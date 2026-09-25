@@ -33,7 +33,7 @@ minijinja = "2"
 richrs = "0.2"
 serde = { version = "1", features = ["derive"] }
 tempfile = "3"
-time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }
+time = { version = "0.3", features = ["formatting", "parsing", "local-offset", "macros"] }
 
 [profile.release]
 lto = "thin"

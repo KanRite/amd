@@ -159,6 +159,11 @@ pub struct BoardApp {
     /// A card matches when it carries any tag in the set (OR, not AND) —
     /// narrowing further is a second click away by toggling another tag off.
     tag_filter: BTreeSet<String>,
+    /// `git config user.email`, resolved once at load rather than per frame
+    /// or per card — `git::config` shells out, and egui redraws
+    /// continuously. Used only to tell your own lease apart from someone
+    /// else's on a card's badge.
+    identity: Option<String>,
 }
 
 /// Whether `card` should be drawn under the current tag filter. An empty
@@ -194,6 +199,10 @@ impl BoardApp {
                 "no boards found — run `amd init` here, or `amd repos add` to register one"
             ));
         }
+        // `user.email` is ordinarily global, so any registered repo's
+        // context resolves the same identity — the first one is as good as
+        // any other.
+        let identity = crate::git::config(&repos[0].board.root, "user.email");
         Ok(Self {
             repos,
             status: None,
@@ -205,6 +214,7 @@ impl BoardApp {
             showing_settings: false,
             backlog_repo: 0,
             tag_filter: BTreeSet::new(),
+            identity,
         })
     }
 
@@ -304,6 +314,7 @@ impl BoardApp {
             (None, None) => 0.0,
         };
 
+        let mut lease_note = None;
         let outcome = (|| -> Result<()> {
             let task = Task::from_path(&path, column)
                 .ok_or_else(|| anyhow!("{} is not a task", path.display()))?;
@@ -311,6 +322,19 @@ impl BoardApp {
             let found = target.board.find(&task.stem)?;
             if found.column != column {
                 target.board.move_task(&found, column)?;
+                // Dragging a card into Todo or Doing means "I'm starting
+                // this" — claim the lease at the same moment, best-effort:
+                // a failure here must never undo the move that already
+                // succeeded, only surface as a status note below.
+                if matches!(column, Column::Todo | Column::Doing)
+                    && let Ok(entered) = target.board.find(&task.stem)
+                    && let Ok(hash) = entered.hash()
+                {
+                    let hours = crate::board_settings::load(&target.board).lease_hours();
+                    if let Err(err) = entered.take_lease(hash, hours) {
+                        lease_note = Some(format!("moved, but couldn't claim the lease: {err}"));
+                    }
+                }
             }
             // Re-read: moving renamed the file.
             let moved = target.board.find(&task.stem)?;
@@ -319,7 +343,7 @@ impl BoardApp {
         })();
 
         match outcome {
-            Ok(()) => self.status = None,
+            Ok(()) => self.status = lease_note,
             Err(err) => self.status = Some(format!("{err}")),
         }
         self.reload();
@@ -531,6 +555,7 @@ impl eframe::App for BoardApp {
                                     repo_index,
                                     column,
                                     &self.tag_filter,
+                                    self.identity.as_deref(),
                                     &mut opened,
                                 ) {
                                     pending = Some(drop);
@@ -551,6 +576,7 @@ impl eframe::App for BoardApp {
                                 cards,
                                 index,
                                 &self.tag_filter,
+                                self.identity.as_deref(),
                                 &mut GroupEvents {
                                     opened: &mut opened,
                                     edit: &mut group_edit,
@@ -1081,6 +1107,7 @@ fn group_ui(
     cards: &[Card],
     repo_index: usize,
     filter: &BTreeSet<String>,
+    identity: Option<&str>,
     events: &mut GroupEvents,
 ) -> Option<(PathBuf, usize, Option<String>)> {
     let heading = group.map_or("(unfiled)", |group| group.name.as_str());
@@ -1153,7 +1180,7 @@ fn group_ui(
 
             let empty = cards.is_empty();
             for card in cards {
-                if card_ui(ui, card, repo_index) {
+                if card_ui(ui, card, repo_index, identity) {
                     *events.opened = Some(card.task.path.clone());
                 }
             }
@@ -1184,6 +1211,7 @@ fn column_ui(
     repo_index: usize,
     column: Column,
     filter: &BTreeSet<String>,
+    identity: Option<&str>,
     opened: &mut Option<PathBuf>,
 ) -> Option<Drop> {
     let mut result = None;
@@ -1219,7 +1247,7 @@ fn column_ui(
                 if let Some(drop) = slot(ui, repo_index, column, index) {
                     result = Some(drop);
                 }
-                if card_ui(ui, card, repo_index) {
+                if card_ui(ui, card, repo_index, identity) {
                     *opened = Some(card.task.path.clone());
                 }
             }
@@ -1275,12 +1303,23 @@ fn slot(ui: &mut egui::Ui, repo_index: usize, column: Column, index: usize) -> O
 /// A ticket: the width of its column, as tall as its title needs, so a column
 /// reads as a stack.
 #[cfg(feature = "gui")]
-fn card_ui(ui: &mut egui::Ui, card: &Card, repo_index: usize) -> bool {
+fn card_ui(ui: &mut egui::Ui, card: &Card, repo_index: usize, identity: Option<&str>) -> bool {
     let id = egui::Id::new(("card", &card.task.path));
     let payload = Dragged {
         path: card.task.path.clone(),
         repo: repo_index,
     };
+    // Someone else's active lease gets a visible, attention-colour badge —
+    // not just a refusal on save — so a conflict is avoidable rather than
+    // only discovered after the fact (docs/adr/0007-concurrency-and-locking.md's
+    // own stated cost: "an expired lease someone still believes in is a
+    // surprise"). Your own lease gets a quieter marker, mostly so a card you
+    // hold reads differently from one nobody's touched.
+    let lease_badge = card
+        .task
+        .lease_active()
+        .then(|| card.task.locked_by())
+        .flatten();
     let dragged = ui.dnd_drag_source(id, payload, |ui| {
         egui::Frame::default()
             .inner_margin(8.0)
@@ -1302,6 +1341,17 @@ fn card_ui(ui: &mut egui::Ui, card: &Card, repo_index: usize) -> bool {
                         }
                     });
                     ui.label(&card.title);
+                    if let Some(holder) = &lease_badge {
+                        let mine = identity.is_some_and(|me| me == holder);
+                        let text = if mine {
+                            egui::RichText::new(format!("🔒 {holder}")).weak()
+                        } else {
+                            egui::RichText::new(format!("🔒 {holder}"))
+                                .color(egui::Color32::from_rgb(200, 140, 40))
+                                .strong()
+                        };
+                        ui.label(text);
+                    }
                 });
             });
     });

@@ -8,7 +8,7 @@
 //! board-local value needs to travel with the repository to every clone,
 //! which is exactly why it can't live in either of those.
 //!
-//! Two keys today:
+//! Three keys today:
 //! - `project`: the declared identity `amd init <project>` records. It is
 //!   immutable once set — a policy this module enforces on its own write
 //!   path, not a filesystem lock. Hand-editing the file directly is not
@@ -17,6 +17,12 @@
 //! - `next-id`: the board's id counter, moved here from the legacy
 //!   `<board>/.next-id` file so the ticket columns hold nothing but tickets.
 //!   Freely mutable — every new ticket advances it — unlike `project`.
+//! - `lease-hours`: how long a taken ticket lease lasts before it lapses on
+//!   its own (`docs/adr/0007-concurrency-and-locking.md`). Unlike the two
+//!   above, nothing writes this programmatically — it's meant to be
+//!   hand-edited, the same as `branch-types`/`editor`/`no-register` in the
+//!   *global* settings file, just board-local rather than per-machine
+//!   because a lease policy is a team decision, not a personal preference.
 //!
 //! One repository, one settings file — a repository with more than one
 //! board (two different `AMD_DIR` trees) shares this file and its counter
@@ -31,6 +37,8 @@ use crate::settings::Config;
 
 const PROJECT: &str = "project";
 const NEXT_ID: &str = "next-id";
+const LEASE_HOURS: &str = "lease-hours";
+const DEFAULT_LEASE_HOURS: f64 = 8.0;
 
 /// `<repo-root>/.settings` — a sibling of the board directory, not inside it.
 pub fn path(board: &Board) -> std::path::PathBuf {
@@ -75,6 +83,18 @@ impl BoardSettings {
     /// Freely mutable, unlike `project` — every ticket recorded advances it.
     pub fn set_next_id(&mut self, id: u32) {
         self.config.set(NEXT_ID, &id.to_string());
+    }
+
+    /// How long a taken lease lasts before it lapses on its own —
+    /// `AMD_LEASE_HOURS`, then this board's own `.settings`, then eight
+    /// hours (a working day). An unparsable or non-positive value falls
+    /// back to the default rather than producing a lease that expires
+    /// before it's taken or never at all.
+    pub fn lease_hours(&self) -> f64 {
+        crate::settings::resolved("AMD_LEASE_HOURS", &self.config, LEASE_HOURS)
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .filter(|hours| *hours > 0.0)
+            .unwrap_or(DEFAULT_LEASE_HOURS)
     }
 
     pub fn save(&self, board: &Board) -> Result<()> {
@@ -211,6 +231,35 @@ mod tests {
         assert!(validate_project_name("agile:md").is_ok());
         assert!(validate_project_name("").is_err());
         assert!(validate_project_name("agile md").is_err());
+    }
+
+    #[test]
+    fn lease_hours_defaults_to_eight_with_nothing_set() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(load(&board(dir.path())).lease_hours(), 8.0);
+    }
+
+    #[test]
+    fn lease_hours_reads_the_board_setting_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.config.set(LEASE_HOURS, "2");
+        settings.save(&board).unwrap();
+        assert_eq!(load(&board).lease_hours(), 2.0);
+    }
+
+    #[test]
+    fn lease_hours_falls_back_to_the_default_when_unparsable_or_non_positive() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.config.set(LEASE_HOURS, "not a number");
+        assert_eq!(settings.lease_hours(), 8.0);
+        settings.config.set(LEASE_HOURS, "0");
+        assert_eq!(settings.lease_hours(), 8.0);
+        settings.config.set(LEASE_HOURS, "-3");
+        assert_eq!(settings.lease_hours(), 8.0);
     }
 
     #[test]

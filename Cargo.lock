@@ -71,6 +71,7 @@ dependencies = [
  "libc",
  "richrs",
  "tempfile",
+ "time",
 ]
 
 [[package]]

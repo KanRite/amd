@@ -310,6 +310,10 @@ fn labels(node: &Node, root: bool) -> String {
             .clone()
             .filter(|_| root)
             .map(|parent| format!("^{parent}")),
+        task.lease_active()
+            .then(|| task.locked_by())
+            .flatten()
+            .map(|holder| format!("locked:{holder}")),
     ]
     .into_iter()
     .flatten()

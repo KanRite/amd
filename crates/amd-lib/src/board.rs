@@ -334,6 +334,10 @@ impl Board {
     /// `None`. The folder is the move; the frontmatter is updated to match, so
     /// a ticket read on its own still says which epic it belongs to.
     pub fn set_epic(&self, task: &Task, epic: Option<&str>) -> Result<PathBuf> {
+        // Checked up front, not left to set_epic_meta's own write_checked
+        // afterwards — that would risk a half-moved, half-refused ticket if
+        // someone else holds the lease.
+        task.ensure_not_leased()?;
         // A started sprint takes tickets in and lets them out. Teams do this —
         // more often when they are new — and it is poor practice that skews the
         // charts, but a tool that refuses leaves people editing frontmatter by
@@ -528,6 +532,7 @@ impl Board {
     /// relocates which column produces unused branches (docs/adr/0006). The
     /// returned name is `Some` when a branch was actually deleted.
     pub fn archive(&self, task: &Task) -> Result<(PathBuf, Option<String>)> {
+        task.ensure_not_leased()?;
         // Moving a ticket out of a started sprint leaves a `git mv` in the
         // history: the scope change is dated and the points are still readable
         // on disk. Archiving from inside one leaves neither — the file is
@@ -615,6 +620,7 @@ impl Board {
         if task.column == to {
             bail!("already in {to}/");
         }
+        task.ensure_not_leased()?;
         let dir = self.dir(to);
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         let dest = dir.join(task.file_name());
@@ -987,6 +993,61 @@ mod tests {
         let loose = board.find("001").unwrap();
         assert_eq!(loose.epic, None);
         assert_eq!(loose.epic_meta(), None);
+    }
+
+    // -- Leases block moves too (docs/adr/0007-concurrency-and-locking.md) -
+
+    fn leased_backlog_ticket(board: &Board, name: &str, holder: &str, until: &str) {
+        let body = format!(
+            "---\nid: \"{}\"\ntitle: \"T\"\nlocked-by: \"{holder}\"\nlocked-until: \"{until}\"\n---\n\nbody\n",
+            &name[..3]
+        );
+        fs::write(board.dir(Column::Backlog).join(name), body).unwrap();
+    }
+
+    fn future() -> String {
+        (time::OffsetDateTime::now_utc() + time::Duration::hours(1))
+            .format(&time::format_description::well_known::Rfc3339)
+            .unwrap()
+    }
+
+    #[test]
+    fn move_task_refuses_a_ticket_leased_by_someone_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = git_repo_board(dir.path());
+        leased_backlog_ticket(&board, "001-a.md", "other@example.com", &future());
+        let task = board.find("001").unwrap();
+        assert!(board.move_task(&task, Column::Todo).is_err());
+        assert_eq!(board.find("001").unwrap().column, Column::Backlog);
+    }
+
+    #[test]
+    fn move_task_succeeds_when_the_lease_is_your_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = git_repo_board(dir.path());
+        leased_backlog_ticket(&board, "001-a.md", "t@t.co", &future());
+        let task = board.find("001").unwrap();
+        board.move_task(&task, Column::Todo).unwrap();
+        assert_eq!(board.find("001").unwrap().column, Column::Todo);
+    }
+
+    #[test]
+    fn archive_refuses_a_ticket_leased_by_someone_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = git_repo_board(dir.path());
+        leased_backlog_ticket(&board, "001-a.md", "other@example.com", &future());
+        let task = board.find("001").unwrap();
+        assert!(board.archive(&task).is_err());
+    }
+
+    #[test]
+    fn set_epic_refuses_a_ticket_leased_by_someone_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = git_repo_board(dir.path());
+        fs::create_dir_all(board.dir(Column::Backlog).join("checkout")).unwrap();
+        leased_backlog_ticket(&board, "001-a.md", "other@example.com", &future());
+        let task = board.find("001").unwrap();
+        assert!(board.set_epic(&task, Some("checkout")).is_err());
     }
 
     #[test]
