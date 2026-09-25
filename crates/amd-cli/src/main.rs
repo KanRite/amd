@@ -21,12 +21,13 @@ use anyhow::{Context, Result, bail};
 use clap::builder::PossibleValuesParser;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
+use time::format_description::well_known::Rfc3339;
 
 use agile_md::board::{ABANDON, Board, Column};
 use agile_md::create::{Draft, NewTicket};
 use agile_md::registry::Registry;
 use agile_md::templates::{DEFAULT_TEMPLATE, TEMPLATE_SUFFIX, Templates};
-use agile_md::{branch, git, task, templates};
+use agile_md::{board_settings, branch, git, task, templates};
 
 const AFTER_HELP: &str = "\
 A <REF> is a task id (e.g. 7 or 007) or a unique slug substring. Leave it out
@@ -49,6 +50,15 @@ to tickets carrying that tag instead.
 Tickets nest: `--parent <ref>` puts one under another, and the board shows
 the tree. Nesting is the parent/child relationship; an epic or sprint is a
 folder the backlog is divided into. A ticket can have both.
+
+`amd lock <ref>` claims a ticket's lease for your git identity
+(`user.email`), so anyone else's edits or moves on it are refused with a
+clear message until it's released or it lapses on its own (8 hours by
+default). `amd unlock <ref>` releases your own; `amd unlock <ref> --force`
+breaks someone else's, a separate, deliberate act. Entering `todo`/`doing`
+claims a free lease automatically — a lease is advisory, not a guarantee:
+it only stops local tools from writing, and a concurrent edit on another
+clone still surfaces as a normal git merge conflict.
 
 `amd todo`/`doing`/`done`/`backlog`/`abandon <ref>` move a ticket there;
 leave off <ref> and it lists that destination instead of moving anything.
@@ -231,6 +241,19 @@ enum Cmd {
         /// Who it belongs to; `@me` is your git user name, empty unassigns
         #[arg(value_name = "WHO")]
         who: Option<String>,
+    },
+    /// Claim a ticket's lease so nobody else's writes land on it
+    Lock {
+        #[arg(value_name = "REF")]
+        task: String,
+    },
+    /// Release a ticket's lease
+    Unlock {
+        #[arg(value_name = "REF")]
+        task: String,
+        /// Break someone else's lease instead of only releasing your own
+        #[arg(long)]
+        force: bool,
     },
     /// Set a field on a ticket: points, epic, order or title
     Set {
@@ -569,7 +592,7 @@ fn run() -> Result<()> {
         Cmd::Group { command } => cmd_group(&board, command.unwrap_or(GroupCmd::List)),
         Cmd::Assign { task, who } => {
             let task = resolve(&board, Some(task), "assign", &Column::ALL)?;
-            let who = resolve_assignee(who.as_deref());
+            let who = resolve_assignee(&board.root, who.as_deref());
             task.assign(task.hash()?, &who)?;
             match who.is_empty() {
                 true => println!("{} unassigned", task.id_display()),
@@ -577,9 +600,42 @@ fn run() -> Result<()> {
             }
             Ok(())
         }
+        Cmd::Lock { task } => cmd_lock(&board, &task),
+        Cmd::Unlock { task, force } => cmd_unlock(&board, &task, force),
         Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
     }
+}
+
+/// Claim a ticket's lease for the current git identity. Refuses if someone
+/// else's active lease is already there — the same `write_checked` gate
+/// every other setter goes through, with no special casing needed for take.
+fn cmd_lock(board: &Board, reference: &str) -> Result<()> {
+    let task = board.find(reference)?;
+    let hours = board_settings::load(board).lease_hours();
+    task.take_lease(task.hash()?, hours)?;
+    let until = task
+        .locked_until()
+        .and_then(|until| until.format(&Rfc3339).ok())
+        .unwrap_or_default();
+    println!("{} locked until {until}", task.id_display());
+    Ok(())
+}
+
+/// Release a ticket's lease — only your own unless `--force` says to break
+/// someone else's, a deliberate, separate act rather than a side effect of
+/// an ordinary release.
+fn cmd_unlock(board: &Board, reference: &str, force: bool) -> Result<()> {
+    let task = board.find(reference)?;
+    let hash = task.hash()?;
+    if force {
+        task.break_lease(hash)?;
+        println!("{} lease broken", task.id_display());
+    } else {
+        task.release_lease(hash)?;
+        println!("{} unlocked", task.id_display());
+    }
+    Ok(())
 }
 
 /// Move a task into todo/ and put the working tree on its branch. This is
@@ -680,9 +736,30 @@ fn cmd_gui() -> Result<()> {
 /// `Board::move_task` returns where the ticket landed and leaves the reporting
 /// to whoever asked for the move.
 fn move_and_report(board: &Board, task: &task::Task, to: Column) -> Result<()> {
-    board.move_task(task, to)?;
+    let dest = board.move_task(task, to)?;
     println!("moved {} -> {to}/", task.file_name());
+    // Entering todo/doing already means "I'm starting this" — claiming the
+    // lease at the same moment matches that intent with no extra step.
+    // Every other column move (and every column move that's already leased
+    // by someone else) is refused earlier, inside move_task itself.
+    if matches!(to, Column::Todo | Column::Doing)
+        && let Some(moved) = task::Task::from_path(&dest, to)
+    {
+        maybe_take_lease(board, &moved);
+    }
     Ok(())
+}
+
+/// Best-effort: a failure here (no git email configured, or someone else
+/// grabbing the lease in the instant between the move and this call) must
+/// never undo a move that already succeeded — it only gets a note, the same
+/// tone as "no branch type on this ticket; left the branch alone".
+fn maybe_take_lease(board: &Board, task: &task::Task) {
+    let Ok(hash) = task.hash() else { return };
+    let hours = board_settings::load(board).lease_hours();
+    if let Err(err) = task.take_lease(hash, hours) {
+        eprintln!("amd: could not claim the lease automatically: {err:#}");
+    }
 }
 
 /// Where a destination verb can send a ticket: one of the four columns,
@@ -886,9 +963,9 @@ fn cmd_repos(command: ReposCmd) -> Result<()> {
 }
 
 /// `@me` is whoever git says you are — the name that ends up in the commits.
-fn resolve_assignee(who: Option<&str>) -> String {
+fn resolve_assignee(repo: &Path, who: Option<&str>) -> String {
     match who {
-        Some("@me") => git::config("user.name").unwrap_or_else(|| "me".to_string()),
+        Some("@me") => git::config(repo, "user.name").unwrap_or_else(|| "me".to_string()),
         Some(who) => who.trim().to_string(),
         None => String::new(),
     }
@@ -989,13 +1066,16 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     };
 
     let assignee = match args.assignee {
-        Some(who) => resolve_assignee(Some(&who)),
-        None if full_form => resolve_assignee(Some(&form::label(
-            "Assignee:",
-            "",
-            board.assignees()?,
-            "who's doing it; blank for nobody, @me for you",
-        )?)),
+        Some(who) => resolve_assignee(&board.root, Some(&who)),
+        None if full_form => resolve_assignee(
+            &board.root,
+            Some(&form::label(
+                "Assignee:",
+                "",
+                board.assignees()?,
+                "who's doing it; blank for nobody, @me for you",
+            )?),
+        ),
         None => String::new(),
     };
 

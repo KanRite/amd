@@ -522,6 +522,35 @@ assert "amd ls all --tag behaves the same as amd board --tag" \
 assert "amd <destination> --tag with no matches lists an empty column, not an error" \
   bash -c "cd '${import_dst}' && '${AMD}' backlog --tag NO-SUCH-TAG --plain | grep -q '(empty)'"
 
+echo "locking:"
+lock_repo="$(mktemp -d)"
+( cd "${lock_repo}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init locktest --local-only >/dev/null \
+  && "${AMD}" new "Lockable ticket" --no-edit >/dev/null \
+  && "${AMD}" lock 1 >/dev/null )
+assert "amd lock records the holder in the ticket's own frontmatter" \
+  bash -c "cd '${lock_repo}' && '${AMD}' show 1 | grep -q 'locked-by: \"t@t.co\"'"
+assert "a different git identity is refused editing a leased ticket" \
+  bash -c "cd '${lock_repo}' && git config user.email other@example.com && '${AMD}' set 1 points 3 2>&1 | grep -q 'leased by t@t.co'"
+assert "a different git identity is refused moving a leased ticket" \
+  bash -c "cd '${lock_repo}' && git config user.email other@example.com && '${AMD}' doing 1 2>&1 | grep -q 'leased by t@t.co'"
+assert "the holder's own identity can still edit the leased ticket" \
+  bash -c "cd '${lock_repo}' && git config user.email t@t.co && '${AMD}' set 1 points 3 | grep -q 'sized 3'"
+assert "a different identity cannot plain-unlock someone else's lease" \
+  bash -c "cd '${lock_repo}' && git config user.email other@example.com && '${AMD}' unlock 1 2>&1 | grep -q 'leased by t@t.co'"
+assert "a different git identity is refused filing a leased ticket under an epic" \
+  bash -c "cd '${lock_repo}' && git config user.email t@t.co && '${AMD}' group epic checkout >/dev/null \
+    && git config user.email other@example.com && '${AMD}' checkout 1 2>&1 | grep -q 'leased by t@t.co'"
+assert "a different git identity is refused abandoning a leased ticket" \
+  bash -c "cd '${lock_repo}' && git config user.email other@example.com && '${AMD}' abandon 1 2>&1 | grep -q 'leased by t@t.co'"
+assert "unlock --force breaks someone else's lease" \
+  bash -c "cd '${lock_repo}' && git config user.email other@example.com && '${AMD}' unlock 1 --force | grep -q 'lease broken'"
+assert "the lease is gone after being broken" \
+  bash -c "cd '${lock_repo}' && ! '${AMD}' show 1 | grep -q 'locked-by: \"t@t.co\"'"
+assert "amd todo auto-takes a now-free lease on entry" \
+  bash -c "cd '${lock_repo}' && git config user.email t@t.co && '${AMD}' todo 1 --no-branch >/dev/null \
+    && '${AMD}' show 1 | grep -q 'locked-by: \"t@t.co\"'"
+
 echo "pipes:"
 assert "the board survives a closed pipe" \
   bash -c "'${AMD}' board --plain | head -2 >/dev/null 2>/tmp/amd-pipe.err; ! grep -q 'panicked' /tmp/amd-pipe.err"

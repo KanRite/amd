@@ -58,6 +58,10 @@ amd link    1 3                   # relate two tickets
 amd tag     urgent                # list every ticket carrying a tag, across every column
 amd todo    --tag urgent          # any listing form narrows to a tag: board, ls, a
                                    # destination verb, or an epic by name
+amd lock    1                     # claim a ticket so someone else's edits and moves
+                                   # are refused until you release it or it lapses
+amd unlock  1                     # release your own lease
+amd unlock  1 --force             # break someone else's — a separate, deliberate act
 ```
 
 `amd` works from any subdirectory — it resolves the board from the repo root.

@@ -169,6 +169,29 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   the no-ref, listing form. The `Verb` external-subcommand path (epic names)
   parses `--tag`/`-t` out of its raw args by hand, since clap hands that
   whole tail over as an opaque `Vec<String>`.
+- **Leases** (`docs/adr/0007-concurrency-and-locking.md`, currently only
+  surviving at `~/develop/github/agile-md/to-sort/old-amd-docs/adr/` —
+  `docs/adr/` was never restored into this repo after the git-history reset):
+  `locked-by`/`locked-until` frontmatter, stored as an **absolute expiry**
+  rather than a duration so every check (`Task::write_checked`,
+  `Board::move_task`/`archive`/`set_epic`) is a self-contained
+  `now > locked_until` comparison against data already in the file — no
+  `Board` handle needed except at the one place a duration is actually
+  chosen (`Task::take_lease`, called from `amd lock` and from
+  `move_and_report`/`amdui`'s `apply()` on entering `todo`/`doing`, both of
+  which already hold one). Identity is `git::config(repo, "user.email")` —
+  `git.rs`'s `config()` takes an explicit repo path like every other
+  function there, not the process's current directory, so a desktop board
+  open across several registered repositories resolves each ticket's own
+  identity correctly. `take_lease`/`release_lease` need no special-casing:
+  both are ordinary `write_checked`-protected writes, and its generic "leased
+  by someone else" gate already gives exactly the right semantics for each
+  (blocked if someone else holds it; blocked unless *you're* the holder).
+  Only `break_lease` (`amd unlock --force`) bypasses that gate — the one
+  deliberate act ADR-0007 wants kept separate from an ordinary write.
+  `board_settings::lease_hours()` resolves the duration (`AMD_LEASE_HOURS`,
+  then the board's own `.settings`, then 8 hours) the same
+  `settings::resolved()` precedence every other setting uses.
 - `Board::archive()` (`amd abandon`) moves a ticket to `<board>/archive/`,
   which is **not** a column: it's off the board and its contents are
   gitignored. That means `git mv` would refuse the ignored destination and
@@ -186,10 +209,13 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   (the branch types on offer), `AMD_YES` (force-create), `AMD_NO_INPUT` (never
   prompt), `AMD_NO_BRANCH` (never touch branches), `AMD_NO_REGISTER` (keep the
   repository list manual), `NO_COLOR`/`--plain` (plain board), `EDITOR` (for
-  `amd edit`). **`AMD_TYPES` is dead** — it was in `--help` long after nothing
-  read it. `AMD_BRANCH_TYPES`, `EDITOR` and `AMD_NO_REGISTER` also fall back
-  to the settings file (`branch-types`/`editor`/`no-register`) when unset —
-  the env var wins when both are set (`settings::resolved()`).
+  `amd edit`), `AMD_LEASE_HOURS` (lease duration, default 8). **`AMD_TYPES` is
+  dead** — it was in `--help` long after nothing read it. `AMD_BRANCH_TYPES`,
+  `EDITOR` and `AMD_NO_REGISTER` also fall back to the settings file
+  (`branch-types`/`editor`/`no-register`) when unset — the env var wins when
+  both are set (`settings::resolved()`). `AMD_LEASE_HOURS` follows the same
+  precedence against the *board-local* `.settings`'s `lease-hours` key
+  instead — a lease policy is a team decision, not a personal one.
 
 ## Ticket fields (`crates/amd-lib/src/branch.rs`, `templates/ticket.md.jinja`)
 
@@ -418,6 +444,14 @@ changes):
   board only** — `amd ls` still sorts by id, which is a real inconsistency.
 - Errors from a save go to the status line *behind* the modal, so a failure
   reads as "the button does nothing". See ticket 025.
+- `BoardApp.identity` (`git::config`, resolved **once** at `load()`) is who
+  the badge on a leased card compares against — not re-resolved per frame or
+  per card, since egui redraws continuously and `git::config` shells out.
+  Dragging a card into Todo or Doing auto-takes a free lease the same way
+  `move_and_report` does on the CLI side; column moves and the editor's save
+  (`apply_edit`) inherit the actual refusal for free from
+  `Task::write_checked`/`Board::move_task` — the GUI only adds the
+  auto-take and the badge, not a second enforcement path.
 
 ## Conventions
 

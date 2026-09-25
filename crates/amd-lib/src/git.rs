@@ -261,9 +261,17 @@ pub fn push(repo: &Path) -> Result<()> {
     Ok(())
 }
 
-/// A `git config` value (used to fill `author` in task templates).
-pub fn config(key: &str) -> Option<String> {
+/// A `git config` value (used to fill `author` in task templates, and to
+/// resolve the current identity for a ticket lease). `-C repo` like every
+/// other function here, rather than relying on the process's current
+/// directory — the caller may not be standing in the repo in question (a
+/// desktop board open across several registered repositories, a test), and
+/// git itself resolves the repository boundary from any path inside it, so
+/// this doesn't need `repo` to be the root.
+pub fn config(repo: &Path, key: &str) -> Option<String> {
     let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
         .args(["config", "--get", key])
         .stderr(Stdio::null())
         .output()

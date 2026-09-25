@@ -6,8 +6,11 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::board::Column;
+use crate::git;
 
 /// Longest slug we put in a filename (matches the pre-Rust `cut -c1-50`).
 const MAX_SLUG: usize = 50;
@@ -44,6 +47,34 @@ impl std::fmt::Display for Conflict {
 }
 
 impl std::error::Error for Conflict {}
+
+/// A write was refused because someone else holds an active lease on this
+/// ticket — `docs/adr/0007-concurrency-and-locking.md`'s coordination layer,
+/// on top of the lost-update fix above. `until` is when it lapses on its
+/// own; nobody has to release it for that to happen.
+#[derive(Debug)]
+pub struct LeaseHeld {
+    pub path: PathBuf,
+    pub holder: String,
+    pub until: OffsetDateTime,
+}
+
+impl std::fmt::Display for LeaseHeld {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let until = self
+            .until
+            .format(&Rfc3339)
+            .unwrap_or_else(|_| self.until.to_string());
+        write!(
+            f,
+            "{} is leased by {} until {until} — use `amd unlock --force` to break it",
+            self.path.display(),
+            self.holder
+        )
+    }
+}
+
+impl std::error::Error for LeaseHeld {}
 
 #[derive(Clone, Debug)]
 pub struct Task {
@@ -100,14 +131,136 @@ impl Task {
         Ok(hash_of(&text))
     }
 
+    /// Who holds the lease, if the ticket records one — regardless of
+    /// whether it has since lapsed. Use [`Task::lease_active`] to ask
+    /// whether it still counts.
+    pub fn locked_by(&self) -> Option<String> {
+        self.meta("locked-by").filter(|who| !who.is_empty())
+    }
+
+    /// When the recorded lease lapses, if it has one.
+    pub fn locked_until(&self) -> Option<OffsetDateTime> {
+        self.meta("locked-until")
+            .filter(|value| !value.is_empty())
+            .and_then(|value| OffsetDateTime::parse(&value, &Rfc3339).ok())
+    }
+
+    /// Whether a lease is currently in force: held by someone, and not yet
+    /// lapsed. A lapsed lease is not an error state
+    /// (`docs/adr/0007-concurrency-and-locking.md`) — it just stops
+    /// counting, with nothing to clean up.
+    pub fn lease_active(&self) -> bool {
+        match (self.locked_by(), self.locked_until()) {
+            (Some(_), Some(until)) => until > OffsetDateTime::now_utc(),
+            _ => false,
+        }
+    }
+
     /// Read-modify-write against this ticket, refusing with [`Conflict`] if
-    /// the file no longer matches `expected`. `modify` receives the freshly
-    /// re-read, verified-current text and returns the replacement.
+    /// the file no longer matches `expected`, or [`LeaseHeld`] if someone
+    /// else's lease is still active. `modify` receives the freshly re-read,
+    /// verified-current text and returns the replacement.
     fn write_checked(
         &self,
         expected: ContentHash,
         modify: impl FnOnce(&str) -> Result<String>,
     ) -> Result<()> {
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        self.check_lease(&text)?;
+        if hash_of(&text) != expected {
+            return Err(Conflict {
+                path: self.path.clone(),
+            }
+            .into());
+        }
+        let updated = modify(&text)?;
+        fs::write(&self.path, updated).with_context(|| format!("writing {}", self.path.display()))
+    }
+
+    /// `git config user.email`, resolved from this ticket's own directory
+    /// rather than the process's current one — a desktop board open across
+    /// several registered repositories isn't standing in any one of them.
+    fn git_identity(&self) -> Option<String> {
+        let repo = self.path.parent().unwrap_or_else(|| Path::new("."));
+        git::config(repo, "user.email")
+    }
+
+    /// Refuse if someone else holds an active lease on this ticket. Content
+    /// setters get this for free from `write_checked`; `board.rs`'s
+    /// `move_task`/`archive`/`set_epic` rename the file rather than writing
+    /// through it, so they call this explicitly, up front, before touching
+    /// the filesystem — checking only *after* the rename (via
+    /// `set_epic_meta`'s own `write_checked`, say) would risk a half-moved,
+    /// half-refused ticket.
+    pub(crate) fn ensure_not_leased(&self) -> Result<()> {
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        self.check_lease(&text)
+    }
+
+    /// The generic lease gate every `write_checked`-based setter goes
+    /// through: refuse if `text` (already read, not re-read here) records
+    /// an active lease held by someone other than the current git identity.
+    /// `take_lease`/`release_lease` need no special casing beyond this —
+    /// taking is correctly blocked when someone else holds it, and
+    /// releasing is correctly blocked unless the caller *is* the holder.
+    /// `break_lease` is the one deliberate bypass.
+    fn check_lease(&self, text: &str) -> Result<()> {
+        let Some(holder) = meta_in(text, "locked-by").filter(|who| !who.is_empty()) else {
+            return Ok(());
+        };
+        let Some(until) = meta_in(text, "locked-until")
+            .filter(|value| !value.is_empty())
+            .and_then(|value| OffsetDateTime::parse(value, &Rfc3339).ok())
+        else {
+            return Ok(());
+        };
+        if until <= OffsetDateTime::now_utc() {
+            return Ok(());
+        }
+        if self.git_identity().as_deref() == Some(holder) {
+            return Ok(());
+        }
+        Err(LeaseHeld {
+            path: self.path.clone(),
+            holder: holder.to_string(),
+            until,
+        }
+        .into())
+    }
+
+    /// Claim the lease for the current git identity (`git config
+    /// user.email`), for `hours` from now. Inherits `write_checked`'s
+    /// generic lease gate with no extra logic: refuses if someone else's
+    /// active lease is already there, succeeds otherwise — including
+    /// refreshing one you already hold.
+    pub fn take_lease(&self, expected: ContentHash, hours: f64) -> Result<()> {
+        let holder = self.git_identity().with_context(|| {
+            "no git user.email configured — set one with `git config user.email you@example.com`"
+        })?;
+        let until = OffsetDateTime::now_utc() + time::Duration::seconds_f64(hours * 3600.0);
+        let until = until.format(&Rfc3339)?;
+        self.write_checked(expected, |text| {
+            let text = set_meta(text, "locked-by", &format!("{holder:?}"))?;
+            set_meta(&text, "locked-until", &format!("{until:?}"))
+        })
+    }
+
+    /// Release the lease — only the caller's own. Releasing someone else's
+    /// isn't release, it's [`Task::break_lease`], and stays a separate,
+    /// deliberate act rather than a side effect of this one.
+    pub fn release_lease(&self, expected: ContentHash) -> Result<()> {
+        self.write_checked(expected, |text| {
+            let text = set_meta(text, "locked-by", "\"\"")?;
+            set_meta(&text, "locked-until", "\"\"")
+        })
+    }
+
+    /// Clear the lease regardless of who holds it. The one deliberate
+    /// bypass of `write_checked`'s generic lease gate — used only by `amd
+    /// unlock --force`, never as a side effect of an ordinary write.
+    pub fn break_lease(&self, expected: ContentHash) -> Result<()> {
         let text = fs::read_to_string(&self.path)
             .with_context(|| format!("reading {}", self.path.display()))?;
         if hash_of(&text) != expected {
@@ -116,7 +269,8 @@ impl Task {
             }
             .into());
         }
-        let updated = modify(&text)?;
+        let text = set_meta(&text, "locked-by", "\"\"")?;
+        let updated = set_meta(&text, "locked-until", "\"\"")?;
         fs::write(&self.path, updated).with_context(|| format!("writing {}", self.path.display()))
     }
 
@@ -830,5 +984,165 @@ mod tests {
         assert_eq!(unquote("'First task'"), "First task");
         assert_eq!(unquote("[x,y]"), "[x,y]");
         assert_eq!(unquote("\""), "\"");
+    }
+
+    // -- Leases (docs/adr/0007-concurrency-and-locking.md) ------------------
+
+    /// A fresh git repo with `user.email` set to `email` — `git::config` is
+    /// `-C`-scoped (see `git.rs`), so each test gets its own isolated
+    /// identity with no process-wide state and no cross-test locking needed.
+    fn identity(dir: &Path, email: &str) {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["init", "-q"])
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["config", "user.email", email])
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    fn future() -> String {
+        (OffsetDateTime::now_utc() + time::Duration::hours(1))
+            .format(&Rfc3339)
+            .unwrap()
+    }
+
+    fn past() -> String {
+        (OffsetDateTime::now_utc() - time::Duration::hours(1))
+            .format(&Rfc3339)
+            .unwrap()
+    }
+
+    #[test]
+    fn take_lease_records_the_current_identity_and_a_future_expiry() {
+        let dir = tempfile::tempdir().unwrap();
+        identity(dir.path(), "me@example.com");
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            "---\nid: \"001\"\ntitle: \"A\"\nlocked-by: \"\"\nlocked-until: \"\"\n---\n\nbody\n",
+        );
+        task.take_lease(task.hash().unwrap(), 8.0).unwrap();
+        assert_eq!(task.locked_by(), Some("me@example.com".to_string()));
+        assert!(task.lease_active());
+        assert!(task.locked_until().unwrap() > OffsetDateTime::now_utc());
+    }
+
+    #[test]
+    fn an_ordinary_setter_is_blocked_by_someone_elses_active_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        identity(dir.path(), "me@example.com");
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            &format!(
+                "---\nid: \"001\"\ntitle: \"A\"\nlocked-by: \"other@example.com\"\nlocked-until: \"{}\"\n---\n\nbody\n",
+                future()
+            ),
+        );
+        let err = task.set_title(task.hash().unwrap(), "New").unwrap_err();
+        assert!(err.to_string().contains("other@example.com"), "{err}");
+        assert_eq!(task.title(), "A", "the blocked write must not have landed");
+    }
+
+    #[test]
+    fn an_ordinary_setter_succeeds_when_the_active_lease_is_your_own() {
+        let dir = tempfile::tempdir().unwrap();
+        identity(dir.path(), "me@example.com");
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            &format!(
+                "---\nid: \"001\"\ntitle: \"A\"\nlocked-by: \"me@example.com\"\nlocked-until: \"{}\"\n---\n\nbody\n",
+                future()
+            ),
+        );
+        task.set_title(task.hash().unwrap(), "New").unwrap();
+        assert_eq!(task.title(), "New");
+    }
+
+    #[test]
+    fn a_lapsed_lease_blocks_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        identity(dir.path(), "me@example.com");
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            &format!(
+                "---\nid: \"001\"\ntitle: \"A\"\nlocked-by: \"other@example.com\"\nlocked-until: \"{}\"\n---\n\nbody\n",
+                past()
+            ),
+        );
+        assert!(!task.lease_active());
+        task.set_title(task.hash().unwrap(), "New").unwrap();
+        assert_eq!(task.title(), "New");
+    }
+
+    #[test]
+    fn take_lease_refuses_when_someone_else_holds_an_active_one() {
+        let dir = tempfile::tempdir().unwrap();
+        identity(dir.path(), "me@example.com");
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            &format!(
+                "---\nid: \"001\"\ntitle: \"A\"\nlocked-by: \"other@example.com\"\nlocked-until: \"{}\"\n---\n\nbody\n",
+                future()
+            ),
+        );
+        assert!(task.take_lease(task.hash().unwrap(), 8.0).is_err());
+    }
+
+    #[test]
+    fn release_lease_only_clears_your_own() {
+        let dir = tempfile::tempdir().unwrap();
+        identity(dir.path(), "me@example.com");
+        let until = future();
+        let mine = ranked(
+            dir.path(),
+            "001-a.md",
+            &format!(
+                "---\nid: \"001\"\ntitle: \"A\"\nlocked-by: \"me@example.com\"\nlocked-until: \"{until}\"\n---\n\nbody\n"
+            ),
+        );
+        mine.release_lease(mine.hash().unwrap()).unwrap();
+        assert!(!mine.lease_active());
+
+        let theirs = ranked(
+            dir.path(),
+            "002-b.md",
+            &format!(
+                "---\nid: \"002\"\ntitle: \"B\"\nlocked-by: \"other@example.com\"\nlocked-until: \"{until}\"\n---\n\nbody\n"
+            ),
+        );
+        assert!(
+            theirs.release_lease(theirs.hash().unwrap()).is_err(),
+            "releasing someone else's lease isn't release, it's break_lease"
+        );
+        assert!(theirs.lease_active());
+    }
+
+    #[test]
+    fn break_lease_clears_it_regardless_of_holder() {
+        let dir = tempfile::tempdir().unwrap();
+        identity(dir.path(), "me@example.com");
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            &format!(
+                "---\nid: \"001\"\ntitle: \"A\"\nlocked-by: \"other@example.com\"\nlocked-until: \"{}\"\n---\n\nbody\n",
+                future()
+            ),
+        );
+        task.break_lease(task.hash().unwrap()).unwrap();
+        assert!(!task.lease_active());
+        assert_eq!(task.locked_by(), None);
     }
 }
