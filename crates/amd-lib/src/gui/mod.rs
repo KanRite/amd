@@ -9,6 +9,7 @@
 pub mod richtext;
 pub mod settings;
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
@@ -154,6 +155,16 @@ pub struct BoardApp {
     /// every repository; the backlog is long enough that one at a time reads
     /// better.
     backlog_repo: usize,
+    /// Tags currently toggled on in the toolbar. Empty means unfiltered.
+    /// A card matches when it carries any tag in the set (OR, not AND) —
+    /// narrowing further is a second click away by toggling another tag off.
+    tag_filter: BTreeSet<String>,
+}
+
+/// Whether `card` should be drawn under the current tag filter. An empty
+/// filter matches everything, same as no filter at all.
+fn card_visible(card: &Card, filter: &BTreeSet<String>) -> bool {
+    filter.is_empty() || card.task.tags().iter().any(|tag| filter.contains(tag))
 }
 
 impl BoardApp {
@@ -193,6 +204,7 @@ impl BoardApp {
             settings: GuiSettings::load(),
             showing_settings: false,
             backlog_repo: 0,
+            tag_filter: BTreeSet::new(),
         })
     }
 
@@ -467,6 +479,31 @@ impl eframe::App for BoardApp {
                     self.showing_settings = true;
                 }
             });
+            let mut all_tags = BTreeSet::new();
+            for repo in &self.repos {
+                for card in repo.lanes.iter().flatten() {
+                    all_tags.extend(card.task.tags());
+                }
+            }
+            if !all_tags.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.weak("Tags:");
+                    for tag in &all_tags {
+                        let mut on = self.tag_filter.contains(tag);
+                        if ui.selectable_label(on, tag).clicked() {
+                            on = !on;
+                            if on {
+                                self.tag_filter.insert(tag.clone());
+                            } else {
+                                self.tag_filter.remove(tag);
+                            }
+                        }
+                    }
+                    if !self.tag_filter.is_empty() && ui.small_button("clear").clicked() {
+                        self.tag_filter.clear();
+                    }
+                });
+            }
             if let Some(status) = &self.status {
                 ui.colored_label(egui::Color32::from_rgb(220, 80, 80), status);
             }
@@ -488,9 +525,14 @@ impl eframe::App for BoardApp {
                         }
                         ui.horizontal_top(|ui| {
                             for column in Column::ALL {
-                                if let Some(drop) =
-                                    column_ui(ui, repo, repo_index, column, &mut opened)
-                                {
+                                if let Some(drop) = column_ui(
+                                    ui,
+                                    repo,
+                                    repo_index,
+                                    column,
+                                    &self.tag_filter,
+                                    &mut opened,
+                                ) {
                                     pending = Some(drop);
                                 }
                             }
@@ -508,9 +550,12 @@ impl eframe::App for BoardApp {
                                 group.as_ref(),
                                 cards,
                                 index,
-                                &mut opened,
-                                &mut group_edit,
-                                &mut group_start,
+                                &self.tag_filter,
+                                &mut GroupEvents {
+                                    opened: &mut opened,
+                                    edit: &mut group_edit,
+                                    start: &mut group_start,
+                                },
                             ) {
                                 refile = Some(target);
                             }
@@ -1016,6 +1061,16 @@ impl BoardApp {
     }
 }
 
+/// The bits of frame state `group_ui` reports back by writing into, grouped
+/// so the function stays under clippy's argument-count lint rather than
+/// taking `opened`/`edit`/`start` as three separate `&mut` parameters.
+#[cfg(feature = "gui")]
+struct GroupEvents<'a> {
+    opened: &'a mut Option<PathBuf>,
+    edit: &'a mut Option<String>,
+    start: &'a mut Option<String>,
+}
+
 /// One epic group in the backlog: a column of cards under the epic's name,
 /// with the loose backlog first. Dropping a card here files it under this
 /// epic, which moves the file and rewrites its `epic` key to match.
@@ -1025,13 +1080,20 @@ fn group_ui(
     group: Option<&Group>,
     cards: &[Card],
     repo_index: usize,
-    opened: &mut Option<PathBuf>,
-    edit: &mut Option<String>,
-    start: &mut Option<String>,
+    filter: &BTreeSet<String>,
+    events: &mut GroupEvents,
 ) -> Option<(PathBuf, usize, Option<String>)> {
     let heading = group.map_or("(unfiled)", |group| group.name.as_str());
+    // A group has no index-based drop slots the way a column does, so — unlike
+    // `column_ui` — filtering the display list here carries no risk of
+    // misplacing a drop; there is nothing keyed off position to misplace.
+    let cards: Vec<&Card> = cards
+        .iter()
+        .filter(|card| card_visible(card, filter))
+        .collect();
     // Only sized tickets count, and a sprint refuses unsized ones, so its
-    // total is the whole of what it committed to.
+    // total is the whole of what it committed to — of the cards currently
+    // shown, matching the visible count in the heading below.
     let points: i64 = cards
         .iter()
         .filter_map(|card| card.points.as_deref())
@@ -1056,7 +1118,7 @@ fn group_ui(
                 if let Some(group) = group {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.small_button("edit").clicked() {
-                            *edit = Some(group.name.clone());
+                            *events.edit = Some(group.name.clone());
                         }
                     });
                 }
@@ -1069,7 +1131,7 @@ fn group_ui(
                         match group.state {
                             State::Pending => {
                                 if ui.small_button("start").clicked() {
-                                    *start = Some(group.name.clone());
+                                    *events.start = Some(group.name.clone());
                                 }
                             }
                             // No control to undo it: the flag is one way.
@@ -1089,12 +1151,13 @@ fn group_ui(
             }
             ui.separator();
 
+            let empty = cards.is_empty();
             for card in cards {
                 if card_ui(ui, card, repo_index) {
-                    *opened = Some(card.task.path.clone());
+                    *events.opened = Some(card.task.path.clone());
                 }
             }
-            if cards.is_empty() {
+            if empty {
                 ui.weak("(empty)");
             }
         });
@@ -1120,30 +1183,39 @@ fn column_ui(
     repo: &RepoBoard,
     repo_index: usize,
     column: Column,
+    filter: &BTreeSet<String>,
     opened: &mut Option<PathBuf>,
 ) -> Option<Drop> {
     let mut result = None;
     let cards = &repo.lanes[column as usize];
+    let visible = cards
+        .iter()
+        .filter(|card| card_visible(card, filter))
+        .count();
 
     let frame = egui::Frame::default()
         .inner_margin(6.0)
         .fill(ui.visuals().faint_bg_color)
         .corner_radius(4.0);
 
+    // Slots keep their index into the *full* lane even when a tag filter
+    // hides some of its cards — that index is also what `apply()` ranks
+    // against, unfiltered. Filtering the display but not the index space
+    // would place a drop between the wrong pair of real neighbours whenever
+    // a hidden card sat between two visible ones.
     let (_, payload) = ui.dnd_drop_zone::<Dragged, ()>(frame, |ui| {
         ui.vertical(|ui| {
             ui.set_width(COLUMN_WIDTH);
             ui.set_min_height(160.0);
             ui.label(
-                egui::RichText::new(format!(
-                    "{}  ({})",
-                    column.as_str().to_uppercase(),
-                    cards.len()
-                ))
-                .monospace()
-                .strong(),
+                egui::RichText::new(format!("{}  ({visible})", column.as_str().to_uppercase()))
+                    .monospace()
+                    .strong(),
             );
             for (index, card) in cards.iter().enumerate() {
+                if !card_visible(card, filter) {
+                    continue;
+                }
                 if let Some(drop) = slot(ui, repo_index, column, index) {
                     result = Some(drop);
                 }
@@ -1154,7 +1226,7 @@ fn column_ui(
             if let Some(drop) = slot(ui, repo_index, column, cards.len()) {
                 result = Some(drop);
             }
-            if cards.is_empty() {
+            if visible == 0 {
                 ui.weak("(empty)");
             }
         });
@@ -1291,5 +1363,43 @@ mod tests {
     fn a_template_without_frontmatter_is_left_as_rendered() {
         let odd = "no frontmatter at all\n";
         assert_eq!(splice_body(odd, "typed"), odd);
+    }
+
+    fn card(dir: &std::path::Path, name: &str, body: &str) -> Card {
+        let path = dir.join(name);
+        std::fs::write(&path, body).unwrap();
+        card_from(Task::from_path(&path, Column::Todo).unwrap())
+    }
+
+    #[test]
+    fn card_visible_matches_any_tag_in_the_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let tagged = card(
+            dir.path(),
+            "001-a.md",
+            "---\nid: \"001\"\ntitle: \"A\"\ntags: [urgent]\n---\n\nbody\n",
+        );
+        let untagged = card(
+            dir.path(),
+            "002-b.md",
+            "---\nid: \"002\"\ntitle: \"B\"\n---\n\nbody\n",
+        );
+
+        let empty = BTreeSet::new();
+        assert!(
+            card_visible(&tagged, &empty) && card_visible(&untagged, &empty),
+            "an empty filter matches everything"
+        );
+
+        let mut filter = BTreeSet::new();
+        filter.insert("urgent".to_string());
+        assert!(card_visible(&tagged, &filter));
+        assert!(!card_visible(&untagged, &filter));
+
+        filter.insert("other".to_string());
+        assert!(
+            card_visible(&tagged, &filter),
+            "matches any tag in the filter (OR), not all of them"
+        );
     }
 }
