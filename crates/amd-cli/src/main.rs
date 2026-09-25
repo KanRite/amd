@@ -42,10 +42,18 @@ todo/. Leave the type out and there is nothing to check out: the ticket
 still moves, the working tree is left alone.
 
 New tickets land in backlog/. `amd set` sizes and files them; `amd group`
-divides the backlog into epics and sprints. `amd tag <tag>` lists every
-ticket carrying it, across every column. Any listing form — `board`, `ls`,
-a bare destination verb, an epic by name — takes `--tag <tag>` to narrow it
-to tickets carrying that tag instead.
+divides the backlog into epics and sprints — both optional, and a ticket
+moves in or out of either one at a time with `amd set <ref> epic <name>`,
+or all at once with `amd group empty <name>`, no precondition. `amd tag
+<tag>` lists every ticket carrying it, across every column. Any listing
+form — `board`, `ls`, a bare destination verb, an epic by name — takes
+`--tag <tag>` to narrow it to tickets carrying that tag instead.
+
+`todo`/`doing` can each carry a WIP limit (`AMD_WIP_TODO`/`AMD_WIP_DOING`,
+or the board's own `.settings`) — a move into an already-full column is
+refused, naming the limit and the current count; `--force` overrides it.
+The limit only ever gates entry: moving a ticket *out* of a column that's
+already over its limit is never blocked.
 
 Tickets nest: `--parent <ref>` puts one under another, and the board shows
 the tree. Nesting is the parent/child relationship; an epic or sprint is a
@@ -198,6 +206,9 @@ enum Cmd {
         /// With no ref, only show tasks carrying this tag
         #[arg(short = 't', long = "tag", value_name = "TAG")]
         tag: Option<String>,
+        /// Move it even if todo/ is already at its WIP limit
+        #[arg(long)]
+        force: bool,
     },
     /// Move a task into doing/, or list it with no ref
     Doing {
@@ -206,6 +217,9 @@ enum Cmd {
         /// With no ref, only show tasks carrying this tag
         #[arg(short = 't', long = "tag", value_name = "TAG")]
         tag: Option<String>,
+        /// Move it even if doing/ is already at its WIP limit
+        #[arg(long)]
+        force: bool,
     },
     /// Move a task into done/, or list it with no ref
     Done {
@@ -388,6 +402,12 @@ enum GroupCmd {
         #[arg(value_name = "NAME")]
         name: String,
     },
+    /// Empty an epic or sprint's folder into the loose backlog at once —
+    /// every ticket it holds, no precondition
+    Empty {
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -499,33 +519,37 @@ fn run() -> Result<()> {
             Destination::Column(Column::Backlog),
             task,
             tag.as_deref(),
+            false,
         ),
         Cmd::Todo {
             task,
             branch,
             no_branch,
             tag,
+            force,
         } => match task {
             Some(reference) => {
                 let task = board.find(&reference)?;
-                cmd_enter_todo(&board, &task, branch, no_branch)
+                cmd_enter_todo(&board, &task, branch, no_branch, force)
             }
             None => render::columns(&board, &[Column::Todo], tag.as_deref()),
         },
-        Cmd::Doing { task, tag } => cmd_destination(
+        Cmd::Doing { task, tag, force } => cmd_destination(
             &board,
             Destination::Column(Column::Doing),
             task,
             tag.as_deref(),
+            force,
         ),
         Cmd::Done { task, tag } => cmd_destination(
             &board,
             Destination::Column(Column::Done),
             task,
             tag.as_deref(),
+            false,
         ),
         Cmd::Abandon { task, tag } => {
-            cmd_destination(&board, Destination::Abandon, task, tag.as_deref())
+            cmd_destination(&board, Destination::Abandon, task, tag.as_deref(), false)
         }
         Cmd::Verb(args) => {
             let mut args = args.into_iter();
@@ -547,7 +571,7 @@ fn run() -> Result<()> {
                 }
             }
             let destination = resolve_destination(&board, &name)?;
-            cmd_destination(&board, destination, task, tag.as_deref())
+            cmd_destination(&board, destination, task, tag.as_deref(), false)
         }
         Cmd::Show { task } => {
             let task = resolve(&board, task, "show", &Column::ALL)?;
@@ -651,6 +675,7 @@ fn cmd_enter_todo(
     task: &task::Task,
     override_branch: Option<String>,
     no_branch: bool,
+    force: bool,
 ) -> Result<()> {
     // Read everything off the ticket before the move — afterwards the path is
     // stale. A ticket with no branch type has nothing to check out, so there's
@@ -670,7 +695,7 @@ fn cmd_enter_todo(
         },
     };
 
-    move_and_report(board, task, Column::Todo)?;
+    move_and_report(board, task, Column::Todo, force)?;
 
     if no_branch || std::env::var("AMD_NO_BRANCH").as_deref() == Ok("1") {
         return Ok(());
@@ -735,8 +760,8 @@ fn cmd_gui() -> Result<()> {
 /// Move a ticket and say so. The wording is the CLI's, not the library's —
 /// `Board::move_task` returns where the ticket landed and leaves the reporting
 /// to whoever asked for the move.
-fn move_and_report(board: &Board, task: &task::Task, to: Column) -> Result<()> {
-    let dest = board.move_task(task, to)?;
+fn move_and_report(board: &Board, task: &task::Task, to: Column, force: bool) -> Result<()> {
+    let dest = board.move_task(task, to, force)?;
     println!("moved {} -> {to}/", task.file_name());
     // Entering todo/doing already means "I'm starting this" — claiming the
     // lease at the same moment matches that intent with no extra step.
@@ -805,11 +830,12 @@ fn cmd_destination(
     destination: Destination,
     task: Option<String>,
     tag: Option<&str>,
+    force: bool,
 ) -> Result<()> {
     match (destination, task) {
         (Destination::Column(column), Some(reference)) => {
             let task = board.find(&reference)?;
-            move_and_report(board, &task, column)
+            move_and_report(board, &task, column, force)
         }
         (Destination::Column(column), None) => render::columns(board, &[column], tag),
         (Destination::Abandon, Some(reference)) => {
@@ -906,6 +932,18 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
             let mut group = board.group(&name)?;
             group.start()?;
             println!("{name} started — its tickets are now fixed");
+            Ok(())
+        }
+        GroupCmd::Empty { name } => {
+            let result = board.empty_group(&name)?;
+            println!(
+                "{} emptied into backlog/ ({} ticket(s))",
+                name,
+                result.moved.len()
+            );
+            for (stem, err) in &result.skipped {
+                eprintln!("amd: {stem} not moved: {err}");
+            }
             Ok(())
         }
     }

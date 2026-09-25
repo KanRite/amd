@@ -209,13 +209,15 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   (the branch types on offer), `AMD_YES` (force-create), `AMD_NO_INPUT` (never
   prompt), `AMD_NO_BRANCH` (never touch branches), `AMD_NO_REGISTER` (keep the
   repository list manual), `NO_COLOR`/`--plain` (plain board), `EDITOR` (for
-  `amd edit`), `AMD_LEASE_HOURS` (lease duration, default 8). **`AMD_TYPES` is
+  `amd edit`), `AMD_LEASE_HOURS` (lease duration, default 8), `AMD_WIP_TODO`/
+  `AMD_WIP_DOING` (WIP limits, unset = unlimited). **`AMD_TYPES` is
   dead** — it was in `--help` long after nothing read it. `AMD_BRANCH_TYPES`,
   `EDITOR` and `AMD_NO_REGISTER` also fall back to the settings file
   (`branch-types`/`editor`/`no-register`) when unset — the env var wins when
-  both are set (`settings::resolved()`). `AMD_LEASE_HOURS` follows the same
-  precedence against the *board-local* `.settings`'s `lease-hours` key
-  instead — a lease policy is a team decision, not a personal one.
+  both are set (`settings::resolved()`). `AMD_LEASE_HOURS`/`AMD_WIP_TODO`/
+  `AMD_WIP_DOING` follow the same precedence against the *board-local*
+  `.settings`'s `lease-hours`/`wip-todo`/`wip-doing` keys instead — both are
+  team decisions, not personal ones.
 
 ## Ticket fields (`crates/amd-lib/src/branch.rs`, `templates/ticket.md.jinja`)
 
@@ -424,6 +426,29 @@ changes):
   things: an unsized ticket (it would make the total a lie) and an *archive*
   straight out of the sprint (a move out is a dated `git mv`; an archive is
   gitignored and is not). `State::Started` marks a moment, not a lock.
+- **Both epics and sprints are optional**, and both stay in scope —
+  ticket 032's 2026-09-22 note that dropped sprints (this board was
+  human-plus-AI only) was itself reversed 2026-09-25: tickets now live in a
+  pushed, git-tracked repository, which makes a real team a near-term case.
+  Nothing here changed as a result; sprints were never actually removed
+  from the code, only from that ticket's own notes.
+- **`Board::empty_group`** moves every ticket a group holds back to the
+  loose backlog at once, no precondition — reuses `set_epic(task, None)`
+  per ticket rather than a new mechanism, so it inherits the same
+  lease/hash checks that setter already has, and skips (rather than
+  aborts on) a ticket it can't move. `amd group empty <name>` in the CLI,
+  an "empty" button next to a group's "edit" button in `amdui`.
+- **WIP limits** (`board_settings::wip_limit`) gate entry into `todo`/
+  `doing` only — `Board::move_task` checks the destination column's count
+  against the configured limit (env, then `.settings`, same precedence as
+  `lease_hours`) before the existing lease check, refusing with
+  `WipLimitExceeded` unless `force` is set. Moving a ticket *out* of an
+  over-limit column is never blocked, because the check only ever looks at
+  where a ticket is going, not where it's leaving from. `move_task`'s
+  signature carries `force: bool` now — both its callers (`amd-cli`'s
+  `move_and_report`, `amdui`'s `apply()`) pass it through; the GUI always
+  passes `false` (no drag-and-drop escape hatch), a blocked drag just sets
+  the status line, the same treatment a lease refusal already gets.
 
 ## The desktop board (`crates/amd-lib/src/gui/`)
 
@@ -452,6 +477,13 @@ changes):
   (`apply_edit`) inherit the actual refusal for free from
   `Task::write_checked`/`Board::move_task` — the GUI only adds the
   auto-take and the badge, not a second enforcement path.
+- **"Add epic"/"Add sprint" render on both views, not just Backlog.**
+  Gating them to `View::Backlog` alone made the feature effectively
+  invisible — the Board view is the default, so they were never on screen
+  unless you already knew to switch tabs. `GroupDraft.repo` resolves the
+  same way `New ticket` already does per-view (`Backlog` uses
+  `self.backlog_repo`, `Board` defaults to repo `0`) — an existing,
+  already-accepted pattern, not a new one.
 
 ## Conventions
 

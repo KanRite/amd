@@ -23,6 +23,9 @@
 //!   hand-edited, the same as `branch-types`/`editor`/`no-register` in the
 //!   *global* settings file, just board-local rather than per-machine
 //!   because a lease policy is a team decision, not a personal preference.
+//! - `wip-todo`/`wip-doing`: the most tickets `todo/`/`doing/` may hold at
+//!   once. Absent (the default) means unlimited — same hand-edited,
+//!   board-local shape as `lease-hours`, for the same reason.
 //!
 //! One repository, one settings file — a repository with more than one
 //! board (two different `AMD_DIR` trees) shares this file and its counter
@@ -32,13 +35,15 @@
 
 use anyhow::{Result, bail};
 
-use crate::board::Board;
+use crate::board::{Board, Column};
 use crate::settings::Config;
 
 const PROJECT: &str = "project";
 const NEXT_ID: &str = "next-id";
 const LEASE_HOURS: &str = "lease-hours";
 const DEFAULT_LEASE_HOURS: f64 = 8.0;
+const WIP_TODO: &str = "wip-todo";
+const WIP_DOING: &str = "wip-doing";
 
 /// `<repo-root>/.settings` — a sibling of the board directory, not inside it.
 pub fn path(board: &Board) -> std::path::PathBuf {
@@ -95,6 +100,22 @@ impl BoardSettings {
             .and_then(|value| value.trim().parse::<f64>().ok())
             .filter(|hours| *hours > 0.0)
             .unwrap_or(DEFAULT_LEASE_HOURS)
+    }
+
+    /// The most tickets `column` may hold at once — `AMD_WIP_TODO`/
+    /// `AMD_WIP_DOING`, then this board's own `.settings`, then unlimited
+    /// (`None`). Only `Column::Todo`/`Column::Doing` can carry a limit;
+    /// anything else always reads as unlimited, matching the ticket's own
+    /// scope.
+    pub fn wip_limit(&self, column: Column) -> Option<u32> {
+        let (env_var, key) = match column {
+            Column::Todo => ("AMD_WIP_TODO", WIP_TODO),
+            Column::Doing => ("AMD_WIP_DOING", WIP_DOING),
+            Column::Backlog | Column::Done => return None,
+        };
+        crate::settings::resolved(env_var, &self.config, key)
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .filter(|limit| *limit > 0)
     }
 
     pub fn save(&self, board: &Board) -> Result<()> {
@@ -260,6 +281,50 @@ mod tests {
         assert_eq!(settings.lease_hours(), 8.0);
         settings.config.set(LEASE_HOURS, "-3");
         assert_eq!(settings.lease_hours(), 8.0);
+    }
+
+    #[test]
+    fn wip_limit_defaults_to_unlimited() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = load(&board(dir.path()));
+        assert_eq!(settings.wip_limit(Column::Todo), None);
+        assert_eq!(settings.wip_limit(Column::Doing), None);
+    }
+
+    #[test]
+    fn wip_limit_reads_the_board_setting_per_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.config.set(WIP_TODO, "3");
+        settings.save(&board).unwrap();
+        assert_eq!(load(&board).wip_limit(Column::Todo), Some(3));
+        assert_eq!(load(&board).wip_limit(Column::Doing), None);
+    }
+
+    #[test]
+    fn wip_limit_only_applies_to_todo_and_doing() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        // Even set by hand, backlog/done have nowhere to store a value read
+        // from — Column::Backlog/Done short-circuit to None unconditionally.
+        settings.config.set("wip-backlog", "1");
+        settings.config.set("wip-done", "1");
+        settings.save(&board).unwrap();
+        assert_eq!(load(&board).wip_limit(Column::Backlog), None);
+        assert_eq!(load(&board).wip_limit(Column::Done), None);
+    }
+
+    #[test]
+    fn wip_limit_ignores_zero_and_unparsable_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.config.set(WIP_TODO, "0");
+        assert_eq!(settings.wip_limit(Column::Todo), None);
+        settings.config.set(WIP_TODO, "not a number");
+        assert_eq!(settings.wip_limit(Column::Todo), None);
     }
 
     #[test]

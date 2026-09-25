@@ -449,7 +449,30 @@ assert "an epic cannot be created with a column's name" \
   bash -c "cd '${work}' && '${AMD}' group epic todo 2>&1 | grep -q collides"
 assert "an epic cannot be created named abandon" \
   bash -c "cd '${work}' && '${AMD}' group epic abandon 2>&1 | grep -q collides"
+assert "amd group empty moves every ticket in a group back to loose backlog, no precondition" \
+  bash -c "cd '${work}' && '${AMD}' --plain checkout | grep -q '\[' \
+    && '${AMD}' group empty checkout | grep -q 'emptied into backlog' \
+    && '${AMD}' --plain checkout | grep -q '(empty)'"
 rm -rf "${work}"
+
+echo "WIP limits:"
+wip_repo="$(mktemp -d)"
+( cd "${wip_repo}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init wiptest --local-only >/dev/null \
+  && "${AMD}" new "Existing in todo" --no-edit >/dev/null \
+  && "${AMD}" todo 1 --no-branch >/dev/null \
+  && "${AMD}" new "Second ticket" --no-edit >/dev/null )
+assert "amd todo refuses when todo/ is already at its configured WIP limit" \
+  bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 '${AMD}' todo 2 2>&1 | grep -q 'todo/ already has 1 of 1 allowed'"
+assert "the refused move never happened" \
+  bash -c "cd '${wip_repo}' && test -f tasks/backlog/002-second-ticket.md"
+assert "amd todo --force overrides the WIP limit" \
+  bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 '${AMD}' todo 2 --force --no-branch >/dev/null \
+    && test -f tasks/todo/002-second-ticket.md"
+assert "moving something out of an over-limit column is never blocked" \
+  bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 '${AMD}' doing 1 >/dev/null && test -f tasks/doing/001-existing-in-todo.md"
+assert "a limit on todo does not apply to doing" \
+  bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 '${AMD}' doing 2 >/dev/null && test -f tasks/doing/002-second-ticket.md"
 
 echo "import and tag filtering:"
 import_src="$(mktemp -d)"
