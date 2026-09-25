@@ -42,7 +42,9 @@ still moves, the working tree is left alone.
 
 New tickets land in backlog/. `amd set` sizes and files them; `amd group`
 divides the backlog into epics and sprints. `amd tag <tag>` lists every
-ticket carrying it, across every column.
+ticket carrying it, across every column. Any listing form — `board`, `ls`,
+a bare destination verb, an epic by name — takes `--tag <tag>` to narrow it
+to tickets carrying that tag instead.
 
 Tickets nest: `--parent <ref>` puts one under another, and the board shows
 the tree. Nesting is the parent/child relationship; an epic or sprint is a
@@ -129,7 +131,11 @@ enum Cmd {
     /// Create a task in todo/ from a template
     New(NewArgs),
     /// Show all columns (the default command)
-    Board,
+    Board {
+        /// Only show tasks carrying this tag
+        #[arg(short = 't', long = "tag", value_name = "TAG")]
+        tag: Option<String>,
+    },
     /// List a column: backlog, todo, doing, done or all
     #[command(alias = "list")]
     Ls {
@@ -139,6 +145,9 @@ enum Cmd {
             value_parser = PossibleValuesParser::new(["backlog", "todo", "doing", "done", "all"]),
         )]
         column: String,
+        /// Only show tasks carrying this tag
+        #[arg(short = 't', long = "tag", value_name = "TAG")]
+        tag: Option<String>,
     },
     /// List every ticket carrying a tag
     Tag {
@@ -161,6 +170,9 @@ enum Cmd {
     Backlog {
         #[arg(value_name = "REF")]
         task: Option<String>,
+        /// With no ref, only show tasks carrying this tag
+        #[arg(short = 't', long = "tag", value_name = "TAG")]
+        tag: Option<String>,
     },
     /// Move a task into todo/, or list it with no ref — entering todo/
     /// creates or switches to the ticket's branch
@@ -173,22 +185,34 @@ enum Cmd {
         /// Move the task without touching branches
         #[arg(long)]
         no_branch: bool,
+        /// With no ref, only show tasks carrying this tag
+        #[arg(short = 't', long = "tag", value_name = "TAG")]
+        tag: Option<String>,
     },
     /// Move a task into doing/, or list it with no ref
     Doing {
         #[arg(value_name = "REF")]
         task: Option<String>,
+        /// With no ref, only show tasks carrying this tag
+        #[arg(short = 't', long = "tag", value_name = "TAG")]
+        tag: Option<String>,
     },
     /// Move a task into done/, or list it with no ref
     Done {
         #[arg(value_name = "REF")]
         task: Option<String>,
+        /// With no ref, only show tasks carrying this tag
+        #[arg(short = 't', long = "tag", value_name = "TAG")]
+        tag: Option<String>,
     },
     /// Take a ticket off the board into archive/, or list the archive with
     /// no ref
     Abandon {
         #[arg(value_name = "REF")]
         task: Option<String>,
+        /// With no ref, only show tasks carrying this tag
+        #[arg(short = 't', long = "tag", value_name = "TAG")]
+        tag: Option<String>,
     },
     /// Print a task
     Show {
@@ -401,7 +425,7 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
     form::set_no_input(cli.no_input);
     render::set_plain(cli.plain);
-    let command = cli.command.unwrap_or(Cmd::Board);
+    let command = cli.command.unwrap_or(Cmd::Board { tag: None });
 
     // Completions don't need a board — and often run before there is one.
     if let Cmd::Completions { shell } = command {
@@ -443,38 +467,64 @@ fn run() -> Result<()> {
             unreachable!("handled above")
         }
         Cmd::New(args) => cmd_new(&board, args),
-        Cmd::Board => cmd_ls(&board, "all"),
-        Cmd::Ls { column } => cmd_ls(&board, &column),
-        Cmd::Tag { tag } => render::named(&format!("tag: {tag}"), board.tasks_tagged(&tag)?),
+        Cmd::Board { tag } => cmd_ls(&board, "all", tag.as_deref()),
+        Cmd::Ls { column, tag } => cmd_ls(&board, &column, tag.as_deref()),
+        Cmd::Tag { tag } => render::named(&format!("tag: {tag}"), board.tasks_tagged(&tag)?, None),
         Cmd::Import { path, dry_run } => cmd_import(&board, &path, dry_run),
-        Cmd::Backlog { task } => {
-            cmd_destination(&board, Destination::Column(Column::Backlog), task)
-        }
+        Cmd::Backlog { task, tag } => cmd_destination(
+            &board,
+            Destination::Column(Column::Backlog),
+            task,
+            tag.as_deref(),
+        ),
         Cmd::Todo {
             task,
             branch,
             no_branch,
+            tag,
         } => match task {
             Some(reference) => {
                 let task = board.find(&reference)?;
                 cmd_enter_todo(&board, &task, branch, no_branch)
             }
-            None => render::columns(&board, &[Column::Todo]),
+            None => render::columns(&board, &[Column::Todo], tag.as_deref()),
         },
-        Cmd::Doing { task } => cmd_destination(&board, Destination::Column(Column::Doing), task),
-        Cmd::Done { task } => cmd_destination(&board, Destination::Column(Column::Done), task),
-        Cmd::Abandon { task } => cmd_destination(&board, Destination::Abandon, task),
+        Cmd::Doing { task, tag } => cmd_destination(
+            &board,
+            Destination::Column(Column::Doing),
+            task,
+            tag.as_deref(),
+        ),
+        Cmd::Done { task, tag } => cmd_destination(
+            &board,
+            Destination::Column(Column::Done),
+            task,
+            tag.as_deref(),
+        ),
+        Cmd::Abandon { task, tag } => {
+            cmd_destination(&board, Destination::Abandon, task, tag.as_deref())
+        }
         Cmd::Verb(args) => {
             let mut args = args.into_iter();
             let name = args
                 .next()
-                .ok_or_else(|| anyhow::anyhow!("usage: amd <destination> [ref]"))?;
-            let task = args.next();
-            if let Some(extra) = args.next() {
-                bail!("amd {name}: unexpected argument '{extra}'");
+                .ok_or_else(|| anyhow::anyhow!("usage: amd <destination> [ref] [--tag TAG]"))?;
+            let mut task = None;
+            let mut tag = None;
+            while let Some(arg) = args.next() {
+                match arg.as_str() {
+                    "--tag" | "-t" => {
+                        let value = args
+                            .next()
+                            .ok_or_else(|| anyhow::anyhow!("amd {name}: --tag needs a value"))?;
+                        tag = Some(value);
+                    }
+                    _ if task.is_none() => task = Some(arg),
+                    other => bail!("amd {name}: unexpected argument '{other}'"),
+                }
             }
             let destination = resolve_destination(&board, &name)?;
-            cmd_destination(&board, destination, task)
+            cmd_destination(&board, destination, task, tag.as_deref())
         }
         Cmd::Show { task } => {
             let task = resolve(&board, task, "show", &Column::ALL)?;
@@ -669,16 +719,22 @@ fn resolve_destination(board: &Board, name: &str) -> Result<Destination> {
     );
 }
 
-/// Move a ticket to a destination, or — with no ref — list what's there.
-/// Every destination verb goes through this one function, static columns and
-/// dynamic epic names alike, so they can't drift from each other.
-fn cmd_destination(board: &Board, destination: Destination, task: Option<String>) -> Result<()> {
+/// Move a ticket to a destination, or — with no ref — list what's there,
+/// narrowed to `tag` when given. Every destination verb goes through this one
+/// function, static columns and dynamic epic names alike, so they can't drift
+/// from each other.
+fn cmd_destination(
+    board: &Board,
+    destination: Destination,
+    task: Option<String>,
+    tag: Option<&str>,
+) -> Result<()> {
     match (destination, task) {
         (Destination::Column(column), Some(reference)) => {
             let task = board.find(&reference)?;
             move_and_report(board, &task, column)
         }
-        (Destination::Column(column), None) => render::columns(board, &[column]),
+        (Destination::Column(column), None) => render::columns(board, &[column], tag),
         (Destination::Abandon, Some(reference)) => {
             let task = board.find(&reference)?;
             let name = task.file_name();
@@ -689,7 +745,7 @@ fn cmd_destination(board: &Board, destination: Destination, task: Option<String>
             }
             Ok(())
         }
-        (Destination::Abandon, None) => render::named(ABANDON, board.archived()?),
+        (Destination::Abandon, None) => render::named(ABANDON, board.archived()?, tag),
         (Destination::Epic(name), Some(reference)) => {
             let task = board.find(&reference)?;
             board.set_epic(&task, Some(&name))?;
@@ -698,7 +754,7 @@ fn cmd_destination(board: &Board, destination: Destination, task: Option<String>
         }
         (Destination::Epic(name), None) => {
             let tasks = board.tasks_in_group(&name)?;
-            render::named(&name, tasks)
+            render::named(&name, tasks, tag)
         }
     }
 }
@@ -1018,13 +1074,13 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     Ok(())
 }
 
-fn cmd_ls(board: &Board, column: &str) -> Result<()> {
+fn cmd_ls(board: &Board, column: &str, tag: Option<&str>) -> Result<()> {
     if column.eq_ignore_ascii_case("all") {
-        return render::columns(board, &Column::ALL);
+        return render::columns(board, &Column::ALL, tag);
     }
     let column = Column::parse(column)
         .with_context(|| format!("unknown column '{column}' (todo, doing, done or all)"))?;
-    render::columns(board, &[column])
+    render::columns(board, &[column], tag)
 }
 
 fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {

@@ -55,10 +55,14 @@ pub struct Node {
 }
 
 /// Read a column and nest it, reading each task's parent exactly once.
-pub fn column_forest(board: &Board, column: Column) -> Result<Vec<Node>> {
+/// `tag`, when given, drops every task that doesn't carry it — a task left
+/// out this way can still anchor a child from another column, same as any
+/// other task that isn't in the set being nested.
+pub fn column_forest(board: &Board, column: Column, tag: Option<&str>) -> Result<Vec<Node>> {
     let with_parents = board
         .tasks_in(column)?
         .into_iter()
+        .filter(|task| tag.is_none_or(|tag| task.has_tag(tag)))
         .map(|task| {
             let parent = task.parent();
             (task, parent)
@@ -67,11 +71,12 @@ pub fn column_forest(board: &Board, column: Column) -> Result<Vec<Node>> {
     Ok(forest(with_parents))
 }
 
-/// Print one or more columns of the board.
-pub fn columns(board: &Board, columns: &[Column]) -> Result<()> {
+/// Print one or more columns of the board. `tag` narrows every column to the
+/// tasks carrying it.
+pub fn columns(board: &Board, columns: &[Column], tag: Option<&str>) -> Result<()> {
     let mut loaded = Vec::new();
     for column in columns {
-        loaded.push((*column, column_forest(board, *column)?));
+        loaded.push((*column, column_forest(board, *column, tag)?));
     }
     if rich() {
         // Falling back rather than failing: a rendering problem should never
@@ -86,10 +91,12 @@ pub fn columns(board: &Board, columns: &[Column]) -> Result<()> {
 
 /// Print one flat, named list of tasks — an epic or the archive, not a board
 /// column — in the same shape `columns` prints a single column in. The no-ref
-/// form of a destination verb (`amd <destination>`) goes through this.
-pub fn named(title: &str, tasks: Vec<Task>) -> Result<()> {
+/// form of a destination verb (`amd <destination>`) goes through this. `tag`,
+/// when given, narrows the list to tasks carrying it.
+pub fn named(title: &str, tasks: Vec<Task>, tag: Option<&str>) -> Result<()> {
     let with_parents = tasks
         .into_iter()
+        .filter(|task| tag.is_none_or(|tag| task.has_tag(tag)))
         .map(|task| {
             let parent = task.parent();
             (task, parent)

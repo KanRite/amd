@@ -55,6 +55,9 @@ amd edit    1                     # open in $EDITOR
 amd abandon 1                     # take it off the board, into tasks/archive/ — and
                                    # delete its branch too, if it's still empty
 amd link    1 3                   # relate two tickets
+amd tag     urgent                # list every ticket carrying a tag, across every column
+amd todo    --tag urgent          # any listing form narrows to a tag: board, ls, a
+                                   # destination verb, or an epic by name
 ```
 
 `amd` works from any subdirectory — it resolves the board from the repo root.

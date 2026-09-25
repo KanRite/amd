@@ -439,6 +439,12 @@ assert "amd <epic> <ref> files a ticket, same as set epic" \
     && test -f tasks/backlog/checkout/\${id}-verb-filed.md"
 assert "amd <epic> with no ref lists that epic's tickets" \
   bash -c "cd '${work}' && '${AMD}' checkout | grep -q 'Verb filed'"
+assert "amd <epic> --tag narrows an epic listing to tasks carrying that tag" \
+  bash -c "cd '${work}' && '${AMD}' new 'Verb filed and urgent' -t urgent --no-edit >/dev/null \
+    && id=\$(ls tasks/backlog | grep verb-filed-and-urgent | cut -d- -f1) \
+    && '${AMD}' checkout \${id} >/dev/null \
+    && '${AMD}' checkout --tag urgent | grep -q 'Verb filed and urgent' \
+    && ! '${AMD}' checkout --tag urgent | grep -q '\[.*\] Verb filed\$'"
 assert "an epic cannot be created with a column's name" \
   bash -c "cd '${work}' && '${AMD}' group epic todo 2>&1 | grep -q collides"
 assert "an epic cannot be created named abandon" \
@@ -502,6 +508,19 @@ assert "importing the same source again flags every ticket DUPLICATE against the
     && '${AMD}' tag DUPLICATE | grep -q 'Shipped feature'"
 assert "amd tag finds nothing for a tag nobody has" \
   bash -c "cd '${import_dst}' && ! '${AMD}' tag NO-SUCH-TAG | grep -q 'Old backlog ticket'"
+assert "amd backlog --tag narrows the listed column to tasks carrying that tag" \
+  bash -c "cd '${import_dst}' && test \"\$('${AMD}' backlog --tag DUPLICATE --plain | grep -c 'Old backlog ticket')\" = 1 \
+    && test \"\$('${AMD}' backlog --plain | grep -c 'Old backlog ticket')\" = 2"
+assert "amd board --tag narrows every column to tasks carrying that tag" \
+  bash -c "cd '${import_dst}' && out=\$('${AMD}' board --tag DUPLICATE --plain) \
+    && echo \"\$out\" | grep -q 'Old backlog ticket' \
+    && echo \"\$out\" | grep -q 'In progress work' \
+    && echo \"\$out\" | grep -q 'Shipped feature' \
+    && test \"\$(echo \"\$out\" | grep -c 'Old backlog ticket')\" = 1"
+assert "amd ls all --tag behaves the same as amd board --tag" \
+  bash -c "cd '${import_dst}' && test \"\$('${AMD}' ls all --tag DUPLICATE --plain | grep -c 'Shipped feature')\" = 1"
+assert "amd <destination> --tag with no matches lists an empty column, not an error" \
+  bash -c "cd '${import_dst}' && '${AMD}' backlog --tag NO-SUCH-TAG --plain | grep -q '(empty)'"
 
 echo "pipes:"
 assert "the board survives a closed pipe" \

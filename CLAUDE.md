@@ -159,6 +159,16 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   exist any more, this replaced it. `amd abandon` also deletes the ticket's
   branch if it's still empty, since a ticket can be abandoned from `todo/`
   before real work starts.
+- **Tag filtering**: `amd tag <tag>` lists every ticket carrying `<tag>`,
+  across every column, via `Board::tasks_tagged()`/`Task::has_tag()`. Every
+  listing form also takes `--tag <tag>` to narrow it down: `amd board`,
+  `amd ls [column]`, a bare destination verb (`amd todo`, `amd backlog`, …)
+  and an epic by name (`amd checkout --tag urgent`) all thread it through to
+  `render::columns()`/`render::named()`, which filter before building the
+  tree. Moving a ticket (`<ref>` given) ignores `--tag` — it only applies to
+  the no-ref, listing form. The `Verb` external-subcommand path (epic names)
+  parses `--tag`/`-t` out of its raw args by hand, since clap hands that
+  whole tail over as an opaque `Vec<String>`.
 - `Board::archive()` (`amd abandon`) moves a ticket to `<board>/archive/`,
   which is **not** a column: it's off the board and its contents are
   gitignored. That means `git mv` would refuse the ignored destination and
