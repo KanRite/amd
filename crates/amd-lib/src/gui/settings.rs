@@ -37,6 +37,85 @@ impl Theme {
     }
 }
 
+/// The accent colour applied over whichever base theme is active —
+/// `egui::Visuals::selection`/`hyperlink_color`, which is what everything
+/// already built on `ui.visuals()` (card fills, borders, the drop-target
+/// highlight) picks up automatically, with no per-widget changes needed.
+/// Deliberately not a per-element palette editor: an inventory of every
+/// `Color32`/`.visuals()` call in `gui/mod.rs` found only two genuinely
+/// hardcoded colours (the status-error red, the lease-badge amber), and
+/// both are semantic rather than decorative — left untouched by design, so
+/// an error still reads as an error whichever accent is chosen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Accent {
+    /// Leave egui's own theme default alone — no override applied.
+    #[default]
+    Default,
+    Blue,
+    Green,
+    Purple,
+    Orange,
+    Red,
+}
+
+impl Accent {
+    pub const ALL: [Accent; 6] = [
+        Accent::Default,
+        Accent::Blue,
+        Accent::Green,
+        Accent::Purple,
+        Accent::Orange,
+        Accent::Red,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Accent::Default => "default",
+            Accent::Blue => "blue",
+            Accent::Green => "green",
+            Accent::Purple => "purple",
+            Accent::Orange => "orange",
+            Accent::Red => "red",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Accent::Default => "Default",
+            Accent::Blue => "Blue",
+            Accent::Green => "Green",
+            Accent::Purple => "Purple",
+            Accent::Orange => "Orange",
+            Accent::Red => "Red",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Accent> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "default" => Some(Accent::Default),
+            "blue" => Some(Accent::Blue),
+            "green" => Some(Accent::Green),
+            "purple" => Some(Accent::Purple),
+            "orange" => Some(Accent::Orange),
+            "red" => Some(Accent::Red),
+            _ => None,
+        }
+    }
+
+    /// The colour to apply, or `None` to leave the active theme's own
+    /// default selection/hyperlink colour alone.
+    pub fn color(self) -> Option<egui::Color32> {
+        match self {
+            Accent::Default => None,
+            Accent::Blue => Some(egui::Color32::from_rgb(66, 133, 244)),
+            Accent::Green => Some(egui::Color32::from_rgb(52, 168, 83)),
+            Accent::Purple => Some(egui::Color32::from_rgb(155, 89, 182)),
+            Accent::Orange => Some(egui::Color32::from_rgb(230, 126, 34)),
+            Accent::Red => Some(egui::Color32::from_rgb(192, 57, 43)),
+        }
+    }
+}
+
 /// Text size, as a multiple of the standard size.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FontSize {
@@ -86,6 +165,7 @@ impl FontSize {
 pub struct GuiSettings {
     pub theme: Theme,
     pub font: FontSize,
+    pub accent: Accent,
 }
 
 impl GuiSettings {
@@ -103,6 +183,10 @@ impl GuiSettings {
                 .get("ui.font")
                 .and_then(FontSize::parse)
                 .unwrap_or_default(),
+            accent: config
+                .get("ui.accent")
+                .and_then(Accent::parse)
+                .unwrap_or_default(),
         }
     }
 
@@ -118,6 +202,7 @@ impl GuiSettings {
         let mut config = Config::load_from(path);
         config.set("ui.theme", self.theme.as_str());
         config.set("ui.font", self.font.as_str());
+        config.set("ui.accent", self.accent.as_str());
         config.save_to(path)
     }
 }
@@ -132,6 +217,7 @@ mod tests {
         assert_eq!(settings.theme, Theme::System);
         assert_eq!(settings.font, FontSize::Standard);
         assert_eq!(settings.font.scale(), 1.0);
+        assert_eq!(settings.accent, Accent::Default);
     }
 
     #[test]
@@ -162,6 +248,7 @@ mod tests {
         GuiSettings {
             theme: Theme::Light,
             font: FontSize::Large,
+            accent: Accent::Purple,
         }
         .save_to(&path)
         .unwrap();
@@ -170,6 +257,7 @@ mod tests {
         let reopened = GuiSettings::from_config(&Config::load_from(&path));
         assert_eq!(reopened.theme, Theme::Light);
         assert_eq!(reopened.font, FontSize::Large);
+        assert_eq!(reopened.accent, Accent::Purple);
         assert_eq!(
             Config::load_from(&path).get("theme"),
             Some("nord"),
@@ -178,12 +266,37 @@ mod tests {
     }
 
     #[test]
+    fn accent_default_applies_no_colour_override() {
+        assert_eq!(Accent::default(), Accent::Default);
+        assert_eq!(Accent::Default.color(), None);
+    }
+
+    #[test]
+    fn every_other_accent_has_a_colour() {
+        for accent in Accent::ALL {
+            if accent == Accent::Default {
+                continue;
+            }
+            assert!(accent.color().is_some(), "{accent:?} should have a colour");
+        }
+    }
+
+    #[test]
+    fn accent_survives_a_round_trip_through_the_config() {
+        let mut config = Config::default();
+        config.set("ui.accent", "green");
+        assert_eq!(GuiSettings::from_config(&config).accent, Accent::Green);
+    }
+
+    #[test]
     fn nonsense_falls_back_rather_than_failing() {
         let mut config = Config::default();
         config.set("ui.theme", "chartreuse");
         config.set("ui.font", "enormous");
+        config.set("ui.accent", "chartreuse");
         let settings = GuiSettings::from_config(&config);
         assert_eq!(settings.theme, Theme::System);
         assert_eq!(settings.font, FontSize::Standard);
+        assert_eq!(settings.accent, Accent::Default);
     }
 }

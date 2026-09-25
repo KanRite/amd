@@ -18,7 +18,7 @@ use crate::board::{Board, Column};
 use crate::group::{DEFAULT_DAYS, Group, Kind, State};
 use crate::registry::Registry;
 use crate::task::{ContentHash, Task};
-use settings::{FontSize, GuiSettings, Theme};
+use settings::{Accent, FontSize, GuiSettings, Theme};
 
 /// Wide enough for a title of a few words without wrapping to three lines,
 /// narrow enough that three columns and a scrollbar fit a laptop screen.
@@ -440,6 +440,20 @@ impl eframe::App for BoardApp {
         // card widths with the text, so a large font does not overflow a
         // column sized for a standard one.
         ctx.set_zoom_factor(self.settings.font.scale());
+        // After set_theme, which resets visuals to the theme's own
+        // defaults: everything already built on `ui.visuals()` (card fills,
+        // borders, the drop-target highlight) picks this up for free, no
+        // per-widget changes needed. `Accent::Default` applies nothing,
+        // leaving the theme's own colours exactly as before this existed.
+        if let Some(color) = self.settings.accent.color() {
+            // Both light and dark styles, not just whichever is active right
+            // now — under `ThemePreference::System` the OS can switch either
+            // way, and the accent should still hold when it does.
+            ctx.all_styles_mut(|style| {
+                style.visuals.selection.bg_fill = color;
+                style.visuals.hyperlink_color = color;
+            });
+        }
 
         let mut pending: Option<Drop> = None;
         let mut reload = false;
@@ -682,6 +696,15 @@ impl BoardApp {
                 }
             });
             ui.weak("remembered for next time");
+
+            ui.add_space(8.0);
+            ui.label("Accent colour");
+            ui.horizontal_wrapped(|ui| {
+                for accent in Accent::ALL {
+                    ui.selectable_value(&mut self.settings.accent, accent, accent.label());
+                }
+            });
+            ui.weak("applies over either colour scheme above");
 
             ui.separator();
             close = ui.button("Close").clicked();
