@@ -238,12 +238,18 @@ amd group sprint sprint-1 --days 10
 amd set 001 epic sprint-1              # refused unless the ticket is sized
 amd group start sprint-1               # one way: no route back to pending
 amd group                              # tickets and points per epic and sprint
+amd group empty checkout               # every ticket in it, back to backlog/ at once
 amd todo 001 --no-branch && amd doing 001 && amd done 001
 ```
 
 The rules live in the board, not the window, so the command line gets them
 too: a sprint refuses an unsized ticket, and refuses to have one archived
 straight out of a started sprint.
+
+`todo`/`doing` can each carry a WIP limit (`AMD_WIP_TODO`/`AMD_WIP_DOING`,
+or the board's own `.settings`). A move into an already-full column is
+refused, naming the limit; `--force` overrides it. The limit only ever
+gates entry — moving a ticket *out* of an over-limit column always works.
 
 `cargo build -p amd-cli --no-default-features` builds this without the desktop
 board — the whole API, no windowing stack, which is what CI and scripts want.

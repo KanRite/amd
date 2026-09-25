@@ -70,6 +70,37 @@ impl fmt::Display for Column {
     }
 }
 
+/// A move was refused because its destination column is already at (or
+/// past) its configured WIP limit. Gates entry only — a column that's
+/// already over its limit stays movable-out-of, since this never looks at
+/// where a ticket is leaving from.
+#[derive(Debug)]
+pub struct WipLimitExceeded {
+    pub column: Column,
+    pub limit: u32,
+    pub current: usize,
+}
+
+impl fmt::Display for WipLimitExceeded {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}/ already has {} of {} allowed — move something out first, or use --force",
+            self.column, self.current, self.limit
+        )
+    }
+}
+
+impl std::error::Error for WipLimitExceeded {}
+
+/// What `Board::empty_group` actually did — every ticket it moved, and
+/// every ticket (stem, reason) it skipped rather than aborting the batch
+/// over.
+pub struct EmptiedGroup {
+    pub moved: Vec<PathBuf>,
+    pub skipped: Vec<(String, String)>,
+}
+
 pub struct Board {
     /// Absolute path to the board directory itself (`…/tasks`).
     pub root: PathBuf,
@@ -378,6 +409,27 @@ impl Board {
         Ok(dest)
     }
 
+    /// Empty a group's folder into the loose backlog at once — every
+    /// ticket currently in it, no precondition, the same "no precondition"
+    /// as an epic already has for a single ticket. Reuses `set_epic` per
+    /// ticket rather than a new mechanism, so it inherits the same
+    /// lease/hash checks that setter already has. A ticket that can't move
+    /// (someone else's active lease, say) is skipped rather than aborting
+    /// the whole batch — reported the same way `amd import` already
+    /// reports a skipped ticket.
+    pub fn empty_group(&self, name: &str) -> Result<EmptiedGroup> {
+        let mut moved = Vec::new();
+        let mut skipped = Vec::new();
+        for task in self.tasks_in_group(name)? {
+            let stem = task.stem.clone();
+            match self.set_epic(&task, None) {
+                Ok(dest) => moved.push(dest),
+                Err(err) => skipped.push((stem, err.to_string())),
+            }
+        }
+        Ok(EmptiedGroup { moved, skipped })
+    }
+
     /// Every task on the board, column order first.
     /// Every ticket belonging to a group, in whatever column it has reached.
     ///
@@ -616,11 +668,22 @@ impl Board {
     /// has nowhere to put a line of text, and a library that prints is a
     /// library that has decided what its caller's output looks like
     /// (docs/adr/0004-one-library-two-interfaces.md).
-    pub fn move_task(&self, task: &Task, to: Column) -> Result<PathBuf> {
+    pub fn move_task(&self, task: &Task, to: Column, force: bool) -> Result<PathBuf> {
         if task.column == to {
             bail!("already in {to}/");
         }
         task.ensure_not_leased()?;
+        if !force && let Some(limit) = crate::board_settings::load(self).wip_limit(to) {
+            let current = self.tasks_in(to)?.len();
+            if current as u32 >= limit {
+                return Err(WipLimitExceeded {
+                    column: to,
+                    limit,
+                    current,
+                }
+                .into());
+            }
+        }
         let dir = self.dir(to);
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         let dest = dir.join(task.file_name());
@@ -923,7 +986,7 @@ mod tests {
         assert_eq!(board.tasks_in_group("sprint-1").unwrap().len(), 1);
 
         let task = board.find("001").unwrap();
-        board.move_task(&task, Column::Doing).unwrap();
+        board.move_task(&task, Column::Doing, false).unwrap();
         assert_eq!(
             board.tasks_in_group("sprint-1").unwrap().len(),
             1,
@@ -1017,7 +1080,7 @@ mod tests {
         let board = git_repo_board(dir.path());
         leased_backlog_ticket(&board, "001-a.md", "other@example.com", &future());
         let task = board.find("001").unwrap();
-        assert!(board.move_task(&task, Column::Todo).is_err());
+        assert!(board.move_task(&task, Column::Todo, false).is_err());
         assert_eq!(board.find("001").unwrap().column, Column::Backlog);
     }
 
@@ -1027,7 +1090,7 @@ mod tests {
         let board = git_repo_board(dir.path());
         leased_backlog_ticket(&board, "001-a.md", "t@t.co", &future());
         let task = board.find("001").unwrap();
-        board.move_task(&task, Column::Todo).unwrap();
+        board.move_task(&task, Column::Todo, false).unwrap();
         assert_eq!(board.find("001").unwrap().column, Column::Todo);
     }
 
@@ -1048,6 +1111,119 @@ mod tests {
         leased_backlog_ticket(&board, "001-a.md", "other@example.com", &future());
         let task = board.find("001").unwrap();
         assert!(board.set_epic(&task, Some("checkout")).is_err());
+    }
+
+    // -- WIP limits ----------------------------------------------------------
+
+    fn set_wip_limit(board: &Board, key: &str, limit: u32) {
+        fs::write(
+            crate::board_settings::path(board),
+            format!("{key} = {limit}\n"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn move_task_refuses_when_the_destination_is_already_at_its_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        backlog_ticket(&board, "001-a.md");
+        backlog_ticket(&board, "002-b.md");
+        touch(&board, "existing.md"); // one ticket already in todo/
+        set_wip_limit(&board, "wip-todo", 1);
+        let task = board.find("001").unwrap();
+        let err = board
+            .move_task(&task, Column::Todo, false)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("todo") && err.contains('1'), "{err}");
+        assert_eq!(board.find("001").unwrap().column, Column::Backlog);
+    }
+
+    #[test]
+    fn move_task_force_overrides_the_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        backlog_ticket(&board, "001-a.md");
+        touch(&board, "existing.md");
+        set_wip_limit(&board, "wip-todo", 1);
+        let task = board.find("001").unwrap();
+        board.move_task(&task, Column::Todo, true).unwrap();
+        assert_eq!(board.find("001").unwrap().column, Column::Todo);
+    }
+
+    #[test]
+    fn moving_out_of_an_over_limit_column_is_never_blocked() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        // Two tickets already in todo/, then the limit is lowered to one —
+        // the column is now over its limit by hand, the exact case the
+        // ticket's own notes call out. Moving one back OUT must still work.
+        touch(&board, "001-a.md");
+        touch(&board, "002-b.md");
+        set_wip_limit(&board, "wip-todo", 1);
+        let task = board.find("001").unwrap();
+        board.move_task(&task, Column::Doing, false).unwrap();
+        assert_eq!(board.find("001").unwrap().column, Column::Doing);
+    }
+
+    #[test]
+    fn a_limit_on_todo_does_not_apply_to_doing() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        backlog_ticket(&board, "001-a.md");
+        touch(&board, "existing.md");
+        set_wip_limit(&board, "wip-todo", 1);
+        let task = board.find("001").unwrap();
+        board.move_task(&task, Column::Doing, false).unwrap();
+        assert_eq!(board.find("001").unwrap().column, Column::Doing);
+    }
+
+    // -- Emptying a group ------------------------------------------------
+
+    #[test]
+    fn empty_group_moves_every_ticket_it_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        fs::create_dir_all(board.dir(Column::Backlog).join("checkout")).unwrap();
+        backlog_ticket(&board, "001-a.md");
+        backlog_ticket(&board, "002-b.md");
+        board
+            .set_epic(&board.find("001").unwrap(), Some("checkout"))
+            .unwrap();
+        board
+            .set_epic(&board.find("002").unwrap(), Some("checkout"))
+            .unwrap();
+        assert_eq!(board.tasks_in_group("checkout").unwrap().len(), 2);
+
+        let result = board.empty_group("checkout").unwrap();
+        assert_eq!(result.moved.len(), 2);
+        assert!(result.skipped.is_empty());
+        assert_eq!(board.tasks_in_group("checkout").unwrap().len(), 0);
+        assert_eq!(board.find("001").unwrap().epic, None);
+        assert_eq!(board.find("002").unwrap().epic, None);
+    }
+
+    #[test]
+    fn empty_group_skips_a_ticket_it_cannot_move_rather_than_aborting() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = git_repo_board(dir.path());
+        let epic_dir = board.dir(Column::Backlog).join("checkout");
+        fs::create_dir_all(&epic_dir).unwrap();
+        backlog_ticket(&board, "001-a.md");
+        board
+            .set_epic(&board.find("001").unwrap(), Some("checkout"))
+            .unwrap();
+        let body = format!(
+            "---\nid: \"002\"\ntitle: \"T\"\nlocked-by: \"other@example.com\"\nlocked-until: \"{}\"\n---\n\nbody\n",
+            future()
+        );
+        fs::write(epic_dir.join("002-b.md"), body).unwrap();
+
+        let result = board.empty_group("checkout").unwrap();
+        assert_eq!(result.moved.len(), 1, "{:?}", result.moved);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.skipped[0].0, "002-b");
     }
 
     #[test]

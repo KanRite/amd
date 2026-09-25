@@ -321,7 +321,10 @@ impl BoardApp {
             // Find it in whichever column it currently sits in.
             let found = target.board.find(&task.stem)?;
             if found.column != column {
-                target.board.move_task(&found, column)?;
+                // No UI escape hatch for a WIP limit in this pass — a
+                // blocked drag just surfaces the refusal below, the same
+                // treatment a lease refusal already gets.
+                target.board.move_task(&found, column, false)?;
                 // Dragging a card into Todo or Doing means "I'm starting
                 // this" — claim the lease at the same moment, best-effort:
                 // a failure here must never undo the move that already
@@ -468,19 +471,28 @@ impl eframe::App for BoardApp {
                     }
                 }
                 ui.separator();
-                if self.view == View::Backlog {
-                    for (kind, label) in [(Kind::Epic, "Add epic"), (Kind::Sprint, "Add sprint")] {
-                        if ui.button(label).clicked() {
-                            self.group_draft = Some(GroupDraft {
-                                repo: self.backlog_repo,
-                                kind,
-                                editing: None,
-                                name: String::new(),
-                                description: String::new(),
-                                days: DEFAULT_DAYS.to_string(),
-                                state: State::Pending,
-                            });
-                        }
+                // On both views, not just Backlog — an epic/sprint is filed
+                // under backlog/ regardless of which view created it, the
+                // same way "New ticket" already resolves its target repo
+                // per-view below. Gating this to Backlog only made the
+                // feature effectively invisible: the Board view is the
+                // default, so these buttons were never on screen unless you
+                // already knew to switch tabs first.
+                for (kind, label) in [(Kind::Epic, "Add epic"), (Kind::Sprint, "Add sprint")] {
+                    if ui.button(label).clicked() {
+                        let repo = match self.view {
+                            View::Backlog => self.backlog_repo,
+                            View::Board => 0,
+                        };
+                        self.group_draft = Some(GroupDraft {
+                            repo,
+                            kind,
+                            editing: None,
+                            name: String::new(),
+                            description: String::new(),
+                            days: DEFAULT_DAYS.to_string(),
+                            state: State::Pending,
+                        });
                     }
                 }
                 if ui.button("New ticket").clicked() {
@@ -536,6 +548,7 @@ impl eframe::App for BoardApp {
         let mut refile: Option<(PathBuf, usize, Option<String>)> = None;
         let mut group_edit: Option<String> = None;
         let mut group_start: Option<String> = None;
+        let mut group_empty: Option<String> = None;
 
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::both().show(ui, |ui| match self.view {
@@ -581,6 +594,7 @@ impl eframe::App for BoardApp {
                                     opened: &mut opened,
                                     edit: &mut group_edit,
                                     start: &mut group_start,
+                                    empty: &mut group_empty,
                                 },
                             ) {
                                 refile = Some(target);
@@ -601,6 +615,9 @@ impl eframe::App for BoardApp {
         }
         if let Some(name) = group_start {
             self.start_sprint(&name);
+        }
+        if let Some(name) = group_empty {
+            self.empty_group_now(&name);
         }
 
         if let Some((path, repo, epic)) = refile {
@@ -711,6 +728,26 @@ impl BoardApp {
         })();
         match outcome {
             Ok(()) => self.status = None,
+            Err(err) => self.status = Some(format!("{err}")),
+        }
+        self.reload();
+    }
+
+    /// Empty a group's folder into the loose backlog at once, best-effort:
+    /// a ticket that couldn't move (someone else's active lease, say) is
+    /// named in the status line rather than silently dropped or aborting
+    /// the ones that did move.
+    fn empty_group_now(&mut self, name: &str) {
+        match self.repos[self.backlog_repo].board.empty_group(name) {
+            Ok(result) if result.skipped.is_empty() => self.status = None,
+            Ok(result) => {
+                let names: Vec<&str> = result.skipped.iter().map(|(s, _)| s.as_str()).collect();
+                self.status = Some(format!(
+                    "moved {}, couldn't move {}",
+                    result.moved.len(),
+                    names.join(", ")
+                ));
+            }
             Err(err) => self.status = Some(format!("{err}")),
         }
         self.reload();
@@ -1095,6 +1132,7 @@ struct GroupEvents<'a> {
     opened: &'a mut Option<PathBuf>,
     edit: &'a mut Option<String>,
     start: &'a mut Option<String>,
+    empty: &'a mut Option<String>,
 }
 
 /// One epic group in the backlog: a column of cards under the epic's name,
@@ -1146,6 +1184,13 @@ fn group_ui(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.small_button("edit").clicked() {
                             *events.edit = Some(group.name.clone());
+                        }
+                        // No precondition, matching a single ticket's own
+                        // "no precondition" move out of a group — including
+                        // a started sprint, which already lets tickets out
+                        // individually.
+                        if !cards.is_empty() && ui.small_button("empty").clicked() {
+                            *events.empty = Some(group.name.clone());
                         }
                     });
                 }
