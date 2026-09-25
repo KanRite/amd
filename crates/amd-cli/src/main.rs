@@ -4,8 +4,11 @@
 //! `<repo-root>/tasks`. Status is the folder; `git mv` is the audit trail; the
 //! ticket format is a MiniJinja template you can edit.
 
+mod autocommit;
+mod changelog;
 mod completions;
 mod form;
+mod github;
 mod init;
 mod render;
 mod value;
@@ -68,6 +71,18 @@ claims a free lease automatically — a lease is advisory, not a guarantee:
 it only stops local tools from writing, and a concurrent edit on another
 clone still surfaces as a normal git merge conflict.
 
+`amd init <project>`'s tickets repository commits and pushes its own change
+on every command that changes the board — a dedicated tickets repository
+barely functions without this, since nothing else in it ever changes for a
+move to ride alongside. Any other board (including one made with
+`--local-only`, or one sharing a tree with code) defaults to off, since
+`amd` committing there would cut across whatever else is staged; opt in with
+`AMD_COMMIT=1` or `commit = true` in the board's `.settings`, opt a tickets
+repository back out with `AMD_COMMIT=0`. `amd log` renders history as a
+generated view regardless of the setting; `amd changelog` regenerates
+`CHANGELOG.md` from the same history and pushes it if it changed. Both work
+in any git repository, board or not.
+
 `amd todo`/`doing`/`done`/`backlog`/`abandon <ref>` move a ticket there;
 leave off <ref> and it lists that destination instead of moving anything.
 The same works for any epic by name: `amd checkout 7` files ticket 7 under
@@ -76,14 +91,18 @@ one with a side effect: it creates or switches to the ticket's branch, the
 same way `amd start` used to. Abandoning a ticket deletes that branch too,
 if it's still empty — nothing lost, nothing left behind.
 
-`amd init <project>` creates a private `<project>-tickets` GitHub repository
-(under the GitHub organisation or personal account named <project> — pass
---org to use a different owner), clones it as a child of the current
-directory, scaffolds the board inside it, and registers it. Must be run
-from a plain directory, never from inside an existing git repository —
-`amd init <project> --local-only` scaffolds the board in the repository
-you're standing in instead, with no network and nothing created remotely,
-the project name still recorded, just without a dedicated tickets repo.
+`amd init <project>` creates two private GitHub repositories (under the
+GitHub organisation or personal account named <project> — pass --org to use
+a different owner): `<project>-tickets`, cloned as a child of the current
+directory with the board scaffolded inside and registered, taking direct
+pushes with no PR required — and `<project>-documents`, scaffolded with
+adr/, rfc/ and docs/ directories, whose `main` branch requires a PR with one
+approval before anything merges. Both get a CHANGELOG.md kept current by
+`amd changelog`. Must be run from a plain directory, never from inside an
+existing git repository — `amd init <project> --local-only` scaffolds the
+board in the repository you're standing in instead, with no network and
+nothing created remotely, the project name still recorded, just without
+either dedicated repository.
 <project> cannot be changed once set — every ticket records which
 repository it's about using this name, and changing it later means finding
 and updating every ticket by hand, on every clone, with no way to do it
@@ -97,12 +116,16 @@ Environment:
   AMD_NO_INPUT      set to 1 to never prompt (same as --no-input)
   AMD_NO_BRANCH     set to 1 to never create branches (same as --no-branch)
   AMD_NO_REGISTER   set to 1 to keep the repository list manual
+  AMD_COMMIT        set to 1/true/yes to auto-commit board changes (off by
+                    default, except a tickets repo from `amd init`)
   NO_COLOR          set to any value for plain output (same as --plain)
   EDITOR            editor used by `amd edit` (default: vi)
 
 AMD_BRANCH_TYPES, EDITOR and AMD_NO_REGISTER can also be set in the settings
 file (`branch-types`, `editor`, `no-register`) — the environment variable
-wins when both are set.
+wins when both are set. AMD_COMMIT follows the same precedence against the
+board's own `.settings` (`commit`), a team decision rather than a personal
+one, like AMD_LEASE_HOURS and AMD_WIP_TODO/AMD_WIP_DOING.
 
 Creating a task interactively ends in $EDITOR with the rendered ticket, so
 the notes and checklist get filled in there and then (--no-edit to skip).
@@ -132,7 +155,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Create or connect this project's dedicated tickets repository
+    /// Create or connect this project's dedicated tickets and documents repositories
     Init {
         /// The project's declared identity — cannot be changed once set
         #[arg(value_name = "PROJECT")]
@@ -316,6 +339,12 @@ enum Cmd {
         #[command(subcommand)]
         command: Option<TemplateCmd>,
     },
+    /// Render history as a generated log — works in any git repository, not
+    /// only one with a board (a documents repository, say)
+    Log,
+    /// Regenerate CHANGELOG.md from history and push it if it changed —
+    /// works in any git repository, not only one with a board
+    Changelog,
     /// Move a task into an epic, or list it with no ref — checked against
     /// the board's current epics (the four columns and `abandon` are their
     /// own named commands above, and always win if a name collides)
@@ -498,6 +527,30 @@ fn run() -> Result<()> {
         return init::run(project, local_only, org);
     }
 
+    // `log`/`changelog` read git history directly and work in any
+    // repository — a documents repository has no board at all, and even in
+    // a tickets repository this has no reason to depend on `ensure_board`.
+    if let Cmd::Log = command {
+        let repo =
+            git::repo_root().ok_or_else(|| anyhow::anyhow!("not inside a git repository"))?;
+        println!("{}", changelog::render(&changelog::entries(&repo)?));
+        return Ok(());
+    }
+    if let Cmd::Changelog = command {
+        let repo =
+            git::repo_root().ok_or_else(|| anyhow::anyhow!("not inside a git repository"))?;
+        let changed = changelog::refresh(&repo)?;
+        println!(
+            "{}",
+            if changed {
+                "CHANGELOG.md updated and pushed"
+            } else {
+                "CHANGELOG.md already up to date"
+            }
+        );
+        return Ok(());
+    }
+
     let board = ensure_board()?;
     // Every repository you work in joins the list, so the boards you actually
     // use are all there next session without anyone curating them.
@@ -505,8 +558,33 @@ fn run() -> Result<()> {
     // Notices if this board's declared project identity has silently
     // changed since amd last saw it — see project_trust.rs.
     agile_md::project_trust::check(&board)?;
-    match command {
-        Cmd::Init { .. } | Cmd::Completions { .. } | Cmd::Repos { .. } | Cmd::Gui => {
+
+    // A single wrap point around every remaining command, rather than
+    // instrumenting each write site individually: whatever a command
+    // touches under the repository root between here and its own `Ok(())`
+    // is exactly what gets committed and pushed afterward. This also covers
+    // `Cmd::Edit`, which bypasses `write_checked` entirely, and a lease
+    // auto-take inside `cmd_enter_todo`/`move_and_report` — neither needs
+    // special-casing, since both are just "files that changed", the same as
+    // any other write. A read-only command (`board`, `ls`, `show`, …)
+    // touches nothing, so `touched` comes back empty and this is a no-op.
+    let verb = command_verb(&command);
+    let settings = board_settings::load(&board);
+    let auto_commit = settings.commit_enabled();
+    let repo = board.repo_root().to_path_buf();
+    let before = if auto_commit {
+        git::changed_paths(&repo)?
+    } else {
+        Default::default()
+    };
+
+    let result = match command {
+        Cmd::Init { .. }
+        | Cmd::Completions { .. }
+        | Cmd::Repos { .. }
+        | Cmd::Gui
+        | Cmd::Log
+        | Cmd::Changelog => {
             unreachable!("handled above")
         }
         Cmd::New(args) => cmd_new(&board, args),
@@ -628,7 +706,55 @@ fn run() -> Result<()> {
         Cmd::Unlock { task, force } => cmd_unlock(&board, &task, force),
         Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
+    };
+
+    // Only a command that actually succeeded gets committed — an error
+    // leaves whatever it wrote on disk uncommitted, same as today, for the
+    // user to inspect via `git status` rather than folding a possibly
+    // partial write into an automatic commit.
+    if auto_commit && result.is_ok() {
+        let after = git::changed_paths(&repo)?;
+        let touched: Vec<PathBuf> = after.difference(&before).cloned().collect();
+        if !touched.is_empty() {
+            autocommit::commit_and_push(&repo, &verb, &touched)?;
+        }
     }
+    result
+}
+
+/// A short word for the commit subject, derived from the command itself
+/// rather than threaded through each handler — `Cmd::Verb`'s destination
+/// name (an epic, say) comes along for free since it's just the raw arg.
+fn command_verb(command: &Cmd) -> String {
+    match command {
+        Cmd::Init { .. } => "init",
+        Cmd::New(_) => "add",
+        Cmd::Board { .. } => "board",
+        Cmd::Ls { .. } => "ls",
+        Cmd::Tag { .. } => "tag",
+        Cmd::Import { .. } => "import",
+        Cmd::Backlog { .. } => "backlog",
+        Cmd::Todo { .. } => "todo",
+        Cmd::Doing { .. } => "doing",
+        Cmd::Done { .. } => "done",
+        Cmd::Abandon { .. } => "abandon",
+        Cmd::Show { .. } => "show",
+        Cmd::Edit { .. } => "edit",
+        Cmd::Assign { .. } => "assign",
+        Cmd::Lock { .. } => "lock",
+        Cmd::Unlock { .. } => "unlock",
+        Cmd::Set { .. } => "set",
+        Cmd::Group { .. } => "group",
+        Cmd::Repos { .. } => "repos",
+        Cmd::Link { .. } => "link",
+        Cmd::Gui => "gui",
+        Cmd::Completions { .. } => "completions",
+        Cmd::Templates { .. } => "templates",
+        Cmd::Log => "log",
+        Cmd::Changelog => "changelog",
+        Cmd::Verb(args) => return args.first().cloned().unwrap_or_else(|| "move".to_string()),
+    }
+    .to_string()
 }
 
 /// Claim a ticket's lease for the current git identity. Refuses if someone

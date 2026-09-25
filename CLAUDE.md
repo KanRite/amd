@@ -46,7 +46,9 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 - `crates/amd-lib/src/board_settings.rs` — the board-local settings file
   (`<repo-root>/.settings`, git-tracked, hidden to match the legacy
   `.next-id` file it partly replaces): the declared, immutable `project`
-  identity and the `next-id` ticket counter.
+  identity, the `next-id` ticket counter, and `commit` (whether board
+  changes auto-commit — off by default everywhere except a tickets
+  repository `amd init` scaffolds, which sets it explicitly).
 - `crates/amd-lib/src/project_trust.rs` — a per-machine, trust-on-first-use
   check that a board's declared `project` hasn't changed unexpectedly since
   `amd` last saw it.
@@ -60,16 +62,63 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   skipped and reported, not a hard failure for the whole batch. `--dry-run`
   computes and reports everything without writing or spending an id.
 - `crates/amd-cli/src/main.rs` — the `amd` binary: clap CLI and command handlers; it also owns
-  `form.rs`, `value.rs`, `completions.rs` and `init.rs`, which are CLI-only.
-- `crates/amd-cli/src/init.rs` — `amd init <project>`: finds or creates a
-  private `<project>-tickets` GitHub repository (via `gh`, as a child of the
-  current directory), clones it, scaffolds the board, and registers it.
-  **Refuses to run from inside an existing git repository** — a guard, not
-  an inference: an earlier version tried placing the new repo as a sibling
-  of whatever repo you happened to be standing in, which was a real source
-  of confusion. `--local-only` is the command for "inside a repo" — it
-  skips all of the above and just scaffolds here, the way bare `amd init`
-  always has.
+  `form.rs`, `value.rs`, `completions.rs`, `init.rs`, `github.rs`,
+  `autocommit.rs` and `changelog.rs`, which are CLI-only.
+- `crates/amd-cli/src/init.rs` — `amd init <project>`: finds or creates
+  **two** private GitHub repositories, `<project>-tickets` and
+  `<project>-documents` (via `gh`, as siblings of the current directory).
+  Tickets is what it always was — a board, cloned, scaffolded, registered,
+  with `commit = true` set in its `.settings` so it auto-commits (below) —
+  plus a light branch-protection tier (`github::protect_main(..., false)`):
+  no required review, but `allow_force_pushes`/`allow_deletions` both false
+  and `enforce_admins: true`, so ordinary direct pushes are unaffected and
+  only history-rewriting is blocked. Documents is new: `adr/`, `rfc/`,
+  `docs/`, `README.md`, `CHANGELOG.md`, not a `Board` (no counter, no
+  leases), not added to `Registry` (that's for board aggregation), and
+  protected with `protect_main(..., true)` — one required approving review,
+  `enforce_admins: true`, deliberately **not** `require_last_push_approval`
+  (that combination previously made a solo pusher's own PRs permanently
+  unmergeable elsewhere in this org). Both get
+  `.github/workflows/changelog.yml`, which runs `amd changelog` on push to
+  `main`. **Refuses to run from inside an existing git repository** — a
+  guard, not an inference: an earlier version tried placing the new repo as
+  a sibling of whatever repo you happened to be standing in, which was a
+  real source of confusion. `--local-only` is the command for "inside a
+  repo" — it skips all of the above and just scaffolds the board here, the
+  way bare `amd init` always has (no documents repository in this mode).
+  Design record: `041-rename-init-file-name` in `agile-md-tickets` (the
+  two-repository decision itself replaces that ticket's original,
+  now-dropped idea of a single merged `-data` repository).
+- `crates/amd-cli/src/github.rs` — `protect_main(full_name, require_review)`:
+  branch protection on `main` via `gh api`, the two tiers `init.rs` uses.
+  Shells out rather than linking a forge API client, extending `git.rs`'s
+  own stated reasoning to the forge
+  (`rfc/0004-reducing-forge-specific-dependencies.md`).
+- `crates/amd-cli/src/autocommit.rs` — wraps `main.rs`'s whole command match
+  in one before/after `git::changed_paths` diff (`crate::command_verb`
+  supplies the verb from the `Cmd` variant itself, including the real
+  destination name for `Cmd::Verb`): whatever a successful command changed
+  under the board's repo root gets committed with `<verb>: <touched
+  stems>`, then pushed, retrying once via `git::pull_rebase` on a
+  non-fast-forward rejection. A repository with no `origin` commits locally
+  and stops — not an error, the same reading `amd init` already gives a
+  found-locally tickets repo with none. Gated by
+  `board_settings::commit_enabled()`, so a failed command (nothing to
+  commit) or a board with `commit` off (the default — see
+  `board_settings.rs`) makes this a no-op.
+- `crates/amd-cli/src/changelog.rs` — `amd log` (a generated view) and `amd
+  changelog` (regenerates and pushes `CHANGELOG.md`), both parsed from
+  `git log --name-status -M` rather than depending on commit-message
+  format — deliberately not `lite-actions/simple-commit(s-log)`, which
+  turned out not to exist anywhere in this org. A rename between two
+  different top-level directories reads as a transition to the
+  destination's name (a board column, or `adr`/`rfc`/`docs` in a documents
+  repository) — one generic reading that works in either kind of
+  repository without this module knowing about `Column` at all.
+  `CHANGELOG.md`'s own commits are excluded from its own entries, which is
+  what lets `refresh` actually converge instead of documenting itself
+  forever. Both commands work in any git repository, board or not — handled
+  early in `main.rs::run()`, before `ensure_board()`.
 - `crates/amd-ui/src/main.rs` — the `amdui` binary: ~50 lines that call
   `agile_md::gui::run()`, so the board is something you launch rather than a
   subcommand you remember. `amd gui` stays — it's the same call, and it's what
@@ -99,9 +148,15 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 - `crates/amd-lib/src/git.rs` — thin wrappers over the `git` CLI: repo
   discovery and file state (`repo_root`, `is_tracked`, `mv`, `config`),
   branches (`current_branch`, `branch_exists`, `switch_branch`,
-  `commits_ahead`, `branch_pushed`, `delete_branch`, `set_head_branch`), and
-  a small set for `amd init`'s tickets-repo bootstrap (`remote_url`,
-  `commit_all`, `push`).
+  `commits_ahead`, `branch_pushed`, `delete_branch`, `set_head_branch`), a
+  small set for `amd init`'s tickets-repo bootstrap (`remote_url`,
+  `commit_all`, `push`), and what `autocommit.rs`/`changelog.rs` build on:
+  `changed_paths` (a `git status --porcelain` diff), `commit` (path-limited
+  — the pathspec goes on `git commit` itself, not only the preceding `git
+  add`, or a plain `git commit -m` would sweep in anything else already
+  staged), `push_checked`/`PushOutcome` (distinguishes a non-fast-forward
+  rejection from every other push failure), and `pull_rebase` (the one
+  retry after a rejection).
 - `crates/amd-lib/templates/*.md.jinja` — the built-in templates, `include_str!`'d into the
   binary.
 - `install.sh` — downloads the prebuilt `amd-<target>.zip` from the GitHub
@@ -210,7 +265,9 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   prompt), `AMD_NO_BRANCH` (never touch branches), `AMD_NO_REGISTER` (keep the
   repository list manual), `NO_COLOR`/`--plain` (plain board), `EDITOR` (for
   `amd edit`), `AMD_LEASE_HOURS` (lease duration, default 8), `AMD_WIP_TODO`/
-  `AMD_WIP_DOING` (WIP limits, unset = unlimited). **`AMD_TYPES` is
+  `AMD_WIP_DOING` (WIP limits, unset = unlimited), `AMD_COMMIT` (auto-commit
+  board changes, `1`/`true`/`yes` — off by default except a tickets
+  repository `amd init` scaffolds). **`AMD_TYPES` is
   dead** — it was in `--help` long after nothing read it. `AMD_BRANCH_TYPES`,
   `EDITOR` and `AMD_NO_REGISTER` also fall back to the settings file
   (`branch-types`/`editor`/`no-register`) when unset — the env var wins when

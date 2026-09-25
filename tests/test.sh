@@ -67,17 +67,27 @@ assert "periods and underscores are valid in a project name" \
 # unrelated assertion that expects an exhaustive, empty registry.
 "${AMD}" repos remove "$(basename "${periods_and_underscores}")" >/dev/null 2>&1
 
-echo "init: a dedicated tickets repository, found locally:"
+echo "init: dedicated tickets and documents repositories, found locally:"
 # Deliberately a plain, non-git directory: `amd init <project>` must not
 # require being run from inside an existing git repository — it creates or
-# finds `<project>-tickets` as a child of wherever it's run from.
+# finds `<project>-tickets`/`<project>-documents` as children of wherever
+# it's run from. Both are pre-created locally (with no 'origin' remote) so
+# this stays hermetic: `owner_for` defaults to the project name as the
+# GitHub owner, which this account cannot create repositories under, and
+# finding both locally means `amd init` never needs to call `gh` at all.
 plain_dir="$(mktemp -d)"
 ( cd "${plain_dir}" && git init -q widgets-tickets \
   && cd widgets-tickets && git config user.email t@t.co && git config user.name t )
+( cd "${plain_dir}" && git init -q widgets-documents \
+  && cd widgets-documents && git config user.email t@t.co && git config user.name t )
 assert "amd init <project> works from a plain, non-git directory" \
   bash -c "cd '${plain_dir}' && '${AMD}' init widgets >/dev/null && test -d '${plain_dir}/widgets-tickets/tasks/backlog'"
 assert "the found-locally tickets repo's own board records the project" \
   bash -c "grep -q '^project = widgets\$' '${plain_dir}/widgets-tickets/.settings'"
+assert "the found-locally documents repo is scaffolded with adr/rfc/docs" \
+  bash -c "test -d '${plain_dir}/widgets-documents/adr' -a -d '${plain_dir}/widgets-documents/rfc' -a -d '${plain_dir}/widgets-documents/docs'"
+assert "the found-locally documents repo records the project too" \
+  bash -c "grep -q '^project = widgets\$' '${plain_dir}/widgets-documents/.settings'"
 # Registering the sibling repo is a real, intended side effect of `amd init`,
 # but it pollutes the shared registry for every later assertion in this
 # suite that expects an exhaustive count — undo it here rather than let a

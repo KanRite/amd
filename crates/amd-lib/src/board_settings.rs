@@ -26,6 +26,21 @@
 //! - `wip-todo`/`wip-doing`: the most tickets `todo/`/`doing/` may hold at
 //!   once. Absent (the default) means unlimited — same hand-edited,
 //!   board-local shape as `lease-hours`, for the same reason.
+//! - `commit`: whether a board-changing command also commits and pushes its
+//!   own change (`crates/amd-cli/src/autocommit.rs`). Defaults **off** —
+//!   unlike the three settings above, this one is deliberately *not*
+//!   uniformly on, because it's only right for one of two real shapes a
+//!   board can be in (ticket
+//!   `012-have-amd-commit-board-and-document-changes`'s own "real dividing
+//!   line"): a dedicated, board-only repository (RFC 0003's
+//!   `{project}-tickets`) barely functions without it, since nothing else in
+//!   the repository ever changes for a move to ride alongside — but a board
+//!   sharing a tree with code would have `amd` committing across whatever
+//!   the user already has staged, which is the opposite of helpful.
+//!   `amd init <project>` sets `commit = true` explicitly when it scaffolds
+//!   a tickets repository, since it knows which shape that one is; every
+//!   other board (including one created by hand, or by `--local-only`)
+//!   stays off until someone opts it in on purpose.
 //!
 //! One repository, one settings file — a repository with more than one
 //! board (two different `AMD_DIR` trees) shares this file and its counter
@@ -44,6 +59,7 @@ const LEASE_HOURS: &str = "lease-hours";
 const DEFAULT_LEASE_HOURS: f64 = 8.0;
 const WIP_TODO: &str = "wip-todo";
 const WIP_DOING: &str = "wip-doing";
+const COMMIT: &str = "commit";
 
 /// `<repo-root>/.settings` — a sibling of the board directory, not inside it.
 pub fn path(board: &Board) -> std::path::PathBuf {
@@ -116,6 +132,29 @@ impl BoardSettings {
         crate::settings::resolved(env_var, &self.config, key)
             .and_then(|value| value.trim().parse::<u32>().ok())
             .filter(|limit| *limit > 0)
+    }
+
+    /// Whether a board-changing command also commits and pushes its own
+    /// change — `AMD_COMMIT`, then this board's own `.settings`, then **off**
+    /// by default. `1`/`true`/`yes` (case-insensitive) turn it on; anything
+    /// else, including an unset or unparsable value, leaves it off. Off is
+    /// the right default for a board sharing a tree with code — `amd`
+    /// committing there would cut across whatever the user already has
+    /// staged. `amd init <project>` sets this explicitly for the tickets
+    /// repository it scaffolds, which is the one shape this is actually for
+    /// (ticket `[[012-have-amd-commit-board-and-document-changes]]`).
+    pub fn commit_enabled(&self) -> bool {
+        crate::settings::resolved("AMD_COMMIT", &self.config, COMMIT).is_some_and(|value| {
+            matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes")
+        })
+    }
+
+    /// Sets `commit` explicitly — used by `amd init <project>` when it
+    /// scaffolds a tickets repository, the one board shape where
+    /// auto-commit is the right default.
+    pub fn set_commit(&mut self, enabled: bool) {
+        self.config
+            .set(COMMIT, if enabled { "true" } else { "false" });
     }
 
     pub fn save(&self, board: &Board) -> Result<()> {
@@ -325,6 +364,43 @@ mod tests {
         assert_eq!(settings.wip_limit(Column::Todo), None);
         settings.config.set(WIP_TODO, "not a number");
         assert_eq!(settings.wip_limit(Column::Todo), None);
+    }
+
+    #[test]
+    fn commit_enabled_defaults_to_off() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!load(&board(dir.path())).commit_enabled());
+    }
+
+    #[test]
+    fn commit_enabled_reads_the_board_setting_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.config.set(COMMIT, "true");
+        settings.save(&board).unwrap();
+        assert!(load(&board).commit_enabled());
+    }
+
+    #[test]
+    fn commit_enabled_is_case_insensitive_and_tolerates_unparsable_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.config.set(COMMIT, "TRUE");
+        assert!(settings.commit_enabled());
+        settings.config.set(COMMIT, "nonsense");
+        assert!(!settings.commit_enabled(), "an unparsable value stays off");
+    }
+
+    #[test]
+    fn set_commit_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.set_commit(true);
+        settings.save(&board).unwrap();
+        assert!(load(&board).commit_enabled());
     }
 
     #[test]
