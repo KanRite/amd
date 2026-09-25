@@ -116,8 +116,10 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   so `amd` works from any subdirectory; it errors if not inside a git repo.
 - Tasks are `NNN-slug.md`. `Board::next_id()` takes whichever is higher of the
   counter (the board-local settings file's `next-id` key, `<repo-root>/.settings`
-  — falls back to the legacy `<board>/.next-id` file for boards that predate
-  the move) and one past the highest id in the columns. The counter is the
+  — a board that predates the move still has the legacy `<board>/.next-id`
+  file instead; the first read migrates its value into settings and deletes
+  it, so this only ever happens once per board) and one past the highest id
+  in the columns. The counter is the
   authority — it remembers ids whose tickets have gone, archived or deleted,
   which no scan can — and the scan is the safety net, so a lost or badly
   merged counter can't hand out an id already in use. `record_id()` runs in

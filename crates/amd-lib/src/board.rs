@@ -152,13 +152,23 @@ impl Board {
     }
 
     /// What the next id should be, if something on disk says so — the
-    /// board-local settings file first, falling back to the legacy
-    /// `.next-id` file so a board that predates the move doesn't lose its
-    /// place and start handing out ids that are already in use.
+    /// board-local settings file first. A board that predates the move to
+    /// board-local settings still has the legacy `.next-id` file instead;
+    /// the first time that's seen, its value is migrated into settings and
+    /// the legacy file is removed, so this only ever happens once per board
+    /// rather than reading around the old file forever.
     fn stored_next_id(&self) -> Option<u32> {
-        crate::board_settings::load(self)
-            .next_id()
-            .or_else(|| self.legacy_next_id())
+        let settings = crate::board_settings::load(self);
+        if let Some(id) = settings.next_id() {
+            return Some(id);
+        }
+        let legacy = self.legacy_next_id()?;
+        let mut settings = settings;
+        settings.set_next_id(legacy);
+        if settings.save(self).is_ok() {
+            let _ = fs::remove_file(self.legacy_counter_path());
+        }
+        Some(legacy)
     }
 
     fn legacy_next_id(&self) -> Option<u32> {
@@ -984,7 +994,7 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_next_id_file_is_still_read_as_a_fallback() {
+    fn a_legacy_next_id_file_is_migrated_into_settings_and_removed() {
         let dir = tempfile::tempdir().unwrap();
         let board = board_at(dir.path());
         touch(&board, "007-seven.md");
@@ -992,7 +1002,23 @@ mod tests {
         // `next-id` key there, only the old file.
         fs::remove_file(crate::board_settings::path(&board)).unwrap();
         fs::write(board.legacy_counter_path(), "9\n").unwrap();
+
         assert_eq!(board.next_id().unwrap(), 9);
+        assert_eq!(
+            crate::board_settings::load(&board).next_id(),
+            Some(9),
+            "the value should now live in board-local settings"
+        );
+        assert!(
+            !board.legacy_counter_path().exists(),
+            "the legacy file should be gone once migrated, not kept around forever"
+        );
+
+        // Reading again (the ordinary case: a second command against the
+        // same, now-migrated board) must not require the legacy file.
+        touch(&board, "009-nine.md");
+        board.record_id(9).unwrap();
+        assert_eq!(board.next_id().unwrap(), 10);
     }
 
     #[test]

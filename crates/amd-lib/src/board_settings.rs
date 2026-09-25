@@ -65,9 +65,9 @@ impl BoardSettings {
     }
 
     /// The id the next ticket will take, if this file says anything
-    /// sensible. `board.rs`'s `next_id()`/`record_id()` fall back to the
-    /// legacy `.next-id` file when this is `None`, for boards that predate
-    /// the move.
+    /// sensible. `board.rs`'s `next_id()`/`record_id()` migrate the legacy
+    /// `.next-id` file's value in here (and remove it) the first time this
+    /// is `None` but that file exists, for boards that predate the move.
     pub fn next_id(&self) -> Option<u32> {
         self.config.get(NEXT_ID)?.trim().parse().ok()
     }
