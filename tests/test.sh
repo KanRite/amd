@@ -56,7 +56,16 @@ assert "a second init with the same project is a silent no-op" \
 assert "init with a different project is refused, naming both" \
   bash -c "'${AMD}' init other --local-only 2>&1 | grep -q \"already 'acme'\" && grep -q '^project = acme\$' .settings"
 assert "an invalid project name is rejected before anything is created" \
-  bash -c "'${AMD}' init 'not valid' --local-only 2>&1 | grep -q 'letters, numbers and hyphens'"
+  bash -c "'${AMD}' init 'not valid' --local-only 2>&1 | grep -q 'letters, numbers, hyphens, periods, colons and underscores'"
+
+periods_and_underscores="$(mktemp -d)"
+( cd "${periods_and_underscores}" && git init -q && git config user.email t@t.co && git config user.name t )
+assert "periods and underscores are valid in a project name" \
+  bash -c "cd '${periods_and_underscores}' && '${AMD}' init 'a.valid_name' --local-only >/dev/null && grep -q '^project = a.valid_name\$' .settings"
+# init --local-only registers the board it creates, same as any other amd
+# command would — undo it here so it doesn't count toward a later,
+# unrelated assertion that expects an exhaustive, empty registry.
+"${AMD}" repos remove "$(basename "${periods_and_underscores}")" >/dev/null 2>&1
 
 echo "init: a dedicated tickets repository, found locally:"
 # Deliberately a plain, non-git directory: `amd init <project>` must not

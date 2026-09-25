@@ -82,18 +82,29 @@ impl BoardSettings {
     }
 }
 
-/// Non-empty, and every character a letter, digit or hyphen — safe to use
-/// as (part of) a repository name at any forge.
+/// Non-empty, and every character a letter, digit, hyphen, period, colon or
+/// underscore — safe to use as (part of) a repository name at any forge.
+/// Deliberately excludes `/`: unlike the others, a slash isn't just a
+/// forge-compatibility question — `amd init` joins the project name
+/// straight into a filesystem path and into `{owner}/{project}-tickets`, so
+/// a slash would silently nest directories or produce a malformed owner/repo
+/// pair rather than failing cleanly. Note this set is also broader than a
+/// GitHub organisation or user *name* accepts (no periods, colons or
+/// underscores there) — relevant because `amd init`, on GitHub, uses the
+/// project name as the default repository owner too. A project name outside
+/// that narrower set still validates here; it just needs `--org` to say
+/// where the tickets repository actually goes.
 pub fn validate_project_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("a project name can't be empty");
     }
     if let Some(bad) = name
         .chars()
-        .find(|c| !(c.is_ascii_alphanumeric() || *c == '-'))
+        .find(|c| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | ':' | '_')))
     {
         bail!(
-            "project name '{name}' contains '{bad}' — only letters, numbers and hyphens are allowed"
+            "project name '{name}' contains '{bad}' — only letters, numbers, hyphens, \
+             periods, colons and underscores are allowed"
         );
     }
     Ok(())
@@ -192,12 +203,22 @@ mod tests {
     }
 
     #[test]
-    fn project_names_are_letters_digits_and_hyphens_only() {
+    fn project_names_allow_letters_digits_hyphens_periods_colons_and_underscores() {
         assert!(validate_project_name("agile-md").is_ok());
         assert!(validate_project_name("Agile-MD-2").is_ok());
+        assert!(validate_project_name("agile_md").is_ok());
+        assert!(validate_project_name("agile.md").is_ok());
+        assert!(validate_project_name("agile:md").is_ok());
         assert!(validate_project_name("").is_err());
-        assert!(validate_project_name("agile_md").is_err());
-        assert!(validate_project_name("agile/md").is_err());
         assert!(validate_project_name("agile md").is_err());
+    }
+
+    #[test]
+    fn a_slash_is_rejected_even_though_the_other_new_characters_are_allowed() {
+        // Unlike '.', ':' and '_', a slash breaks amd init's own path-join
+        // and owner/repo logic, not just forge compatibility — see this
+        // function's doc comment.
+        let err = validate_project_name("agile/md").unwrap_err().to_string();
+        assert!(err.contains("only letters"), "{err}");
     }
 }

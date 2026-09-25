@@ -56,9 +56,10 @@ same way `amd start` used to. Abandoning a ticket deletes that branch too,
 if it's still empty — nothing lost, nothing left behind.
 
 `amd init <project>` creates a private `<project>-tickets` GitHub repository
-(under --org, or your own account by default), clones it as a child of the
-current directory, scaffolds the board inside it, and registers it. Must be
-run from a plain directory, never from inside an existing git repository —
+(under the GitHub organisation or personal account named <project> — pass
+--org to use a different owner), clones it as a child of the current
+directory, scaffolds the board inside it, and registers it. Must be run
+from a plain directory, never from inside an existing git repository —
 `amd init <project> --local-only` scaffolds the board in the repository
 you're standing in instead, with no network and nothing created remotely,
 the project name still recorded, just without a dedicated tickets repo.
@@ -119,8 +120,8 @@ enum Cmd {
         /// tickets repository — no network, nothing created remotely
         #[arg(long)]
         local_only: bool,
-        /// GitHub org/user to create the tickets repository under (default:
-        /// your own account, same as `gh repo create` with no owner given)
+        /// GitHub org/user to create the tickets repository under
+        /// (default: the project name itself)
         #[arg(long, value_name = "ORG")]
         org: Option<String>,
     },
