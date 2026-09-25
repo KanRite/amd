@@ -1,0 +1,36 @@
+# Who gets asked to review what. Later rules win, so the catch-all comes first.
+#
+# Two owners, because one is not enough to satisfy branch protection: GitHub
+# never lets a PR author approve their own PR, so with a single owner
+# "Require review from Code Owners" deadlocks every PR. @MrDClaudeBot is the
+# second owner and approves what @mrdoodles raises.
+#
+# A CODEOWNERS entry only counts if that account has **write** access to the
+# repository — an owner with read access is silently ignored and shows up in
+# the repo's CODEOWNERS errors, which is why write access is granted before
+# protection is turned on. Check with:
+#   gh api repos/agile-md/amd/codeowners/errors
+
+*                          @mrdoodles @MrDClaudeBot
+
+# The library both binaries share (ADR-0004: "one library, two interfaces").
+# A change here reaches the CLI and the desktop board at once — the whole
+# point of the split, and the whole reason a mistake here is expensive.
+/crates/amd-lib/           @mrdoodles @MrDClaudeBot
+
+# The ticket file format: frontmatter shape, the yaml filter, the strict
+# MiniJinja environment. amd-ui (the companion app, a separate repository)
+# is a format consumer bound by whatever this produces.
+/crates/amd-lib/templates/ @mrdoodles @MrDClaudeBot
+/crates/amd-lib/src/task.rs        @mrdoodles @MrDClaudeBot
+/crates/amd-lib/src/templates.rs   @mrdoodles @MrDClaudeBot
+
+# tests/test.sh is the compatibility contract with v3 boards, per CLAUDE.md.
+# A change here can silently narrow what the spec actually guarantees.
+/tests/test.sh             @mrdoodles @MrDClaudeBot
+
+# Release-critical. bin-name and the packaging shape decide whether a tagged
+# release produces a working zip at all — see the known rust-release gap
+# recorded in CLAUDE.md.
+/.github/workflows/        @mrdoodles @MrDClaudeBot
+/install.sh                @mrdoodles @MrDClaudeBot

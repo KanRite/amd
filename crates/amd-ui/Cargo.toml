@@ -1,0 +1,18 @@
+# The desktop board: `amdui`. Today it is a few lines over agile_md::gui;
+# phase 4 moves the board itself here and amd-lib loses egui entirely.
+[package]
+name = "amd-ui"
+description = "The agile-md desktop board"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "amdui"
+path = "src/main.rs"
+
+[dependencies]
+agile-md = { workspace = true, features = ["gui"] }
+anyhow.workspace = true

@@ -1,0 +1,12 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Conventional commit prefix so Dependabot's commits pass commit validation
+    # and read cleanly in the changelog. Its branch names are always
+    # dependabot/… (with underscores), which the validation workflow accepts via
+    # `branch-types: … dependabot` + `allow-underscores: "true"`.
+    commit-message:
+      prefix: "chore(deps)"

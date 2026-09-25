@@ -1,0 +1,24 @@
+name: Release
+
+# Tag a release (git tag -a vX.Y.Z && git push --tags) and this builds both
+# binaries for every platform, then attaches amd-<target>.zip to the GitHub
+# Release — which is what install.sh downloads.
+#
+# The zip carries `amd` and `amdui`, and is named after the first of them, so
+# the download URL is the same one install.sh has always used.
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: lite-actions/rust-release/.github/workflows/rust-release.yml@v1
+    with:
+      platforms: "linux macos"
+      architectures: "x86_64 aarch64"
+      bin-name: "amd amdui"
+      upload-to-release: true
+    secrets: inherit

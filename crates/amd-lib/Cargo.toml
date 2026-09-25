@@ -1,0 +1,41 @@
+# The library. Everything that touches the board lives here, and nothing that
+# knows about a terminal or a window does — see docs/adr/0004.
+#
+# The absence of clap, inquire and richrs from this manifest is the rule being
+# enforced: this crate cannot draw a board even if someone tried. `gui` is
+# still here pending phase 4 of docs/workspace-split.md.
+[package]
+name = "agile-md"
+description = "A tiny filesystem Kanban: markdown tasks in todo/, doing/ and done/"
+keywords = ["kanban", "tasks", "markdown", "cli", "git"]
+categories = ["command-line-utilities"]
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+
+# The crate keeps the name `agile_md`: it is what every `use` in the workspace
+# already says, and renaming it would churn every import to no end.
+[lib]
+name = "agile_md"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+deunicode.workspace = true
+minijinja.workspace = true
+serde.workspace = true
+time.workspace = true
+
+# Moves to amd-ui in phase 4; until then the board is behind this feature and
+# off by default, so amd-cli never pulls a windowing stack.
+eframe = { workspace = true, optional = true }
+egui = { workspace = true, optional = true }
+
+[features]
+gui = ["dep:eframe", "dep:egui"]
+
+[dev-dependencies]
+tempfile.workspace = true

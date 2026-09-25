@@ -1,0 +1,36 @@
+# The command line: `amd`. clap for the surface, inquire for the forms,
+# tempfile for the one piece of I/O the CLI owns — the $EDITOR scratch file
+# (docs/adr/0004, exception 1).
+[package]
+name = "amd-cli"
+description = "The agile-md command line"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "amd"
+path = "src/main.rs"
+
+[features]
+# `amd gui` opens the board from the terminal, so the CLI binary carries it —
+# as it did before the split, because phase 2 preserves behaviour. Build with
+# `-p amd-cli --no-default-features` for a CLI with no windowing stack.
+#
+# Making `amd gui` exec the `amdui` binary instead would take egui out of this
+# crate entirely, but it would also mean a prebuilt install that ships only
+# `amd` loses the board — so that trade is packaging's to make, not phase 2's.
+default = ["gui"]
+gui = ["agile-md/gui"]
+
+[dependencies]
+agile-md.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
+inquire.workspace = true
+libc.workspace = true
+richrs.workspace = true
+tempfile.workspace = true
