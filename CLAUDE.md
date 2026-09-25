@@ -76,7 +76,8 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   a prebuilt install has (see below), which is why `amd-cli` keeps a `gui`
   feature (on by default) rather than shedding egui entirely.
 - `crates/amd-lib/src/board.rs` — board discovery (`<repo-root>/${AMD_DIR:-tasks}`), the
-  `Column` enum, task lookup, moves, `ensure`/`create`.
+  `Column` enum, task lookup, moves, `create` (scaffolding — the interactive
+  "create one?" prompt itself is `ensure_board()`, CLI-owned).
 - `crates/amd-lib/src/task.rs` — `Task` (path, column, id, stem), frontmatter `meta` lookup,
   `slugify` (transliterates via `deunicode`, so a title in any script still
   makes a plain-ASCII filename and branch; symbols stay separators so an emoji
@@ -95,8 +96,12 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   command with `clap_complete`; `$SHELL` detection and install hints.
 - `crates/amd-cli/src/value.rs` — `TypedValueParser`s that advertise their possible values, so
   completions and `--help` list them while validation stays ours.
-- `crates/amd-lib/src/git.rs` — thin wrappers over the `git` CLI (`rev-parse`, `ls-files`,
-  `mv`, `config`).
+- `crates/amd-lib/src/git.rs` — thin wrappers over the `git` CLI: repo
+  discovery and file state (`repo_root`, `is_tracked`, `mv`, `config`),
+  branches (`current_branch`, `branch_exists`, `switch_branch`,
+  `commits_ahead`, `branch_pushed`, `delete_branch`, `set_head_branch`), and
+  a small set for `amd init`'s tickets-repo bootstrap (`remote_url`,
+  `commit_all`, `push`).
 - `crates/amd-lib/templates/*.md.jinja` — the built-in templates, `include_str!`'d into the
   binary.
 - `install.sh` — downloads the prebuilt `amd-<target>.zip` from the GitHub
@@ -145,16 +150,26 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   It returns where the ticket landed and **prints nothing** — `amd` prints
   `moved X -> done/` from `move_and_report`, and the board says it with a card
   that has moved.
-- `Board::archive()` (`amd rm`, aliased `amd junk`) moves a ticket to
-  `<board>/archive/`, which is **not** a column: it's off the board and its
-  contents are gitignored. That means `git mv` would refuse the ignored
-  destination and forcing it would put the ticket back into the history the
-  `.gitignore` exists to keep out, so a tracked ticket is `git rm --cached`'d
-  and then moved. Archived ids are never reused — that's the counter's job —
-  because reusing one would silently repoint every `parent` and `related` that
-  named it.
-- `Board::ensure()` runs before any board-requiring command: if there's no
-  board, it prompts to create one when interactive (`stdin().is_terminal()`),
+- **Destination-as-verb dispatch** (ADR-0006): `amd todo`/`doing`/`done`/
+  `backlog`/`abandon <ref>` move a ticket there; leave off `<ref>` and the
+  same verb lists that destination instead of moving anything — one command
+  name serves both. The same works for any epic by name (`amd checkout 7`
+  files it, `amd checkout` lists it). Entering `todo` is the one with a side
+  effect: it creates or switches to the ticket's branch — `amd start` doesn't
+  exist any more, this replaced it. `amd abandon` also deletes the ticket's
+  branch if it's still empty, since a ticket can be abandoned from `todo/`
+  before real work starts.
+- `Board::archive()` (`amd abandon`) moves a ticket to `<board>/archive/`,
+  which is **not** a column: it's off the board and its contents are
+  gitignored. That means `git mv` would refuse the ignored destination and
+  forcing it would put the ticket back into the history the `.gitignore`
+  exists to keep out, so a tracked ticket is `git rm --cached`'d and then
+  moved. Archived ids are never reused — that's the counter's job — because
+  reusing one would silently repoint every `parent` and `related` that named
+  it.
+- `ensure_board()` (`crates/amd-cli/src/main.rs` — CLI-owned, not a `Board`
+  method) runs before any board-requiring command: if there's no board, it
+  prompts to create one when interactive (`stdin().is_terminal()`),
   auto-creates when `AMD_YES=1`, and otherwise errors (never hangs
   non-interactively).
 - Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_BRANCH_TYPES`
@@ -162,7 +177,9 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   prompt), `AMD_NO_BRANCH` (never touch branches), `AMD_NO_REGISTER` (keep the
   repository list manual), `NO_COLOR`/`--plain` (plain board), `EDITOR` (for
   `amd edit`). **`AMD_TYPES` is dead** — it was in `--help` long after nothing
-  read it.
+  read it. `AMD_BRANCH_TYPES`, `EDITOR` and `AMD_NO_REGISTER` also fall back
+  to the settings file (`branch-types`/`editor`/`no-register`) when unset —
+  the env var wins when both are set (`settings::resolved()`).
 
 ## Ticket fields (`crates/amd-lib/src/branch.rs`, `templates/ticket.md.jinja`)
 
@@ -171,7 +188,7 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 - **`branch-type` is what gives a ticket a branch**, and it's empty by default.
   `branch-name` is derived from it and the title at creation and stored, so it
   can be edited before work starts. No branch type means no branch, and
-  `amd start` says so and leaves the working tree alone.
+  `amd todo` says so and leaves the working tree alone.
 - The values are the **branch** convention (`feature`, `bugfix`, `hotfix`,
   `release`, `chore`), matching mrdoodles/conventional-validator's branch check
   directly — there's no longer a commit-type-to-branch-prefix mapping to keep in
@@ -185,15 +202,18 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   `branch-type: {{ branch_type | yaml }}`. Jinja would read `branch-type` as a
   subtraction, so the variable has to be `branch_type`; the key is just text.
 - `Task` reads the new keys and **falls back to the old ones** (`type`,
-  `branch`, `owner`), so boards written before this change still list, start and
-  filter correctly. There's no migration command; a ticket picks up the new
-  shape when it's rewritten.
+  `branch`, `owner`), so boards written before this change still list, enter
+  `todo/` and filter correctly. There's no migration command; a ticket picks
+  up the new shape when it's rewritten.
 - Titles are validated against git's ref rules at creation — the title becomes
   the branch, so a title with nothing sluggable in it is rejected up front.
   `slugify` returns an empty string in that case; callers must reject it.
-- `amd start` takes the branch from `--branch`, else the ticket's `branch-name`,
-  else derives one from `branch-type` and the title. **Order matters**: `git mv`
-  is staged first so the rename travels with the switch.
+- **Entering `todo/` is what creates the branch now** (`cmd_enter_todo`,
+  `crates/amd-cli/src/main.rs`) — this replaced the old `amd start`, retired
+  outright, not kept alongside the new verbs. It takes the branch from
+  `--branch`, else the ticket's `branch-name`, else derives one from
+  `branch-type` and the title (`--no-branch` skips all of this). **Order
+  matters**: `git mv` is staged first so the rename travels with the switch.
 
 ## Board rendering (`crates/amd-cli/src/render.rs`)
 
@@ -223,9 +243,10 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   contract the bash version had, and why the tool never hangs in CI.
 - Optional arguments drive it: `amd new` with no title runs the full form
   (title, branch type, assignee, parent, related, tags), `-i` re-asks for what was
-  passed, and
-  `start`/`done`/`back`/`show`/`edit` with no `<ref>` open a task picker
-  scoped to the columns that command can act on.
+  passed, and `show`/`edit` with no `<ref>` open a task picker across every
+  column (`resolve()`). Destination verbs (`todo`/`doing`/`done`/`backlog`/
+  `abandon`) are different: no `<ref>` lists that destination instead of
+  picking — one command name serves both (ADR-0006).
 - **The form is derived from the template**: `templates::required_extras()`
   scans the source for `extra.<key>` / `extra["key"]`, and `cmd_new` prompts
   for each one that `--set` didn't supply. Adding a field to a template adds a
@@ -290,7 +311,7 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 
 - Generated, never checked in: `amd completions <shell>` renders from
   `Cli::command()`, so a new flag is completable the moment it exists. Handled
-  before `Board::ensure()` — it must work outside a repo, which is exactly when
+  before `ensure_board()` — it must work outside a repo, which is exactly when
   people set completion up.
 - Value-level completion comes from `crates/amd-cli/src/value.rs`. `TypedValueParser` lets a
   parser advertise `possible_values()` (used by completions and `--help`) while
@@ -344,11 +365,14 @@ changes):
   `AMD_YES`/`AMD_DIR`.
 - **v4** — bash script → **Rust binary**; tasks rendered from MiniJinja
   templates; `inquire` forms when a value is missing; one flexible ticket whose
-  `branch-type` decides whether `amd start` makes a branch; a desktop board.
-  Two binaries over one library: `amd` and `amdui`. Install downloads a
-  prebuilt binary instead of copying a script. The v3 CLI and board
-  layout still work; v3 task files simply have no labels, so `amd start` on one
-  leaves the branch alone.
+  `branch-type` decides whether entering `todo/` makes a branch; a desktop
+  board. Two binaries over one library: `amd` and `amdui`. Install downloads a
+  prebuilt binary instead of copying a script. The v3 CLI and board layout
+  still work; v3 task files simply have no labels, so entering `todo/` on one
+  leaves the branch alone. **Within v4 itself**, destination-as-verb dispatch
+  (ADR-0006) later retired the original `amd start`/`amd back`/`amd rm`
+  vocabulary outright in favour of `todo`/`doing`/`done`/`backlog`/`abandon` —
+  no new major version, since the ticket file format didn't change.
 
 ## Epics and sprints (`crates/amd-lib/src/group.rs`, ADR-0009)
 
@@ -387,7 +411,9 @@ changes):
 
 ## Conventions
 
-- Public, unprotected repo — push docs/fixes to `main` directly; workflow-file
-  changes need a `workflow`-scoped token.
+- **Feature branch + PR for every real change** — `main` is not pushed to
+  directly (the one exception was the initial full-source-tree restore after
+  this repo's history was reset). Workflow-file changes need a
+  `workflow`-scoped token.
 - Co-authored commits use the bot identity, not the Anthropic no-reply:
   `Co-Authored-By: Claude <309050497+MrDClaudeBot@users.noreply.github.com>`.
