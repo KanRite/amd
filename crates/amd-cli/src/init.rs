@@ -94,17 +94,24 @@ fn set_project(board: &Board, project: &str) -> Result<()> {
     settings.save(board)
 }
 
-/// Creates `{project}-tickets` (under `org`, when given — otherwise `gh`'s
-/// own default, the authenticated account) and clones it as a child of
-/// `base` (the current directory — `run()` has already refused to get here
-/// from inside an existing repository), at `target`. Recovers from a
-/// previous run that died after creation but before cloning by cloning the
-/// existing remote instead of failing.
+/// Which GitHub owner (organisation or personal account) `{project}-tickets`
+/// is created under: `--org`, when given, otherwise the project name itself.
+/// On GitHub, an owner is always either an org or a user account, and the
+/// project name is expected to name one of those directly — not `gh`'s own
+/// default (the CLI's authenticated account), which has no reason to match
+/// the project at all.
+fn owner_for<'a>(project: &'a str, org: Option<&'a str>) -> &'a str {
+    org.unwrap_or(project)
+}
+
+/// Creates `{project}-tickets` under `owner_for(project, org)` and clones it
+/// as a child of `base` (the current directory — `run()` has already
+/// refused to get here from inside an existing repository), at `target`.
+/// Recovers from a previous run that died after creation but before cloning
+/// by cloning the existing remote instead of failing.
 fn create_and_clone(base: &Path, project: &str, org: Option<&str>, target: &Path) -> Result<()> {
-    let full_name = match org {
-        Some(org) => format!("{org}/{project}-tickets"),
-        None => format!("{project}-tickets"),
-    };
+    let owner = owner_for(project, org);
+    let full_name = format!("{owner}/{project}-tickets");
 
     let create = Command::new("gh")
         .current_dir(base)
@@ -135,4 +142,22 @@ fn create_and_clone(base: &Path, project: &str, org: Option<&str>, target: &Path
         bail!("gh repo clone {full_name} failed");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_owner_defaults_to_the_project_name() {
+        assert_eq!(owner_for("agile-md", None), "agile-md");
+    }
+
+    #[test]
+    fn an_explicit_org_overrides_the_project_name() {
+        assert_eq!(
+            owner_for("agile-md", Some("some-other-org")),
+            "some-other-org"
+        );
+    }
 }
