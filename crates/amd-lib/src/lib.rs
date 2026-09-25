@@ -15,6 +15,7 @@ pub mod branch;
 pub mod create;
 pub mod git;
 pub mod group;
+pub mod import;
 pub mod project_trust;
 pub mod registry;
 pub mod settings;

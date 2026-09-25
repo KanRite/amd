@@ -285,6 +285,21 @@ impl Task {
             .unwrap_or_default()
     }
 
+    /// This ticket's tags, as recorded in `tags`.
+    pub fn tags(&self) -> Vec<String> {
+        self.meta("tags")
+            .map(|raw| parse_list(&raw))
+            .unwrap_or_default()
+    }
+
+    /// Whether this ticket carries `tag`, matched exactly (tags are
+    /// free-form labels, not normalised the way a title is for duplicate
+    /// detection — `amd import` writes `DUPLICATE` verbatim, so filtering
+    /// on it is exact too).
+    pub fn has_tag(&self, tag: &str) -> bool {
+        self.tags().iter().any(|known| known == tag)
+    }
+
     /// Add ids to the `related` list, in id order and without duplicates.
     /// Returns whether the file changed.
     pub fn add_related(&self, expected: ContentHash, ids: &[String]) -> Result<bool> {
@@ -344,7 +359,7 @@ impl Task {
 
 /// `[003,007]` -> `["003", "007"]`. Tolerant of spaces and quotes, since a
 /// human may well have typed the line.
-fn parse_list(raw: &str) -> Vec<String> {
+pub(crate) fn parse_list(raw: &str) -> Vec<String> {
     raw.trim()
         .trim_start_matches('[')
         .trim_end_matches(']')
@@ -357,7 +372,7 @@ fn parse_list(raw: &str) -> Vec<String> {
 /// Replace a frontmatter value, adding the key before the closing fence when
 /// the ticket doesn't have it yet — tasks written by an older template, or by
 /// hand, still get linked.
-fn set_meta(text: &str, key: &str, value: &str) -> Result<String> {
+pub(crate) fn set_meta(text: &str, key: &str, value: &str) -> Result<String> {
     if !text.starts_with("---") {
         bail!("no frontmatter to update");
     }
@@ -413,7 +428,7 @@ pub fn split_body(text: &str) -> Option<(&str, &str)> {
     Some(text.split_at(head_len))
 }
 
-fn meta_in<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+pub(crate) fn meta_in<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     let mut lines = text.lines();
     let fenced = text.starts_with("---");
     if fenced {
@@ -432,7 +447,7 @@ fn meta_in<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     None
 }
 
-fn unquote(value: &str) -> &str {
+pub(crate) fn unquote(value: &str) -> &str {
     let bytes = value.as_bytes();
     if bytes.len() >= 2
         && (bytes[0] == b'"' || bytes[0] == b'\'')
@@ -575,6 +590,23 @@ mod tests {
         let path = dir.join(name);
         fs::write(&path, body).unwrap();
         Task::from_path(&path, Column::Todo).unwrap()
+    }
+
+    #[test]
+    fn tags_reads_the_list_and_has_tag_matches_exactly() {
+        let dir = tempfile::tempdir().unwrap();
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            "---\nid: \"001\"\ntitle: \"A\"\ntags: [DUPLICATE,urgent]\n---\n\nbody\n",
+        );
+        assert_eq!(task.tags(), ["DUPLICATE", "urgent"]);
+        assert!(task.has_tag("DUPLICATE"));
+        assert!(
+            !task.has_tag("duplicate"),
+            "tag matching is exact, not case-insensitive"
+        );
+        assert!(!task.has_tag("missing"));
     }
 
     #[test]

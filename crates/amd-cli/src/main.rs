@@ -41,7 +41,8 @@ todo/. Leave the type out and there is nothing to check out: the ticket
 still moves, the working tree is left alone.
 
 New tickets land in backlog/. `amd set` sizes and files them; `amd group`
-divides the backlog into epics and sprints.
+divides the backlog into epics and sprints. `amd tag <tag>` lists every
+ticket carrying it, across every column.
 
 Tickets nest: `--parent <ref>` puts one under another, and the board shows
 the tree. Nesting is the parent/child relationship; an epic or sprint is a
@@ -138,6 +139,23 @@ enum Cmd {
             value_parser = PossibleValuesParser::new(["backlog", "todo", "doing", "done", "all"]),
         )]
         column: String,
+    },
+    /// List every ticket carrying a tag
+    Tag {
+        #[arg(value_name = "TAG")]
+        tag: String,
+    },
+    /// Import tickets from an existing tasks directory tree: status kept,
+    /// ids renumbered, links remapped within the batch, same-titled
+    /// tickets flagged DUPLICATE
+    Import {
+        /// Path to the tasks directory tree to import from (the directory
+        /// that itself contains backlog/todo/doing/done, not their parent)
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+        /// Preview what would happen without writing anything
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Move a task into backlog/, or list it with no ref
     Backlog {
@@ -427,6 +445,8 @@ fn run() -> Result<()> {
         Cmd::New(args) => cmd_new(&board, args),
         Cmd::Board => cmd_ls(&board, "all"),
         Cmd::Ls { column } => cmd_ls(&board, &column),
+        Cmd::Tag { tag } => render::named(&format!("tag: {tag}"), board.tasks_tagged(&tag)?),
+        Cmd::Import { path, dry_run } => cmd_import(&board, &path, dry_run),
         Cmd::Backlog { task } => {
             cmd_destination(&board, Destination::Column(Column::Backlog), task)
         }
@@ -1005,6 +1025,46 @@ fn cmd_ls(board: &Board, column: &str) -> Result<()> {
     let column = Column::parse(column)
         .with_context(|| format!("unknown column '{column}' (todo, doing, done or all)"))?;
     render::columns(board, &[column])
+}
+
+fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {
+    let summary = agile_md::import::import(board, path, dry_run)?;
+    for (path, reason) in &summary.skipped {
+        eprintln!("skipped {}: {reason}", path.display());
+    }
+    if summary.imported.is_empty() {
+        println!("nothing to import from {}", path.display());
+        return Ok(());
+    }
+    for ticket in &summary.imported {
+        let flag = if ticket.duplicate {
+            "  [DUPLICATE]"
+        } else {
+            ""
+        };
+        println!(
+            "{} -> {} \"{}\" ({}){flag}",
+            ticket.old_id, ticket.new_id, ticket.title, ticket.column
+        );
+    }
+    let dup = summary.duplicate_count();
+    let mut line = format!(
+        "{} {} ticket{}",
+        if dry_run { "would import" } else { "imported" },
+        summary.imported.len(),
+        if summary.imported.len() == 1 { "" } else { "s" }
+    );
+    if dup > 0 {
+        line.push_str(&format!(", {dup} flagged DUPLICATE"));
+    }
+    if !summary.skipped.is_empty() {
+        line.push_str(&format!(", {} skipped", summary.skipped.len()));
+    }
+    if dry_run {
+        line.push_str(" — nothing written");
+    }
+    println!("{line}");
+    Ok(())
 }
 
 fn cmd_templates(board: &Board, command: TemplateCmd) -> Result<()> {
