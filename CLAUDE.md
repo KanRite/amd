@@ -50,6 +50,15 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 - `crates/amd-lib/src/project_trust.rs` — a per-machine, trust-on-first-use
   check that a board's declared `project` hasn't changed unexpectedly since
   `amd` last saw it.
+- `crates/amd-lib/src/import.rs` — `amd import <path>`: reads a tasks
+  directory tree, treating it as a read-only `Board` (`Board::at`), and
+  copies each ticket into the current board — status kept, id renumbered
+  against the destination's own counter, `parent`/`related` remapped when
+  both ends are part of the same batch, same-titled tickets (within the
+  batch or against the destination) tagged `DUPLICATE`. `archive/` isn't a
+  destination. A ticket that fails to parse (no frontmatter, unreadable) is
+  skipped and reported, not a hard failure for the whole batch. `--dry-run`
+  computes and reports everything without writing or spending an id.
 - `crates/amd-cli/src/main.rs` — the `amd` binary: clap CLI and command handlers; it also owns
   `form.rs`, `value.rs`, `completions.rs` and `init.rs`, which are CLI-only.
 - `crates/amd-cli/src/init.rs` — `amd init <project>`: finds or creates a

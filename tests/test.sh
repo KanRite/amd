@@ -445,6 +445,64 @@ assert "an epic cannot be created named abandon" \
   bash -c "cd '${work}' && '${AMD}' group epic abandon 2>&1 | grep -q collides"
 rm -rf "${work}"
 
+echo "import and tag filtering:"
+import_src="$(mktemp -d)"
+mkdir -p "${import_src}/backlog" "${import_src}/todo" "${import_src}/done"
+cat > "${import_src}/backlog/010-old-backlog-ticket.md" <<'TICKET'
+---
+id: "010"
+title: "Old backlog ticket"
+parent: ""
+related: []
+tags: []
+---
+
+body
+TICKET
+cat > "${import_src}/todo/003-in-progress-work.md" <<'TICKET'
+---
+id: "003"
+title: "In progress work"
+parent: ""
+related: []
+tags: []
+---
+
+body
+TICKET
+cat > "${import_src}/done/007-shipped-feature.md" <<'TICKET'
+---
+id: "007"
+title: "Shipped feature"
+parent: ""
+related: []
+tags: []
+---
+
+body
+TICKET
+
+import_dst="$(mktemp -d)"
+( cd "${import_dst}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init imported --local-only >/dev/null )
+assert "amd import lands tickets in their original columns with fresh ids" \
+  bash -c "cd '${import_dst}' && '${AMD}' import '${import_src}' >/dev/null \
+    && test -f tasks/backlog/001-old-backlog-ticket.md \
+    && test -f tasks/todo/002-in-progress-work.md \
+    && test -f tasks/done/003-shipped-feature.md"
+assert "the source tree is untouched by the import" \
+  test -f "${import_src}/backlog/010-old-backlog-ticket.md"
+assert "a --dry-run import writes nothing" \
+  bash -c "cd '${import_dst}' && '${AMD}' import '${import_src}' --dry-run | grep -q 'would import 3 tickets' \
+    && ! test -f tasks/backlog/004-old-backlog-ticket.md"
+assert "importing the same source again flags every ticket DUPLICATE against the existing board" \
+  bash -c "cd '${import_dst}' && '${AMD}' import '${import_src}' >/dev/null \
+    && '${AMD}' tag DUPLICATE | grep -q 'Old backlog ticket' \
+    && '${AMD}' tag DUPLICATE | grep -q 'In progress work' \
+    && '${AMD}' tag DUPLICATE | grep -q 'Shipped feature'"
+assert "amd tag finds nothing for a tag nobody has" \
+  bash -c "cd '${import_dst}' && ! '${AMD}' tag NO-SUCH-TAG | grep -q 'Old backlog ticket'"
+
 echo "pipes:"
 assert "the board survives a closed pipe" \
   bash -c "'${AMD}' board --plain | head -2 >/dev/null 2>/tmp/amd-pipe.err; ! grep -q 'panicked' /tmp/amd-pipe.err"

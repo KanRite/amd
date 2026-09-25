@@ -427,6 +427,18 @@ impl Board {
         Ok(tags)
     }
 
+    /// Every ticket carrying `tag`, across every column, in board order.
+    /// `amd import`'s `DUPLICATE` tag is the motivating case — reviewing
+    /// what an import flagged — but this filters on any tag, not just that
+    /// one.
+    pub fn tasks_tagged(&self, tag: &str) -> Result<Vec<Task>> {
+        Ok(self
+            .tasks()?
+            .into_iter()
+            .filter(|task| task.has_tag(tag))
+            .collect())
+    }
+
     /// Everyone with a ticket here, sorted — the suggestions when assigning
     /// one.
     pub fn assignees(&self) -> Result<Vec<String>> {
@@ -975,6 +987,35 @@ mod tests {
         let loose = board.find("001").unwrap();
         assert_eq!(loose.epic, None);
         assert_eq!(loose.epic_meta(), None);
+    }
+
+    #[test]
+    fn tasks_tagged_filters_across_every_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        fs::write(
+            board.dir(Column::Backlog).join("001-a.md"),
+            "---\nid: \"001\"\ntitle: \"A\"\ntags: [DUPLICATE]\n---\n\nbody\n",
+        )
+        .unwrap();
+        fs::write(
+            board.dir(Column::Done).join("002-b.md"),
+            "---\nid: \"002\"\ntitle: \"B\"\ntags: [DUPLICATE,urgent]\n---\n\nbody\n",
+        )
+        .unwrap();
+        fs::write(
+            board.dir(Column::Todo).join("003-c.md"),
+            "---\nid: \"003\"\ntitle: \"C\"\ntags: []\n---\n\nbody\n",
+        )
+        .unwrap();
+
+        let tagged = board.tasks_tagged("DUPLICATE").unwrap();
+        assert_eq!(
+            tagged.iter().map(|t| t.id).collect::<Vec<_>>(),
+            [Some(1), Some(2)]
+        );
+        assert_eq!(board.tasks_tagged("urgent").unwrap().len(), 1);
+        assert!(board.tasks_tagged("missing").unwrap().is_empty());
     }
 
     #[test]
