@@ -477,6 +477,15 @@ changes):
   (`apply_edit`) inherit the actual refusal for free from
   `Task::write_checked`/`Board::move_task` — the GUI only adds the
   auto-take and the badge, not a second enforcement path.
+- **`Accent`** (`gui/settings.rs`) is a global colour, not a per-element
+  palette editor: an inventory of every `Color32`/`.visuals()` call in
+  `gui/mod.rs` found only two genuinely hardcoded colours (status-error
+  red, the lease-badge amber, both semantic — left untouched by design);
+  everything else already derives from `ui.visuals()`, so overriding
+  `Visuals::selection.bg_fill`/`hyperlink_color` via `ctx.all_styles_mut()`
+  (both light and dark styles, since `ThemePreference::System` can pick
+  either) reaches every one of them for free. `Accent::Default` applies no
+  override at all, leaving pre-ticket-039 behaviour exactly as it was.
 - **"Add epic"/"Add sprint" render on both views, not just Backlog.**
   Gating them to `View::Backlog` alone made the feature effectively
   invisible — the Board view is the default, so they were never on screen
