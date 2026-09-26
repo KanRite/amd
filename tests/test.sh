@@ -475,6 +475,18 @@ assert "amd group empty moves every ticket in a group back to loose backlog, no 
   bash -c "cd '${work}' && '${AMD}' --plain checkout | grep -q '\[' \
     && '${AMD}' group empty checkout | grep -q 'emptied into backlog' \
     && '${AMD}' --plain checkout | grep -q '(empty)'"
+assert "a nonempty group cannot be deleted" \
+  bash -c "cd '${work}' && '${AMD}' new 'Back in checkout' --no-edit >/dev/null \
+    && id=\$(ls tasks/backlog | grep back-in-checkout | cut -d- -f1) \
+    && '${AMD}' checkout \${id} >/dev/null \
+    && '${AMD}' group delete checkout 2>&1 | grep -q '1 ticket' \
+    && test -d tasks/backlog/checkout"
+assert "an emptied group can be deleted" \
+  bash -c "cd '${work}' && '${AMD}' group empty checkout >/dev/null \
+    && '${AMD}' group delete checkout | grep -q 'deleted checkout' \
+    && ! test -d tasks/backlog/checkout"
+assert "deleting an unknown group is an error" \
+  bash -c "cd '${work}' && ! '${AMD}' group delete nope"
 rm -rf "${work}"
 
 echo "WIP limits:"

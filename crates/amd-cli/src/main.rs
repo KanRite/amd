@@ -408,6 +408,12 @@ enum GroupCmd {
         #[arg(value_name = "NAME")]
         name: String,
     },
+    /// Delete an epic or sprint outright. Refuses if it still has any
+    /// tickets, in any column — `group empty` it first
+    Delete {
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -944,6 +950,11 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
             for (stem, err) in &result.skipped {
                 eprintln!("amd: {stem} not moved: {err}");
             }
+            Ok(())
+        }
+        GroupCmd::Delete { name } => {
+            board.delete_group(&name)?;
+            println!("deleted {name}");
             Ok(())
         }
     }

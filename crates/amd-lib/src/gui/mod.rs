@@ -65,6 +65,14 @@ struct RepoBoard {
     /// everything not filed under an epic or sprint yet.
     groups: Vec<(Option<Group>, Vec<Card>)>,
     visible: bool,
+    /// Which list the epic/sprint dropdown shows. Per-repo, like `groups`
+    /// itself — each registered repository has its own independent set.
+    selected_kind: Kind,
+    /// The chosen group, if any. `None` means no filter: the loose backlog
+    /// and every column, unfiltered, exactly as before this feature existed.
+    /// Switching `selected_kind` clears this — a name from the other kind's
+    /// list doesn't carry over into the new one.
+    selected_group: Option<String>,
 }
 
 /// Which of the two boards is on screen. The board is the committed work;
@@ -171,6 +179,13 @@ pub struct BoardApp {
     /// continuously. Used only to tell your own lease apart from someone
     /// else's on a card's badge.
     identity: Option<String>,
+    /// The WIP-limit text fields in the Settings modal — `backlog_repo`'s
+    /// board-level `.settings`, not `GuiSettings` (personal/local). Loaded
+    /// once when the modal opens (the "Settings" button handler), same
+    /// lifecycle `GroupDraft` already uses for its own fields, empty string
+    /// meaning unlimited either way.
+    wip_todo_input: String,
+    wip_doing_input: String,
 }
 
 /// The index into `repos` of the repository `current` names, or `0` when
@@ -212,6 +227,8 @@ impl BoardApp {
                 groups: read_groups(&board)?,
                 board,
                 visible: true,
+                selected_kind: Kind::Epic,
+                selected_group: None,
             });
         }
         if repos.is_empty() {
@@ -236,6 +253,8 @@ impl BoardApp {
             backlog_repo,
             tag_filter: BTreeSet::new(),
             identity,
+            wip_todo_input: String::new(),
+            wip_doing_input: String::new(),
         })
     }
 
@@ -248,17 +267,34 @@ impl BoardApp {
                 }
                 (Err(err), _) | (_, Err(err)) => self.status = Some(format!("{err}")),
             }
+            // A selected group that's just been deleted (or emptied and
+            // deleted elsewhere, or renamed by hand) shouldn't leave the
+            // filter pointing at nothing — fall back to unfiltered rather
+            // than a dangling name nothing will ever match again.
+            if let Some(name) = &repo.selected_group
+                && !repo
+                    .groups
+                    .iter()
+                    .any(|(group, _)| group.as_ref().is_some_and(|g| &g.name == name))
+            {
+                repo.selected_group = None;
+            }
         }
     }
 
-    /// File a backlog ticket under an epic, or back into the loose backlog.
-    fn refile(&mut self, path: &std::path::Path, repo: usize, epic: Option<String>) {
+    /// Set or clear a ticket's membership in a group, from its membership
+    /// checkbox — `member: true` files it under `name`, `false` clears it.
+    /// Works from any column: `Board::set_epic` only moves the file inside
+    /// `backlog/`, elsewhere it tags the frontmatter in place.
+    fn toggle_membership(&mut self, path: &std::path::Path, repo: usize, name: &str, member: bool) {
         let outcome = (|| -> Result<()> {
             let board = &self.repos[repo].board;
-            let task = Task::from_path(path, Column::Backlog)
+            let stem = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
                 .ok_or_else(|| anyhow!("{} is not a task", path.display()))?;
-            let found = board.find(&task.stem)?;
-            board.set_epic(&found, epic.as_deref())?;
+            let found = board.find(stem)?;
+            board.set_epic(&found, member.then_some(name))?;
             Ok(())
         })();
         match outcome {
@@ -506,23 +542,56 @@ impl eframe::App for BoardApp {
                     }
                 }
                 ui.separator();
-                // On both views, not just Backlog — an epic/sprint is filed
-                // under backlog/ regardless of which view created it, the
-                // same way "New ticket" already resolves its target repo
-                // per-view below. Gating this to Backlog only made the
-                // feature effectively invisible: the Board view is the
-                // default, so these buttons were never on screen unless you
-                // already knew to switch tabs first.
-                for (kind, label) in [(Kind::Epic, "Add epic"), (Kind::Sprint, "Add sprint")] {
-                    if ui.button(label).clicked() {
-                        // Both views resolve the same way now — Board has no
-                        // repo selector of its own, so it always targets
-                        // whichever repo the Backlog view would show (which
-                        // starts out as the repo `amdui` was launched from).
-                        let repo = self.backlog_repo;
+                // On both views, not just Backlog — picking a group here is
+                // now also a board-wide filter (see column_ui/group lane
+                // below), so it has to be reachable from the Board view too,
+                // not only while looking at Backlog. Replaces the old
+                // "Add epic"/"Add sprint" buttons: creating one now goes
+                // through "New" here instead, targeting whichever kind the
+                // toggle is on.
+                {
+                    let repo_index = self.backlog_repo;
+                    let kind = self.repos[repo_index].selected_kind;
+                    let mut new_kind = kind;
+                    ui.selectable_value(&mut new_kind, Kind::Epic, "Epic");
+                    ui.selectable_value(&mut new_kind, Kind::Sprint, "Sprint");
+                    if new_kind != kind {
+                        let repo = &mut self.repos[repo_index];
+                        repo.selected_kind = new_kind;
+                        // A name from the other kind's list has nothing to
+                        // mean once the dropdown no longer lists that kind.
+                        repo.selected_group = None;
+                    }
+
+                    let repo = &mut self.repos[repo_index];
+                    let names: Vec<String> = repo
+                        .groups
+                        .iter()
+                        .filter_map(|(group, _)| group.as_ref())
+                        .filter(|group| group.kind == new_kind)
+                        .map(|group| group.name.clone())
+                        .collect();
+                    egui::ComboBox::from_id_salt("group-filter")
+                        .selected_text(
+                            repo.selected_group
+                                .clone()
+                                .unwrap_or_else(|| "None".to_string()),
+                        )
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut repo.selected_group, None, "None");
+                            for name in &names {
+                                ui.selectable_value(
+                                    &mut repo.selected_group,
+                                    Some(name.clone()),
+                                    name,
+                                );
+                            }
+                        });
+
+                    if ui.button("New").clicked() {
                         self.group_draft = Some(GroupDraft {
-                            repo,
-                            kind,
+                            repo: repo_index,
+                            kind: new_kind,
                             editing: None,
                             name: String::new(),
                             description: String::new(),
@@ -530,9 +599,22 @@ impl eframe::App for BoardApp {
                             state: State::Pending,
                         });
                     }
+
+                    let selected = self.repos[repo_index].selected_group.clone();
+                    if ui
+                        .add_enabled(selected.is_some(), egui::Button::new("Delete"))
+                        .clicked()
+                        && let Some(name) = selected
+                    {
+                        self.delete_group_now(&name);
+                    }
                 }
+                ui.separator();
                 if ui.button("New ticket").clicked() {
-                    // See "Add epic"/"Add sprint" above — same reasoning.
+                    // Board has no repo selector of its own — it always
+                    // targets whichever repo the Backlog view would show
+                    // (which starts out as the repo `amdui` was launched
+                    // from).
                     let repo = self.backlog_repo;
                     self.drafting = Some(Draft {
                         repo,
@@ -547,6 +629,19 @@ impl eframe::App for BoardApp {
                 reload = ui.button("Reload").clicked();
                 if ui.button("Settings").clicked() {
                     self.showing_settings = true;
+                    // Board-level, not GuiSettings — load fresh from
+                    // backlog_repo's own .settings each time the modal
+                    // opens, same lifecycle GroupDraft's fields already use.
+                    let board_settings =
+                        crate::board_settings::load(&self.repos[self.backlog_repo].board);
+                    self.wip_todo_input = board_settings
+                        .wip_limit(Column::Todo)
+                        .map(|limit| limit.to_string())
+                        .unwrap_or_default();
+                    self.wip_doing_input = board_settings
+                        .wip_limit(Column::Doing)
+                        .map(|limit| limit.to_string())
+                        .unwrap_or_default();
                 }
             });
             let mut all_tags = BTreeSet::new();
@@ -579,7 +674,7 @@ impl eframe::App for BoardApp {
             }
         });
 
-        let mut refile: Option<(PathBuf, usize, Option<String>)> = None;
+        let mut membership_toggle: Option<(PathBuf, usize, String, bool)> = None;
         let mut group_edit: Option<String> = None;
         let mut group_start: Option<String> = None;
         let mut group_empty: Option<String> = None;
@@ -594,18 +689,28 @@ impl eframe::App for BoardApp {
                         if self.repos.iter().filter(|r| r.visible).count() > 1 {
                             ui.label(egui::RichText::new(&repo.name).strong());
                         }
+                        let selected = repo.selected_group.as_deref();
                         ui.horizontal_top(|ui| {
                             for column in Column::ALL {
+                                let mut toggled = None;
                                 if let Some(drop) = column_ui(
                                     ui,
                                     repo,
                                     repo_index,
                                     column,
                                     &self.tag_filter,
-                                    self.identity.as_deref(),
-                                    &mut opened,
+                                    &mut ColumnEvents {
+                                        identity: self.identity.as_deref(),
+                                        selected,
+                                        opened: &mut opened,
+                                        toggled: &mut toggled,
+                                    },
                                 ) {
                                     pending = Some(drop);
+                                }
+                                if let (Some((path, member)), Some(name)) = (toggled, selected) {
+                                    membership_toggle =
+                                        Some((path, repo_index, name.to_string(), member));
                                 }
                             }
                         });
@@ -615,26 +720,45 @@ impl eframe::App for BoardApp {
                 View::Backlog => {
                     let index = self.backlog_repo.min(self.repos.len() - 1);
                     let repo = &self.repos[index];
-                    ui.horizontal_top(|ui| {
-                        for (group, cards) in &repo.groups {
-                            if let Some(target) = group_ui(
-                                ui,
-                                group.as_ref(),
-                                cards,
-                                index,
-                                &self.tag_filter,
-                                self.identity.as_deref(),
-                                &mut GroupEvents {
-                                    opened: &mut opened,
-                                    edit: &mut group_edit,
-                                    start: &mut group_start,
-                                    empty: &mut group_empty,
-                                },
-                            ) {
-                                refile = Some(target);
-                            }
-                        }
-                    });
+                    let selected = repo.selected_group.as_deref();
+                    // The selected group's own header (name, description,
+                    // edit/start-if-sprint/empty) — its dedicated lane is
+                    // gone, but that information still needs to live
+                    // somewhere now that the backlog is one column, not one
+                    // per group.
+                    if let Some(name) = selected {
+                        group_header_ui(
+                            ui,
+                            repo,
+                            name,
+                            &mut group_edit,
+                            &mut group_start,
+                            &mut group_empty,
+                        );
+                        ui.separator();
+                    }
+                    let mut toggled = None;
+                    if let Some(drop) = column_ui(
+                        ui,
+                        repo,
+                        index,
+                        Column::Backlog,
+                        &self.tag_filter,
+                        &mut ColumnEvents {
+                            identity: self.identity.as_deref(),
+                            selected,
+                            opened: &mut opened,
+                            toggled: &mut toggled,
+                        },
+                    ) {
+                        // Reordering within the loose backlog list — the
+                        // same drag column_ui already supports for any
+                        // column, unrelated to epic/sprint membership.
+                        pending = Some(drop);
+                    }
+                    if let (Some((path, member)), Some(name)) = (toggled, selected) {
+                        membership_toggle = Some((path, index, name.to_string(), member));
+                    }
                 }
             });
         });
@@ -654,8 +778,8 @@ impl eframe::App for BoardApp {
             self.empty_group_now(&name);
         }
 
-        if let Some((path, repo, epic)) = refile {
-            self.refile(&path, repo, epic);
+        if let Some((path, repo, name, member)) = membership_toggle {
+            self.toggle_membership(&path, repo, &name, member);
         }
 
         if let Some(path) = opened {
@@ -689,6 +813,7 @@ impl BoardApp {
             return;
         }
         let before = self.settings;
+        let wip_before = (self.wip_todo_input.clone(), self.wip_doing_input.clone());
         let mut close = false;
 
         let modal = egui::Modal::new(egui::Id::new("settings")).show(ctx, |ui| {
@@ -718,6 +843,29 @@ impl BoardApp {
             ui.weak("remembered for next time");
 
             ui.add_space(8.0);
+            ui.label("WIP limits");
+            egui::Grid::new("wip-limits")
+                .num_columns(2)
+                .spacing([8.0, 4.0])
+                .show(ui, |ui| {
+                    ui.label("Todo");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.wip_todo_input)
+                            .desired_width(60.0)
+                            .hint_text("none"),
+                    );
+                    ui.end_row();
+                    ui.label("Doing");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.wip_doing_input)
+                            .desired_width(60.0)
+                            .hint_text("none"),
+                    );
+                    ui.end_row();
+                });
+            ui.weak("empty means unlimited — shared with this repository's board");
+
+            ui.add_space(8.0);
             ui.label("Accent colour");
             ui.horizontal_wrapped(|ui| {
                 for accent in Accent::ALL {
@@ -737,8 +885,33 @@ impl BoardApp {
         {
             self.status = Some(format!("{err}"));
         }
+        let wip_after = (self.wip_todo_input.clone(), self.wip_doing_input.clone());
+        if wip_after != wip_before {
+            self.save_wip_limits();
+        }
         if close || modal.should_close() {
             self.showing_settings = false;
+        }
+    }
+
+    /// Board-level, unlike `self.settings` above — writes to
+    /// `backlog_repo`'s own `.settings`, not the personal `GuiSettings`
+    /// file. An empty or unparsable field is exactly what
+    /// `set_wip_limit(None)` already treats as "unlimited", so a
+    /// partially-typed number just means unlimited until it parses, the
+    /// same tolerance `wip_limit()`'s own read side already has — no
+    /// separate validation needed here.
+    fn save_wip_limits(&mut self) {
+        let board = &self.repos[self.backlog_repo].board;
+        let mut settings = crate::board_settings::load(board);
+        let todo = self.wip_todo_input.trim().parse().ok();
+        let doing = self.wip_doing_input.trim().parse().ok();
+        let outcome = settings
+            .set_wip_limit(Column::Todo, todo)
+            .and_then(|()| settings.set_wip_limit(Column::Doing, doing))
+            .and_then(|()| settings.save(board));
+        if let Err(err) = outcome {
+            self.status = Some(format!("{err}"));
         }
     }
 }
@@ -790,6 +963,20 @@ impl BoardApp {
                     result.moved.len(),
                     names.join(", ")
                 ));
+            }
+            Err(err) => self.status = Some(format!("{err}")),
+        }
+        self.reload();
+    }
+
+    /// Delete a group outright. Refuses (and leaves the selection alone) if
+    /// it still has any tickets — `empty_group_now` above is the deliberate
+    /// first step for that case, this doesn't do it implicitly.
+    fn delete_group_now(&mut self, name: &str) {
+        match self.repos[self.backlog_repo].board.delete_group(name) {
+            Ok(()) => {
+                self.status = None;
+                self.repos[self.backlog_repo].selected_group = None;
             }
             Err(err) => self.status = Some(format!("{err}")),
         }
@@ -1167,126 +1354,99 @@ impl BoardApp {
     }
 }
 
-/// The bits of frame state `group_ui` reports back by writing into, grouped
-/// so the function stays under clippy's argument-count lint rather than
-/// taking `opened`/`edit`/`start` as three separate `&mut` parameters.
+/// The selected group's own compact header — name, description, points (for
+/// a sprint), and its edit/start/empty buttons. Replaces what used to be
+/// each group's own lane header when every group got its own side-by-side
+/// column; now there is one backlog list (`column_ui` on `Column::Backlog`)
+/// and this renders just above it for whichever group is currently selected.
+/// A drag-and-drop target to file a card into a specific group doesn't exist
+/// any more — the membership checkbox on every card is what does that now,
+/// and it works from any column, which a per-group drop lane never did.
 #[cfg(feature = "gui")]
-struct GroupEvents<'a> {
-    opened: &'a mut Option<PathBuf>,
-    edit: &'a mut Option<String>,
-    start: &'a mut Option<String>,
-    empty: &'a mut Option<String>,
-}
-
-/// One epic group in the backlog: a column of cards under the epic's name,
-/// with the loose backlog first. Dropping a card here files it under this
-/// epic, which moves the file and rewrites its `epic` key to match.
-#[cfg(feature = "gui")]
-fn group_ui(
+fn group_header_ui(
     ui: &mut egui::Ui,
-    group: Option<&Group>,
-    cards: &[Card],
-    repo_index: usize,
-    filter: &BTreeSet<String>,
-    identity: Option<&str>,
-    events: &mut GroupEvents,
-) -> Option<(PathBuf, usize, Option<String>)> {
-    let heading = group.map_or("(unfiled)", |group| group.name.as_str());
-    // A group has no index-based drop slots the way a column does, so — unlike
-    // `column_ui` — filtering the display list here carries no risk of
-    // misplacing a drop; there is nothing keyed off position to misplace.
-    let cards: Vec<&Card> = cards
+    repo: &RepoBoard,
+    name: &str,
+    group_edit: &mut Option<String>,
+    group_start: &mut Option<String>,
+    group_empty: &mut Option<String>,
+) {
+    let Some(group) = repo
+        .groups
         .iter()
-        .filter(|card| card_visible(card, filter))
-        .collect();
-    // Only sized tickets count, and a sprint refuses unsized ones, so its
-    // total is the whole of what it committed to — of the cards currently
-    // shown, matching the visible count in the heading below.
-    let points: i64 = cards
+        .filter_map(|(group, _)| group.as_ref())
+        .find(|group| group.name == name)
+    else {
+        return;
+    };
+    let member_count = repo
+        .lanes
         .iter()
+        .flatten()
+        .filter(|card| card_in_group(card, name))
+        .count();
+    let points: i64 = repo
+        .lanes
+        .iter()
+        .flatten()
+        .filter(|card| card_in_group(card, name))
         .filter_map(|card| card.points.as_deref())
         .filter_map(|p| p.trim().parse::<i64>().ok())
         .sum();
 
-    let frame = egui::Frame::default()
-        .inner_margin(6.0)
-        .fill(ui.visuals().faint_bg_color)
-        .corner_radius(4.0);
-
-    let (_, payload) = ui.dnd_drop_zone::<Dragged, ()>(frame, |ui| {
-        ui.vertical(|ui| {
-            ui.set_width(COLUMN_WIDTH);
-            ui.set_min_height(160.0);
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(format!("{heading}  ({})", cards.len()))
-                        .monospace()
-                        .strong(),
-                );
-                if let Some(group) = group {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.small_button("edit").clicked() {
-                            *events.edit = Some(group.name.clone());
-                        }
-                        // No precondition, matching a single ticket's own
-                        // "no precondition" move out of a group — including
-                        // a started sprint, which already lets tickets out
-                        // individually.
-                        if !cards.is_empty() && ui.small_button("empty").clicked() {
-                            *events.empty = Some(group.name.clone());
-                        }
-                    });
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(format!("{name}  ({member_count})"))
+                .monospace()
+                .strong(),
+        );
+        if ui.small_button("edit").clicked() {
+            *group_edit = Some(group.name.clone());
+        }
+        if member_count > 0 && ui.small_button("empty").clicked() {
+            *group_empty = Some(group.name.clone());
+        }
+    });
+    if group.is_sprint() {
+        ui.horizontal(|ui| {
+            ui.weak(format!("sprint · {}d · {points} pts", group.days));
+            match group.state {
+                State::Pending => {
+                    if ui.small_button("start").clicked() {
+                        *group_start = Some(group.name.clone());
+                    }
                 }
-            });
-
-            if let Some(group) = group {
-                if group.is_sprint() {
-                    ui.horizontal(|ui| {
-                        ui.weak(format!("sprint · {}d · {points} pts", group.days));
-                        match group.state {
-                            State::Pending => {
-                                if ui.small_button("start").clicked() {
-                                    *events.start = Some(group.name.clone());
-                                }
-                            }
-                            // No control to undo it: the flag is one way.
-                            State::Started => {
-                                ui.label(egui::RichText::new("started").strong());
-                            }
-                        }
-                    });
-                } else if points > 0 {
-                    ui.weak(format!("epic · {points} pts"));
-                } else {
-                    ui.weak("epic");
+                // No control to undo it: the flag is one way.
+                State::Started => {
+                    ui.label(egui::RichText::new("started").strong());
                 }
-                if !group.description.is_empty() {
-                    ui.weak(&group.description);
-                }
-            }
-            ui.separator();
-
-            let empty = cards.is_empty();
-            for card in cards {
-                if card_ui(ui, card, repo_index, identity) {
-                    *events.opened = Some(card.task.path.clone());
-                }
-            }
-            if empty {
-                ui.weak("(empty)");
             }
         });
-    });
+    } else if points > 0 {
+        ui.weak(format!("epic · {points} pts"));
+    } else {
+        ui.weak("epic");
+    }
+    if !group.description.is_empty() {
+        ui.weak(&group.description);
+    }
+}
 
-    payload.and_then(|dragged| {
-        (dragged.repo == repo_index).then(|| {
-            (
-                dragged.path.clone(),
-                repo_index,
-                group.map(|group| group.name.clone()),
-            )
-        })
-    })
+/// The bits of frame state `column_ui` reads or reports back by writing
+/// into, grouped so the function stays under clippy's argument-count lint —
+/// the same reason `GroupEvents` used to exist here for the per-lane group
+/// renderer this replaced.
+#[cfg(feature = "gui")]
+struct ColumnEvents<'a> {
+    identity: Option<&'a str>,
+    /// The currently selected epic/sprint, if any — `None` means no filter,
+    /// draw plainly; `Some(name)` means every card gets a membership
+    /// checkbox against `name`.
+    selected: Option<&'a str>,
+    opened: &'a mut Option<PathBuf>,
+    /// A membership checkbox was toggled this frame: the card's path and its
+    /// desired new membership state.
+    toggled: &'a mut Option<(PathBuf, bool)>,
 }
 
 /// One status column: a header, then its cards top to bottom, with a drop slot
@@ -1299,8 +1459,7 @@ fn column_ui(
     repo_index: usize,
     column: Column,
     filter: &BTreeSet<String>,
-    identity: Option<&str>,
-    opened: &mut Option<PathBuf>,
+    events: &mut ColumnEvents,
 ) -> Option<Drop> {
     let mut result = None;
     let cards = &repo.lanes[column as usize];
@@ -1335,8 +1494,13 @@ fn column_ui(
                 if let Some(drop) = slot(ui, repo_index, column, index) {
                     result = Some(drop);
                 }
-                if card_ui(ui, card, repo_index, identity) {
-                    *opened = Some(card.task.path.clone());
+                let membership = events.selected.map(|name| card_in_group(card, name));
+                let response = card_ui(ui, card, repo_index, events.identity, membership);
+                if response.opened {
+                    *events.opened = Some(card.task.path.clone());
+                }
+                if let Some(member) = response.toggled {
+                    *events.toggled = Some((card.task.path.clone(), member));
                 }
             }
             if let Some(drop) = slot(ui, repo_index, column, cards.len()) {
@@ -1388,10 +1552,43 @@ fn slot(ui: &mut egui::Ui, repo_index: usize, column: Column, index: usize) -> O
     })
 }
 
-/// A ticket: the width of its column, as tall as its title needs, so a column
-/// reads as a stack.
+/// Whether `card`'s task currently belongs to the group named `name`. Inside
+/// `backlog/` the folder decides (`task.epic`, set from where the file was
+/// found); outside it there's no group directory, so the frontmatter key is
+/// the only carrier (`epic_meta()`, a fresh read) — same split
+/// `Board::tasks_in_group` already makes.
 #[cfg(feature = "gui")]
-fn card_ui(ui: &mut egui::Ui, card: &Card, repo_index: usize, identity: Option<&str>) -> bool {
+fn card_in_group(card: &Card, name: &str) -> bool {
+    if card.task.column == Column::Backlog {
+        card.task.epic.as_deref() == Some(name)
+    } else {
+        card.task.epic_meta().as_deref() == Some(name)
+    }
+}
+
+#[cfg(feature = "gui")]
+struct CardResponse {
+    /// The card was double-clicked to open it.
+    opened: bool,
+    /// The membership checkbox was clicked this frame; carries the desired
+    /// new state, not the old one.
+    toggled: Option<bool>,
+}
+
+/// A ticket: the width of its column, as tall as its title needs, so a column
+/// reads as a stack. `membership` is `None` when no epic/sprint is selected
+/// (draw plainly, no checkbox); `Some(is_member)` draws a checkbox and dims
+/// the card when it isn't currently a member — dimmed rather than hidden,
+/// specifically so a `todo`/`doing`/`done` card can still be *added* to the
+/// selected group from wherever it already sits, not only removed.
+#[cfg(feature = "gui")]
+fn card_ui(
+    ui: &mut egui::Ui,
+    card: &Card,
+    repo_index: usize,
+    identity: Option<&str>,
+    membership: Option<bool>,
+) -> CardResponse {
     let id = egui::Id::new(("card", &card.task.path));
     let payload = Dragged {
         path: card.task.path.clone(),
@@ -1408,46 +1605,83 @@ fn card_ui(ui: &mut egui::Ui, card: &Card, repo_index: usize, identity: Option<&
         .lease_active()
         .then(|| card.task.locked_by())
         .flatten();
-    let dragged = ui.dnd_drag_source(id, payload, |ui| {
-        egui::Frame::default()
-            .inner_margin(8.0)
-            .fill(ui.visuals().panel_fill)
-            .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
-            .corner_radius(4.0)
-            .show(ui, |ui| {
-                ui.set_width(COLUMN_WIDTH - 28.0);
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(&card.id).monospace().weak());
-                        if let Some(who) = &card.assignee {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.weak(who);
-                                },
-                            );
+    let mut toggled = None;
+    let mut opened = false;
+    ui.horizontal(|ui| {
+        // The checkbox is a sibling of the draggable region, not nested
+        // inside it — `dnd_drag_source` senses drag over its whole content,
+        // and a checkbox nested inside it never got a clean click: it
+        // started a drag instead, confirmed visually (the drop-zone
+        // highlight lit up on a plain click). Keeping it outside means a
+        // click here is an ordinary widget interaction, untouched by drag
+        // sensing, while the card body to its right is still what you drag
+        // to reorder or change column.
+        //
+        // Sibling placement alone wasn't enough, confirmed live: a bare,
+        // unlabelled checkbox's native hit box is small (egui sizes it off
+        // `interact_size`, not off any wrapper placed around it — wrapping
+        // it in `add_sized` to force a bigger box was tried and confirmed
+        // *not* to enlarge the actual clickable region, only the dead space
+        // reserved around it, so a click there now hit neither the checkbox
+        // nor the card). A short label turns the checkbox into a normal,
+        // generously sized labelled control — the whole label is part of
+        // the same clickable atom as the box in egui, which is what
+        // actually gives a forgiving, unambiguous hit target.
+        if let Some(is_member) = membership {
+            let mut checked = is_member;
+            if ui.checkbox(&mut checked, "in").changed() {
+                toggled = Some(checked);
+            }
+            ui.add_space(6.0);
+        }
+        let dragged = ui.dnd_drag_source(id, payload, |ui| {
+            // Opacity, not visibility — a non-member still needs to be
+            // fully present and clickable for its checkbox to work.
+            if membership == Some(false) {
+                ui.set_opacity(0.5);
+            }
+            egui::Frame::default()
+                .inner_margin(8.0)
+                .fill(ui.visuals().panel_fill)
+                .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
+                .corner_radius(4.0)
+                .show(ui, |ui| {
+                    ui.set_width(COLUMN_WIDTH - 28.0);
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(&card.id).monospace().weak());
+                            if let Some(who) = &card.assignee {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.weak(who);
+                                    },
+                                );
+                            }
+                        });
+                        ui.label(&card.title);
+                        if let Some(holder) = &lease_badge {
+                            let mine = identity.is_some_and(|me| me == holder);
+                            let text = if mine {
+                                egui::RichText::new(format!("🔒 {holder}")).weak()
+                            } else {
+                                egui::RichText::new(format!("🔒 {holder}"))
+                                    .color(egui::Color32::from_rgb(200, 140, 40))
+                                    .strong()
+                            };
+                            ui.label(text);
                         }
                     });
-                    ui.label(&card.title);
-                    if let Some(holder) = &lease_badge {
-                        let mine = identity.is_some_and(|me| me == holder);
-                        let text = if mine {
-                            egui::RichText::new(format!("🔒 {holder}")).weak()
-                        } else {
-                            egui::RichText::new(format!("🔒 {holder}"))
-                                .color(egui::Color32::from_rgb(200, 140, 40))
-                                .strong()
-                        };
-                        ui.label(text);
-                    }
                 });
-            });
-    });
+        });
 
-    // dnd_drag_source senses drag only, so the double-click needs its own
-    // interaction over the same rectangle.
-    ui.interact(dragged.response.rect, id.with("open"), egui::Sense::click())
-        .double_clicked()
+        // dnd_drag_source senses drag only, so the double-click needs its
+        // own interaction over the same rectangle.
+        opened = ui
+            .interact(dragged.response.rect, id.with("open"), egui::Sense::click())
+            .double_clicked();
+    });
+    CardResponse { opened, toggled }
 }
 
 #[cfg(feature = "gui")]
@@ -1476,6 +1710,8 @@ mod tests {
             lanes: Vec::new(),
             groups: Vec::new(),
             visible: true,
+            selected_kind: Kind::Epic,
+            selected_group: None,
         }
     }
 

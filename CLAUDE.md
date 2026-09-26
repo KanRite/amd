@@ -461,6 +461,25 @@ changes):
   `move_and_report`, `amdui`'s `apply()`) pass it through; the GUI always
   passes `false` (no drag-and-drop escape hatch), a blocked drag just sets
   the status line, the same treatment a lease refusal already gets.
+  `board_settings::set_wip_limit(column, limit)` is the programmatic
+  setter (`amdui`'s Settings modal uses it) — `None`/`0` clears back to
+  unlimited, an empty string being exactly what the read side
+  (`wip_limit`) already treats as absent.
+- **`Board::set_epic` only moves the file inside `backlog/`.** Filing a
+  `todo`/`doing`/`done` ticket into a group (or clearing it) tags
+  `set_epic_meta` in place and leaves the file exactly where it is — column
+  and path both unchanged. Before this branch existed, `set_epic` computed
+  its destination unconditionally under `backlog/<name>/`, which would have
+  silently relocated a `doing`/`done` ticket back into the backlog; nothing
+  called it on a non-backlog task until `amdui`'s membership checkboxes
+  (below) needed to, so the bug was latent, not yet shipped-and-observed.
+- **`Board::delete_group`/`amd group delete <name>`** removes a group's
+  `_group.md` and directory outright. Refused (naming the count) if
+  `tasks_in_group` finds any ticket still claiming membership, checked
+  across every column the same way `empty_group` already does — not just
+  the physical folder — since a committed sprint's tickets can sit in
+  `doing`/`done` while the backlog folder itself is empty. `empty` it
+  first; `delete` does not imply `empty`.
 
 ## The desktop board (`crates/amd-lib/src/gui/`)
 
@@ -498,13 +517,66 @@ changes):
   (both light and dark styles, since `ThemePreference::System` can pick
   either) reaches every one of them for free. `Accent::Default` applies no
   override at all, leaving pre-ticket-039 behaviour exactly as it was.
-- **"Add epic"/"Add sprint" render on both views, not just Backlog.**
-  Gating them to `View::Backlog` alone made the feature effectively
-  invisible — the Board view is the default, so they were never on screen
-  unless you already knew to switch tabs. `GroupDraft.repo` and `New
-  ticket` both resolve to `self.backlog_repo` regardless of which view is
-  showing — Board has no repo selector of its own, so it targets the same
-  repo Backlog would.
+- **The Settings modal mixes personal and board-level state, on purpose.**
+  Text size/theme/accent are `GuiSettings` — personal, local, saved on
+  change. The WIP-limit fields below them are board-level
+  (`board_settings::set_wip_limit`, `backlog_repo`'s own `.settings`,
+  git-tracked and shared) — loaded fresh into
+  `wip_todo_input`/`wip_doing_input` each time the modal opens (same
+  load-on-open lifecycle `GroupDraft` uses), saved via a separate
+  before/after snapshot comparison from `GuiSettings`'s own, since they
+  write to a different file entirely. An empty or unparsable field means
+  unlimited — the same tolerance `wip_limit`'s read side already has, so
+  there's nothing to validate here beyond attempting the parse.
+- **The epic/sprint selector: a toggle, a dropdown, New/Delete — replaces
+  the old "Add epic"/"Add sprint" buttons and the old one-lane-per-group
+  Backlog layout.** `RepoBoard.selected_kind`/`selected_group` are per-repo
+  (each registered repo has its own independent groups, same reason
+  `groups` itself is per-repo); switching the Epic/Sprint toggle clears
+  `selected_group`, since a name from the other kind's list means nothing
+  once the dropdown stops listing it. "New" opens the existing
+  `GroupDraft` modal with `kind` taken from the toggle; "Delete" (disabled
+  when nothing's selected) calls `delete_group_now`, which — like
+  `empty_group_now` beside it — reports an `Err` to the status line rather
+  than a dialog. Visible on both views, not just Backlog, and not scoped
+  to `View::Backlog` the way the old buttons briefly were by mistake — see
+  the still-true reasoning in the next bullet.
+- **Selecting a group is a board-wide *soft* filter, not a hard hide, and
+  every card gets a membership checkbox.** With a group selected, every
+  card in every column — Backlog's now-single flat lane
+  (`column_ui(..., Column::Backlog, ...)`, not a per-group lane any more)
+  and the Board tab's `todo`/`doing`/`done` — renders a checkbox: checked
+  and full-opacity for a current member (`card_in_group`, which reads
+  `task.epic` in `backlog/` and `task.epic_meta()` elsewhere, mirroring
+  `Board::tasks_in_group`'s own split), unchecked and dimmed
+  (`ui.set_opacity(0.5)`) otherwise. Dimmed rather than hidden specifically
+  so a `doing`/`done` ticket can still be *added* to the selected group
+  from wherever it already sits — a hard hide would leave no checkbox left
+  to tick. Toggling calls `Board::set_epic` (safe from any column, per the
+  non-backlog branch above) via `BoardApp::toggle_membership`, which
+  replaced the old drag-a-card-onto-a-lane `refile` — that mechanism doesn't
+  exist any more now that groups don't get their own drop-target lane.
+  `group_header_ui` renders the selected group's own name/description/
+  points/edit/start/empty controls once, above the list, replacing what
+  used to be each lane's own header.
+- **The checkbox has to be a sibling of `dnd_drag_source`, not nested
+  inside it, and it needs a real label — both confirmed the hard way, live.**
+  A checkbox nested inside `dnd_drag_source`'s content closure never got a
+  clean click: `dnd_drag_source` senses `Sense::drag()` over its whole
+  rect, and the slightest pointer movement during a real click reads as a
+  drag starting. Moving the checkbox to a sibling position in the same
+  `ui.horizontal` fixed that. A *second*, independent issue surfaced after:
+  an empty-label checkbox's native hit box is small and is **not** enlarged
+  by wrapping it in `ui.add_sized` — egui sizes a `Checkbox` off
+  `ui.spacing().interact_size`, not off an external wrapper, so the extra
+  allocated space becomes dead space a click can miss into, hitting
+  neither the checkbox nor the card. A short label (`"in"`) fixed it for
+  real: the label is part of the same clickable atom as the box, which is
+  what actually gives a forgiving, unambiguous target — not a cosmetic
+  choice.
+- **`GroupDraft.repo` and `New ticket` both resolve to `self.backlog_repo`
+  regardless of which view is showing** — Board has no repo selector of
+  its own, so it targets the same repo Backlog would.
 - **`backlog_repo`'s initial value is looked up, never assumed to be `0`.**
   `home_repo_index()` finds the repo `amdui`/`amd gui` was actually launched
   from by matching `Board::discover()`'s root against `self.repos` (`load()`
