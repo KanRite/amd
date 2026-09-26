@@ -151,9 +151,16 @@ pub struct BoardApp {
     settings: GuiSettings,
     /// Open while the settings overlay is up.
     showing_settings: bool,
-    /// Which repository the backlog view is showing. The board view stacks
-    /// every repository; the backlog is long enough that one at a time reads
-    /// better.
+    /// Which repository the backlog view is showing, and which repository
+    /// "New ticket"/"Add epic" target from the board view (which has no
+    /// repo selector of its own — it stacks every repository rather than
+    /// showing one at a time). Initialised in `load()` to the repository
+    /// `amdui` was actually launched from, not index `0`: `self.repos` is
+    /// `Registry::boards()`'s output, which is alphabetically sorted for any
+    /// repository that's already registered (the normal case, since both
+    /// `amd` and `amdui` auto-register), so `0` is whichever name sorts
+    /// first — not "the one you're standing in" — unless it happens to
+    /// coincide.
     backlog_repo: usize,
     /// Tags currently toggled on in the toolbar. Empty means unfiltered.
     /// A card matches when it carries any tag in the set (OR, not AND) —
@@ -164,6 +171,19 @@ pub struct BoardApp {
     /// continuously. Used only to tell your own lease apart from someone
     /// else's on a card's badge.
     identity: Option<String>,
+}
+
+/// The index into `repos` of the repository `current` names, or `0` when
+/// `current` is `None` (`amdui`/`amd gui` run somewhere with no board of its
+/// own) or, in principle, not found among `repos` (it always should be:
+/// `Registry::boards()` guarantees `current` is included). Never assume
+/// index `0` means "the repo I'm standing in" elsewhere — `repos` is
+/// alphabetically sorted for anything already registered, which is the
+/// normal case.
+fn home_repo_index(repos: &[RepoBoard], current: Option<&Board>) -> usize {
+    current
+        .and_then(|board| repos.iter().position(|repo| repo.board.root == board.root))
+        .unwrap_or(0)
 }
 
 /// Whether `card` should be drawn under the current tag filter. An empty
@@ -203,6 +223,7 @@ impl BoardApp {
         // context resolves the same identity — the first one is as good as
         // any other.
         let identity = crate::git::config(&repos[0].board.root, "user.email");
+        let backlog_repo = home_repo_index(&repos, current.as_ref());
         Ok(Self {
             repos,
             status: None,
@@ -212,7 +233,7 @@ impl BoardApp {
             view: View::Board,
             settings: GuiSettings::load(),
             showing_settings: false,
-            backlog_repo: 0,
+            backlog_repo,
             tag_filter: BTreeSet::new(),
             identity,
         })
@@ -494,10 +515,11 @@ impl eframe::App for BoardApp {
                 // already knew to switch tabs first.
                 for (kind, label) in [(Kind::Epic, "Add epic"), (Kind::Sprint, "Add sprint")] {
                     if ui.button(label).clicked() {
-                        let repo = match self.view {
-                            View::Backlog => self.backlog_repo,
-                            View::Board => 0,
-                        };
+                        // Both views resolve the same way now — Board has no
+                        // repo selector of its own, so it always targets
+                        // whichever repo the Backlog view would show (which
+                        // starts out as the repo `amdui` was launched from).
+                        let repo = self.backlog_repo;
                         self.group_draft = Some(GroupDraft {
                             repo,
                             kind,
@@ -510,10 +532,8 @@ impl eframe::App for BoardApp {
                     }
                 }
                 if ui.button("New ticket").clicked() {
-                    let repo = match self.view {
-                        View::Backlog => self.backlog_repo,
-                        View::Board => 0,
-                    };
+                    // See "Add epic"/"Add sprint" above — same reasoning.
+                    let repo = self.backlog_repo;
                     self.drafting = Some(Draft {
                         repo,
                         title: String::new(),
@@ -1448,6 +1468,52 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn repo_board(name: &str, root: std::path::PathBuf) -> RepoBoard {
+        RepoBoard {
+            name: name.to_string(),
+            board: Board::at(root),
+            lanes: Vec::new(),
+            groups: Vec::new(),
+            visible: true,
+        }
+    }
+
+    #[test]
+    fn home_repo_index_finds_current_wherever_it_sorts() {
+        // The bug this guards: `repos` is alphabetically sorted once a
+        // repository is registered, so "agile-md" can sort before
+        // "oberi-kitchen" regardless of which one `amdui` was launched
+        // from — index 0 must never be assumed to mean "current".
+        let repos = vec![
+            repo_board("agile-md-tickets", "/agile-md-tickets/tasks".into()),
+            repo_board(
+                "oberi-kitchen-tickets",
+                "/oberi-kitchen-tickets/tasks".into(),
+            ),
+        ];
+        let current = Board::at("/oberi-kitchen-tickets/tasks".into());
+        assert_eq!(home_repo_index(&repos, Some(&current)), 1);
+    }
+
+    #[test]
+    fn home_repo_index_falls_back_to_zero_with_no_current_board() {
+        let repos = vec![repo_board(
+            "agile-md-tickets",
+            "/agile-md-tickets/tasks".into(),
+        )];
+        assert_eq!(home_repo_index(&repos, None), 0);
+    }
+
+    #[test]
+    fn home_repo_index_falls_back_to_zero_when_current_is_not_registered() {
+        let repos = vec![repo_board(
+            "agile-md-tickets",
+            "/agile-md-tickets/tasks".into(),
+        )];
+        let current = Board::at("/somewhere-else/tasks".into());
+        assert_eq!(home_repo_index(&repos, Some(&current)), 0);
+    }
 
     const RENDERED: &str = "---\nid: \"001\"\ntitle: \"T\"\npoints: \"\"\n---\n\n## Notes\n\n\n";
 
