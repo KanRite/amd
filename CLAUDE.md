@@ -489,10 +489,22 @@ changes):
 - **"Add epic"/"Add sprint" render on both views, not just Backlog.**
   Gating them to `View::Backlog` alone made the feature effectively
   invisible — the Board view is the default, so they were never on screen
-  unless you already knew to switch tabs. `GroupDraft.repo` resolves the
-  same way `New ticket` already does per-view (`Backlog` uses
-  `self.backlog_repo`, `Board` defaults to repo `0`) — an existing,
-  already-accepted pattern, not a new one.
+  unless you already knew to switch tabs. `GroupDraft.repo` and `New
+  ticket` both resolve to `self.backlog_repo` regardless of which view is
+  showing — Board has no repo selector of its own, so it targets the same
+  repo Backlog would.
+- **`backlog_repo`'s initial value is looked up, never assumed to be `0`.**
+  `home_repo_index()` finds the repo `amdui`/`amd gui` was actually launched
+  from by matching `Board::locate()`'s root against `self.repos`. This used
+  to be hardcoded to `0` in three places (`BoardApp::load()`'s init, and
+  both `View::Board`'s "New ticket"/"Add epic" arms, which read `0` where
+  `View::Backlog` read `self.backlog_repo`) — a real bug, not a stylistic
+  inconsistency: `Registry::add()` sorts entries alphabetically once a
+  repository is registered (the normal case — both binaries auto-register),
+  so index `0` is whichever repo's name sorts first, not the one you're
+  standing in. `amdui` launched from `oberi-kitchen-tickets` would open
+  showing (and creating tickets in) `agile-md-tickets` purely because "a"
+  sorts before "o", with no relationship to the current directory at all.
 
 ## Conventions
 
