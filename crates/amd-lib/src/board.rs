@@ -401,8 +401,12 @@ impl Board {
     }
 
     /// File a ticket under an epic, or move it back to the loose backlog with
-    /// `None`. The folder is the move; the frontmatter is updated to match, so
-    /// a ticket read on its own still says which epic it belongs to.
+    /// `None`. Inside `backlog/` the folder is the move, and the frontmatter
+    /// is updated to match; outside it (`todo`/`doing`/`done`) there is no
+    /// group directory to move into, so this only ever writes the `epic`
+    /// frontmatter key in place — the ticket stays exactly where it is,
+    /// column included. Calling this on a `doing`/`done` ticket does not
+    /// send it back to the backlog.
     pub fn set_epic(&self, task: &Task, epic: Option<&str>) -> Result<PathBuf> {
         // Checked up front, not left to set_epic_meta's own write_checked
         // afterwards — that would risk a half-moved, half-refused ticket if
@@ -422,6 +426,13 @@ impl Board {
                 bail!("{} needs points before it can go in {name}", task.stem);
             }
         }
+
+        if task.column != Column::Backlog {
+            let hash = task.hash()?;
+            task.set_epic_meta(hash, epic.unwrap_or_default())?;
+            return Ok(task.path.clone());
+        }
+
         let dir = match epic {
             Some(name) => self.dir(Column::Backlog).join(name),
             None => self.dir(Column::Backlog),
@@ -467,6 +478,25 @@ impl Board {
             }
         }
         Ok(EmptiedGroup { moved, skipped })
+    }
+
+    /// Delete a group outright — its `_group.md` and the (now-empty)
+    /// directory. Refuses if it still has any tickets, checked the same way
+    /// `empty_group` finds them: every column, not just the physical
+    /// folder, since a committed sprint's tickets can sit in `doing`/`done`
+    /// while still claiming membership. `empty` it first, same two-step
+    /// `create_group`'s own "already exists" refusal expects the caller to
+    /// resolve deliberately rather than the tool guessing.
+    pub fn delete_group(&self, name: &str) -> Result<()> {
+        let group = self.group(name)?;
+        let tickets = self.tasks_in_group(name)?;
+        if !tickets.is_empty() {
+            bail!(
+                "{name} still has {} ticket(s) — empty it first",
+                tickets.len()
+            );
+        }
+        fs::remove_dir_all(&group.dir).with_context(|| format!("removing {}", group.dir.display()))
     }
 
     /// Every task on the board, column order first.
@@ -1056,6 +1086,42 @@ mod tests {
     }
 
     #[test]
+    fn set_epic_tags_a_non_backlog_ticket_in_place_without_moving_it() {
+        // Before this, set_epic's directory-move logic ran unconditionally,
+        // so filing a doing/ ticket into an epic would have silently
+        // relocated it back into backlog/<epic>/ — nothing called it on a
+        // non-backlog task before the GUI's membership checkboxes needed to.
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        fs::create_dir_all(board.dir(Column::Backlog).join("checkout")).unwrap();
+        backlog_ticket(&board, "001-a.md");
+        let task = board.find("001").unwrap();
+        board.move_task(&task, Column::Doing, false).unwrap();
+        let path_before = board.find("001").unwrap().path;
+
+        let task = board.find("001").unwrap();
+        board.set_epic(&task, Some("checkout")).unwrap();
+
+        let after = board.find("001").unwrap();
+        assert_eq!(after.column, Column::Doing, "must not move column");
+        assert_eq!(after.path, path_before, "must not move the file");
+        assert_eq!(after.epic_meta().as_deref(), Some("checkout"));
+        assert_eq!(
+            board.tasks_in_group("checkout").unwrap().len(),
+            1,
+            "membership is visible via tasks_in_group despite no directory move"
+        );
+
+        // And clearing it is likewise metadata-only.
+        let task = board.find("001").unwrap();
+        board.set_epic(&task, None).unwrap();
+        let after = board.find("001").unwrap();
+        assert_eq!(after.column, Column::Doing);
+        assert_eq!(after.path, path_before);
+        assert_eq!(after.epic_meta(), None);
+    }
+
+    #[test]
     fn the_group_file_is_not_a_ticket() {
         let dir = tempfile::tempdir().unwrap();
         let board = board_at(dir.path());
@@ -1285,6 +1351,66 @@ mod tests {
         assert_eq!(result.moved.len(), 1, "{:?}", result.moved);
         assert_eq!(result.skipped.len(), 1);
         assert_eq!(result.skipped[0].0, "002-b");
+    }
+
+    #[test]
+    fn deleting_a_nonempty_group_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        fs::create_dir_all(board.dir(Column::Backlog).join("checkout")).unwrap();
+        backlog_ticket(&board, "001-a.md");
+        board
+            .set_epic(&board.find("001").unwrap(), Some("checkout"))
+            .unwrap();
+
+        let err = board.delete_group("checkout").unwrap_err();
+        assert!(err.to_string().contains("1 ticket"), "{err}");
+        assert!(
+            board.group("checkout").is_ok(),
+            "must not have been deleted"
+        );
+    }
+
+    #[test]
+    fn deleting_a_nonempty_group_counts_tickets_outside_the_backlog_too() {
+        // A committed sprint's tickets can sit in doing/done while the
+        // folder itself is physically empty — delete has to see them the
+        // same way empty_group already does, or it would silently orphan
+        // their epic reference.
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        sprint(&board, "sprint-1");
+        backlog_ticket(&board, "001-a.md");
+        let task = board.find("001").unwrap();
+        task.set_points(task.hash().unwrap(), "3").unwrap();
+        board.set_epic(&task, Some("sprint-1")).unwrap();
+        let task = board.find("001").unwrap();
+        board.move_task(&task, Column::Doing, false).unwrap();
+
+        let err = board.delete_group("sprint-1").unwrap_err();
+        assert!(err.to_string().contains("1 ticket"), "{err}");
+    }
+
+    #[test]
+    fn an_emptied_group_can_be_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        fs::create_dir_all(board.dir(Column::Backlog).join("checkout")).unwrap();
+        backlog_ticket(&board, "001-a.md");
+        board
+            .set_epic(&board.find("001").unwrap(), Some("checkout"))
+            .unwrap();
+
+        board.empty_group("checkout").unwrap();
+        board.delete_group("checkout").unwrap();
+        assert!(board.group("checkout").is_err(), "the directory is gone");
+    }
+
+    #[test]
+    fn deleting_an_unknown_group_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        assert!(board.delete_group("nope").is_err());
     }
 
     #[test]
