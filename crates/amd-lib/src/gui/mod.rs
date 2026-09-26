@@ -151,6 +151,11 @@ impl Editor {
 
 pub struct BoardApp {
     repos: Vec<RepoBoard>,
+    /// Names the current project declares (`board_settings::repos()`) with
+    /// no matching, board-having entry in the local `registry.rs` — known to
+    /// exist, not cloned (or not registered) on this machine. Rendered
+    /// greyed out and inert in the `View::Board` repo row, not omitted.
+    unregistered: Vec<String>,
     status: Option<String>,
     editing: Option<Editor>,
     drafting: Option<Draft>,
@@ -162,13 +167,9 @@ pub struct BoardApp {
     /// Which repository the backlog view is showing, and which repository
     /// "New ticket"/"Add epic" target from the board view (which has no
     /// repo selector of its own — it stacks every repository rather than
-    /// showing one at a time). Initialised in `load()` to the repository
-    /// `amdui` was actually launched from, not index `0`: `self.repos` is
-    /// `Registry::boards()`'s output, which is alphabetically sorted for any
-    /// repository that's already registered (the normal case, since both
-    /// `amd` and `amdui` auto-register), so `0` is whichever name sorts
-    /// first — not "the one you're standing in" — unless it happens to
-    /// coincide.
+    /// showing one at a time). Always `0` — `repos[0]` is the current
+    /// project's own board, pushed first in `load()` by construction, not
+    /// found by position in some other ordering.
     backlog_repo: usize,
     /// Tags currently toggled on in the toolbar. Empty means unfiltered.
     /// A card matches when it carries any tag in the set (OR, not AND) —
@@ -188,19 +189,6 @@ pub struct BoardApp {
     wip_doing_input: String,
 }
 
-/// The index into `repos` of the repository `current` names, or `0` when
-/// `current` is `None` (`amdui`/`amd gui` run somewhere with no board of its
-/// own) or, in principle, not found among `repos` (it always should be:
-/// `Registry::boards()` guarantees `current` is included). Never assume
-/// index `0` means "the repo I'm standing in" elsewhere — `repos` is
-/// alphabetically sorted for anything already registered, which is the
-/// normal case.
-fn home_repo_index(repos: &[RepoBoard], current: Option<&Board>) -> usize {
-    current
-        .and_then(|board| repos.iter().position(|repo| repo.board.root == board.root))
-        .unwrap_or(0)
-}
-
 /// Whether `card` should be drawn under the current tag filter. An empty
 /// filter matches everything, same as no filter at all.
 fn card_visible(card: &Card, filter: &BTreeSet<String>) -> bool {
@@ -209,40 +197,41 @@ fn card_visible(card: &Card, filter: &BTreeSet<String>) -> bool {
 
 impl BoardApp {
     pub fn load() -> Result<Self> {
-        let current = Board::discover().ok();
+        // A hard error now, not a `.ok()` folded away — `amdui` operates on
+        // exactly one project (the one launched from), never a personal
+        // cross-project stack the way the old machine-wide registry allowed.
+        let current = Board::discover()?;
+        let current_root = current.repo_root().to_path_buf();
+        let declared = crate::board_settings::load(&current).repos();
         let registry = Registry::load();
-        let entries = registry.boards(current.as_ref());
 
-        let mut repos = Vec::new();
-        for entry in entries {
-            let board = entry.board();
-            if !entry.has_board() {
-                continue;
+        let mut repos = vec![open_repo_board(current_root.clone(), current)?];
+        // A name this project declares but that isn't registered locally
+        // (or is, but its board has since gone missing) — rendered greyed
+        // out in the repo-visibility row, not silently omitted, so a
+        // teammate who's added a repository sees it exists before they've
+        // cloned it.
+        let mut unregistered = Vec::new();
+        for name in &declared {
+            match registry.find(name) {
+                Some(entry) if entry.root == current_root => {} // already added, above
+                Some(entry) if entry.has_board() => {
+                    repos.push(open_repo_board(entry.root.clone(), entry.board())?);
+                }
+                _ => unregistered.push(name.clone()),
             }
-            repos.push(RepoBoard {
-                // The registry's name, not Board::name(): a board's root is
-                // <repo>/tasks, so the latter labels every repository "tasks".
-                name: entry.name.clone(),
-                lanes: read_lanes(&board)?,
-                groups: read_groups(&board)?,
-                board,
-                visible: true,
-                selected_kind: Kind::Epic,
-                selected_group: None,
-            });
-        }
-        if repos.is_empty() {
-            return Err(anyhow!(
-                "no boards found — run `amd init` here, or `amd repos add` to register one"
-            ));
         }
         // `user.email` is ordinarily global, so any registered repo's
         // context resolves the same identity — the first one is as good as
         // any other.
         let identity = crate::git::config(&repos[0].board.root, "user.email");
-        let backlog_repo = home_repo_index(&repos, current.as_ref());
+        // Always 0: `repos[0]` is `current`, pushed first above by
+        // construction, not found by position in an alphabetically-sorted
+        // list the way the old cross-project registry required.
+        let backlog_repo = 0;
         Ok(Self {
             repos,
+            unregistered,
             status: None,
             editing: None,
             drafting: None,
@@ -259,6 +248,11 @@ impl BoardApp {
     }
 
     fn reload(&mut self) {
+        // Deliberately doesn't re-derive `unregistered` — a repo newly
+        // registered (or un-registered) elsewhere while `amdui` is already
+        // running only takes effect on the next launch, same as any other
+        // change to which repos exist wasn't live-tracked before this
+        // either. `Reload` refreshes each already-open board's own content.
         for repo in &mut self.repos {
             match (read_lanes(&repo.board), read_groups(&repo.board)) {
                 (Ok(lanes), Ok(groups)) => {
@@ -481,6 +475,26 @@ fn read_lanes(board: &Board) -> Result<Vec<Vec<Card>>> {
     Ok(lanes)
 }
 
+/// Builds a `RepoBoard` from a repository root and the `Board` inside it.
+/// The directory's own basename names it, not `Board::name()` — a board's
+/// root is `<repo>/tasks`, so the latter would label every repository
+/// "tasks".
+fn open_repo_board(root: PathBuf, board: Board) -> Result<RepoBoard> {
+    let name = root
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| root.display().to_string());
+    Ok(RepoBoard {
+        name,
+        lanes: read_lanes(&board)?,
+        groups: read_groups(&board)?,
+        board,
+        visible: true,
+        selected_kind: Kind::Epic,
+        selected_group: None,
+    })
+}
+
 #[cfg(feature = "gui")]
 impl eframe::App for BoardApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
@@ -529,6 +543,18 @@ impl eframe::App for BoardApp {
                     View::Board => {
                         for repo in &mut self.repos {
                             ui.checkbox(&mut repo.visible, &repo.name);
+                        }
+                        // Declared by this project, not registered on this
+                        // machine — visible so a teammate who's just added a
+                        // repository knows it exists, inert because there's
+                        // nothing local to show yet.
+                        for name in &self.unregistered {
+                            let mut moot = false;
+                            ui.add_enabled(false, egui::Checkbox::new(&mut moot, name))
+                                .on_disabled_hover_text(
+                                    "declared for this project but not registered on this \
+                                     machine — clone it, then `amd register`",
+                                );
                         }
                     }
                     View::Backlog => {
@@ -1702,54 +1728,6 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn repo_board(name: &str, root: std::path::PathBuf) -> RepoBoard {
-        RepoBoard {
-            name: name.to_string(),
-            board: Board::at(root),
-            lanes: Vec::new(),
-            groups: Vec::new(),
-            visible: true,
-            selected_kind: Kind::Epic,
-            selected_group: None,
-        }
-    }
-
-    #[test]
-    fn home_repo_index_finds_current_wherever_it_sorts() {
-        // The bug this guards: `repos` is alphabetically sorted once a
-        // repository is registered, so "agile-md" can sort before
-        // "oberi-kitchen" regardless of which one `amdui` was launched
-        // from — index 0 must never be assumed to mean "current".
-        let repos = vec![
-            repo_board("agile-md-tickets", "/agile-md-tickets/tasks".into()),
-            repo_board(
-                "oberi-kitchen-tickets",
-                "/oberi-kitchen-tickets/tasks".into(),
-            ),
-        ];
-        let current = Board::at("/oberi-kitchen-tickets/tasks".into());
-        assert_eq!(home_repo_index(&repos, Some(&current)), 1);
-    }
-
-    #[test]
-    fn home_repo_index_falls_back_to_zero_with_no_current_board() {
-        let repos = vec![repo_board(
-            "agile-md-tickets",
-            "/agile-md-tickets/tasks".into(),
-        )];
-        assert_eq!(home_repo_index(&repos, None), 0);
-    }
-
-    #[test]
-    fn home_repo_index_falls_back_to_zero_when_current_is_not_registered() {
-        let repos = vec![repo_board(
-            "agile-md-tickets",
-            "/agile-md-tickets/tasks".into(),
-        )];
-        let current = Board::at("/somewhere-else/tasks".into());
-        assert_eq!(home_repo_index(&repos, Some(&current)), 0);
-    }
 
     const RENDERED: &str = "---\nid: \"001\"\ntitle: \"T\"\npoints: \"\"\n---\n\n## Notes\n\n\n";
 

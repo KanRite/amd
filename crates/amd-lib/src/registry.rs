@@ -1,4 +1,5 @@
-//! The registered repositories.
+//! The locally registered repositories: the **per-machine** half of
+//! registration.
 //!
 //! Deliberately a list of paths and nothing more. The tickets themselves are
 //! never copied into a store: they're markdown in each repo, they change when
@@ -9,6 +10,16 @@
 //!
 //! Stored one path per line at `$XDG_CONFIG_HOME/agile-md/repos`, so it can be
 //! read, edited and version-controlled by hand.
+//!
+//! **This is not the whole of registration any more.** The *other* half —
+//! which repository names a project actually declares as its own — is
+//! `board_settings::repos()`, shared and git-tracked in the tickets repo's
+//! own `.settings`. This file only ever answers "is a given declared name
+//! cloned on *this* machine, and where" (`find`); it no longer decides *which*
+//! names to look for; nothing here reaches across unrelated projects any more,
+//! and nothing writes to it silently in the background — `amd register`
+//! (`amd-cli`) is the only writer now, `registry::remember`'s
+//! run-on-every-command auto-fill is gone along with it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -118,58 +129,16 @@ impl Registry {
         self.entries.len() != before
     }
 
-    /// Every registered repository that actually has a board, plus `current`
-    /// when it isn't registered — you should always see the board you're
-    /// standing in, listed or not.
-    pub fn boards(&self, current: Option<&Board>) -> Vec<Entry> {
-        let mut entries: Vec<Entry> = self
-            .entries
-            .iter()
-            .filter(|entry| entry.has_board())
-            .cloned()
-            .collect();
-        if let Some(board) = current
-            && let Some(root) = board.root.parent()
-            && !entries.iter().any(|entry| entry.root == root)
-        {
-            entries.insert(0, Entry::new(root.to_path_buf()));
-        }
-        entries
-    }
-}
-
-/// Remember a repository we've just worked in, so the list fills itself from
-/// the boards you actually use rather than from anyone maintaining it. Called
-/// on every command that resolves a board, and writes only the first time a
-/// repository is seen.
-///
-/// Best effort: a read-only config directory is no reason for `amd board` to
-/// fail. Set `AMD_NO_REGISTER=1` (or the equivalent `no-register` settings
-/// key — the env var wins when both are set) to keep the list entirely
-/// manual — after which `amd repos remove` sticks, because nothing puts it
-/// back.
-pub fn remember(board: &Board) -> bool {
-    let settings = crate::settings::Config::load();
-    if crate::settings::resolved("AMD_NO_REGISTER", &settings, "no-register").as_deref()
-        == Some("1")
-    {
-        return false;
-    }
-    let Some(path) = path() else {
-        return false;
-    };
-    let Some(root) = board.root.parent() else {
-        return false;
-    };
-    remember_in(&path, root)
-}
-
-/// The half that takes a path, so tests need no environment fiddling.
-fn remember_in(config: &Path, root: &Path) -> bool {
-    let mut registry = Registry::load_from(config);
-    match registry.add(root) {
-        Ok(true) => registry.save_to(config).is_ok(),
-        _ => false,
+    /// Is `name` registered on this machine, and if so, its `Entry`?
+    ///
+    /// This is the only question this file answers now — *which* names are
+    /// worth asking about comes from the current project's own declared list
+    /// (`board_settings::repos()`), never from scanning this file's own
+    /// entries wholesale. A declared name with no matching entry here (or one
+    /// whose board no longer exists — `has_board()`) is what `amdui` shows
+    /// greyed out, not an error and not silently omitted.
+    pub fn find(&self, name: &str) -> Option<&Entry> {
+        self.entries.iter().find(|entry| entry.name == name)
     }
 }
 
@@ -261,39 +230,14 @@ mod tests {
     }
 
     #[test]
-    fn working_in_a_repository_remembers_it_once() {
+    fn find_locates_a_registered_repo_by_name() {
         let dir = tempfile::tempdir().unwrap();
         let alpha = repo(dir.path(), "alpha");
-        let config = dir.path().join("config/repos");
-
-        assert!(remember_in(&config, &alpha), "first visit registers");
-        assert!(
-            !remember_in(&config, &alpha),
-            "second visit changes nothing"
-        );
-        let registry = Registry::load_from(&config);
-        assert_eq!(registry.entries.len(), 1);
-        assert_eq!(registry.entries[0].name, "alpha");
-    }
-
-    #[test]
-    fn remembering_leaves_the_rest_of_the_list_alone() {
-        let dir = tempfile::tempdir().unwrap();
-        let alpha = repo(dir.path(), "alpha");
-        let beta = repo(dir.path(), "beta");
-        let config = dir.path().join("config/repos");
-
         let mut registry = Registry::default();
-        registry.add(&beta).unwrap();
-        registry.save_to(&config).unwrap();
+        registry.add(&alpha).unwrap();
 
-        remember_in(&config, &alpha);
-        let names: Vec<String> = Registry::load_from(&config)
-            .entries
-            .iter()
-            .map(|entry| entry.name.clone())
-            .collect();
-        assert_eq!(names, ["alpha", "beta"]);
+        assert_eq!(registry.find("alpha").unwrap().root, alpha);
+        assert!(registry.find("nope").is_none());
     }
 
     #[test]

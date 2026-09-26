@@ -96,13 +96,11 @@ Environment:
   AMD_YES           set to 1 to create a missing board without prompting
   AMD_NO_INPUT      set to 1 to never prompt (same as --no-input)
   AMD_NO_BRANCH     set to 1 to never create branches (same as --no-branch)
-  AMD_NO_REGISTER   set to 1 to keep the repository list manual
   NO_COLOR          set to any value for plain output (same as --plain)
   EDITOR            editor used by `amd edit` (default: vi)
 
-AMD_BRANCH_TYPES, EDITOR and AMD_NO_REGISTER can also be set in the settings
-file (`branch-types`, `editor`, `no-register`) — the environment variable
-wins when both are set.
+AMD_BRANCH_TYPES and EDITOR can also be set in the settings file
+(`branch-types`, `editor`) — the environment variable wins when both are set.
 
 Creating a task interactively ends in $EDITOR with the rendered ticket, so
 the notes and checklist get filled in there and then (--no-edit to skip).
@@ -287,10 +285,17 @@ enum Cmd {
         #[command(subcommand)]
         command: Option<GroupCmd>,
     },
-    /// Register repositories so their boards can be seen together
-    Repos {
-        #[command(subcommand)]
-        command: Option<ReposCmd>,
+    /// Register a repository — declares its name for the whole project
+    /// (shared, git-tracked) and its path on this machine (local only)
+    Register {
+        #[arg(value_name = "PATH")]
+        path: Option<String>,
+    },
+    /// Remove a repository's *local* registration only — the project-wide
+    /// declaration is untouched, so it reappears greyed out, not gone
+    Deregister {
+        #[arg(value_name = "NAME")]
+        name: String,
     },
     /// Link tickets together: both ends get the other in `related`
     Link {
@@ -417,22 +422,6 @@ enum GroupCmd {
 }
 
 #[derive(Subcommand, Debug)]
-enum ReposCmd {
-    /// List the registered repositories (the default)
-    List,
-    /// Register a repository; defaults to the one you're in
-    Add {
-        #[arg(value_name = "PATH")]
-        path: Option<PathBuf>,
-    },
-    /// Unregister a repository, by path or by name
-    Remove {
-        #[arg(value_name = "PATH|NAME")]
-        repo: String,
-    },
-}
-
-#[derive(Subcommand, Debug)]
 enum TemplateCmd {
     /// List the available templates (the default)
     List,
@@ -481,12 +470,6 @@ fn run() -> Result<()> {
         return completions::print(shell, &mut Cli::command());
     }
 
-    // Nor does the registry: it's a list of repositories, and asking what's on
-    // it shouldn't put the current one there. `amd repos` works anywhere.
-    if let Cmd::Repos { command } = command {
-        return cmd_repos(command.unwrap_or(ReposCmd::List));
-    }
-
     // The desktop board draws every registered repository, so it must not
     // insist on standing in one — `amd gui` works from anywhere. The `amdui`
     // binary is the same call without the subcommand.
@@ -505,16 +488,15 @@ fn run() -> Result<()> {
     }
 
     let board = ensure_board()?;
-    // Every repository you work in joins the list, so the boards you actually
-    // use are all there next session without anyone curating them.
-    agile_md::registry::remember(&board);
     // Notices if this board's declared project identity has silently
     // changed since amd last saw it — see project_trust.rs.
     agile_md::project_trust::check(&board)?;
     match command {
-        Cmd::Init { .. } | Cmd::Completions { .. } | Cmd::Repos { .. } | Cmd::Gui => {
+        Cmd::Init { .. } | Cmd::Completions { .. } | Cmd::Gui => {
             unreachable!("handled above")
         }
+        Cmd::Register { path } => cmd_register(&board, path.as_deref()),
+        Cmd::Deregister { name } => cmd_deregister(&name),
         Cmd::New(args) => cmd_new(&board, args),
         Cmd::Board { tag } => cmd_ls(&board, "all", tag.as_deref()),
         Cmd::Ls { column, tag } => cmd_ls(&board, &column, tag.as_deref()),
@@ -960,55 +942,52 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
     }
 }
 
-/// The registry is a list of repositories, not a copy of their tickets: the
-/// markdown is the source of truth and it changes under you.
-fn cmd_repos(command: ReposCmd) -> Result<()> {
+/// Registers a repository, both halves at once: declares its name for the
+/// whole project (`board.settings`, shared, git-tracked — everyone sees it
+/// listed on their next pull) and its path on this machine
+/// (`registry.rs`, local, never shared). `path` defaults to the repository
+/// you're standing in, same as the old `amd repos add`. Both halves are
+/// idempotent, so registering something already declared/already local is
+/// never an error.
+fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
+    let path = match path {
+        Some(path) => PathBuf::from(path),
+        None => git::repo_root().ok_or_else(|| anyhow::anyhow!("not inside a git repository"))?,
+    };
+    let canonical = path
+        .canonicalize()
+        .with_context(|| format!("{} doesn't exist", path.display()))?;
+    let name = canonical
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .ok_or_else(|| anyhow::anyhow!("{} has no name", canonical.display()))?;
+
+    let mut settings = board_settings::load(board);
+    settings.declare_repo(&name)?;
+    settings.save(board)?;
+
     let mut registry = Registry::load();
-    match command {
-        ReposCmd::List => {
-            if registry.entries.is_empty() {
-                println!("(no repositories registered — add one with: amd repos add)");
-                return Ok(());
-            }
-            let width = registry
-                .entries
-                .iter()
-                .map(|entry| entry.name.len())
-                .max()
-                .unwrap_or(0);
-            for entry in &registry.entries {
-                let board = if entry.has_board() {
-                    ""
-                } else {
-                    "  (no board)"
-                };
-                println!("{:width$}  {}{board}", entry.name, entry.root.display());
-            }
-            Ok(())
-        }
-        ReposCmd::Add { path } => {
-            let path = match path {
-                Some(path) => path,
-                None => git::repo_root()
-                    .ok_or_else(|| anyhow::anyhow!("not inside a git repository"))?,
-            };
-            let added = registry.add(&path)?;
-            registry.save()?;
-            match added {
-                true => println!("registered {}", path.display()),
-                false => println!("{} was already registered", path.display()),
-            }
-            Ok(())
-        }
-        ReposCmd::Remove { repo } => {
-            if !registry.remove(&repo) {
-                bail!("'{repo}' is not registered");
-            }
-            registry.save()?;
-            println!("unregistered {repo}");
-            Ok(())
-        }
+    let added = registry.add(&canonical)?;
+    registry.save()?;
+
+    match added {
+        true => println!("registered {name}"),
+        false => println!("{name} was already registered on this machine"),
     }
+    Ok(())
+}
+
+/// Removes only the *local* registration — the project-wide declaration is
+/// untouched, so `name` goes back to showing greyed out in `amdui` rather
+/// than disappearing for the rest of the team.
+fn cmd_deregister(name: &str) -> Result<()> {
+    let mut registry = Registry::load();
+    if !registry.remove(name) {
+        bail!("'{name}' is not registered on this machine");
+    }
+    registry.save()?;
+    println!("deregistered {name} on this machine (still declared for the project)");
+    Ok(())
 }
 
 /// `@me` is whoever git says you are — the name that ends up in the commits.

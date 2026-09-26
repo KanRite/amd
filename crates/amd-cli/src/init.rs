@@ -83,7 +83,13 @@ fn init_here(project: &str) -> Result<()> {
     let board = Board::locate()?;
     board.create()?;
     set_project(&board, project)?;
-    agile_md::registry::remember(&board);
+    // Best-effort, same as the non-local-only path above: registering this
+    // machine's own copy of the board it was just created in, so it's
+    // findable without a separate `amd register` immediately afterward.
+    let mut registry = Registry::load();
+    if registry.add(board.repo_root()).is_ok() {
+        let _ = registry.save();
+    }
     println!("Initialised agile-md board at {}", board.root.display());
     Ok(())
 }

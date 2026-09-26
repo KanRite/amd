@@ -19,9 +19,10 @@ Options:
   -h, --help     Print this help
   -V, --version  Print the version
 
-The board draws every repository on the registry, so it runs from anywhere —
-you don't have to be standing in one. `amd repos` lists them, `amd` is the
-command line, and `amd gui` opens this same window.";
+The board resolves the current project from where it's launched (a plain
+directory holding a project's sibling repos, or a repo inside one), plus
+whatever else that project has registered — `amd register`/`amd deregister`
+manage that. `amd` is the command line, `amd gui` opens this same window.";
 
 fn main() -> ExitCode {
     // Deliberately no clap: a window takes no arguments, and the two flags

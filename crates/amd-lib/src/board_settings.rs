@@ -20,14 +20,23 @@
 //! - `lease-hours`: how long a taken ticket lease lasts before it lapses on
 //!   its own (`docs/adr/0007-concurrency-and-locking.md`). Unlike the two
 //!   above, nothing writes this programmatically — it's meant to be
-//!   hand-edited, the same as `branch-types`/`editor`/`no-register` in the
-//!   *global* settings file, just board-local rather than per-machine
+//!   hand-edited, the same as `branch-types`/`editor` in the *global*
+//!   settings file, just board-local rather than per-machine
 //!   because a lease policy is a team decision, not a personal preference.
 //! - `wip-todo`/`wip-doing`: the most tickets `todo/`/`doing/` may hold at
 //!   once. Absent (the default) means unlimited — board-local for the same
 //!   reason as `lease-hours` (a team decision, not a personal one), but
 //!   unlike it there is a programmatic setter (`set_wip_limit`) — `amdui`'s
 //!   Settings modal writes it, not just a hand edit.
+//! - `repos`: the *declared* names of every repository this project spans
+//!   — comma-separated, same shape the global settings file's
+//!   `branch-types` already uses. Shared and git-tracked deliberately: one
+//!   team member adding a repository means everyone sees it listed on their
+//!   next pull. This is one half of registration; the other half —
+//!   whether *this machine* actually has a declared name cloned, and
+//!   where — is `registry.rs`'s job, per-machine and never shared. A name
+//!   declared here with no matching local registry entry is what `amdui`
+//!   shows greyed out.
 //!
 //! One repository, one settings file — a repository with more than one
 //! board (two different `AMD_DIR` trees) shares this file and its counter
@@ -46,6 +55,7 @@ const LEASE_HOURS: &str = "lease-hours";
 const DEFAULT_LEASE_HOURS: f64 = 8.0;
 const WIP_TODO: &str = "wip-todo";
 const WIP_DOING: &str = "wip-doing";
+const REPOS: &str = "repos";
 
 /// `<repo-root>/.settings` — a sibling of the board directory, not inside it.
 pub fn path(board: &Board) -> std::path::PathBuf {
@@ -138,6 +148,35 @@ impl BoardSettings {
         };
         let value = limit.filter(|l| *l > 0).map(|l| l.to_string());
         self.config.set(key, value.as_deref().unwrap_or(""));
+        Ok(())
+    }
+
+    /// The declared repository names this project spans, in the order they
+    /// were added. Whether any of them are actually cloned on this machine
+    /// is `registry.rs`'s question, not this one.
+    pub fn repos(&self) -> Vec<String> {
+        self.config
+            .get(REPOS)
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Declares a repository name as part of this project. Idempotent —
+    /// declaring a name that's already there changes nothing, the same way
+    /// re-running `amd init <project>` against its own project is a no-op —
+    /// registering something twice, locally or for the team, should never
+    /// be an error.
+    pub fn declare_repo(&mut self, name: &str) -> Result<()> {
+        validate_project_name(name)?;
+        let mut names = self.repos();
+        if !names.iter().any(|existing| existing == name) {
+            names.push(name.to_string());
+            self.config.set(REPOS, &names.join(","));
+        }
         Ok(())
     }
 
@@ -382,6 +421,42 @@ mod tests {
         let mut settings = load(&board(dir.path()));
         assert!(settings.set_wip_limit(Column::Backlog, Some(1)).is_err());
         assert!(settings.set_wip_limit(Column::Done, Some(1)).is_err());
+    }
+
+    #[test]
+    fn repos_defaults_to_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(load(&board(dir.path())).repos().is_empty());
+    }
+
+    #[test]
+    fn declare_repo_round_trips_and_preserves_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.declare_repo("amd-documents").unwrap();
+        settings.declare_repo("amd-ui").unwrap();
+        settings.save(&board).unwrap();
+        assert_eq!(load(&board).repos(), ["amd-documents", "amd-ui"]);
+    }
+
+    #[test]
+    fn declaring_the_same_repo_twice_is_a_silent_no_op() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.declare_repo("amd-ui").unwrap();
+        settings.declare_repo("amd-ui").unwrap();
+        settings.save(&board).unwrap();
+        assert_eq!(load(&board).repos(), ["amd-ui"]);
+    }
+
+    #[test]
+    fn declare_repo_validates_the_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = load(&board(dir.path()));
+        assert!(settings.declare_repo("has a space").is_err());
+        assert!(settings.declare_repo("has/a/slash").is_err());
     }
 
     #[test]
