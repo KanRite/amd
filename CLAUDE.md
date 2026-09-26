@@ -128,6 +128,18 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 
 - `Board::locate()` resolves the board as `$(git rev-parse --show-toplevel)/${AMD_DIR:-tasks}`,
   so `amd` works from any subdirectory; it errors if not inside a git repo.
+- `Board::discover()` is `locate()` plus one fallback, used by `ensure_board()`
+  and the GUI's `BoardApp::load()` (not by `amd init --local-only` or `amd
+  repos add` with no path, both of which specifically mean "the repo I'm
+  standing in"): when the current directory isn't inside a git repository at
+  all, it looks at the directory's own immediate children for exactly one
+  that's both a git repo and has a board of its own
+  (`project_siblings()`) — the layout `amd init <project>` creates, a plain
+  parent folder holding `{project}-tickets` (and optionally
+  `{project}-documents`) as siblings. Lets `amd`/`amdui` run from that
+  parent directory itself, not only one `cd` deeper. Two or more qualifying
+  children is an error naming all of them, never a guess, same as `find`
+  on an ambiguous ticket reference.
 - Tasks are `NNN-slug.md`. `Board::next_id()` takes whichever is higher of the
   counter (the board-local settings file's `next-id` key, `<repo-root>/.settings`
   — a board that predates the move still has the legacy `<board>/.next-id`
@@ -495,16 +507,20 @@ changes):
   repo Backlog would.
 - **`backlog_repo`'s initial value is looked up, never assumed to be `0`.**
   `home_repo_index()` finds the repo `amdui`/`amd gui` was actually launched
-  from by matching `Board::locate()`'s root against `self.repos`. This used
-  to be hardcoded to `0` in three places (`BoardApp::load()`'s init, and
-  both `View::Board`'s "New ticket"/"Add epic" arms, which read `0` where
-  `View::Backlog` read `self.backlog_repo`) — a real bug, not a stylistic
-  inconsistency: `Registry::add()` sorts entries alphabetically once a
-  repository is registered (the normal case — both binaries auto-register),
-  so index `0` is whichever repo's name sorts first, not the one you're
-  standing in. `amdui` launched from `oberi-kitchen-tickets` would open
-  showing (and creating tickets in) `agile-md-tickets` purely because "a"
-  sorts before "o", with no relationship to the current directory at all.
+  from by matching `Board::discover()`'s root against `self.repos` (`load()`
+  used plain `locate()` until `discover()` existed — see above; `.ok()`
+  quietly falls back to "no current board" for an ambiguous match, same as
+  any other resolution failure, so the GUI needs no ambiguity handling of
+  its own). This used to be hardcoded to `0` in three places
+  (`BoardApp::load()`'s init, and both `View::Board`'s "New ticket"/"Add
+  epic" arms, which read `0` where `View::Backlog` read `self.backlog_repo`)
+  — a real bug, not a stylistic inconsistency: `Registry::add()` sorts
+  entries alphabetically once a repository is registered (the normal case —
+  both binaries auto-register), so index `0` is whichever repo's name sorts
+  first, not the one you're standing in. `amdui` launched from
+  `oberi-kitchen-tickets` would open showing (and creating tickets in)
+  `agile-md-tickets` purely because "a" sorts before "o", with no
+  relationship to the current directory at all.
 
 ## Conventions
 

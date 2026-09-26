@@ -148,6 +148,45 @@ impl Board {
         )
     }
 
+    /// `locate()`, and — only when that fails because the current directory
+    /// isn't inside a git repository at all — a fallback for the layout
+    /// `amd init <project>` now creates: a plain parent directory holding
+    /// `{project}-tickets` (and optionally `{project}-documents`) as
+    /// siblings. Lets `amd`/`amdui` be run from that parent directory
+    /// itself, not only from one `cd` deeper inside the tickets repository.
+    ///
+    /// Not tied to the `-tickets` naming convention specifically — any
+    /// immediate child that is both a git repository and has a board of its
+    /// own qualifies, the same `has_board()` test the registry already uses
+    /// elsewhere. Two or more qualifying children is an error naming all of
+    /// them, never a silent guess, the same principle `find` already applies
+    /// to an ambiguous ticket reference.
+    pub fn discover() -> Result<Board> {
+        if let Ok(board) = Board::locate() {
+            return Ok(board);
+        }
+        let cwd = env::current_dir().context("reading the current directory")?;
+        match project_siblings(&cwd).as_slice() {
+            [only] => Ok(Board::in_repo(only)),
+            [] => bail!(
+                "not inside a git repository, and no project board among this directory's own \
+                 subdirectories either (agile-md boards live at <repo>/{})",
+                dir_name()
+            ),
+            many => {
+                let names: Vec<String> = many
+                    .iter()
+                    .filter_map(|path| path.file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .collect();
+                bail!(
+                    "more than one project board here ({}); cd into one directly",
+                    names.join(", ")
+                )
+            }
+        }
+    }
+
     /// The board directory's name (`tasks`), for display and templates.
     pub fn name(&self) -> String {
         self.root
@@ -705,6 +744,28 @@ fn dir_name() -> String {
         .ok()
         .filter(|dir| !dir.is_empty())
         .unwrap_or_else(|| DEFAULT_DIR.to_string())
+}
+
+/// Every immediate child of `dir` that is both a git repository and has a
+/// board of its own — the candidates `Board::discover()` chooses from.
+/// Separated out so it can be tested against a real temporary directory
+/// without touching the process's current directory, which `discover()`
+/// itself reads and which isn't safe to mutate with tests running in
+/// parallel (`registry.rs`'s `remember_in` uses the same split, for the
+/// same reason). A directory that can't be read (removed mid-scan, no
+/// permission) contributes no candidates rather than failing the whole
+/// scan — the same "best effort" stance the registry takes elsewhere.
+fn project_siblings(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.join(".git").is_dir() && path.join(dir_name()).is_dir())
+        .collect();
+    found.sort();
+    found
 }
 
 #[cfg(test)]
@@ -1352,5 +1413,55 @@ mod tests {
         assert_eq!(Column::parse("todo"), Some(Column::Todo));
         assert_eq!(Column::parse("Backlog"), Some(Column::Backlog));
         assert_eq!(Column::parse("archive"), None);
+    }
+
+    /// A child that qualifies as a project sibling: a git repo with a board
+    /// of its own. `project_siblings` only checks for directories, not a
+    /// real git repository, so a bare `.git` dir is enough here.
+    fn project_child(parent: &Path, name: &str) {
+        let child = parent.join(name);
+        fs::create_dir_all(child.join(".git")).unwrap();
+        board_at(&child);
+    }
+
+    #[test]
+    fn project_siblings_finds_nothing_in_an_empty_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(project_siblings(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn project_siblings_ignores_plain_directories_and_half_qualified_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("not-a-repo")).unwrap();
+        // A git repo with no board of its own.
+        fs::create_dir_all(dir.path().join("code-only/.git")).unwrap();
+        // A board-shaped directory that isn't a git repository.
+        board_at(&dir.path().join("board-but-no-git"));
+        assert!(project_siblings(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn project_siblings_finds_the_one_qualifying_child() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("not-a-repo")).unwrap();
+        project_child(dir.path(), "acme-tickets");
+        let found = project_siblings(dir.path());
+        assert_eq!(found, vec![dir.path().join("acme-tickets")]);
+    }
+
+    #[test]
+    fn project_siblings_finds_every_qualifying_child_sorted() {
+        let dir = tempfile::tempdir().unwrap();
+        project_child(dir.path(), "widgets-tickets");
+        project_child(dir.path(), "acme-tickets");
+        let found = project_siblings(dir.path());
+        assert_eq!(
+            found,
+            vec![
+                dir.path().join("acme-tickets"),
+                dir.path().join("widgets-tickets"),
+            ]
+        );
     }
 }

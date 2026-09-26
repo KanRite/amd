@@ -194,7 +194,7 @@ fn card_visible(card: &Card, filter: &BTreeSet<String>) -> bool {
 
 impl BoardApp {
     pub fn load() -> Result<Self> {
-        let current = Board::locate().ok();
+        let current = Board::discover().ok();
         let registry = Registry::load();
         let entries = registry.boards(current.as_ref());
 

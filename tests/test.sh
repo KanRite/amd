@@ -100,6 +100,28 @@ mkdir -p deep/nested
 assert "runs from a subdir (finds repo-root board)" \
   bash -c "cd deep/nested && '${AMD}' board | grep -q TODO"
 
+echo "discovery from a project's parent directory (not itself a git repo):"
+# The amd init <project> layout: a plain folder (not a git repo itself)
+# holding {project}-tickets as a child. amd board should find it without
+# needing to cd one level deeper.
+plain_parent="$(mktemp -d)"
+mkdir -p "${plain_parent}/solo-tickets/tasks"
+( cd "${plain_parent}/solo-tickets" && git init -q && git config user.email t@t.co && git config user.name t \
+  && git add -A && git commit -q -m seed --allow-empty )
+assert "amd board finds the one project sibling from its parent directory" \
+  bash -c "cd '${plain_parent}' && '${AMD}' board --plain | grep -q TODO"
+mkdir -p "${plain_parent}/second-tickets/tasks"
+( cd "${plain_parent}/second-tickets" && git init -q && git config user.email t@t.co && git config user.name t )
+assert "two project siblings is an ambiguity error, not a guess" \
+  bash -c "cd '${plain_parent}' && '${AMD}' board 2>&1 | grep -q 'more than one project board'"
+assert "an unrelated empty directory still errors as before" \
+  bash -c "cd '${nongit}' && '${AMD}' board 2>&1 | grep -q 'not inside a git repository'"
+# The successful discovery above registers solo-tickets, same as any other
+# board resolution would — undo it here for the same reason every other
+# such case in this suite does (see "found locally" above): a later,
+# unrelated assertion expects an exhaustive registry count.
+"${AMD}" repos remove solo-tickets >/dev/null 2>&1
+
 echo "create:"
 "${AMD}" new "First task" >/dev/null
 "${AMD}" new "Second task" -t x -t y >/dev/null
