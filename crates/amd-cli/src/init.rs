@@ -90,7 +90,13 @@ fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<std::pa
     if created_new {
         git::commit_all(&target, &format!("Initialise {project} tickets board"))?;
         git::push(&target)?;
-        github::protect_main(&full_name, false)?;
+        if let github::ProtectionOutcome::Unavailable = github::protect_main(&full_name, false)? {
+            eprintln!(
+                "warning: {full_name} has no branch protection — GitHub Pro is required for a \
+                 private repository on this plan. Direct pushes still work; force-pushes and \
+                 branch deletion just aren't blocked."
+            );
+        }
     }
 
     let mut registry = Registry::load();
@@ -125,7 +131,15 @@ fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<std::
     if created_new {
         git::commit_all(&target, &format!("Initialise {project} documents"))?;
         git::push(&target)?;
-        github::protect_main(&full_name, true)?;
+        if let github::ProtectionOutcome::Unavailable = github::protect_main(&full_name, true)? {
+            eprintln!(
+                "warning: {full_name} has no branch protection — GitHub Pro is required for a \
+                 private repository on this plan, so PR review is NOT enforced yet. Anyone with \
+                 push access can commit straight to main until this repository (or its owning \
+                 account/org) is upgraded — set protection up by hand once it is, or treat \
+                 review as a convention rather than a guarantee until then."
+            );
+        }
     }
 
     Ok(target)

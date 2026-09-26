@@ -93,7 +93,15 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   branch protection on `main` via `gh api`, the two tiers `init.rs` uses.
   Shells out rather than linking a forge API client, extending `git.rs`'s
   own stated reasoning to the forge
-  (`rfc/0004-reducing-forge-specific-dependencies.md`).
+  (`rfc/0004-reducing-forge-specific-dependencies.md`). Returns
+  `ProtectionOutcome::Unavailable`, not an error, on the one `403` confirmed
+  live against a real free-plan org: `Upgrade to GitHub Pro` — a private
+  repo on that plan can't get **any** tier via the API (classic protection
+  or the newer rulesets endpoint both refuse every payload, even the
+  tickets tier's minimal force-push/deletion block), and personal accounts
+  and orgs can be on different plans, so this is a per-run condition, not
+  something to assume from an earlier check. `init.rs` warns and continues
+  rather than failing `amd init` after both repositories already exist.
 - `crates/amd-cli/src/autocommit.rs` — wraps `main.rs`'s whole command match
   in one before/after `git::changed_paths` diff (`crate::command_verb`
   supplies the verb from the `Cmd` variant itself, including the real

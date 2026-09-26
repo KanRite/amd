@@ -9,6 +9,22 @@ use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 
+/// Whether `protect_main` actually applied protection.
+pub enum ProtectionOutcome {
+    /// The branch is protected as asked.
+    Applied,
+    /// GitHub refused the entire endpoint — `repos/{full}/branches/main/protection`
+    /// requires GitHub Pro (or a public repository) for a private repo,
+    /// confirmed live against a real free-plan org: **both** the classic API
+    /// and the newer rulesets API return `403 Upgrade to GitHub Pro` for
+    /// every payload, including one asking for nothing beyond blocking a
+    /// force-push or deletion. There is no partial tier available through
+    /// the API on the free plan — it's all-or-nothing, and on this plan it's
+    /// nothing. Not an error: the repository still exists and works, just
+    /// without this guard, and the caller decides how loudly to say so.
+    Unavailable,
+}
+
 /// Sets `main`'s branch protection on `full_name` (`owner/repo`).
 ///
 /// Both tiers block a force-push or a deletion of `main`, and both run with
@@ -25,7 +41,7 @@ use anyhow::{Context, Result, bail};
 /// pusher's own PRs permanently unmergeable elsewhere in this org — a solo
 /// human (or an agent acting for them) self-approving is still a real PR
 /// with a real diff, just not a second person's review.
-pub fn protect_main(full_name: &str, require_review: bool) -> Result<()> {
+pub fn protect_main(full_name: &str, require_review: bool) -> Result<ProtectionOutcome> {
     let body = if require_review {
         r#"{
             "required_status_checks": null,
@@ -72,11 +88,15 @@ pub fn protect_main(full_name: &str, require_review: bool) -> Result<()> {
         .context("writing branch protection payload to gh api")?;
 
     let out = child.wait_with_output().context("waiting for gh api")?;
-    if !out.status.success() {
-        bail!(
-            "gh api branch protection for {full_name} failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
+    if out.status.success() {
+        return Ok(ProtectionOutcome::Applied);
     }
-    Ok(())
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr.contains("Upgrade to GitHub Pro") {
+        return Ok(ProtectionOutcome::Unavailable);
+    }
+    bail!(
+        "gh api branch protection for {full_name} failed: {}",
+        stderr.trim()
+    );
 }
