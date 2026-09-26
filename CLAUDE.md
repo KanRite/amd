@@ -129,9 +129,12 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 - `Board::locate()` resolves the board as `$(git rev-parse --show-toplevel)/${AMD_DIR:-tasks}`,
   so `amd` works from any subdirectory; it errors if not inside a git repo.
 - `Board::discover()` is `locate()` plus one fallback, used by `ensure_board()`
-  and the GUI's `BoardApp::load()` (not by `amd init --local-only` or `amd
-  repos add` with no path, both of which specifically mean "the repo I'm
-  standing in"): when the current directory isn't inside a git repository at
+  (so `amd register` goes through it too, like any other ordinary command —
+  it's only the *path* `amd register` defaults to when none is given that
+  still resolves via `git::repo_root()`, unchanged, since that specifically
+  means "the repo I'm standing in") and the GUI's `BoardApp::load()`. Not
+  used by `amd init --local-only`, for the same "repo I'm standing in"
+  reason: when the current directory isn't inside a git repository at
   all, it looks at the directory's own immediate children for exactly one
   that's both a git repo and has a board of its own
   (`project_siblings()`) — the layout `amd init <project>` creates, a plain
@@ -219,14 +222,15 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   non-interactively).
 - Env vars: `AMD_DIR` (board dir name, default `tasks`), `AMD_BRANCH_TYPES`
   (the branch types on offer), `AMD_YES` (force-create), `AMD_NO_INPUT` (never
-  prompt), `AMD_NO_BRANCH` (never touch branches), `AMD_NO_REGISTER` (keep the
-  repository list manual), `NO_COLOR`/`--plain` (plain board), `EDITOR` (for
-  `amd edit`), `AMD_LEASE_HOURS` (lease duration, default 8), `AMD_WIP_TODO`/
-  `AMD_WIP_DOING` (WIP limits, unset = unlimited). **`AMD_TYPES` is
-  dead** — it was in `--help` long after nothing read it. `AMD_BRANCH_TYPES`,
-  `EDITOR` and `AMD_NO_REGISTER` also fall back to the settings file
-  (`branch-types`/`editor`/`no-register`) when unset — the env var wins when
-  both are set (`settings::resolved()`). `AMD_LEASE_HOURS`/`AMD_WIP_TODO`/
+  prompt), `AMD_NO_BRANCH` (never touch branches), `NO_COLOR`/`--plain`
+  (plain board), `EDITOR` (for `amd edit`), `AMD_LEASE_HOURS` (lease
+  duration, default 8), `AMD_WIP_TODO`/`AMD_WIP_DOING` (WIP limits, unset =
+  unlimited). **`AMD_TYPES` is dead** — it was in `--help` long after
+  nothing read it. **`AMD_NO_REGISTER` is also gone** (2026-09-26) —
+  registration is a deliberate act (`amd register`) again, not something
+  running in the background to opt out of. `AMD_BRANCH_TYPES` and `EDITOR`
+  also fall back to the settings file (`branch-types`/`editor`) when unset —
+  the env var wins when both are set (`settings::resolved()`). `AMD_LEASE_HOURS`/`AMD_WIP_TODO`/
   `AMD_WIP_DOING` follow the same precedence against the *board-local*
   `.settings`'s `lease-hours`/`wip-todo`/`wip-doing` keys instead — both are
   team decisions, not personal ones.
@@ -332,30 +336,54 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 - Template errors are flattened by `render_error()` (message + line + cause
   chain + MiniJinja debug info); without that only the top line survives.
 
-## Several repositories (`crates/amd-lib/src/registry.rs`)
+## Several repositories: declared names + local paths, not one shared list
 
-- The registry is **a list of repository paths and nothing else**, one per line
-  at `$XDG_CONFIG_HOME/agile-md/repos`. There is deliberately no store of
-  tickets: the markdown is the source of truth, it changes under you on every
-  checkout and pull, and an index would be stale the moment it was written.
-  Reading a board is a directory listing and a few small files.
-- **The list fills itself**: `registry::remember()` runs whenever a command
-  resolves a board, writing only the first time a repository is seen, so the
-  boards you work on accumulate across sessions. Best effort — a read-only
-  config directory must not stop `amd board`. `AMD_NO_REGISTER=1` opts out, and
-  only then does `amd repos remove` stick.
-- **`amd repos` and `amd completions` run before the board is resolved.** Asking
-  what's on the list must not add to it, and both have to work outside a repo.
-  That bug shipped for one commit and the CLI suite now covers it.
-- `Registry::boards()` always includes the repository you're standing in, listed
-  or not — you should never open the board and not see the one you're in.
+Two cooperating halves, deliberately kept separate — reworked 2026-09-26
+after the old single, per-machine registry predated the two-repo topology
+and stacked *every* repository ever worked in, across every unrelated
+project, into one `amdui` window:
+
+- **Declared** (`board_settings::repos()`/`declare_repo()`, board-local
+  `.settings`, git-tracked): the repository *names* a project spans, shared
+  with the whole team. One member adding a repository means everyone sees
+  it listed on their next pull. Comma-separated, same shape the global
+  settings file's `branch-types` already uses — no new persistence
+  mechanism.
+- **Registered** (`crates/amd-lib/src/registry.rs`, `$XDG_CONFIG_HOME/agile-md/repos`,
+  per-machine, unchanged in shape from before): whether a declared name is
+  actually cloned on *this* machine, and where. `Registry::find(name)` is
+  the only question this file answers now — *which* names are worth asking
+  about always comes from the current project's own declared list, never
+  from scanning this file's entries wholesale. There is deliberately no
+  store of tickets in either half: the markdown is the source of truth, it
+  changes under you on every checkout and pull, and an index would be
+  stale the moment it was written.
+- **`amd register [path]`** (defaults to the repo you're in) does both
+  halves at once — declares the name for the project, registers the path
+  locally — and is the *only* writer now. Registration is deliberate again:
+  `registry::remember()`'s run-on-every-command auto-fill is gone, along
+  with `AMD_NO_REGISTER` (nothing left to opt out of).
+- **`amd deregister <name>`** removes only the *local* registration. The
+  declared list is untouched on purpose — you not having a repository
+  cloned right now shouldn't silently un-declare it for the rest of the
+  team. It goes back to showing greyed out for you, the same state a
+  teammate who's never registered it at all would see.
+- **`BoardApp::load()` (`gui/mod.rs`) cross-references the two.** `Board::discover()`
+  finds the current project (a hard error now if none is found — `amdui`
+  operates on exactly one project, never a cross-project stack); its own
+  board is always `repos[0]`. Each declared name with a registered,
+  board-having local entry becomes another `RepoBoard`; each declared name
+  *without* one goes into `unregistered` and renders greyed out and inert
+  in the `View::Board` repo row — visible, so a teammate who's added a
+  repository knows it exists, not silently omitted.
 - Ids restart at 001 in every repository, so a `Card` carries which repo it came
   from; the board shows the name whenever more than one is in view, and a move
   goes through *that* repository's `Board`, not the current one. A drag between
   repositories is refused: the ticket would need a new id, not a rename.
-- `load_from`/`save_to` take a path, so tests need no environment mutation. The
-  CLI suite sets `XDG_CONFIG_HOME` to a temp dir — `amd repos add` writes to the
-  config directory and a test must never touch the user's.
+- `Registry::load_from`/`save_to` take a path, so tests need no environment
+  mutation. The CLI suite sets `XDG_CONFIG_HOME` to a temp dir — `amd
+  register` writes to the config directory and a test must never touch the
+  user's.
 
 ## Completions
 
@@ -577,22 +605,23 @@ changes):
 - **`GroupDraft.repo` and `New ticket` both resolve to `self.backlog_repo`
   regardless of which view is showing** — Board has no repo selector of
   its own, so it targets the same repo Backlog would.
-- **`backlog_repo`'s initial value is looked up, never assumed to be `0`.**
-  `home_repo_index()` finds the repo `amdui`/`amd gui` was actually launched
-  from by matching `Board::discover()`'s root against `self.repos` (`load()`
-  used plain `locate()` until `discover()` existed — see above; `.ok()`
-  quietly falls back to "no current board" for an ambiguous match, same as
-  any other resolution failure, so the GUI needs no ambiguity handling of
-  its own). This used to be hardcoded to `0` in three places
-  (`BoardApp::load()`'s init, and both `View::Board`'s "New ticket"/"Add
-  epic" arms, which read `0` where `View::Backlog` read `self.backlog_repo`)
-  — a real bug, not a stylistic inconsistency: `Registry::add()` sorts
-  entries alphabetically once a repository is registered (the normal case —
-  both binaries auto-register), so index `0` is whichever repo's name sorts
-  first, not the one you're standing in. `amdui` launched from
-  `oberi-kitchen-tickets` would open showing (and creating tickets in)
-  `agile-md-tickets` purely because "a" sorts before "o", with no
-  relationship to the current directory at all.
+- **`backlog_repo` is always `0` — and as of the declared/registered
+  registration split (2026-09-26), that's no longer a lookup, it's a fact
+  by construction.** `repos[0]` is the current project's own board,
+  pushed first in `load()` before anything from the declared list; nothing
+  after it can end up ahead of it. This is actually the *second* fix to
+  this value, worth knowing if `git blame` turns up the first: it used to
+  be hardcoded `0` against `Registry::add()`'s alphabetically-sorted,
+  cross-project entry list (the normal case, since both binaries
+  auto-registered every repo ever touched), which meant `amdui` launched
+  from `oberi-kitchen-tickets` could open showing `agile-md-tickets`
+  purely because "a" sorts before "o". That got a real fix,
+  `home_repo_index()`, matching `Board::discover()`'s root by position —
+  correct, but still a lookup against a list `0` had no natural
+  relationship to. Once registration stopped being a single cross-project
+  list and `repos` started life as "the current project first, then its
+  own declared repos", the lookup itself became unnecessary; removed
+  along with its tests rather than kept as a no-op.
 
 ## Conventions
 

@@ -13,7 +13,7 @@
 set -uo pipefail
 
 export AMD_NO_INPUT=1
-# Keep the suite away from the real registry and theme: `amd repos add` writes
+# Keep the suite away from the real registry and theme: `amd register` writes
 # to the config directory, and a test must never touch the user's.
 XDG_CONFIG_HOME="$(mktemp -d)/config"
 export XDG_CONFIG_HOME
@@ -62,10 +62,10 @@ periods_and_underscores="$(mktemp -d)"
 ( cd "${periods_and_underscores}" && git init -q && git config user.email t@t.co && git config user.name t )
 assert "periods and underscores are valid in a project name" \
   bash -c "cd '${periods_and_underscores}' && '${AMD}' init 'a.valid_name' --local-only >/dev/null && grep -q '^project = a.valid_name\$' .settings"
-# init --local-only registers the board it creates, same as any other amd
-# command would — undo it here so it doesn't count toward a later,
-# unrelated assertion that expects an exhaustive, empty registry.
-"${AMD}" repos remove "$(basename "${periods_and_underscores}")" >/dev/null 2>&1
+# init --local-only registers the board it creates locally — undo it here
+# so it doesn't leave a stray local-registry entry ahead of the dedicated
+# "registration:" tests below, which check that file's exact contents.
+"${AMD}" deregister "$(basename "${periods_and_underscores}")" >/dev/null 2>&1
 
 echo "init: a dedicated tickets repository, found locally:"
 # Deliberately a plain, non-git directory: `amd init <project>` must not
@@ -78,11 +78,10 @@ assert "amd init <project> works from a plain, non-git directory" \
   bash -c "cd '${plain_dir}' && '${AMD}' init widgets >/dev/null && test -d '${plain_dir}/widgets-tickets/tasks/backlog'"
 assert "the found-locally tickets repo's own board records the project" \
   bash -c "grep -q '^project = widgets\$' '${plain_dir}/widgets-tickets/.settings'"
-# Registering the sibling repo is a real, intended side effect of `amd init`,
-# but it pollutes the shared registry for every later assertion in this
-# suite that expects an exhaustive count — undo it here rather than let a
-# later, unrelated test fail with no clue why.
-"${AMD}" repos remove widgets-tickets >/dev/null 2>&1
+# Registering the sibling repo locally is a real, intended side effect of
+# `amd init` — undo it here so it doesn't leave a stray local-registry entry
+# ahead of the dedicated "registration:" tests below.
+"${AMD}" deregister widgets-tickets >/dev/null 2>&1
 
 echo "init: refuses to run inside an existing git repository:"
 guard_test="$(mktemp -d)"
@@ -93,7 +92,6 @@ assert "amd init <project> refuses to run inside an existing repository" \
   bash -c "cd '${guard_test}/code_repo' && '${AMD}' init gadgets 2>&1 | grep -q 'must not be run inside a git repository'"
 assert "nothing was created by the refused attempt" \
   test ! -e "${guard_test}/gadgets-tickets" -a ! -e "${guard_test}/code_repo/gadgets-tickets"
-"${AMD}" repos remove gadgets-tickets >/dev/null 2>&1
 
 echo "discovery from a subdirectory:"
 mkdir -p deep/nested
@@ -116,11 +114,8 @@ assert "two project siblings is an ambiguity error, not a guess" \
   bash -c "cd '${plain_parent}' && '${AMD}' board 2>&1 | grep -q 'more than one project board'"
 assert "an unrelated empty directory still errors as before" \
   bash -c "cd '${nongit}' && '${AMD}' board 2>&1 | grep -q 'not inside a git repository'"
-# The successful discovery above registers solo-tickets, same as any other
-# board resolution would — undo it here for the same reason every other
-# such case in this suite does (see "found locally" above): a later,
-# unrelated assertion expects an exhaustive registry count.
-"${AMD}" repos remove solo-tickets >/dev/null 2>&1
+# Unlike `amd init`, plain board discovery no longer registers anything on
+# its own — nothing to clean up here any more.
 
 echo "create:"
 "${AMD}" new "First task" >/dev/null
@@ -349,22 +344,30 @@ assert "@me resolves to the git user" \
   bash -c "'${AMD}' assign 1 @me >/dev/null && grep -q '^assignee: \"t\"$' tasks/*/001-first-task.md"
 assert "the board shows the assignee" bash -c "'${AMD}' board --plain | grep -q '@t'"
 
-echo "repositories:"
-assert "working in a repository remembers it" \
-  bash -c "'${AMD}' repos | grep -q \"$(basename "${tmp}")\""
-assert "it is remembered once, not once per command" \
-  bash -c "'${AMD}' board >/dev/null; '${AMD}' board >/dev/null; [ \"\$('${AMD}' repos | grep -c \"$(basename "${tmp}")\")\" = 1 ]"
-assert "AMD_NO_REGISTER keeps the list manual" \
-  bash -c "'${AMD}' repos remove \"$(basename "${tmp}")\" >/dev/null && AMD_NO_REGISTER=1 '${AMD}' board >/dev/null && '${AMD}' repos | grep -q 'no repositories registered'"
-assert "the current repository can be registered explicitly" \
-  bash -c "'${AMD}' repos add | grep -q 'registered'"
-assert "registering lists it by name" bash -c "'${AMD}' repos | grep -q \"$(basename "${tmp}")\""
-assert "registering twice is a no-op" bash -c "'${AMD}' repos add | grep -q 'already registered'"
+echo "registration:"
+tmp_name="$(basename "${tmp}")"
+# periods_and_underscores was deregistered earlier (right after its own
+# init --local-only) — reused here specifically because it's a real board
+# that's confirmed *not* currently registered, to check that merely running
+# a board-resolving command doesn't silently re-add it.
+assert "amd board no longer registers anything on its own" \
+  bash -c "cd '${periods_and_underscores}' && '${AMD}' board >/dev/null; \
+    ! grep -q \"$(basename "${periods_and_underscores}")\$\" \"\${XDG_CONFIG_HOME}/agile-md/repos\" 2>/dev/null"
+assert "amd register declares the repo for the project and registers it locally" \
+  bash -c "'${AMD}' register | grep -q 'registered' \
+    && grep -qE \"^repos = .*${tmp_name}\" .settings \
+    && grep -q \"${tmp_name}\$\" \"\${XDG_CONFIG_HOME}/agile-md/repos\""
+assert "registering the same path again is a local no-op, not an error" \
+  bash -c "'${AMD}' register | grep -q 'already registered on this machine'"
 assert "a non-repository is refused" \
-  bash -c "'${AMD}' repos add '${nongit}' 2>&1 | grep -q 'not a git repository'"
-assert "unregistering by name works" \
-  bash -c "'${AMD}' repos remove \"$(basename "${tmp}")\" | grep -q 'unregistered'"
-assert "unregistering something unknown fails" bash -c "! '${AMD}' repos remove nope"
+  bash -c "'${AMD}' register '${nongit}' 2>&1 | grep -q 'not a git repository'"
+assert "amd deregister removes only the local registration" \
+  bash -c "'${AMD}' deregister \"${tmp_name}\" | grep -q '^deregistered ' \
+    && ! grep -q \"${tmp_name}\$\" \"\${XDG_CONFIG_HOME}/agile-md/repos\""
+assert "the project-wide declaration survives deregistering locally" \
+  bash -c "grep -qE \"^repos = .*${tmp_name}\" .settings"
+assert "deregistering something not registered locally fails" \
+  bash -c "! '${AMD}' deregister nope"
 
 echo "related tickets:"
 assert "related is empty by default" \
