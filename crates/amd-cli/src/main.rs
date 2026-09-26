@@ -1013,7 +1013,7 @@ fn resolve_assignee(repo: &Path, who: Option<&str>) -> String {
 /// interactive, create outright with `AMD_YES=1`, and otherwise fail with a
 /// clear message — never block waiting on a pipe.
 fn ensure_board() -> Result<Board> {
-    let board = Board::locate()?;
+    let board = Board::discover()?;
     if board.root.is_dir() {
         return Ok(board);
     }
