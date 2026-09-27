@@ -279,6 +279,19 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
     both paths, gone or not, to record the whole rename — same reason a
     two-commit rename needs both paths on the second commit, not just the
     first.
+  - **`changed_paths` drops a rename hop `git` has already forgotten** —
+    found live, against the real `agile-md-tickets` repo, not anticipated:
+    a ticket already mid-rename (staged, uncommitted) *before* this
+    feature's first use on it, then moved again before either side ever
+    landed in a commit, collapses in git's own index straight from the
+    original committed path to the final one — the intermediate hop never
+    existed in any commit, so it stops appearing in `git status` at all.
+    Without also requiring the path to still be a key in the `after`
+    snapshot, `changed_paths` kept reporting it as "changed" (dirty in
+    `before`, simply absent from `after`), and handing that stale path to
+    `git commit` failed outright. No data was ever at risk — the file had
+    already moved correctly on disk; only the automatic commit failed,
+    caught by the same warn-not-fail policy below.
   - **Best-effort, matching `maybe_take_lease`'s own tone**: a commit or
     push failure (locked signing key, no agent, network down, a moved
     remote) warns to stderr and moves on — never fails the command, never
