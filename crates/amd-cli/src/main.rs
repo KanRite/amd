@@ -130,7 +130,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Create or connect this project's dedicated tickets repository
+    /// Create or connect this project's dedicated tickets and documents
+    /// repositories ({project}-tickets, {project}-documents)
     Init {
         /// The project's declared identity — cannot be changed once set
         #[arg(value_name = "PROJECT")]
@@ -144,7 +145,7 @@ enum Cmd {
         #[arg(long, value_name = "ORG")]
         org: Option<String>,
     },
-    /// Create a task in todo/ from a template
+    /// Create a task in backlog/ from a template
     New(NewArgs),
     /// Show all columns (the default command)
     Board {
