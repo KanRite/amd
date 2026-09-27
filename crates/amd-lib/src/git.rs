@@ -324,10 +324,24 @@ pub fn dirty_paths(repo: &Path) -> Result<BTreeMap<PathBuf, Option<SystemTime>>>
         .collect())
 }
 
-/// Which paths actually changed between two `dirty_paths` snapshots — not
-/// just newly dirty, but also a path already dirty in `before` that
+/// Which paths actually changed between two `dirty_paths` snapshots, and
+/// are still something `after`'s own `git status` currently knows about —
+/// not just newly dirty, but also a path already dirty in `before` that
 /// changed again by `after` (see `dirty_paths`'s own doc for why presence
 /// alone isn't enough for an untracked file).
+///
+/// The `after.contains_key` filter matters on its own, confirmed live
+/// against a real repo rather than reasoned out in advance: a ticket that
+/// already had an *uncommitted* rename sitting from before this operation
+/// (`backlog` staged to `todo`, say) and is then moved again before either
+/// side is ever committed collapses, in git's own index, straight from
+/// `backlog` to the final destination — `todo` never existed in any commit,
+/// so it simply stops being mentioned anywhere in `after`'s status at all.
+/// Without this filter, `todo` still shows up as "changed" (dirty in
+/// `before`, absent from `after`) and gets handed to `git commit` as a
+/// pathspec it has no memory of, which fails outright ("did not match any
+/// files known to git") — a real failure, hit directly, not a hypothetical
+/// this filter guards against speculatively.
 pub fn changed_paths(
     before: &BTreeMap<PathBuf, Option<SystemTime>>,
     after: &BTreeMap<PathBuf, Option<SystemTime>>,
@@ -335,7 +349,7 @@ pub fn changed_paths(
     let mut all: BTreeSet<&PathBuf> = before.keys().collect();
     all.extend(after.keys());
     all.into_iter()
-        .filter(|path| before.get(*path) != after.get(*path))
+        .filter(|path| before.get(*path) != after.get(*path) && after.contains_key(*path))
         .cloned()
         .collect()
 }
@@ -560,6 +574,53 @@ mod tests {
             !changed.contains(&PathBuf::from("untouched.md")),
             "{changed:?}"
         );
+    }
+
+    #[test]
+    fn changed_paths_drops_an_intermediate_hop_git_has_already_forgotten() {
+        // The real bug, hit directly against a live repo: a ticket already
+        // mid-rename (staged, never committed) before this operation even
+        // starts, then moved again before either side lands in a commit.
+        // Git's own index collapses the whole chain straight from the
+        // original committed path to the final one — the middle hop never
+        // existed in any commit, so `after`'s status stops mentioning it
+        // entirely, even though it was genuinely dirty in `before`.
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("origin.git");
+        std::fs::create_dir_all(&bare).unwrap();
+        git(&bare, &["init", "-q", "--bare"]);
+
+        let repo = dir.path().join("repo");
+        init_repo(&repo);
+        git(&repo, &["remote", "add", "origin", bare.to_str().unwrap()]);
+        std::fs::write(repo.join("start.md"), "content\n").unwrap();
+        commit_all(&repo, "seed").unwrap();
+        push(&repo).unwrap();
+
+        // First hop, staged but never committed.
+        git(&repo, &["mv", "start.md", "middle.md"]);
+        let before = dirty_paths(&repo).unwrap();
+        assert!(before.contains_key(&PathBuf::from("middle.md")));
+
+        // Second hop, on top of the still-uncommitted first one — git
+        // collapses this to start.md -> end.md directly.
+        git(&repo, &["mv", "middle.md", "end.md"]);
+        let after = dirty_paths(&repo).unwrap();
+        assert!(
+            !after.contains_key(&PathBuf::from("middle.md")),
+            "git should have forgotten the intermediate hop: {after:?}"
+        );
+
+        let changed = changed_paths(&before, &after);
+        assert!(
+            !changed.contains(&PathBuf::from("middle.md")),
+            "a path git has no memory of must never reach commit_paths: {changed:?}"
+        );
+        assert!(changed.contains(&PathBuf::from("end.md")));
+
+        // The real proof: committing this must not error the way it did
+        // live ("did not match any files known to git").
+        commit_paths(&repo, "test: chained rename", &changed).unwrap();
     }
 
     #[test]
