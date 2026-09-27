@@ -6,6 +6,7 @@
 
 mod completions;
 mod form;
+mod github;
 mod init;
 mod render;
 mod value;

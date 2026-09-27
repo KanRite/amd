@@ -70,18 +70,31 @@ assert "periods and underscores are valid in a project name" \
 echo "init: a dedicated tickets repository, found locally:"
 # Deliberately a plain, non-git directory: `amd init <project>` must not
 # require being run from inside an existing git repository — it creates or
-# finds `<project>-tickets` as a child of wherever it's run from.
+# finds `<project>-tickets`/`<project>-governance` as children of wherever
+# it's run from. Both pre-created here (empty, local-only git repos, no
+# 'origin') so `init` finds both and never calls out to `gh` at all —
+# hitting the real network for a nonexistent "widgets" owner would just
+# fail, and this test has nothing to do with `gh repo create` itself.
 plain_dir="$(mktemp -d)"
 ( cd "${plain_dir}" && git init -q widgets-tickets \
   && cd widgets-tickets && git config user.email t@t.co && git config user.name t )
+( cd "${plain_dir}" && git init -q widgets-governance \
+  && cd widgets-governance && git config user.email t@t.co && git config user.name t )
 assert "amd init <project> works from a plain, non-git directory" \
   bash -c "cd '${plain_dir}' && '${AMD}' init widgets >/dev/null && test -d '${plain_dir}/widgets-tickets/tasks/backlog'"
 assert "the found-locally tickets repo's own board records the project" \
   bash -c "grep -q '^project = widgets\$' '${plain_dir}/widgets-tickets/.settings'"
-# Registering the sibling repo locally is a real, intended side effect of
-# `amd init` — undo it here so it doesn't leave a stray local-registry entry
-# ahead of the dedicated "registration:" tests below.
-"${AMD}" deregister widgets-tickets >/dev/null 2>&1
+assert "the found-locally governance repo is scaffolded, not a board" \
+  bash -c "test -d '${plain_dir}/widgets-governance/adr' \
+    && test ! -d '${plain_dir}/widgets-governance/tasks' \
+    && grep -q '^widgets\$' '${plain_dir}/widgets-governance/.settings/project'"
+# Deregistering by alias both proves resolution actually works and cleans
+# up the registry ahead of the dedicated "registration:"/"aliases:" tests
+# below, which check that file's exact contents.
+assert "amd init aliased the tickets repo 'tickets'" \
+  bash -c "'${AMD}' deregister tickets | grep -q 'deregistered widgets-tickets'"
+assert "amd init aliased the governance repo 'governance'" \
+  bash -c "'${AMD}' deregister governance | grep -q 'deregistered widgets-governance'"
 
 echo "init: refuses to run inside an existing git repository:"
 guard_test="$(mktemp -d)"
@@ -91,7 +104,8 @@ guard_test="$(mktemp -d)"
 assert "amd init <project> refuses to run inside an existing repository" \
   bash -c "cd '${guard_test}/code_repo' && '${AMD}' init gadgets 2>&1 | grep -q 'must not be run inside a git repository'"
 assert "nothing was created by the refused attempt" \
-  test ! -e "${guard_test}/gadgets-tickets" -a ! -e "${guard_test}/code_repo/gadgets-tickets"
+  test ! -e "${guard_test}/gadgets-tickets" -a ! -e "${guard_test}/code_repo/gadgets-tickets" \
+  -a ! -e "${guard_test}/gadgets-governance" -a ! -e "${guard_test}/code_repo/gadgets-governance"
 
 echo "discovery from a subdirectory:"
 mkdir -p deep/nested
