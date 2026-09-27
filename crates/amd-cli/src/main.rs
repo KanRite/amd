@@ -49,11 +49,14 @@ or all at once with `amd group empty <name>`, no precondition. `amd tag
 form — `board`, `ls`, a bare destination verb, an epic by name — takes
 `--tag <tag>` to narrow it to tickets carrying that tag instead.
 
-`todo`/`doing` can each carry a WIP limit (`AMD_WIP_TODO`/`AMD_WIP_DOING`,
-or the board's own `.settings`) — a move into an already-full column is
-refused, naming the limit and the current count; `--force` overrides it.
-The limit only ever gates entry: moving a ticket *out* of a column that's
-already over its limit is never blocked.
+`todo/` can carry a WIP limit (`AMD_WIP_TODO`, or the board's own
+`.settings`) — unset means unlimited. `doing/` always carries one
+(`AMD_WIP_LIMIT`, or `wip-limit` in `.settings`; `amd wip-limit <n>` sets
+it) — unset or unparsable defaults to 1, and 0 turns it off. Either way, a
+move into an already-full column is refused, naming the limit and the
+current count; `--force` overrides it. The limit only ever gates entry:
+moving a ticket *out* of a column that's already over its limit is never
+blocked.
 
 Tickets nest: `--parent <ref>` puts one under another, and the board shows
 the tree. Nesting is the parent/child relationship; an epic or sprint is a
@@ -286,6 +289,12 @@ enum Cmd {
         #[command(subcommand)]
         command: Option<GroupCmd>,
     },
+    /// Set doing/'s WIP limit. 0 turns it off; an absent or unparsable
+    /// setting defaults to 1
+    WipLimit {
+        #[arg(value_name = "N")]
+        limit: u32,
+    },
     /// Register a repository — declares its name for the whole project
     /// (shared, git-tracked) and its path on this machine (local only)
     Register {
@@ -496,6 +505,7 @@ fn run() -> Result<()> {
         Cmd::Init { .. } | Cmd::Completions { .. } | Cmd::Gui => {
             unreachable!("handled above")
         }
+        Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
         Cmd::Register { path } => cmd_register(&board, path.as_deref()),
         Cmd::Deregister { name } => cmd_deregister(&name),
         Cmd::New(args) => cmd_new(&board, args),
@@ -941,6 +951,21 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Sets doing/'s WIP limit — the only way to set an explicit value besides
+/// `amdui`'s Settings modal or hand-editing `.settings`. `limit` is a `u32`,
+/// so clap already refuses a non-numeric argument before this runs; `0` is
+/// a valid value and means the limit is turned off.
+fn cmd_wip_limit(board: &Board, limit: u32) -> Result<()> {
+    let mut settings = board_settings::load(board);
+    settings.set_wip_limit(Column::Doing, Some(limit))?;
+    settings.save(board)?;
+    match limit {
+        0 => println!("doing/'s WIP limit is now off"),
+        n => println!("doing/'s WIP limit is now {n}"),
+    }
+    Ok(())
 }
 
 /// Registers a repository, both halves at once: declares its name for the

@@ -922,11 +922,13 @@ impl BoardApp {
 
     /// Board-level, unlike `self.settings` above — writes to
     /// `backlog_repo`'s own `.settings`, not the personal `GuiSettings`
-    /// file. An empty or unparsable field is exactly what
-    /// `set_wip_limit(None)` already treats as "unlimited", so a
-    /// partially-typed number just means unlimited until it parses, the
-    /// same tolerance `wip_limit()`'s own read side already has — no
-    /// separate validation needed here.
+    /// file. An empty or unparsable field parses to `None`, which
+    /// `set_wip_limit` and `wip_limit()`'s read side already tolerate with
+    /// no separate validation needed here — but the two fields no longer
+    /// mean the same thing left blank: `wip_todo_input` blank still reads
+    /// back as unlimited, while `wip_doing_input` blank now reads back as
+    /// the column's own default of 1, not unlimited (`board_settings.rs`'s
+    /// module doc explains why the two are asymmetric on purpose).
     fn save_wip_limits(&mut self) {
         let board = &self.repos[self.backlog_repo].board;
         let mut settings = crate::board_settings::load(board);

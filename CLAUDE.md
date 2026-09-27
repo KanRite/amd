@@ -224,16 +224,20 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   (the branch types on offer), `AMD_YES` (force-create), `AMD_NO_INPUT` (never
   prompt), `AMD_NO_BRANCH` (never touch branches), `NO_COLOR`/`--plain`
   (plain board), `EDITOR` (for `amd edit`), `AMD_LEASE_HOURS` (lease
-  duration, default 8), `AMD_WIP_TODO`/`AMD_WIP_DOING` (WIP limits, unset =
-  unlimited). **`AMD_TYPES` is dead** — it was in `--help` long after
-  nothing read it. **`AMD_NO_REGISTER` is also gone** (2026-09-26) —
-  registration is a deliberate act (`amd register`) again, not something
-  running in the background to opt out of. `AMD_BRANCH_TYPES` and `EDITOR`
-  also fall back to the settings file (`branch-types`/`editor`) when unset —
-  the env var wins when both are set (`settings::resolved()`). `AMD_LEASE_HOURS`/`AMD_WIP_TODO`/
-  `AMD_WIP_DOING` follow the same precedence against the *board-local*
-  `.settings`'s `lease-hours`/`wip-todo`/`wip-doing` keys instead — both are
-  team decisions, not personal ones.
+  duration, default 8), `AMD_WIP_TODO` (todo's WIP limit, unset = unlimited),
+  `AMD_WIP_LIMIT` (doing's WIP limit — unset or unparsable defaults to **1**,
+  not unlimited; `0` turns it off). **`AMD_TYPES` is dead** — it was in
+  `--help` long after nothing read it. **`AMD_NO_REGISTER` is also gone**
+  (2026-09-26) — registration is a deliberate act (`amd register`) again,
+  not something running in the background to opt out of. `AMD_BRANCH_TYPES`
+  and `EDITOR` also fall back to the settings file (`branch-types`/`editor`)
+  when unset — the env var wins when both are set (`settings::resolved()`).
+  `AMD_LEASE_HOURS`/`AMD_WIP_TODO`/`AMD_WIP_LIMIT` follow the same
+  precedence against the *board-local* `.settings`'s
+  `lease-hours`/`wip-todo`/`wip-limit` keys instead — team decisions, not
+  personal ones. `wip-limit` (2026-09-27) replaced an earlier `wip-doing`
+  key entirely — see `board_settings::wip_limit`'s doc comment for why
+  todo/doing are deliberately asymmetric now, not a naming tidy-up.
 
 ## Ticket fields (`crates/amd-lib/src/branch.rs`, `templates/ticket.md.jinja`)
 
@@ -490,9 +494,19 @@ changes):
   passes `false` (no drag-and-drop escape hatch), a blocked drag just sets
   the status line, the same treatment a lease refusal already gets.
   `board_settings::set_wip_limit(column, limit)` is the programmatic
-  setter (`amdui`'s Settings modal uses it) — `None`/`0` clears back to
-  unlimited, an empty string being exactly what the read side
-  (`wip_limit`) already treats as absent.
+  setter (`amdui`'s Settings modal, and `amd wip-limit <n>` for doing,
+  both use it).
+  **Todo and doing are deliberately asymmetric (2026-09-27).** Todo:
+  absent, unparsable or `0` all mean unlimited, unchanged from when this
+  was built. Doing: absent or unparsable now defaults to **1**, not
+  unlimited — a queue of more than one "in progress" ticket is treated as
+  the thing worth naming a default against — and `0` is stored *literally*
+  by `set_wip_limit` rather than collapsed into clearing, specifically so
+  "nobody set it" (→ 1) and "somebody set it to 0" (→ off) stay two
+  different states on disk. `wip-doing` doesn't exist any more; the key is
+  `wip-limit`, and `AMD_WIP_DOING` is `AMD_WIP_LIMIT` — a rename with a
+  behaviour change riding along, not a tidy-up, so don't "fix" doing back
+  to matching todo's symmetry without re-reading why.
 - **`Board::set_epic` only moves the file inside `backlog/`.** Filing a
   `todo`/`doing`/`done` ticket into a group (or clearing it) tags
   `set_epic_meta` in place and leaves the file exactly where it is — column
@@ -553,9 +567,11 @@ changes):
   `wip_todo_input`/`wip_doing_input` each time the modal opens (same
   load-on-open lifecycle `GroupDraft` uses), saved via a separate
   before/after snapshot comparison from `GuiSettings`'s own, since they
-  write to a different file entirely. An empty or unparsable field means
-  unlimited — the same tolerance `wip_limit`'s read side already has, so
-  there's nothing to validate here beyond attempting the parse.
+  write to a different file entirely. An empty or unparsable field parses
+  to `None`, which both fields tolerate with nothing further to validate —
+  but the two no longer *mean* the same thing left blank: `wip_todo_input`
+  blank still reads back as unlimited, `wip_doing_input` blank now reads
+  back as doing's own default of 1 (see the WIP-limits bullet above).
 - **The epic/sprint selector: a toggle, a dropdown, New/Delete — replaces
   the old "Add epic"/"Add sprint" buttons and the old one-lane-per-group
   Backlog layout.** `RepoBoard.selected_kind`/`selected_group` are per-repo
