@@ -442,6 +442,21 @@ project, into one `amdui` window:
   cloned right now shouldn't silently un-declare it for the rest of the
   team. It goes back to showing greyed out for you, the same state a
   teammate who's never registered it at all would see.
+- **A third, purely local layer sits on top: aliases** (`crates/amd-lib/src/alias.rs`,
+  `$XDG_CONFIG_HOME/agile-md/aliases`, ticket 026). A short name — `tickets`
+  instead of `agile-md-tickets` — that resolves to a registered repository's
+  real declared name, set with `amd alias <name> <alias>`. Deliberately a
+  third file, not a second column on the registry's own one-path-per-line
+  format (that file's doc comment is explicit it's "a list of paths and
+  nothing more") — reuses `settings::Config`'s existing `key = value`
+  parser rather than inventing a new one. Refused if the target isn't
+  registered, or if the alias is already a *different* repository's own
+  real name — an alias and a real name must never be ambiguous with each
+  other. **Narrower surface than it might sound**: the only two places that
+  ever take a repository name as free-typed input are `amd deregister` and
+  `amd alias` itself — `BoardApp::load()`'s own repo-resolution loop
+  (`gui/mod.rs`) only ever sees a project's *declared* names (git-tracked,
+  never an alias), so it needs no resolution step at all.
 - **`BoardApp::load()` (`gui/mod.rs`) cross-references the two.** `Board::discover()`
   finds the current project (a hard error now if none is found — `amdui`
   operates on exactly one project, never a cross-project stack); its own

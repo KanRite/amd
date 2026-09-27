@@ -27,7 +27,7 @@ use agile_md::board::{ABANDON, Board, Column};
 use agile_md::create::{Draft, NewTicket};
 use agile_md::registry::Registry;
 use agile_md::templates::{DEFAULT_TEMPLATE, TEMPLATE_SUFFIX, Templates};
-use agile_md::{board_settings, branch, git, task, templates};
+use agile_md::{alias, board_settings, branch, git, task, templates};
 
 const AFTER_HELP: &str = "\
 A <REF> is a task id (e.g. 7 or 007) or a unique slug substring. Leave it out
@@ -307,6 +307,16 @@ enum Cmd {
         #[arg(value_name = "NAME")]
         name: String,
     },
+    /// Give a registered repository a short local name — purely on this
+    /// machine, never shared with the team
+    Alias {
+        /// The repository's real, registered name
+        #[arg(value_name = "NAME")]
+        name: String,
+        /// The short name to use instead
+        #[arg(value_name = "ALIAS")]
+        alias: String,
+    },
     /// Link tickets together: both ends get the other in `related`
     Link {
         #[arg(value_name = "REF")]
@@ -512,6 +522,7 @@ fn run() -> Result<()> {
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
         Cmd::Register { path } => cmd_register(&board, path.as_deref()),
         Cmd::Deregister { name } => cmd_deregister(&name),
+        Cmd::Alias { name, alias } => cmd_alias(&name, &alias),
         Cmd::New(args) => cmd_new(&board, args),
         Cmd::Board { tag } => cmd_ls(&board, "all", tag.as_deref()),
         Cmd::Ls { column, tag } => cmd_ls(&board, &column, tag.as_deref()),
@@ -1085,12 +1096,24 @@ fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
 /// untouched, so `name` goes back to showing greyed out in `amdui` rather
 /// than disappearing for the rest of the team.
 fn cmd_deregister(name: &str) -> Result<()> {
+    let name = alias::Aliases::load().resolve(name);
     let mut registry = Registry::load();
-    if !registry.remove(name) {
+    if !registry.remove(&name) {
         bail!("'{name}' is not registered on this machine");
     }
     registry.save()?;
     println!("deregistered {name} on this machine (still declared for the project)");
+    Ok(())
+}
+
+/// Assigns `alias` to `name`, purely on this machine — never written to the
+/// project's shared, declared `repos` list.
+fn cmd_alias(name: &str, alias: &str) -> Result<()> {
+    let registry = Registry::load();
+    let mut aliases = alias::Aliases::load();
+    aliases.set(&registry, name, alias)?;
+    aliases.save()?;
+    println!("{alias} -> {name}");
     Ok(())
 }
 
