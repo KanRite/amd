@@ -36,6 +36,17 @@
 //!   collapsed into "absent" the way `wip-todo`'s `0` is, precisely so the
 //!   two states (nobody set it; somebody deliberately disabled it) stay
 //!   distinguishable. `amd wip-limit <n>` is the CLI setter.
+//! - `commit`: whether a mutating command commits (and pushes) its own
+//!   change automatically — the audit trail for a dedicated, board-only
+//!   `{project}-tickets` repository, which has nothing else in it for a
+//!   change to ride in on (`agile-md-documents`'
+//!   `adr/0006-auto-commit-for-dedicated-tickets-repos.md`). Absent or
+//!   unparsable means **on** — the opposite default from every other
+//!   setting here, deliberately: this feature's whole job is broken until
+//!   it's active, so off-by-default would ship it in a state where the
+//!   common case needs a setting found first. `AMD_COMMIT=0`/`off`/`false`
+//!   turns it off; no programmatic setter, hand-edited like `lease-hours`,
+//!   a team decision rather than a personal one.
 //! - `repos`: the *declared* names of every repository this project spans
 //!   — comma-separated, same shape the global settings file's
 //!   `branch-types` already uses. Shared and git-tracked deliberately: one
@@ -64,6 +75,7 @@ const DEFAULT_LEASE_HOURS: f64 = 8.0;
 const WIP_TODO: &str = "wip-todo";
 const WIP_LIMIT: &str = "wip-limit";
 const REPOS: &str = "repos";
+const AUTO_COMMIT: &str = "commit";
 
 /// `<repo-root>/.settings` — a sibling of the board directory, not inside it.
 pub fn path(board: &Board) -> std::path::PathBuf {
@@ -184,6 +196,22 @@ impl BoardSettings {
                 bail!("{} has no WIP limit", column.as_str())
             }
         }
+    }
+
+    /// Whether a mutating command should commit (and push) its own change
+    /// automatically. Opposite default from everything else in this file:
+    /// absent or unparsable means **on**, since the feature's entire job is
+    /// broken until it's active. `AMD_COMMIT` wins over `.settings` when
+    /// set, same precedence every other setting here uses.
+    pub fn auto_commit(&self) -> bool {
+        crate::settings::resolved("AMD_COMMIT", &self.config, AUTO_COMMIT)
+            .map(|value| {
+                !matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "0" | "off" | "false"
+                )
+            })
+            .unwrap_or(true)
     }
 
     /// The declared repository names this project spans, in the order they
@@ -502,6 +530,47 @@ mod tests {
         let mut settings = load(&board(dir.path()));
         assert!(settings.set_wip_limit(Column::Backlog, Some(1)).is_err());
         assert!(settings.set_wip_limit(Column::Done, Some(1)).is_err());
+    }
+
+    #[test]
+    fn auto_commit_defaults_to_on() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(load(&board(dir.path())).auto_commit());
+    }
+
+    #[test]
+    fn auto_commit_can_be_turned_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.config.set(AUTO_COMMIT, "off");
+        settings.save(&board).unwrap();
+        assert!(!load(&board).auto_commit());
+    }
+
+    #[test]
+    fn auto_commit_recognises_0_and_false_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.config.set(AUTO_COMMIT, "0");
+        assert!(!settings.auto_commit());
+        settings.config.set(AUTO_COMMIT, "false");
+        assert!(!settings.auto_commit());
+        settings.config.set(AUTO_COMMIT, "FALSE");
+        assert!(!settings.auto_commit(), "case-insensitive");
+    }
+
+    #[test]
+    fn auto_commit_ignores_unparsable_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.config.set(AUTO_COMMIT, "sure, why not");
+        assert!(
+            settings.auto_commit(),
+            "unparsable falls back to on, not off"
+        );
     }
 
     #[test]
