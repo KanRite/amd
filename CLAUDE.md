@@ -226,18 +226,75 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   (plain board), `EDITOR` (for `amd edit`), `AMD_LEASE_HOURS` (lease
   duration, default 8), `AMD_WIP_TODO` (todo's WIP limit, unset = unlimited),
   `AMD_WIP_LIMIT` (doing's WIP limit — unset or unparsable defaults to **1**,
-  not unlimited; `0` turns it off). **`AMD_TYPES` is dead** — it was in
-  `--help` long after nothing read it. **`AMD_NO_REGISTER` is also gone**
-  (2026-09-26) — registration is a deliberate act (`amd register`) again,
-  not something running in the background to opt out of. `AMD_BRANCH_TYPES`
-  and `EDITOR` also fall back to the settings file (`branch-types`/`editor`)
-  when unset — the env var wins when both are set (`settings::resolved()`).
-  `AMD_LEASE_HOURS`/`AMD_WIP_TODO`/`AMD_WIP_LIMIT` follow the same
-  precedence against the *board-local* `.settings`'s
-  `lease-hours`/`wip-todo`/`wip-limit` keys instead — team decisions, not
-  personal ones. `wip-limit` (2026-09-27) replaced an earlier `wip-doing`
-  key entirely — see `board_settings::wip_limit`'s doc comment for why
-  todo/doing are deliberately asymmetric now, not a naming tidy-up.
+  not unlimited; `0` turns it off), `AMD_COMMIT` (auto-commit-and-push,
+  unset = **on**; `0`/`off`/`false` turns it off). **`AMD_TYPES` is dead** —
+  it was in `--help` long after nothing read it. **`AMD_NO_REGISTER` is also
+  gone** (2026-09-26) — registration is a deliberate act (`amd register`)
+  again, not something running in the background to opt out of.
+  `AMD_BRANCH_TYPES` and `EDITOR` also fall back to the settings file
+  (`branch-types`/`editor`) when unset — the env var wins when both are set
+  (`settings::resolved()`). `AMD_LEASE_HOURS`/`AMD_WIP_TODO`/`AMD_WIP_LIMIT`/
+  `AMD_COMMIT` follow the same precedence against the *board-local*
+  `.settings`'s `lease-hours`/`wip-todo`/`wip-limit`/`commit` keys instead —
+  team decisions, not personal ones. `wip-limit` (2026-09-27) replaced an
+  earlier `wip-doing` key entirely — see `board_settings::wip_limit`'s doc
+  comment for why todo/doing are deliberately asymmetric now, not a naming
+  tidy-up.
+- **Auto-commit-and-push** (ticket 012, `board_settings::auto_commit`,
+  `main.rs`'s `with_auto_commit`) — every ticket-mutating command commits
+  (and pushes) its own change, the audit trail a dedicated, board-only
+  `{project}-tickets` repository has no other way to accumulate (nothing
+  else in it ever changes at the same time a ticket does, so there's no
+  natural commit for a move to ride in on). Default **on** — the opposite
+  default from every other setting in this file, deliberately: the feature
+  is broken until it's active, so off-by-default would ship it in a state
+  where the common case needs a setting found first.
+  - **The paths committed are computed, never hand-listed.**
+    `git::dirty_paths` snapshots the repo before and after the mutation
+    runs; `git::changed_paths` diffs the two. This isn't a simplification
+    over passing an explicit paths list — it's the fix for a real bug a
+    hand-maintained list would have shipped with: `Board::record_id` (via
+    `amd new`) also writes `.settings`'s `next-id` counter, so a new ticket
+    genuinely touches two files in one operation, and nobody wrote that
+    call site expecting to enumerate `.settings` too.
+  - **The diff has to be signature-based, not presence-based.** An
+    untracked file's `git status` is always `??` regardless of content, so
+    a path already dirty in the *before* snapshot that changes again by the
+    *after* snapshot is invisible to a plain set difference — hit directly
+    on a board created with `amd init --local-only` (which never commits),
+    where `.settings` is untracked from the start and a second `amd new`
+    needs its *second* bump noticed. `dirty_paths` maps each path to a
+    modified-time signature instead of returning a bare set, and
+    `changed_paths` compares signatures, not just presence.
+  - **`git status`'s default collapses a wholly-untracked directory into
+    one line.** Also hit directly on an `--local-only` board: without
+    `--untracked-files=all`, a brand new ticket inside a never-committed
+    `tasks/` never appears as its own path, because git reports the whole
+    directory as a single untracked entry.
+  - **`commit_paths` skips `add` for a path that no longer exists.**
+    `git mv` (used for a tracked rename) already stages both sides of the
+    move in the index by itself; re-`add`ing the now-gone old path
+    afterward fails with "did not match any files", since there's nothing
+    left for `add` to reconcile. The commit's own pathspec still needs
+    both paths, gone or not, to record the whole rename — same reason a
+    two-commit rename needs both paths on the second commit, not just the
+    first.
+  - **Best-effort, matching `maybe_take_lease`'s own tone**: a commit or
+    push failure (locked signing key, no agent, network down, a moved
+    remote) warns to stderr and moves on — never fails the command, never
+    rolls back. The board change already succeeded on disk; failing at
+    that point would misreport a move that actually worked.
+  - **Scope**: every verb in `Board::move_task`/`archive`/`set_epic`/
+    `Task::assign`/`take_lease`/`release_lease`/`break_lease`, plus every
+    `amd group` command including `empty` (one commit for every ticket it
+    moves, not one per ticket — a single logical action). Not in scope:
+    `amd register`/`deregister` (the registry, not the board),
+    `{project}-documents` (a different repository entirely, PR-reviewed by
+    design, never auto-committed).
+  - **`amd log`** (`cmd_log`) renders the board's transition history —
+    `date time action id title sha` — from `git log --name-status -M`,
+    reading paths and rename status only, never the commit message, so it
+    works retroactively over history from before this feature existed too.
 
 ## Ticket fields (`crates/amd-lib/src/branch.rs`, `templates/ticket.md.jinja`)
 

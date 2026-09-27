@@ -197,7 +197,7 @@ assert "an invalid --branch is rejected" \
 git checkout -q main 2>/dev/null || git checkout -q master
 assert "doing is a plain move now: no branch effect at all" \
   bash -c "'${AMD}' doing 1 >/dev/null && test -f tasks/doing/001-first-task.md"
-"${AMD}" "done" 1 >/dev/null
+AMD_COMMIT=0 "${AMD}" "done" 1 >/dev/null
 assert "done: doing -> done" test -f tasks/done/001-first-task.md
 assert "moved via git (rename tracked)" bash -c 'git status --porcelain | grep -q "^R"'
 # The move message comes from the CLI now, not from the library (ADR-0004).
@@ -286,7 +286,7 @@ assert "init creates an archive that keeps itself out of git" \
 "${AMD}" new "Bin this one" >/dev/null
 git add -A; git commit -qm junkable
 assert "abandon takes a ticket off the board" \
-  bash -c "'${AMD}' abandon bin-this-one | grep -q 'archived'"
+  bash -c "AMD_COMMIT=0 '${AMD}' abandon bin-this-one | grep -q 'archived'"
 assert "the ticket is in the archive" test -f tasks/archive/*-bin-this-one.md
 assert "amd abandon with no ref lists the archive" \
   bash -c "'${AMD}' abandon | grep -q 'Bin this one'"
@@ -491,6 +491,43 @@ assert "an emptied group can be deleted" \
 assert "deleting an unknown group is an error" \
   bash -c "cd '${work}' && ! '${AMD}' group delete nope"
 rm -rf "${work}"
+
+echo "commit-and-push:"
+commit_repo="$(mktemp -d)"
+commit_origin="$(mktemp -d)/origin.git"
+mkdir -p "${commit_origin}" && git init -q --bare "${commit_origin}"
+( cd "${commit_repo}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
+  && git remote add origin "${commit_origin}" \
+  && AMD_YES=1 "${AMD}" init committest --local-only >/dev/null )
+assert "amd new commits both the new ticket and .settings' next-id bump" \
+  bash -c "cd '${commit_repo}' && '${AMD}' new 'First ticket' --no-edit >/dev/null \
+    && git show --stat --pretty=format: HEAD | grep -q '001-first-ticket.md' \
+    && git show --stat --pretty=format: HEAD | grep -q '.settings'"
+assert "that commit was pushed to origin" \
+  bash -c "cd '${commit_repo}' && [ \"\$(git rev-parse HEAD)\" = \"\$(git rev-parse origin/main)\" ]"
+assert "a file staged by hand beforehand is never swept into the next commit" \
+  bash -c "cd '${commit_repo}' && echo dummy > dummy.md && git add dummy.md \
+    && '${AMD}' todo 1 --no-branch >/dev/null \
+    && ! git show --stat --pretty=format: HEAD | grep -q dummy.md \
+    && git status --porcelain=v1 | grep -q '^A  dummy.md\$'"
+assert "AMD_COMMIT=0 suppresses the commit entirely" \
+  bash -c "cd '${commit_repo}' && AMD_COMMIT=0 '${AMD}' doing 1 >/dev/null \
+    && git status --porcelain=v1 | grep -q '001-first-ticket.md'"
+assert "the move itself still happened despite AMD_COMMIT=0" \
+  bash -c "cd '${commit_repo}' && test -f tasks/doing/001-first-ticket.md"
+assert "amd group empty commits every ticket it moves in one commit" \
+  bash -c "cd '${commit_repo}' && '${AMD}' group epic squad >/dev/null \
+    && '${AMD}' squad 1 >/dev/null && '${AMD}' new 'Second ticket' --no-edit >/dev/null \
+    && '${AMD}' squad 2 >/dev/null \
+    && before=\$(git rev-list --count HEAD) \
+    && '${AMD}' group empty squad >/dev/null \
+    && after=\$(git rev-list --count HEAD) \
+    && [ \$((after - before)) -eq 1 ] \
+    && git show --stat --pretty=format: HEAD | grep -q '001-first-ticket.md' \
+    && git show --stat --pretty=format: HEAD | grep -q '002-second-ticket.md'"
+assert "amd log renders a transition with a real sha" \
+  bash -c "cd '${commit_repo}' && '${AMD}' log | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}  add .*[0-9a-f]{7,}\$'"
+rm -rf "${commit_repo}"
 
 echo "WIP limits:"
 wip_repo="$(mktemp -d)"

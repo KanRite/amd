@@ -331,6 +331,10 @@ enum Cmd {
         #[command(subcommand)]
         command: Option<TemplateCmd>,
     },
+    /// Show board transitions from git history: date, time, action, id,
+    /// title, sha. Reads paths and rename status only, never the commit
+    /// message, so it works over history from before this existed too
+    Log,
     /// Move a task into an epic, or list it with no ref — checked against
     /// the board's current epics (the four columns and `abandon` are their
     /// own named commands above, and always win if a name collides)
@@ -581,52 +585,65 @@ fn run() -> Result<()> {
         }
         Cmd::Edit { task } => {
             let task = resolve(&board, task, "edit", &Column::ALL)?;
-            open_editor(&task.path)
+            let (id_display, title) = (task.id_display(), task.title());
+            // No separate "did it actually change" check needed: the
+            // snapshot diff in with_auto_commit is already empty when the
+            // editor exits without saving, so nothing gets committed.
+            with_auto_commit(&board, "edit", &id_display, &title, || {
+                open_editor(&task.path)
+            })
         }
         Cmd::Set { task, field, value } => {
             let task = resolve(&board, Some(task), "set", &Column::ALL)?;
-            match field.as_str() {
-                "points" => {
-                    task.set_points(task.hash()?, &value)?;
-                    println!("{} sized {}", task.id_display(), display(&value));
+            let (id_display, title) = (task.id_display(), task.title());
+            with_auto_commit(&board, "set", &id_display, &title, || {
+                match field.as_str() {
+                    "points" => {
+                        task.set_points(task.hash()?, &value)?;
+                        println!("{} sized {}", task.id_display(), display(&value));
+                    }
+                    // Filing goes through the board, not the ticket: it moves the
+                    // file, and the sprint rules live there.
+                    "epic" => {
+                        let epic = (!value.is_empty()).then_some(value.as_str());
+                        board.set_epic(&task, epic)?;
+                        println!("{} filed under {}", task.id_display(), display(&value));
+                    }
+                    "order" => {
+                        let rank: f64 = value
+                            .parse()
+                            .with_context(|| format!("{value} is not a number"))?;
+                        task.set_order(task.hash()?, rank)?;
+                        println!("{} ranked {rank}", task.id_display());
+                    }
+                    "title" => {
+                        task.set_title(task.hash()?, &value)?;
+                        println!("{} retitled", task.id_display());
+                    }
+                    other => bail!("unknown field {other}"),
                 }
-                // Filing goes through the board, not the ticket: it moves the
-                // file, and the sprint rules live there.
-                "epic" => {
-                    let epic = (!value.is_empty()).then_some(value.as_str());
-                    board.set_epic(&task, epic)?;
-                    println!("{} filed under {}", task.id_display(), display(&value));
-                }
-                "order" => {
-                    let rank: f64 = value
-                        .parse()
-                        .with_context(|| format!("{value} is not a number"))?;
-                    task.set_order(task.hash()?, rank)?;
-                    println!("{} ranked {rank}", task.id_display());
-                }
-                "title" => {
-                    task.set_title(task.hash()?, &value)?;
-                    println!("{} retitled", task.id_display());
-                }
-                other => bail!("unknown field {other}"),
-            }
-            Ok(())
+                Ok(())
+            })
         }
         Cmd::Group { command } => cmd_group(&board, command.unwrap_or(GroupCmd::List)),
         Cmd::Assign { task, who } => {
             let task = resolve(&board, Some(task), "assign", &Column::ALL)?;
+            let (id_display, title) = (task.id_display(), task.title());
             let who = resolve_assignee(&board.root, who.as_deref());
-            task.assign(task.hash()?, &who)?;
-            match who.is_empty() {
-                true => println!("{} unassigned", task.id_display()),
-                false => println!("{} assigned to {who}", task.id_display()),
-            }
-            Ok(())
+            with_auto_commit(&board, "assign", &id_display, &title, || {
+                task.assign(task.hash()?, &who)?;
+                match who.is_empty() {
+                    true => println!("{} unassigned", task.id_display()),
+                    false => println!("{} assigned to {who}", task.id_display()),
+                }
+                Ok(())
+            })
         }
         Cmd::Lock { task } => cmd_lock(&board, &task),
         Cmd::Unlock { task, force } => cmd_unlock(&board, &task, force),
         Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
+        Cmd::Log => cmd_log(&board),
     }
 }
 
@@ -635,14 +652,17 @@ fn run() -> Result<()> {
 /// every other setter goes through, with no special casing needed for take.
 fn cmd_lock(board: &Board, reference: &str) -> Result<()> {
     let task = board.find(reference)?;
-    let hours = board_settings::load(board).lease_hours();
-    task.take_lease(task.hash()?, hours)?;
-    let until = task
-        .locked_until()
-        .and_then(|until| until.format(&Rfc3339).ok())
-        .unwrap_or_default();
-    println!("{} locked until {until}", task.id_display());
-    Ok(())
+    let (id_display, title) = (task.id_display(), task.title());
+    with_auto_commit(board, "lock", &id_display, &title, || {
+        let hours = board_settings::load(board).lease_hours();
+        task.take_lease(task.hash()?, hours)?;
+        let until = task
+            .locked_until()
+            .and_then(|until| until.format(&Rfc3339).ok())
+            .unwrap_or_default();
+        println!("{} locked until {until}", task.id_display());
+        Ok(())
+    })
 }
 
 /// Release a ticket's lease — only your own unless `--force` says to break
@@ -650,15 +670,18 @@ fn cmd_lock(board: &Board, reference: &str) -> Result<()> {
 /// an ordinary release.
 fn cmd_unlock(board: &Board, reference: &str, force: bool) -> Result<()> {
     let task = board.find(reference)?;
-    let hash = task.hash()?;
-    if force {
-        task.break_lease(hash)?;
-        println!("{} lease broken", task.id_display());
-    } else {
-        task.release_lease(hash)?;
-        println!("{} unlocked", task.id_display());
-    }
-    Ok(())
+    let (id_display, title) = (task.id_display(), task.title());
+    with_auto_commit(board, "unlock", &id_display, &title, || {
+        let hash = task.hash()?;
+        if force {
+            task.break_lease(hash)?;
+            println!("{} lease broken", task.id_display());
+        } else {
+            task.release_lease(hash)?;
+            println!("{} unlocked", task.id_display());
+        }
+        Ok(())
+    })
 }
 
 /// Move a task into todo/ and put the working tree on its branch. This is
@@ -760,18 +783,24 @@ fn cmd_gui() -> Result<()> {
 /// `Board::move_task` returns where the ticket landed and leaves the reporting
 /// to whoever asked for the move.
 fn move_and_report(board: &Board, task: &task::Task, to: Column, force: bool) -> Result<()> {
-    let dest = board.move_task(task, to, force)?;
-    println!("moved {} -> {to}/", task.file_name());
-    // Entering todo/doing already means "I'm starting this" — claiming the
-    // lease at the same moment matches that intent with no extra step.
-    // Every other column move (and every column move that's already leased
-    // by someone else) is refused earlier, inside move_task itself.
-    if matches!(to, Column::Todo | Column::Doing)
-        && let Some(moved) = task::Task::from_path(&dest, to)
-    {
-        maybe_take_lease(board, &moved);
-    }
-    Ok(())
+    // Captured before the move: id_display()/title() read the ticket's own
+    // file, which move_task is about to relocate.
+    let (id_display, title) = (task.id_display(), task.title());
+    with_auto_commit(board, to.as_str(), &id_display, &title, || {
+        let dest = board.move_task(task, to, force)?;
+        println!("moved {} -> {to}/", task.file_name());
+        // Entering todo/doing already means "I'm starting this" — claiming
+        // the lease at the same moment matches that intent with no extra
+        // step. Every other column move (and every column move that's
+        // already leased by someone else) is refused earlier, inside
+        // move_task itself.
+        if matches!(to, Column::Todo | Column::Doing)
+            && let Some(moved) = task::Task::from_path(&dest, to)
+        {
+            maybe_take_lease(board, &moved);
+        }
+        Ok(())
+    })
 }
 
 /// Best-effort: a failure here (no git email configured, or someone else
@@ -784,6 +813,47 @@ fn maybe_take_lease(board: &Board, task: &task::Task) {
     if let Err(err) = task.take_lease(hash, hours) {
         eprintln!("amd: could not claim the lease automatically: {err:#}");
     }
+}
+
+/// Runs `mutate`, then — if `commit` is on for this board — commits and
+/// pushes exactly the paths it changed, determined by diffing `git status`
+/// before and after rather than a hand-maintained list. That's not a
+/// simplification: `Board::record_id` writes `.settings`'s `next-id`
+/// alongside a new ticket, so `amd new` genuinely touches two files in one
+/// operation, and a hand-picked paths argument at each call site is exactly
+/// the shape of place a second incidental write like that gets missed.
+/// Anything already dirty *before* `mutate` runs — this repo's own
+/// unrelated in-progress state — is excluded by construction, since it
+/// appears in both snapshots.
+///
+/// Best-effort in the same spirit as `maybe_take_lease`: a commit or push
+/// failure (a locked signing key, no agent, the network down, a moved
+/// remote) must never undo a board change that already succeeded on disk.
+/// It warns and moves on — never fails the command, never rolls back —
+/// because failing at this point would misreport a move that actually
+/// worked, and there is nothing sane to roll back to that wouldn't be its
+/// own surprise.
+fn with_auto_commit<T>(
+    board: &Board,
+    verb: &str,
+    subject: &str,
+    detail: &str,
+    mutate: impl FnOnce() -> Result<T>,
+) -> Result<T> {
+    let auto_commit = board_settings::load(board).auto_commit();
+    let before = auto_commit.then(|| git::dirty_paths(board.repo_root()).unwrap_or_default());
+    let result = mutate()?;
+    if let Some(before) = before {
+        let after = git::dirty_paths(board.repo_root()).unwrap_or_default();
+        let changed = git::changed_paths(&before, &after);
+        if !changed.is_empty() {
+            let message = format!("{verb}: {subject} \"{detail}\"");
+            if let Err(err) = git::commit_paths(board.repo_root(), &message, &changed) {
+                eprintln!("amd: could not commit/push automatically: {err:#}");
+            }
+        }
+    }
+    Ok(result)
 }
 
 /// Where a destination verb can send a ticket: one of the four columns,
@@ -839,20 +909,26 @@ fn cmd_destination(
         (Destination::Column(column), None) => render::columns(board, &[column], tag),
         (Destination::Abandon, Some(reference)) => {
             let task = board.find(&reference)?;
-            let name = task.file_name();
-            let (_, deleted_branch) = board.archive(&task)?;
-            println!("archived {name} -> archive/");
-            if let Some(branch) = deleted_branch {
-                println!("deleted {branch} (empty)");
-            }
-            Ok(())
+            let (id_display, title) = (task.id_display(), task.title());
+            with_auto_commit(board, "abandon", &id_display, &title, || {
+                let name = task.file_name();
+                let (_, deleted_branch) = board.archive(&task)?;
+                println!("archived {name} -> archive/");
+                if let Some(branch) = deleted_branch {
+                    println!("deleted {branch} (empty)");
+                }
+                Ok(())
+            })
         }
         (Destination::Abandon, None) => render::named(ABANDON, board.archived()?, tag),
         (Destination::Epic(name), Some(reference)) => {
             let task = board.find(&reference)?;
-            board.set_epic(&task, Some(&name))?;
-            println!("{} filed under {name}", task.id_display());
-            Ok(())
+            let (id_display, title) = (task.id_display(), task.title());
+            with_auto_commit(board, "set", &id_display, &title, || {
+                board.set_epic(&task, Some(&name))?;
+                println!("{} filed under {name}", task.id_display());
+                Ok(())
+            })
         }
         (Destination::Epic(name), None) => {
             let tasks = board.tasks_in_group(&name)?;
@@ -898,42 +974,44 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
             Ok(())
         }
         GroupCmd::Epic { name, description } => {
-            let group = Group {
-                dir: board.dir(Column::Backlog).join(&name),
-                name: name.clone(),
-                kind: Kind::Epic,
-                description,
-                days: agile_md::group::DEFAULT_DAYS,
-                state: State::Pending,
-            };
-            board.create_group(&group)?;
-            println!("created epic {name}");
-            Ok(())
+            with_auto_commit(board, "group-epic", &name, &description, || {
+                let group = Group {
+                    dir: board.dir(Column::Backlog).join(&name),
+                    name: name.clone(),
+                    kind: Kind::Epic,
+                    description: description.clone(),
+                    days: agile_md::group::DEFAULT_DAYS,
+                    state: State::Pending,
+                };
+                board.create_group(&group)?;
+                println!("created epic {name}");
+                Ok(())
+            })
         }
         GroupCmd::Sprint {
             name,
             description,
             days,
-        } => {
+        } => with_auto_commit(board, "group-sprint", &name, &description, || {
             let group = Group {
                 dir: board.dir(Column::Backlog).join(&name),
                 name: name.clone(),
                 kind: Kind::Sprint,
-                description,
+                description: description.clone(),
                 days,
                 state: State::Pending,
             };
             board.create_group(&group)?;
             println!("created sprint {name} ({days} days)");
             Ok(())
-        }
-        GroupCmd::Start { name } => {
+        }),
+        GroupCmd::Start { name } => with_auto_commit(board, "group-start", &name, "", || {
             let mut group = board.group(&name)?;
             group.start()?;
             println!("{name} started — its tickets are now fixed");
             Ok(())
-        }
-        GroupCmd::Empty { name } => {
+        }),
+        GroupCmd::Empty { name } => with_auto_commit(board, "group-empty", &name, "", || {
             let result = board.empty_group(&name)?;
             println!(
                 "{} emptied into backlog/ ({} ticket(s))",
@@ -944,12 +1022,12 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
                 eprintln!("amd: {stem} not moved: {err}");
             }
             Ok(())
-        }
-        GroupCmd::Delete { name } => {
+        }),
+        GroupCmd::Delete { name } => with_auto_commit(board, "group-delete", &name, "", || {
             board.delete_group(&name)?;
             println!("deleted {name}");
             Ok(())
-        }
+        }),
     }
 }
 
@@ -1200,7 +1278,27 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
+    // Not `with_auto_commit`: that helper takes its commit message eagerly,
+    // but a new ticket's id isn't allocated until `draft.write` actually
+    // runs (`Board::record_id`), so there's nothing to capture beforehand
+    // the way every other verb captures its ticket's existing id_display.
+    let auto_commit = board_settings::load(board).auto_commit();
+    let before = auto_commit.then(|| git::dirty_paths(board.repo_root()).unwrap_or_default());
     let created = draft.write(board, body)?;
+    if let Some(before) = before {
+        let after = git::dirty_paths(board.repo_root()).unwrap_or_default();
+        let changed = git::changed_paths(&before, &after);
+        if !changed.is_empty() {
+            let message = format!(
+                "new: {} \"{}\"",
+                created.task.id_display(),
+                created.task.title()
+            );
+            if let Err(err) = git::commit_paths(board.repo_root(), &message, &changed) {
+                eprintln!("amd: could not commit/push automatically: {err:#}");
+            }
+        }
+    }
     for id in &created.linked {
         println!("{id} now links to {}", created.task.id_display());
     }
@@ -1254,6 +1352,94 @@ fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {
         line.push_str(" — nothing written");
     }
     println!("{line}");
+    Ok(())
+}
+
+/// The board transition log: `date time action id title sha`, one line per
+/// file change under the board, oldest first. Reads paths and rename
+/// status from `git log --name-status -M`, never the commit message
+/// (`%s`), so it's indifferent to whatever wrote the commit — including
+/// history from before auto-commit existed, or a hand-written message.
+fn cmd_log(board: &Board) -> Result<()> {
+    let repo = board.repo_root();
+    let board_rel = board
+        .root
+        .strip_prefix(repo)
+        .unwrap_or(Path::new("tasks"))
+        .to_path_buf();
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args([
+            "log",
+            "--name-status",
+            "-M",
+            "--date=format:%Y-%m-%d %H:%M",
+            "--pretty=format:>>>%h|%ad",
+            "--reverse",
+        ])
+        .arg("--")
+        .arg(&board.root)
+        .output()
+        .context("running git log")?;
+    if !out.status.success() {
+        bail!("git log failed");
+    }
+    let text = String::from_utf8(out.stdout).context("git log produced non-utf8 output")?;
+
+    let mut sha = String::new();
+    let mut when = String::new();
+    let mut any = false;
+    for line in text.lines() {
+        if let Some(header) = line.strip_prefix(">>>") {
+            let (h, w) = header.split_once('|').unwrap_or((header, ""));
+            sha = h.to_string();
+            when = w.to_string();
+            continue;
+        }
+        if line.is_empty() {
+            continue;
+        }
+        let mut fields = line.split('\t');
+        let Some(status) = fields.next() else {
+            continue;
+        };
+        let (action, path) = match status.as_bytes().first() {
+            Some(b'A') => ("add".to_string(), fields.next()),
+            Some(b'M') => ("edit".to_string(), fields.next()),
+            Some(b'D') => ("remove".to_string(), fields.next()),
+            Some(b'R') => {
+                let (_old, new) = (fields.next(), fields.next());
+                let action = new
+                    .map(Path::new)
+                    .and_then(|p| p.strip_prefix(&board_rel).ok())
+                    .and_then(|p| p.parent())
+                    .and_then(|p| p.file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "move".to_string());
+                (action, new)
+            }
+            _ => continue,
+        };
+        let Some(path) = path else { continue };
+        let title = Path::new(path)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let title = match title.split_once('-') {
+            Some((_, rest)) => rest.replace('-', " "),
+            None => title.replace('-', " "),
+        };
+        let id = Path::new(path)
+            .file_stem()
+            .and_then(|stem| stem.to_string_lossy().split('-').next().map(str::to_string))
+            .unwrap_or_default();
+        println!("{when}  {action:<8} {id:>4}  {title}  {sha}");
+        any = true;
+    }
+    if !any {
+        println!("(no board history yet)");
+    }
     Ok(())
 }
 
