@@ -508,8 +508,36 @@ assert "amd todo --force overrides the WIP limit" \
     && test -f tasks/todo/002-second-ticket.md"
 assert "moving something out of an over-limit column is never blocked" \
   bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 '${AMD}' doing 1 >/dev/null && test -f tasks/doing/001-existing-in-todo.md"
-assert "a limit on todo does not apply to doing" \
-  bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 '${AMD}' doing 2 >/dev/null && test -f tasks/doing/002-second-ticket.md"
+assert "a limit on todo does not apply to doing (doing's own default limit turned off here to isolate the claim)" \
+  bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 AMD_WIP_LIMIT=0 '${AMD}' doing 2 >/dev/null && test -f tasks/doing/002-second-ticket.md"
+rm -rf "${wip_repo}"
+
+echo "doing/'s own default WIP limit:"
+doing_wip_repo="$(mktemp -d)"
+( cd "${doing_wip_repo}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init doingwiptest --local-only >/dev/null \
+  && "${AMD}" new "First" --no-edit >/dev/null \
+  && "${AMD}" new "Second" --no-edit >/dev/null \
+  && "${AMD}" doing 1 >/dev/null )
+assert "doing/ defaults to a WIP limit of 1 with nothing configured at all" \
+  bash -c "cd '${doing_wip_repo}' && '${AMD}' doing 2 2>&1 | grep -q 'doing/ already has 1 of 1 allowed'"
+assert "the refused move never happened" \
+  bash -c "cd '${doing_wip_repo}' && test -f tasks/backlog/002-second.md"
+assert "amd wip-limit sets an explicit limit, persisted in .settings" \
+  bash -c "cd '${doing_wip_repo}' && '${AMD}' wip-limit 2 >/dev/null && grep -q '^wip-limit = 2\$' .settings"
+assert "the new limit takes effect immediately" \
+  bash -c "cd '${doing_wip_repo}' && '${AMD}' doing 2 >/dev/null && test -f tasks/doing/002-second.md"
+assert "amd wip-limit 0 turns doing/'s limit off" \
+  bash -c "cd '${doing_wip_repo}' && '${AMD}' wip-limit 0 >/dev/null \
+    && '${AMD}' new \"Third\" --no-edit >/dev/null && '${AMD}' doing 3 >/dev/null \
+    && test -f tasks/doing/003-third.md"
+assert "amd wip-limit rejects a non-numeric value" \
+  bash -c "cd '${doing_wip_repo}' && ! '${AMD}' wip-limit nope >/dev/null 2>&1"
+assert "a garbled wip-limit value in .settings resets to the default of 1, not unlimited" \
+  bash -c "cd '${doing_wip_repo}' && sed -i 's/^wip-limit = 0\$/wip-limit = nope/' .settings \
+    && '${AMD}' new \"Fourth\" --no-edit >/dev/null \
+    && '${AMD}' doing 4 2>&1 | grep -q 'doing/ already has 3 of 1 allowed'"
+rm -rf "${doing_wip_repo}"
 
 echo "import and tag filtering:"
 import_src="$(mktemp -d)"
