@@ -522,6 +522,13 @@ changes):
   the physical folder — since a committed sprint's tickets can sit in
   `doing`/`done` while the backlog folder itself is empty. `empty` it
   first; `delete` does not imply `empty`.
+- **Next round of epic/sprint design, not built yet**: sprint backfill, a
+  `Closed` state, and burn-up reporting into the documents repo are
+  designed in `agile-md-documents`'
+  `rfc/0005-sprint-backfill-closing-and-burn-up-reporting.md` — including
+  one question it deliberately leaves open (whether a running sprint's
+  `todo` is a gate on the existing column or a nested one). Nothing below
+  describes any of that; it isn't shipped.
 
 ## The desktop board (`crates/amd-lib/src/gui/`)
 
