@@ -9,7 +9,8 @@ use anyhow::{Context, Result, bail};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::board::Column;
+use crate::board::{Board, Column};
+use crate::branch;
 use crate::git;
 
 /// Longest slug we put in a filename (matches the pre-Rust `cut -c1-50`).
@@ -88,6 +89,27 @@ pub struct Task {
     /// folder is what decides this — the `epic` frontmatter key follows it,
     /// not the other way round, so moving the file is what changes the epic.
     pub epic: Option<String>,
+}
+
+/// Every field the ticket editor can change in one pass, for
+/// [`Task::apply_edit`]. `epic` is deliberately not here — it moves the file
+/// (`Board::set_epic`), which is a different, adjacent action from a
+/// frontmatter-only write; the editor calls that separately, after this one.
+pub struct EditFields<'a> {
+    pub title: &'a str,
+    pub assignee: &'a str,
+    pub points: &'a str,
+    pub tags: &'a [String],
+    /// Branch type; `branch-name` is not taken as input — it's re-derived
+    /// from this and `title`, the same pairing `create::Draft::prepare`
+    /// establishes at creation.
+    pub branch_type: &'a str,
+    /// A ref (id or slug), resolved against `board` the same way
+    /// `create::Draft::prepare` resolves one. Empty clears it.
+    pub parent: &'a str,
+    /// Refs, resolved the same way.
+    pub related: &'a [String],
+    pub body: &'a str,
 }
 
 impl Task {
@@ -386,31 +408,58 @@ impl Task {
         })
     }
 
-    /// Title, assignee, points and body, applied together in **one** write.
-    /// Required, not just tidier, once writes are hash-checked: a form that
-    /// captures one hash when it opens and then calls four separate setters
-    /// against it could never have the second one succeed, since the first
-    /// write already changed the file the hash was checked against. This is
-    /// what makes `docs/adr/0006-the-operation-vocabulary.md`'s "one write
-    /// per action" true for the editor, which is also what
+    /// Title, assignee, points, tags, branch type (and the `branch-name` it
+    /// derives), parent, related, and body, applied together in **one**
+    /// write. Required, not just tidier, once writes are hash-checked: a
+    /// form that captures one hash when it opens and then calls separate
+    /// setters against it could never have the second one succeed, since the
+    /// first write already changed the file the hash was checked against.
+    /// This is what makes `docs/adr/0006-the-operation-vocabulary.md`'s "one
+    /// write per action" true for the editor, which is also what
     /// `docs/adr/0007-concurrency-and-locking.md`'s optimistic writes assume.
+    ///
+    /// `parent`/`related` are resolved against `board` before anything is
+    /// written — an unknown ref is refused clean, the same as
+    /// `create::Draft::prepare`. Unlike creation (and unlike `amd link`),
+    /// only *this* ticket's own frontmatter changes here: the parent's
+    /// `## Children` list and a related ticket's own back-link are not
+    /// touched. Doing that safely would mean hash-checking several files as
+    /// one transaction, which nothing in this codebase does today — a known,
+    /// deliberate gap rather than a half-built reciprocal write; `amd link`
+    /// remains the one path that updates both sides.
     pub fn apply_edit(
         &self,
         expected: ContentHash,
-        title: &str,
-        assignee: &str,
-        points: &str,
-        body: &str,
+        board: &Board,
+        fields: EditFields,
     ) -> Result<()> {
+        branch::validate_branch_type(fields.branch_type)?;
+        let branch_name = branch::for_title(fields.branch_type, fields.title)?;
+        let parent = match fields.parent {
+            "" => String::new(),
+            reference => board.find(reference)?.id_display(),
+        };
+        let mut related = Vec::new();
+        for reference in fields.related {
+            related.push(board.find(reference)?.id_display());
+        }
+        related.sort();
+        related.dedup();
+
         self.write_checked(expected, |text| {
-            let text = set_meta(text, "title", &format!("{title:?}"))?;
-            let text = set_meta(&text, "assignee", &format!("{assignee:?}"))?;
-            let text = set_meta(&text, "points", &format!("{points:?}"))?;
+            let text = set_meta(text, "title", &format!("{:?}", fields.title))?;
+            let text = set_meta(&text, "assignee", &format!("{:?}", fields.assignee))?;
+            let text = set_meta(&text, "points", &format!("{:?}", fields.points))?;
+            let text = set_meta(&text, "tags", &format!("[{}]", fields.tags.join(",")))?;
+            let text = set_meta(&text, "branch-type", &format!("{:?}", fields.branch_type))?;
+            let text = set_meta(&text, "branch-name", &format!("{branch_name:?}"))?;
+            let text = set_meta(&text, "parent", &format!("{parent:?}"))?;
+            let text = set_meta(&text, "related", &format!("[{}]", related.join(",")))?;
             let head = split_body(&text)
                 .map(|(head, _)| head.to_string())
                 .ok_or_else(|| anyhow::anyhow!("no frontmatter in {}", self.path.display()))?;
             let mut out = head;
-            out.push_str(body);
+            out.push_str(fields.body);
             if !out.ends_with('\n') {
                 out.push('\n');
             }
@@ -850,20 +899,113 @@ mod tests {
         assert_eq!(task.title(), "Renamed");
     }
 
+    /// A board with one existing ticket (`001`) to resolve `parent`/`related`
+    /// refs against, matching the fixture `create.rs`'s own tests use.
+    fn board_with_a_ticket() -> (tempfile::TempDir, Board) {
+        let dir = tempfile::tempdir().unwrap();
+        let board = Board::at(dir.path().join("tasks"));
+        board.create().unwrap();
+        ranked(
+            &board.dir(Column::Backlog),
+            "001-existing.md",
+            "---\nid: \"001\"\ntitle: \"Existing\"\n---\n\nbody\n",
+        );
+        (dir, board)
+    }
+
+    fn no_edit() -> EditFields<'static> {
+        EditFields {
+            title: "",
+            assignee: "",
+            points: "",
+            tags: &[],
+            branch_type: "",
+            parent: "",
+            related: &[],
+            body: "",
+        }
+    }
+
     #[test]
     fn apply_edit_writes_every_field_in_one_pass() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_dir, board) = board_with_a_ticket();
         let task = ranked(
-            dir.path(),
-            "001-a.md",
-            "---\nid: \"001\"\ntitle: \"Old\"\nassignee: \"\"\npoints: \"\"\n---\n\nold body\n",
+            &board.dir(Column::Backlog),
+            "002-a.md",
+            "---\nid: \"002\"\ntitle: \"Old\"\nassignee: \"\"\npoints: \"\"\n---\n\nold body\n",
         );
-        task.apply_edit(task.hash().unwrap(), "New", "sam", "5", "new body\n")
-            .unwrap();
+        let tags = ["urgent".to_string(), "gui".to_string()];
+        let related = ["001".to_string()];
+        task.apply_edit(
+            task.hash().unwrap(),
+            &board,
+            EditFields {
+                title: "New",
+                assignee: "sam",
+                points: "5",
+                tags: &tags,
+                branch_type: "feature",
+                parent: "001",
+                related: &related,
+                body: "new body\n",
+            },
+        )
+        .unwrap();
         assert_eq!(task.title(), "New");
         assert_eq!(task.assignee(), Some("sam".to_string()));
         assert_eq!(task.points(), Some("5".to_string()));
+        assert_eq!(task.tags(), ["urgent", "gui"]);
+        assert_eq!(task.branch_type(), Some("feature".to_string()));
+        assert_eq!(task.branch(), Some("feature/new".to_string()));
+        assert_eq!(task.parent(), Some("001".to_string()));
+        assert_eq!(task.related(), ["001"]);
         assert_eq!(task.body().unwrap(), "new body\n");
+    }
+
+    #[test]
+    fn apply_edit_refuses_an_unknown_parent_before_writing_anything() {
+        let (_dir, board) = board_with_a_ticket();
+        let task = ranked(
+            &board.dir(Column::Backlog),
+            "002-a.md",
+            "---\nid: \"002\"\ntitle: \"Old\"\n---\n\nbody\n",
+        );
+        let err = task
+            .apply_edit(
+                task.hash().unwrap(),
+                &board,
+                EditFields {
+                    parent: "99",
+                    ..no_edit()
+                },
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no task matches '99'"), "{err}");
+        assert_eq!(task.title(), "Old", "nothing must have been written");
+    }
+
+    #[test]
+    fn apply_edit_refuses_an_unknown_branch_type_before_writing_anything() {
+        let (_dir, board) = board_with_a_ticket();
+        let task = ranked(
+            &board.dir(Column::Backlog),
+            "002-a.md",
+            "---\nid: \"002\"\ntitle: \"Old\"\n---\n\nbody\n",
+        );
+        let err = task
+            .apply_edit(
+                task.hash().unwrap(),
+                &board,
+                EditFields {
+                    branch_type: "feat",
+                    ..no_edit()
+                },
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unknown branch type 'feat'"), "{err}");
+        assert_eq!(task.title(), "Old", "nothing must have been written");
     }
 
     /// The bug a naive four-separate-writes save would have: the hash

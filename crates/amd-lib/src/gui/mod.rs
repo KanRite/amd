@@ -88,7 +88,17 @@ struct Draft {
     repo: usize,
     title: String,
     epic: Option<String>,
+    assignee: String,
     points: String,
+    /// Comma-separated; parsed with `task::parse_list` on create, same as a
+    /// hand-typed `tags:` frontmatter line would be.
+    tags: String,
+    /// `branch::NONE` for no branch, else one of `branch::branch_types()`.
+    branch_type: String,
+    /// A ref (id or slug); empty for no parent.
+    parent: String,
+    /// Comma-separated refs.
+    related: String,
     /// Notes written while creating, appended to the template's body.
     body: String,
     markdown: bool,
@@ -118,6 +128,19 @@ struct Editor {
     title: String,
     assignee: String,
     points: String,
+    /// The epic/sprint this ticket is filed under, if any — a different,
+    /// adjacent mechanism from the rest of these fields: saving goes through
+    /// `Board::set_epic` (which can move the file), not `Task::apply_edit`,
+    /// the same call the board view's own membership checkbox already makes.
+    epic: Option<String>,
+    /// Comma-separated; parsed with `task::parse_list` on save.
+    tags: String,
+    /// `branch::NONE` for no branch, else one of `branch::branch_types()`.
+    branch_type: String,
+    /// A ref (id or slug); empty for no parent.
+    parent: String,
+    /// Comma-separated refs.
+    related: String,
     body: String,
     /// Fingerprint of the ticket's content when the editor opened. Saving
     /// checks this before writing — see `Task::apply_edit` and
@@ -134,6 +157,14 @@ struct Editor {
 
 impl Editor {
     fn open(repo: usize, card: &Card) -> Result<Self> {
+        // The folder decides inside `backlog/`; outside it there's no group
+        // directory, so the frontmatter key is the only carrier — the same
+        // split `card_in_group` makes.
+        let epic = if card.task.column == Column::Backlog {
+            card.task.epic.clone()
+        } else {
+            card.task.epic_meta()
+        };
         Ok(Self {
             repo,
             path: card.task.path.clone(),
@@ -141,6 +172,11 @@ impl Editor {
             title: card.task.title(),
             assignee: card.task.assignee().unwrap_or_default(),
             points: card.task.points().unwrap_or_default(),
+            epic,
+            tags: card.task.tags().join(","),
+            branch_type: card.task.branch_type().unwrap_or_default(),
+            parent: card.task.parent().unwrap_or_default(),
+            related: card.task.related().join(","),
             body: card.task.body()?,
             hash: card.task.hash()?,
             markdown: false,
@@ -299,14 +335,20 @@ impl BoardApp {
     }
 
     /// Write the editor's fields back to the ticket in one call
-    /// (`Task::apply_edit`) — not four separate setters, because the hash
+    /// (`Task::apply_edit`) — not several separate setters, because the hash
     /// captured when the editor opened can only ever match the file once.
     /// A conflict here means the ticket changed elsewhere while this was
     /// open; the status line reports it rather than silently overwriting
-    /// whatever changed it.
+    /// whatever changed it. `epic` is applied second, through
+    /// `Board::set_epic` — a different, adjacent action (it can move the
+    /// file) from the frontmatter-only write above, the same call the board
+    /// view's own membership checkbox already makes. It runs after, against
+    /// whatever `apply_edit` just wrote, rather than against the stale
+    /// captured hash.
     fn save(&mut self) {
         let Some(editor) = &self.editing else { return };
         let outcome = (|| -> Result<()> {
+            let board = &self.repos[editor.repo].board;
             let task = self.repos[editor.repo]
                 .lanes
                 .iter()
@@ -314,13 +356,24 @@ impl BoardApp {
                 .find(|card| card.task.path == editor.path)
                 .map(|card| &card.task)
                 .ok_or_else(|| anyhow!("{} is no longer on the board", editor.path.display()))?;
+            let tags = crate::task::parse_list(&editor.tags);
+            let related = crate::task::parse_list(&editor.related);
             task.apply_edit(
                 editor.hash,
-                &editor.title,
-                &editor.assignee,
-                &editor.points,
-                &editor.body,
-            )
+                board,
+                crate::task::EditFields {
+                    title: &editor.title,
+                    assignee: &editor.assignee,
+                    points: &editor.points,
+                    tags: &tags,
+                    branch_type: &editor.branch_type,
+                    parent: &editor.parent,
+                    related: &related,
+                    body: &editor.body,
+                },
+            )?;
+            board.set_epic(task, editor.epic.as_deref())?;
+            Ok(())
         })();
 
         match outcome {
@@ -655,7 +708,12 @@ impl eframe::App for BoardApp {
                         repo,
                         title: String::new(),
                         epic: None,
+                        assignee: String::new(),
                         points: String::new(),
+                        tags: String::new(),
+                        branch_type: crate::branch::NONE.to_string(),
+                        parent: String::new(),
+                        related: String::new(),
                         body: "\n## Notes\n\n\n## Acceptance criteria\n\n- [ ] \n".to_string(),
                         markdown: false,
                         line: None,
@@ -1197,6 +1255,42 @@ impl BoardApp {
                             .hint_text("e.g. 3"),
                     );
                     ui.end_row();
+
+                    ui.label("Assignee");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut draft.assignee)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("unassigned"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Tags");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut draft.tags)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("comma-separated, e.g. gui, urgent"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Branch type");
+                    branch_type_combo(ui, &mut draft.branch_type, "draft-branch-type");
+                    ui.end_row();
+
+                    ui.label("Parent");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut draft.parent)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("id or slug"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Related");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut draft.related)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("comma-separated ids or slugs"),
+                    );
+                    ui.end_row();
                 });
 
             ui.add_space(6.0);
@@ -1249,7 +1343,12 @@ impl BoardApp {
         let repo = draft.repo;
         let title = draft.title.trim().to_string();
         let epic = draft.epic.clone();
+        let assignee = draft.assignee.trim().to_string();
         let points = draft.points.trim().to_string();
+        let tags = crate::task::parse_list(&draft.tags);
+        let branch_type = draft.branch_type.trim().to_string();
+        let parent = draft.parent.trim().to_string();
+        let related = crate::task::parse_list(&draft.related);
         let body = draft.body.clone();
 
         let outcome = (|| -> Result<()> {
@@ -1265,11 +1364,11 @@ impl BoardApp {
                 crate::create::NewTicket {
                     title: title.clone(),
                     template: crate::templates::DEFAULT_TEMPLATE.to_string(),
-                    branch_type: String::new(),
-                    assignee: String::new(),
-                    parent: None,
-                    related: Vec::new(),
-                    tags: Vec::new(),
+                    branch_type,
+                    assignee,
+                    parent: (!parent.is_empty()).then_some(parent),
+                    related,
+                    tags,
                     extra: Default::default(),
                 },
             )?;
@@ -1309,6 +1408,15 @@ impl BoardApp {
         let mut save = false;
         let mut cancel = false;
         let id = editor.id.clone();
+        // Same rule as the New ticket dialog: a sprint only takes sized
+        // tickets, so it isn't offered here.
+        let epics = self.repos[editor.repo]
+            .groups
+            .iter()
+            .filter_map(|(group, _)| group.as_ref())
+            .filter(|group| group.accepts_changes() && !group.is_sprint())
+            .map(|group| group.name.clone())
+            .collect::<Vec<_>>();
 
         let modal = egui::Modal::new(egui::Id::new("ticket-editor")).show(ctx, |ui| {
             ui.set_width(560.0);
@@ -1336,6 +1444,45 @@ impl BoardApp {
                         egui::TextEdit::singleline(&mut editor.points)
                             .desired_width(80.0)
                             .hint_text("unsized"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Epic");
+                    egui::ComboBox::from_id_salt("editor-epic")
+                        .selected_text(editor.epic.clone().unwrap_or_else(|| "(none)".into()))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut editor.epic, None, "(none)");
+                            for epic in &epics {
+                                ui.selectable_value(&mut editor.epic, Some(epic.clone()), epic);
+                            }
+                        });
+                    ui.end_row();
+
+                    ui.label("Tags");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut editor.tags)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("comma-separated, e.g. gui, urgent"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Branch type");
+                    branch_type_combo(ui, &mut editor.branch_type, "editor-branch-type");
+                    ui.end_row();
+
+                    ui.label("Parent");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut editor.parent)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("id or slug"),
+                    );
+                    ui.end_row();
+
+                    ui.label("Related");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut editor.related)
+                            .desired_width(f32::INFINITY)
+                            .hint_text("comma-separated ids or slugs"),
                     );
                     ui.end_row();
                 });
@@ -1484,6 +1631,22 @@ struct ColumnEvents<'a> {
     /// A membership checkbox was toggled this frame: the card's path and its
     /// desired new membership state.
     toggled: &'a mut Option<(PathBuf, bool)>,
+}
+
+/// A dropdown of the board's accepted branch types, plus "no branch" —
+/// `branch::choices()` already puts `NONE` first, so this is every valid
+/// value `Task::apply_edit`/`create::Draft::prepare` will accept, offered
+/// rather than typed so a typo can't slip through as an "unknown branch
+/// type" error at save time.
+#[cfg(feature = "gui")]
+fn branch_type_combo(ui: &mut egui::Ui, value: &mut String, id_source: &str) {
+    egui::ComboBox::from_id_salt(id_source)
+        .selected_text(value.as_str())
+        .show_ui(ui, |ui| {
+            for choice in crate::branch::choices() {
+                ui.selectable_value(value, choice.clone(), choice);
+            }
+        });
 }
 
 /// One status column: a header, then its cards top to bottom, with a drop slot
