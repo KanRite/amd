@@ -166,9 +166,11 @@ pub fn toggle(line: &str) -> String {
 /// What pressing Enter at the end of this line should open next.
 ///
 /// `Some("- [ ] ")` after a checklist item, `Some("- ")` after a bullet,
-/// `Some("2. ")` after `"1. "`, and `None` after anything else — including
-/// an empty list item, where continuing would mean fighting the editor to
-/// stop a list.
+/// `Some("2. ")` after `"1. "`, `Some("")` after an ordinary line of prose
+/// (so Notes can run to more than one line the same way a checklist can run
+/// to more than one item), and `None` after anything else — including an
+/// empty line or an empty list item, where continuing would either fight
+/// the editor to stop a list or open blank line after blank line forever.
 pub fn continuation(line: &str) -> Option<String> {
     match classify(line) {
         Kind::Check { indent, text, .. } if !text.trim().is_empty() => {
@@ -189,6 +191,10 @@ pub fn continuation(line: &str) -> Option<String> {
             let next = number.parse::<u64>().ok()?.checked_add(1)?;
             Some(format!("{indent}{next}. "))
         }
+        // Plain prose: `classify` only returns `Text` for a non-blank line
+        // (a blank one is `Kind::Blank`), so there's no separate emptiness
+        // guard to write here — an empty line already can't reach this arm.
+        Kind::Text => Some(String::new()),
         _ => None,
     }
 }
@@ -625,12 +631,31 @@ mod tests {
         assert_eq!(continuation("- [ ] one").as_deref(), Some("- [ ] "));
         assert_eq!(continuation("- one").as_deref(), Some("- "));
         assert_eq!(continuation("  * one").as_deref(), Some("  * "));
-        // Plain text and headings do not become lists.
-        assert_eq!(continuation("just words"), None);
+        // A heading does not become a list — or anything else; see
+        // `headings_do_not_continue` below for why that stays `None` while
+        // plain text now continues with a blank line.
         assert_eq!(continuation("## Notes"), None);
         // An empty item ends the list rather than making another.
         assert_eq!(continuation("- [ ] "), None);
         assert_eq!(continuation("- "), None);
+    }
+
+    /// Notes (and any other plain prose) can run to more than one line, the
+    /// same way a checklist can run to more than one item — Enter opens a
+    /// new blank line to keep typing on, and an empty line stops rather
+    /// than opening blank line after blank line forever.
+    #[test]
+    fn enter_continues_plain_text_with_a_blank_line() {
+        assert_eq!(continuation("just words").as_deref(), Some(""));
+        assert_eq!(continuation("  indented words").as_deref(), Some(""));
+        assert_eq!(continuation(""), None);
+        assert_eq!(continuation("   "), None);
+    }
+
+    #[test]
+    fn headings_do_not_continue() {
+        assert_eq!(continuation("## Notes"), None);
+        assert_eq!(continuation("# Title"), None);
     }
 
     #[test]
@@ -834,6 +859,38 @@ mod interaction_tests {
         assert!(
             harness.state().body.contains("Talked to the team"),
             "typing after clicking the blank line should reach the body: {:?}",
+            harness.state().body
+        );
+    }
+
+    /// Reported right after the click-target fix landed: Acceptance
+    /// criteria could run to several lines (Enter continues a checklist),
+    /// but Notes could only ever hold one — Enter just closed the line
+    /// instead of opening another, since plain prose had no continuation
+    /// at all. `continuation`'s own unit tests cover the string logic;
+    /// this proves it end to end, through the actual keypress.
+    #[test]
+    fn enter_after_a_line_of_notes_opens_a_new_line_to_keep_typing() {
+        let mut harness = harness_with("## Notes\n");
+
+        harness.get_by_label_contains("click to write").click();
+        harness.run();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text("First line".into()));
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text("Second line".into()));
+        harness.run();
+
+        assert!(
+            harness.state().body.contains("First line\nSecond line"),
+            "{:?}",
             harness.state().body
         );
     }
