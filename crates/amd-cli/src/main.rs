@@ -6,6 +6,7 @@
 
 mod completions;
 mod form;
+mod github;
 mod init;
 mod render;
 mod value;
@@ -133,8 +134,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Create or connect this project's dedicated tickets and documents
-    /// repositories ({project}-tickets, {project}-documents)
+    /// Create or connect this project's dedicated tickets and governance
+    /// repositories ({project}-tickets, {project}-governance)
     Init {
         /// The project's declared identity — cannot be changed once set
         #[arg(value_name = "PROJECT")]

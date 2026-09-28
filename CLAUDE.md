@@ -61,15 +61,39 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   computes and reports everything without writing or spending an id.
 - `crates/amd-cli/src/main.rs` — the `amd` binary: clap CLI and command handlers; it also owns
   `form.rs`, `value.rs`, `completions.rs` and `init.rs`, which are CLI-only.
-- `crates/amd-cli/src/init.rs` — `amd init <project>`: finds or creates a
-  private `<project>-tickets` GitHub repository (via `gh`, as a child of the
-  current directory), clones it, scaffolds the board, and registers it.
-  **Refuses to run from inside an existing git repository** — a guard, not
-  an inference: an earlier version tried placing the new repo as a sibling
-  of whatever repo you happened to be standing in, which was a real source
-  of confusion. `--local-only` is the command for "inside a repo" — it
-  skips all of the above and just scaffolds here, the way bare `amd init`
-  always has.
+- `crates/amd-cli/src/init.rs` — `amd init <project>`: finds or creates
+  **two** private GitHub repositories, `<project>-tickets` and
+  `<project>-governance` (via `gh`, as siblings under the current
+  directory), clones each, scaffolds them, registers both locally, and
+  aliases them `tickets`/`governance` (`crates/amd-lib/src/alias.rs`,
+  ticket 026) — warning rather than failing if either alias is already
+  taken by something else on this machine. Tickets gets the board;
+  governance gets `adr/`, `rfc/`, `docs/`, `README.md`, `CHANGELOG.md`, and
+  a `.settings/` **directory** (ticket 057 — one small file per key, so a
+  changed setting reviews as its own small diff; `.settings/project` is
+  the only file `init` writes today). Each repository gets its own branch
+  protection tier via `github.rs`'s `protect_main()` — tickets: blocks
+  force-push/deletion only; governance: additionally requires one approving
+  review — both `enforce_admins: true` so the owner can't silently bypass
+  it, neither ever sets `require_last_push_approval` (that combination is
+  what previously made a solo pusher's own PRs permanently unmergeable
+  elsewhere in this org). **This org's repos are private on the free
+  plan**, where GitHub's branch-protection API (both the classic endpoint
+  and the newer rulesets one) returns `403 Upgrade to GitHub Pro` for
+  *any* payload — `protect_main` treats that as `ProtectionOutcome::Unavailable`,
+  not an error, and `init` just warns; review on governance is a human
+  convention until the org upgrades or the repos go public, not something
+  GitHub enforces yet. **Refuses to run from inside an existing git
+  repository** — a guard, not an inference: an earlier version tried
+  placing the new repos as siblings of whatever repo you happened to be
+  standing in, which was a real source of confusion. `--local-only` is the
+  command for "inside a repo" — it skips all of the above (tickets board
+  only, no governance sibling, no protection) and just scaffolds here, the
+  way bare `amd init` always has.
+- `crates/amd-cli/src/github.rs` — `protect_main(full_name, require_review)`:
+  the only thing that shells out to `gh api` rather than plain `gh repo`/
+  `git`. Needs the branch to exist first (protection is set after the
+  first commit is pushed, not before).
 - `crates/amd-ui/src/main.rs` — the `amdui` binary: ~50 lines that call
   `agile_md::gui::run()`, so the board is something you launch rather than a
   subcommand you remember. `amd gui` stays — it's the same call, and it's what
@@ -138,8 +162,8 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   all, it looks at the directory's own immediate children for exactly one
   that's both a git repo and has a board of its own
   (`project_siblings()`) — the layout `amd init <project>` creates, a plain
-  parent folder holding `{project}-tickets` (and optionally
-  `{project}-documents`) as siblings. Lets `amd`/`amdui` run from that
+  parent folder holding `{project}-tickets` and `{project}-governance` as
+  siblings. Lets `amd`/`amdui` run from that
   parent directory itself, not only one `cd` deeper. Two or more qualifying
   children is an error naming all of them, never a guess, same as `find`
   on an ambiguous ticket reference.
@@ -302,7 +326,7 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
     `amd group` command including `empty` (one commit for every ticket it
     moves, not one per ticket — a single logical action). Not in scope:
     `amd register`/`deregister` (the registry, not the board),
-    `{project}-documents` (a different repository entirely, PR-reviewed by
+    `{project}-governance` (a different repository entirely, PR-reviewed by
     design, never auto-committed).
   - **`amd log`** (`cmd_log`) renders the board's transition history —
     `date time action id title sha` — from `git log --name-status -M`,
