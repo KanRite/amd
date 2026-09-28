@@ -131,6 +131,43 @@ assert "an unrelated empty directory still errors as before" \
 # Unlike `amd init`, plain board discovery no longer registers anything on
 # its own — nothing to clean up here any more.
 
+echo "discovery from inside a sibling repo that has no board of its own (ticket 061):"
+# The other real layout: standing inside the *code* repo, a git repository
+# in its own right with no tasks/ of its own, sitting next to the real
+# tickets repo rather than above it. locate() alone "succeeds" here
+# (it never checks the board actually exists), which is exactly what used
+# to stop the sibling-scan fallback from ever running.
+sibling_parent="$(mktemp -d)"
+( cd "${sibling_parent}" && git init -q code && cd code \
+  && git config user.email t@t.co && git config user.name t && git commit -q -m seed --allow-empty )
+mkdir -p "${sibling_parent}/proj-tickets/tasks"
+( cd "${sibling_parent}/proj-tickets" && git init -q && git config user.email t@t.co && git config user.name t \
+  && git add -A && git commit -q -m seed --allow-empty )
+assert "amd board finds the sibling tickets repo from inside the code repo" \
+  bash -c "cd '${sibling_parent}/code' && '${AMD}' board --plain | grep -q TODO"
+mkdir -p "${sibling_parent}/code/deep/nested"
+assert "...and from a subdirectory of the code repo, not just its top level" \
+  bash -c "cd '${sibling_parent}/code/deep/nested' && '${AMD}' board --plain | grep -q TODO"
+mkdir -p "${sibling_parent}/second-tickets/tasks"
+( cd "${sibling_parent}/second-tickets" && git init -q && git config user.email t@t.co && git config user.name t )
+# Deliberately *not* a hard error, unlike the plain-directory case above:
+# a repository's own parent is far more likely to hold unrelated other
+# repositories (this test suite's own scratch boards, a developer's flat
+# ~/projects/ layout) than a directory purpose-built by `amd init` is, so
+# ambiguity here falls back to today's plain "no board yet" behaviour
+# rather than erroring — confirmed the hard way, this exact scenario broke
+# unrelated pre-existing tests further down this file before that fallback
+# was added.
+assert "two tickets siblings from inside the code repo falls back, doesn't error" \
+  bash -c "cd '${sibling_parent}/code' && '${AMD}' board --no-input 2>&1 | grep -q 'no board at'"
+rm -rf "${sibling_parent}"
+
+lonely_parent="$(mktemp -d)"
+( cd "${lonely_parent}" && git init -q lonely-code && cd lonely-code \
+  && git config user.email t@t.co && git config user.name t )
+assert "a code repo with no tickets sibling at all still falls back to today's behaviour" \
+  bash -c "cd '${lonely_parent}/lonely-code' && '${AMD}' board --no-input 2>&1 | grep -q 'no board at'"
+
 echo "create:"
 "${AMD}" new "First task" >/dev/null
 "${AMD}" new "Second task" -t x -t y >/dev/null

@@ -148,21 +148,50 @@ impl Board {
         )
     }
 
-    /// `locate()`, and — only when that fails because the current directory
-    /// isn't inside a git repository at all — a fallback for the layout
-    /// `amd init <project>` now creates: a plain parent directory holding
-    /// `{project}-tickets` (and optionally `{project}-documents`) as
-    /// siblings. Lets `amd`/`amdui` be run from that parent directory
-    /// itself, not only from one `cd` deeper inside the tickets repository.
+    /// `locate()`, plus two fallbacks for the layout `amd init <project>`
+    /// creates: a plain parent directory holding `{project}-tickets` (and
+    /// `{project}-governance`) as siblings.
     ///
-    /// Not tied to the `-tickets` naming convention specifically — any
-    /// immediate child that is both a git repository and has a board of its
-    /// own qualifies, the same `has_board()` test the registry already uses
-    /// elsewhere. Two or more qualifying children is an error naming all of
-    /// them, never a silent guess, the same principle `find` already applies
-    /// to an ambiguous ticket reference.
+    /// **Standing inside a git repository that has no board of its own** —
+    /// a team member working in the *code* repository, a sibling of the
+    /// tickets repo rather than an ancestor of it — checks that repository's
+    /// own parent directory for exactly one qualifying sibling before
+    /// giving up. Ticket 061: `locate()` alone happily "succeeds" here,
+    /// returning a `Board` at a `tasks/` that doesn't exist, so without this
+    /// the sibling check below was never even reached — every command
+    /// treated the code repository as a (nonexistent, emptyish) board of
+    /// its own instead of finding the real one next door.
+    ///
+    /// **Standing outside any git repository at all** — the original case
+    /// this was built for — checks the current directory's own children
+    /// instead, so `amd`/`amdui` can run from that parent directory itself,
+    /// not only from one `cd` deeper inside the tickets repository.
+    ///
+    /// **The two cases resolve ambiguity differently, deliberately.** The
+    /// plain-directory case has no sane fallback if the scan is ambiguous —
+    /// `locate()` already failed outright — so it errors, naming every
+    /// candidate, never a silent guess. The in-a-repo case always has one:
+    /// `locate()`'s own (possibly nonexistent) answer, the "no board here
+    /// yet" a genuine single-repo board already relies on. A repository's
+    /// parent is far more likely to hold unrelated other repositories than
+    /// a directory purpose-built by `amd init` is — confirmed live, the
+    /// hard way, by this project's own test suite: `tests/test.sh` alone
+    /// leaves enough sibling scratch boards under a shared temp root that
+    /// an unconditional ambiguity error here broke unrelated, pre-existing
+    /// tests that create a fresh repo and expect today's plain "no board
+    /// yet" behaviour, not a wall of unrelated names. So: found none, or
+    /// found more than one, both fall back to `locate()`'s own answer
+    /// silently, and only a genuinely unambiguous single sibling redirects.
     pub fn discover() -> Result<Board> {
         if let Ok(board) = Board::locate() {
+            if board.root.is_dir() {
+                return Ok(board);
+            }
+            if let Some(parent) = board.repo_root().parent()
+                && let [only] = project_siblings(parent).as_slice()
+            {
+                return Ok(Board::in_repo(only));
+            }
             return Ok(board);
         }
         let cwd = env::current_dir().context("reading the current directory")?;
@@ -173,17 +202,7 @@ impl Board {
                  subdirectories either (agile-md boards live at <repo>/{})",
                 dir_name()
             ),
-            many => {
-                let names: Vec<String> = many
-                    .iter()
-                    .filter_map(|path| path.file_name())
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .collect();
-                bail!(
-                    "more than one project board here ({}); cd into one directly",
-                    names.join(", ")
-                )
-            }
+            many => Err(ambiguous_siblings(many)),
         }
     }
 
@@ -796,6 +815,21 @@ fn project_siblings(dir: &Path) -> Vec<PathBuf> {
         .collect();
     found.sort();
     found
+}
+
+/// More than one qualifying sibling was found — named, never guessed at,
+/// the same principle `find` already applies to an ambiguous ticket
+/// reference. Shared by both call sites in `discover()`.
+fn ambiguous_siblings(paths: &[PathBuf]) -> anyhow::Error {
+    let names: Vec<String> = paths
+        .iter()
+        .filter_map(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .collect();
+    anyhow!(
+        "more than one project board here ({}); cd into one directly",
+        names.join(", ")
+    )
 }
 
 #[cfg(test)]

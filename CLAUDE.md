@@ -172,21 +172,38 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 
 - `Board::locate()` resolves the board as `$(git rev-parse --show-toplevel)/${AMD_DIR:-tasks}`,
   so `amd` works from any subdirectory; it errors if not inside a git repo.
-- `Board::discover()` is `locate()` plus one fallback, used by `ensure_board()`
-  (so `amd register` goes through it too, like any other ordinary command —
-  it's only the *path* `amd register` defaults to when none is given that
-  still resolves via `git::repo_root()`, unchanged, since that specifically
-  means "the repo I'm standing in") and the GUI's `BoardApp::load()`. Not
-  used by `amd init --local-only`, for the same "repo I'm standing in"
-  reason: when the current directory isn't inside a git repository at
-  all, it looks at the directory's own immediate children for exactly one
-  that's both a git repo and has a board of its own
-  (`project_siblings()`) — the layout `amd init <project>` creates, a plain
-  parent folder holding `{project}-tickets` and `{project}-governance` as
-  siblings. Lets `amd`/`amdui` run from that
-  parent directory itself, not only one `cd` deeper. Two or more qualifying
-  children is an error naming all of them, never a guess, same as `find`
-  on an ambiguous ticket reference.
+- `Board::discover()` is `locate()` plus **two** fallbacks (ticket 061 added
+  the second), used by `ensure_board()` (so `amd register` goes through it
+  too, like any other ordinary command — it's only the *path* `amd
+  register` defaults to when none is given that still resolves via
+  `git::repo_root()`, unchanged, since that specifically means "the repo
+  I'm standing in") and the GUI's `BoardApp::load()`. Not used by `amd init
+  --local-only`, for the same "repo I'm standing in" reason.
+  - **Outside any git repository at all**: looks at the current
+    directory's own immediate children for exactly one that's both a git
+    repo and has a board of its own (`project_siblings()`) — the layout
+    `amd init <project>` creates, a plain parent folder holding
+    `{project}-tickets` and `{project}-governance` as siblings. Lets
+    `amd`/`amdui` run from that parent directory itself, not only one `cd`
+    deeper. Two or more qualifying children **errors**, naming all of
+    them, never a guess, same as `find` on an ambiguous ticket reference —
+    there's no sane fallback here, `locate()` already failed outright.
+  - **Inside a git repository that has no board of its own** (ticket 061 —
+    `locate()` alone "succeeds" here regardless, since it never checks
+    `tasks/` actually exists, which is exactly what stopped this from ever
+    running before): checks *that repository's own parent* the same way,
+    so standing inside the **code** repo — a sibling of the tickets repo,
+    not an ancestor of it — finds the real board next door instead of
+    treating the code repo as an empty one of its own. Two or more
+    qualifying children here does **not** error, unlike the case above —
+    it falls back to `locate()`'s own (possibly nonexistent) answer
+    silently, same as finding none at all. A repository's parent is far
+    more likely to hold unrelated other repositories than a directory
+    purpose-built by `amd init` is — confirmed the hard way: `tests/test.sh`'s
+    own scratch boards, all siblings under one shared temp root, made an
+    unconditional ambiguity error here break unrelated, pre-existing tests
+    that create a fresh repo and expect today's plain "no board yet"
+    behaviour. Only a genuinely unambiguous single sibling redirects.
 - Tasks are `NNN-slug.md`. `Board::next_id()` takes whichever is higher of the
   counter (the board-local settings file's `next-id` key, `<repo-root>/.settings`
   — a board that predates the move still has the legacy `<board>/.next-id`
