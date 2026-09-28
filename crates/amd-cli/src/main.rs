@@ -1055,7 +1055,22 @@ fn cmd_wip_limit(board: &Board, limit: u32) -> Result<()> {
         0 => println!("doing/'s WIP limit is now off"),
         n => println!("doing/'s WIP limit is now {n}"),
     }
+    note_if_written_to_governance(&settings);
     Ok(())
+}
+
+/// `board_settings::save` writes a governance-shaped setting into
+/// governance's own local clone, but never commits or pushes it there —
+/// unlike the tickets repo, governance is PR-reviewed, so `amd` doesn't
+/// commit on the user's behalf (`adr/0006`'s tickets/governance boundary).
+/// This just says where the file landed and what still needs doing.
+fn note_if_written_to_governance(settings: &board_settings::BoardSettings) {
+    if let Some(root) = settings.governance_root() {
+        println!(
+            "  written to {} — commit and open a PR there to apply it",
+            root.join(".settings").display()
+        );
+    }
 }
 
 /// Registers a repository, both halves at once: declares its name for the
@@ -1090,6 +1105,7 @@ fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
         true => println!("registered {name}"),
         false => println!("{name} was already registered on this machine"),
     }
+    note_if_written_to_governance(&settings);
     Ok(())
 }
 

@@ -45,8 +45,28 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
   recognise so one writer cannot delete another's.
 - `crates/amd-lib/src/board_settings.rs` — the board-local settings file
   (`<repo-root>/.settings`, git-tracked, hidden to match the legacy
-  `.next-id` file it partly replaces): the declared, immutable `project`
-  identity and the `next-id` ticket counter.
+  `.next-id` file it partly replaces): the `next-id` ticket counter and the
+  `commit` auto-commit toggle stay here. `project`/`repos`/`wip-todo`/
+  `wip-limit`/`lease-hours` move to `{project}-governance`'s own
+  `.settings/` **directory** once one is locatable (ticket 057) — one small
+  file per key, so each reviews as its own legible diff in a repository
+  that's already PR-reviewed, rather than a bare commit to this one's own
+  `main`. `governance_root()` finds it by sibling-path derivation
+  (`{project}-tickets` next to `{project}-governance`, the standing
+  `rfc/0003` layout) first, falling back to a **project-scoped** registry
+  lookup (`{project}-governance`, using this board's own possibly-stale
+  `project` value) — deliberately never the machine-wide `governance`
+  alias (`crates/amd-lib/src/alias.rs`), which would silently leak a
+  *different* project's settings into this one on any machine juggling
+  more than one project — confirmed live, the hard way, as a real
+  `project_trust` violation while building this. A board with no
+  locatable governance sibling (a single-repo board, or one that predates
+  the split) keeps storing the moved keys in its own file exactly as
+  before — every getter's own body is unchanged; only `load`/`save` know
+  where each key actually lives. Writing a governance-shaped key never
+  commits or pushes it there (`cmd_register`/`amd wip-limit` print where
+  the file landed and that it needs a PR) — governance is PR-reviewed,
+  same `adr/0006` boundary as `{project}-documents` always was.
 - `crates/amd-lib/src/project_trust.rs` — a per-machine, trust-on-first-use
   check that a board's declared `project` hasn't changed unexpectedly since
   `amd` last saw it.

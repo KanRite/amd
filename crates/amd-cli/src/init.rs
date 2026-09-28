@@ -42,6 +42,13 @@ pub fn run(project: String, local_only: bool, org: Option<String>) -> Result<()>
     }
     let base = std::env::current_dir().context("reading the current directory")?;
 
+    // Tickets first, governance second: `init_tickets`'s own `set_project`
+    // runs before governance exists to be found (ticket 057's sibling
+    // derivation needs the directory already there), so `project` lands in
+    // the tickets repo's own file too, not just governance's. Harmless —
+    // once both repos exist, `board_settings::load` always prefers
+    // governance's copy — but worth knowing before "why is `project` in
+    // both places" looks like a bug.
     let tickets = init_tickets(&base, &project, org.as_deref())?;
     let governance = init_governance(&base, &project, org.as_deref())?;
 

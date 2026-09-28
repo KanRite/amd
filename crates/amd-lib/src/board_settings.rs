@@ -62,6 +62,18 @@
 //! between them, rather than each getting its own. Not a real scenario:
 //! `AMD_DIR` exists so a repository can pick a non-default location for its
 //! one board, not to run several boards side by side.
+//!
+//! **`project`/`repos`/`wip-todo`/`wip-limit`/`lease-hours` move to
+//! `{project}-governance` once one is locatable** (ticket 057) — a
+//! `.settings/` *directory* there, one small file per key, so a changed
+//! setting reviews as its own legible diff in a repository that's already
+//! PR-reviewed, rather than a bare commit straight to this repository's own
+//! `main`. `next-id`/`commit` stay here regardless: `next-id` is bumped on
+//! every `amd new` and must stay on the fast, direct-to-main path;
+//! `commit` is the auto-commit toggle itself. A board with no locatable
+//! governance sibling — a single-repo board, or one that predates the
+//! split — keeps storing the moved keys in this file exactly as it always
+//! has; nothing here requires the split to have happened.
 
 use anyhow::{Result, bail};
 
@@ -77,14 +89,75 @@ const WIP_LIMIT: &str = "wip-limit";
 const REPOS: &str = "repos";
 const AUTO_COMMIT: &str = "commit";
 
+/// Keys that move to `{project}-governance`'s `.settings/` directory once
+/// one is locatable. Everything else this module knows about (`next-id`,
+/// `commit`) — and anything it doesn't recognise at all — stays in this
+/// board's own file.
+const GOVERNANCE_KEYS: &[&str] = &[PROJECT, LEASE_HOURS, WIP_TODO, WIP_LIMIT, REPOS];
+
 /// `<repo-root>/.settings` — a sibling of the board directory, not inside it.
 pub fn path(board: &Board) -> std::path::PathBuf {
     board.repo_root().join(".settings")
 }
 
+/// Where `{project}-governance`'s `.settings/` directory can be found for
+/// this board, if at all. Sibling-path derivation first — the standing
+/// `rfc/0003` layout, `{project}-tickets` next to `{project}-governance` —
+/// so this works even on a machine that's never run `amd register`. Falls
+/// back to a **project-scoped** registry lookup, `{project}-governance`,
+/// using this board's own (possibly stale, pre-migration) locally recorded
+/// `project` value — deliberately *not* the machine-wide `governance`
+/// alias: a machine can have more than one project registered at once, and
+/// resolving to "whichever repo happens to be aliased governance right
+/// now" would silently leak a *different* project's settings into this
+/// one — confirmed live, the hard way, as a real `project_trust` violation
+/// during this ticket's own testing. `None` means no governance repository
+/// is locatable at all — not an error, just "keep using the local file",
+/// which is also exactly what every board that predates the governance
+/// split needs.
+fn governance_root(board: &Board) -> Option<std::path::PathBuf> {
+    let repo = board.repo_root();
+    if let Some(name) = repo.file_name().and_then(|n| n.to_str())
+        && let Some(prefix) = name.strip_suffix("-tickets")
+        && let Some(parent) = repo.parent()
+    {
+        let sibling = parent.join(format!("{prefix}-governance"));
+        if sibling.join(".settings").is_dir() {
+            return Some(sibling);
+        }
+    }
+    let local = Config::load_from(&path(board));
+    let project = local.get(PROJECT)?;
+    let declared = format!("{project}-governance");
+    crate::registry::Registry::load()
+        .find(&declared)
+        .map(|entry| entry.root.clone())
+}
+
+/// One key, one file, its entire trimmed content the value — simpler than
+/// reusing `Config`'s `key = value` parser for a file that only ever holds
+/// one key, and it reviews as an even smaller diff.
+fn read_governance_key(governance_root: &std::path::Path, key: &str) -> Option<String> {
+    let text = std::fs::read_to_string(governance_root.join(".settings").join(key)).ok()?;
+    let value = text.trim();
+    (!value.is_empty()).then(|| value.to_string())
+}
+
+fn write_governance_key(governance_root: &std::path::Path, key: &str, value: &str) -> Result<()> {
+    let dir = governance_root.join(".settings");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join(key), format!("{value}\n"))?;
+    Ok(())
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct BoardSettings {
+    /// A merged, in-memory view — `GOVERNANCE_KEYS` from governance (when
+    /// locatable) layered over this board's own file, which every getter
+    /// below still just reads from directly. Only `save` needs to know
+    /// which key belongs in which place.
     config: Config,
+    governance_root: Option<std::path::PathBuf>,
 }
 
 impl BoardSettings {
@@ -198,6 +271,14 @@ impl BoardSettings {
         }
     }
 
+    /// Where a governance-shaped setting just written by `save` actually
+    /// landed, if anywhere other than this board's own file — so a caller
+    /// can tell the user it needs a commit and a PR there, rather than
+    /// having already been pushed the way a tickets-repo change is.
+    pub fn governance_root(&self) -> Option<&std::path::Path> {
+        self.governance_root.as_deref()
+    }
+
     /// Whether a mutating command should commit (and push) its own change
     /// automatically. Opposite default from everything else in this file:
     /// absent or unparsable means **on**, since the feature's entire job is
@@ -243,8 +324,32 @@ impl BoardSettings {
         Ok(())
     }
 
+    /// Persists whatever's in memory to wherever each key actually belongs.
+    /// With no locatable governance repository, this is unchanged from
+    /// before ticket 057 — everything goes in this board's own file.
     pub fn save(&self, board: &Board) -> Result<()> {
-        self.config.save_to(&path(board))
+        let Some(root) = &self.governance_root else {
+            return self.config.save_to(&path(board));
+        };
+        // A fresh read, not `self.config` verbatim: `self.config` also
+        // holds whatever governance keys were merged in at `load()` time,
+        // and those must not leak back into this board's own file — a
+        // legacy value already sitting here (pre-migration) is left alone
+        // rather than actively deleted, since migration is a deliberate,
+        // separate step, not something a save should do as a side effect.
+        let mut local = Config::load_from(&path(board));
+        for key in [NEXT_ID, AUTO_COMMIT] {
+            if let Some(value) = self.config.get(key) {
+                local.set(key, value);
+            }
+        }
+        local.save_to(&path(board))?;
+        for key in GOVERNANCE_KEYS {
+            if let Some(value) = self.config.get(key) {
+                write_governance_key(root, key, value)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -277,8 +382,18 @@ pub fn validate_project_name(name: &str) -> Result<()> {
 }
 
 pub fn load(board: &Board) -> BoardSettings {
+    let mut config = Config::load_from(&path(board));
+    let governance_root = governance_root(board);
+    if let Some(root) = &governance_root {
+        for key in GOVERNANCE_KEYS {
+            if let Some(value) = read_governance_key(root, key) {
+                config.set(key, &value);
+            }
+        }
+    }
     BoardSettings {
-        config: Config::load_from(&path(board)),
+        config,
+        governance_root,
     }
 }
 
@@ -616,5 +731,133 @@ mod tests {
         // function's doc comment.
         let err = validate_project_name("agile/md").unwrap_err().to_string();
         assert!(err.contains("only letters"), "{err}");
+    }
+
+    // ticket 057: the governance sibling ------------------------------
+
+    /// `<dir>/proj-tickets/tasks` — a board named so sibling derivation has
+    /// something to find, distinct from the plain `board()` helper above
+    /// (whose tempdir name never ends in `-tickets`, so it always falls
+    /// through to "no governance sibling", exactly like every test above
+    /// this section already relies on).
+    fn tickets_board(dir: &std::path::Path) -> Board {
+        Board::at(dir.join("proj-tickets").join("tasks"))
+    }
+
+    fn governance_settings_dir(dir: &std::path::Path) -> std::path::PathBuf {
+        let settings = dir.join("proj-governance").join(".settings");
+        std::fs::create_dir_all(&settings).unwrap();
+        settings
+    }
+
+    #[test]
+    fn a_board_named_something_tickets_with_no_sibling_falls_back_to_local() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = tickets_board(dir.path());
+        // No proj-governance directory created at all.
+        let mut settings = load(&board);
+        settings.set_project("proj").unwrap();
+        settings.save(&board).unwrap();
+
+        assert_eq!(load(&board).project(), Some("proj"));
+        let local = Config::load_from(&path(&board));
+        assert_eq!(
+            local.get(PROJECT),
+            Some("proj"),
+            "no sibling exists, so this is exactly the pre-057 behaviour"
+        );
+    }
+
+    #[test]
+    fn a_governance_sibling_is_found_by_the_tickets_suffix_convention() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = tickets_board(dir.path());
+        let settings_dir = governance_settings_dir(dir.path());
+        std::fs::write(settings_dir.join("project"), "proj\n").unwrap();
+
+        assert_eq!(load(&board).project(), Some("proj"));
+    }
+
+    #[test]
+    fn governance_values_win_over_a_stale_local_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = tickets_board(dir.path());
+        std::fs::create_dir_all(board.repo_root()).unwrap();
+        std::fs::write(path(&board), "project = old-value\n").unwrap();
+        let settings_dir = governance_settings_dir(dir.path());
+        std::fs::write(settings_dir.join("project"), "new-value\n").unwrap();
+
+        assert_eq!(
+            load(&board).project(),
+            Some("new-value"),
+            "governance's own copy takes precedence once one exists"
+        );
+    }
+
+    #[test]
+    fn saving_with_a_governance_sibling_writes_there_not_locally() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = tickets_board(dir.path());
+        governance_settings_dir(dir.path());
+
+        let mut settings = load(&board);
+        settings.declare_repo("some-repo").unwrap();
+        settings.set_wip_limit(Column::Doing, Some(3)).unwrap();
+        settings.save(&board).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("proj-governance/.settings/repos")).unwrap(),
+            "some-repo\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("proj-governance/.settings/wip-limit"))
+                .unwrap(),
+            "3\n"
+        );
+        let local = Config::load_from(&path(&board));
+        assert_eq!(
+            local.get(REPOS),
+            None,
+            "governance-shaped keys must not also land in the local file"
+        );
+    }
+
+    #[test]
+    fn saving_next_id_with_a_governance_sibling_still_writes_locally() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = tickets_board(dir.path());
+        governance_settings_dir(dir.path());
+
+        let mut settings = load(&board);
+        settings.set_next_id(42);
+        settings.save(&board).unwrap();
+
+        assert_eq!(load(&board).next_id(), Some(42));
+        assert!(
+            !dir.path()
+                .join("proj-governance/.settings/next-id")
+                .exists(),
+            "next-id is never governance's concern"
+        );
+    }
+
+    #[test]
+    fn a_pre_migration_local_value_is_left_alone_not_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = tickets_board(dir.path());
+        std::fs::create_dir_all(board.repo_root()).unwrap();
+        std::fs::write(path(&board), "repos = leftover-repo\n").unwrap();
+        governance_settings_dir(dir.path());
+
+        let mut settings = load(&board);
+        settings.set_next_id(1);
+        settings.save(&board).unwrap();
+
+        let local = Config::load_from(&path(&board));
+        assert_eq!(
+            local.get(REPOS),
+            Some("leftover-repo"),
+            "migration is a deliberate step, not a side effect of an unrelated save"
+        );
     }
 }
