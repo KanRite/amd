@@ -17,7 +17,7 @@ use anyhow::{Result, anyhow};
 use crate::board::{Board, Column};
 use crate::group::{DEFAULT_DAYS, Group, Kind, State};
 use crate::registry::Registry;
-use crate::task::{ContentHash, Task};
+use crate::task::{ContentHash, Task, VALID_POINTS};
 use settings::{Accent, FontSize, GuiSettings, Theme};
 
 /// Wide enough for a title of a few words without wrapping to three lines,
@@ -1243,11 +1243,7 @@ impl BoardApp {
                     ui.end_row();
 
                     ui.label("Points");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut draft.points)
-                            .desired_width(80.0)
-                            .hint_text("e.g. 3"),
-                    );
+                    points_combo(ui, &mut draft.points, "draft-points");
                     ui.end_row();
 
                     ui.label("Assignee");
@@ -1416,11 +1412,7 @@ impl BoardApp {
                     );
                     ui.end_row();
                     ui.label("Points");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut editor.points)
-                            .desired_width(80.0)
-                            .hint_text("unsized"),
-                    );
+                    points_combo(ui, &mut editor.points, "editor-points");
                     ui.end_row();
 
                     ui.label("Epic");
@@ -1594,6 +1586,25 @@ fn branch_type_combo(ui: &mut egui::Ui, value: &mut String, id_source: &str) {
         .show_ui(ui, |ui| {
             for choice in crate::branch::choices() {
                 ui.selectable_value(value, choice.clone(), choice);
+            }
+        });
+}
+
+/// A dropdown of `task::VALID_POINTS`, plus "(none)" for unsized — the only
+/// values `Task::set_points`/`apply_edit` actually accept, so this can never
+/// produce a write the save call would then reject.
+#[cfg(feature = "gui")]
+fn points_combo(ui: &mut egui::Ui, points: &mut String, id_source: &str) {
+    egui::ComboBox::from_id_salt(id_source)
+        .selected_text(if points.is_empty() {
+            "(none)"
+        } else {
+            points.as_str()
+        })
+        .show_ui(ui, |ui| {
+            ui.selectable_value(points, String::new(), "(none)");
+            for value in VALID_POINTS {
+                ui.selectable_value(points, value.to_string(), value);
             }
         });
 }

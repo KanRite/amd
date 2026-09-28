@@ -368,6 +368,7 @@ impl Task {
 
     /// Size the ticket, or clear the size with an empty string.
     pub fn set_points(&self, expected: ContentHash, points: &str) -> Result<()> {
+        validate_points(points)?;
         self.write_checked(expected, |text| {
             set_meta(text, "points", &format!("{points:?}"))
         })
@@ -435,6 +436,7 @@ impl Task {
     ) -> Result<()> {
         branch::validate_branch_type(fields.branch_type)?;
         let branch_name = branch::for_title(fields.branch_type, fields.title)?;
+        validate_points(fields.points)?;
         let parent = match fields.parent {
             "" => String::new(),
             reference => board.find(reference)?.id_display(),
@@ -570,6 +572,25 @@ pub(crate) fn parse_list(raw: &str) -> Vec<String> {
         .map(|item| item.trim().trim_matches(['"', '\'']).to_string())
         .filter(|item| !item.is_empty())
         .collect()
+}
+
+/// The only sizes a ticket's `points` may take — standard sprint-planning
+/// Fibonacci, fixed rather than configurable: nobody asked for a board to
+/// pick its own scale, and a fixed list is what makes the GUI's points
+/// field a dropdown rather than free text in the first place.
+pub const VALID_POINTS: [&str; 6] = ["1", "2", "3", "5", "8", "13"];
+
+/// Empty (unsized) or one of `VALID_POINTS` — checked here so every write
+/// path (`set_points`, `apply_edit`) enforces it the same way, rather than
+/// each call site remembering to.
+fn validate_points(points: &str) -> Result<()> {
+    if points.is_empty() || VALID_POINTS.contains(&points) {
+        return Ok(());
+    }
+    bail!(
+        "invalid points '{points}' — must be one of {} (or empty to clear)",
+        VALID_POINTS.join(", ")
+    );
 }
 
 /// Replace a frontmatter value, adding the key before the closing fence when
@@ -1086,6 +1107,76 @@ mod tests {
             fs::read_to_string(&task.path).unwrap().ends_with("body\n"),
             "the body must survive"
         );
+    }
+
+    #[test]
+    fn set_points_accepts_every_valid_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            "---\nid: \"001\"\npoints: \"\"\n---\n\nb\n",
+        );
+        for value in VALID_POINTS {
+            task.set_points(task.hash().unwrap(), value).unwrap();
+            assert_eq!(task.points(), Some(value.to_string()));
+        }
+    }
+
+    #[test]
+    fn set_points_clears_with_an_empty_string() {
+        let dir = tempfile::tempdir().unwrap();
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            "---\nid: \"001\"\npoints: \"5\"\n---\n\nb\n",
+        );
+        task.set_points(task.hash().unwrap(), "").unwrap();
+        assert_eq!(task.points(), None);
+    }
+
+    #[test]
+    fn set_points_rejects_a_non_fibonacci_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            "---\nid: \"001\"\npoints: \"\"\n---\n\nb\n",
+        );
+        let err = task
+            .set_points(task.hash().unwrap(), "4")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("invalid points '4'"), "{err}");
+        assert!(err.contains("1, 2, 3, 5, 8, 13"), "{err}");
+        assert_eq!(task.points(), None, "the rejected write must not land");
+    }
+
+    #[test]
+    fn apply_edit_also_rejects_a_non_fibonacci_points_value() {
+        let (_dir, board) = board_with_a_ticket();
+        let task = ranked(
+            &board.dir(Column::Backlog),
+            "002-a.md",
+            "---\nid: \"002\"\ntitle: \"Old\"\nassignee: \"\"\npoints: \"\"\n---\n\nbody\n",
+        );
+        let err = task
+            .apply_edit(
+                task.hash().unwrap(),
+                &board,
+                EditFields {
+                    title: "New",
+                    assignee: "sam",
+                    points: "7",
+                    ..no_edit()
+                },
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("invalid points '7'"), "{err}");
+        // Nothing else was written either -- validation happens before any
+        // part of the combined write.
+        assert_eq!(task.title(), "Old");
     }
 
     #[test]
