@@ -1498,7 +1498,6 @@ fn column_ui(
     filter: &BTreeSet<String>,
     events: &mut ColumnEvents,
 ) -> Option<Drop> {
-    let mut result = None;
     let cards = &repo.lanes[column as usize];
     let visible = cards
         .iter()
@@ -1510,57 +1509,74 @@ fn column_ui(
         .fill(ui.visuals().faint_bg_color)
         .corner_radius(4.0);
 
-    // Slots keep their index into the *full* lane even when a tag filter
-    // hides some of its cards — that index is also what `apply()` ranks
-    // against, unfiltered. Filtering the display but not the index space
-    // would place a drop between the wrong pair of real neighbours whenever
-    // a hidden card sat between two visible ones.
-    let (_, payload) = ui.dnd_drop_zone::<Dragged, ()>(frame, |ui| {
-        ui.vertical(|ui| {
-            ui.set_width(COLUMN_WIDTH);
-            ui.set_min_height(160.0);
-            ui.label(
-                egui::RichText::new(format!("{}  ({visible})", column.as_str().to_uppercase()))
-                    .monospace()
-                    .strong(),
-            );
-            for (index, card) in cards.iter().enumerate() {
-                if !card_visible(card, filter) {
-                    continue;
+    // `dnd_drop_zone` always overwrites *its own* frame's fill and stroke
+    // with `widgets.inactive`/`active` — that's how it paints its own drag
+    // highlight — so setting a stroke on `frame` above would be silently
+    // discarded the moment a drag starts. An outer frame wrapping the drop
+    // zone isn't touched by that override, so it's the only way to give the
+    // column a border of our own choosing, all the time: with only a fill,
+    // an empty column reads as a faint block with no edge at all, and two
+    // columns side by side have nothing marking where one ends and the next
+    // begins. Same stroke source as the ticket card's own border (`card_ui`,
+    // below) — a non-default accent colours this too, for free (ticket 043).
+    let outline = egui::Frame::default()
+        .corner_radius(4.0)
+        .stroke(ui.visuals().widgets.noninteractive.bg_stroke);
+
+    let mut result = None;
+    outline.show(ui, |ui| {
+        // Slots keep their index into the *full* lane even when a tag filter
+        // hides some of its cards — that index is also what `apply()` ranks
+        // against, unfiltered. Filtering the display but not the index space
+        // would place a drop between the wrong pair of real neighbours
+        // whenever a hidden card sat between two visible ones.
+        let (_, payload) = ui.dnd_drop_zone::<Dragged, ()>(frame, |ui| {
+            ui.vertical(|ui| {
+                ui.set_width(COLUMN_WIDTH);
+                ui.set_min_height(160.0);
+                ui.label(
+                    egui::RichText::new(format!("{}  ({visible})", column.as_str().to_uppercase()))
+                        .monospace()
+                        .strong(),
+                );
+                for (index, card) in cards.iter().enumerate() {
+                    if !card_visible(card, filter) {
+                        continue;
+                    }
+                    if let Some(drop) = slot(ui, repo_index, column, index) {
+                        result = Some(drop);
+                    }
+                    let membership = events.selected.map(|name| card_in_group(card, name));
+                    let response = card_ui(ui, card, repo_index, events.identity, membership);
+                    if response.opened {
+                        *events.opened = Some(card.task.path.clone());
+                    }
+                    if let Some(member) = response.toggled {
+                        *events.toggled = Some((card.task.path.clone(), member));
+                    }
                 }
-                if let Some(drop) = slot(ui, repo_index, column, index) {
+                if let Some(drop) = slot(ui, repo_index, column, cards.len()) {
                     result = Some(drop);
                 }
-                let membership = events.selected.map(|name| card_in_group(card, name));
-                let response = card_ui(ui, card, repo_index, events.identity, membership);
-                if response.opened {
-                    *events.opened = Some(card.task.path.clone());
+                if visible == 0 {
+                    ui.weak("(empty)");
                 }
-                if let Some(member) = response.toggled {
-                    *events.toggled = Some((card.task.path.clone(), member));
-                }
-            }
-            if let Some(drop) = slot(ui, repo_index, column, cards.len()) {
-                result = Some(drop);
-            }
-            if visible == 0 {
-                ui.weak("(empty)");
-            }
+            });
         });
-    });
 
-    // Dropped on the lane but not on a slot: append.
-    if let Some(dragged) = payload
-        && result.is_none()
-        && dragged.repo == repo_index
-    {
-        result = Some(Drop::Land {
-            path: dragged.path.clone(),
-            repo: repo_index,
-            column,
-            index: cards.len(),
-        });
-    }
+        // Dropped on the lane but not on a slot: append.
+        if let Some(dragged) = payload
+            && result.is_none()
+            && dragged.repo == repo_index
+        {
+            result = Some(Drop::Land {
+                path: dragged.path.clone(),
+                repo: repo_index,
+                column,
+                index: cards.len(),
+            });
+        }
+    });
     result
 }
 
