@@ -38,14 +38,16 @@ impl Theme {
 }
 
 /// The accent colour applied over whichever base theme is active —
-/// `egui::Visuals::selection`/`hyperlink_color`, which is what everything
-/// already built on `ui.visuals()` (card fills, borders, the drop-target
-/// highlight) picks up automatically, with no per-widget changes needed.
-/// Deliberately not a per-element palette editor: an inventory of every
-/// `Color32`/`.visuals()` call in `gui/mod.rs` found only two genuinely
-/// hardcoded colours (the status-error red, the lease-badge amber), and
-/// both are semantic rather than decorative — left untouched by design, so
-/// an error still reads as an error whichever accent is chosen.
+/// `egui::Visuals::selection`/`hyperlink_color` for anything painted from a
+/// fill (card fills, the drop-target highlight), plus each widget state's
+/// `bg_stroke.color` for anything painted from a stroke instead (the
+/// ticket-card border, `ui.separator()`) — a fill-only override never
+/// reaches those (ticket 043). Deliberately not a per-element palette
+/// editor: an inventory of every `Color32`/`.visuals()` call in
+/// `gui/mod.rs` found only two genuinely hardcoded colours (the
+/// status-error red, the lease-badge amber), and both are semantic rather
+/// than decorative — left untouched by design, so an error still reads as
+/// an error whichever accent is chosen.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Accent {
     /// Leave egui's own theme default alone — no override applied.

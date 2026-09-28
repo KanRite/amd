@@ -511,11 +511,13 @@ impl eframe::App for BoardApp {
         // card widths with the text, so a large font does not overflow a
         // column sized for a standard one.
         ctx.set_zoom_factor(self.settings.font.scale());
-        // After set_theme, which resets visuals to the theme's own
-        // defaults: everything already built on `ui.visuals()` (card fills,
-        // borders, the drop-target highlight) picks this up for free, no
-        // per-widget changes needed. `Accent::Default` applies nothing,
-        // leaving the theme's own colours exactly as before this existed.
+        // After set_theme, which resets visuals to the theme's own defaults.
+        // `selection.bg_fill`/`hyperlink_color` cover anything built from a
+        // fill (card fills, the drop-target highlight), but a card border
+        // and `ui.separator()` both paint `widgets.noninteractive.bg_stroke`
+        // instead — a fill-only override never reaches them. `Accent::Default`
+        // applies nothing, leaving the theme's own colours exactly as before
+        // this existed.
         if let Some(color) = self.settings.accent.color() {
             // Both light and dark styles, not just whichever is active right
             // now — under `ThemePreference::System` the OS can switch either
@@ -523,6 +525,13 @@ impl eframe::App for BoardApp {
             ctx.all_styles_mut(|style| {
                 style.visuals.selection.bg_fill = color;
                 style.visuals.hyperlink_color = color;
+                // `inactive`/`hovered`/`active` too, so a widget's outline
+                // stays consistent across hover states rather than only at
+                // rest.
+                style.visuals.widgets.noninteractive.bg_stroke.color = color;
+                style.visuals.widgets.inactive.bg_stroke.color = color;
+                style.visuals.widgets.hovered.bg_stroke.color = color;
+                style.visuals.widgets.active.bg_stroke.color = color;
             });
         }
 
