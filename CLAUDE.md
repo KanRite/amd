@@ -746,6 +746,21 @@ changes):
   literal by eye. The CLI's own `templates/ticket.md.jinja` keeps its extra
   blank lines deliberately — opened in a real `$EDITOR`, they're free
   spacing, not a stray clickable hint, so there's nothing there to fix.
+- **`continuation` treats plain prose as continuable too, not just lists
+  (ticket 074).** A checklist item could already run to several lines —
+  Enter opens the next `- [ ] ` — but `Kind::Text` fell through to
+  `continuation`'s `_ => None` arm, same as a heading or an empty line,
+  which stops editing rather than opening a new line. Pressing Enter after
+  a line of Notes prose now opens a blank line the same way a fresh Notes
+  section already does (`Kind::Text => Some(String::new())`); an empty line
+  still stops the chain, since `classify` only ever returns `Text` for a
+  non-blank one, so there's no separate emptiness guard to write. Headings
+  are deliberately unchanged. This is a stopgap, not the end state — see
+  `[[075-a-free-flowing-auto-expanding-text-area-for-notes]]` for the real
+  shape wanted (an actual auto-expanding multi-line text area for a
+  paragraph, not one `TextEdit::singleline` row per line with Enter
+  standing in for a line break), and why that's real design work, not a
+  toggle, against `richtext.rs`'s one-row-at-a-time editing model.
 - **There is no raw-markdown fallback any more (ticket 069) — `richtext::ui`
   is the only way to edit a ticket body in `amdui`.** The "MD"/"RT" toggle
   and the `TextEdit::multiline().code_editor()` branch are both gone from
