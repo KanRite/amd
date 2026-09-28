@@ -771,6 +771,55 @@ changes):
   real: the label is part of the same clickable atom as the box, which is
   what actually gives a forgiving, unambiguous target — not a cosmetic
   choice.
+- **The New-ticket and edit-ticket dialogs cover every standard field
+  (ticket 068)** — `tags`, `branch-type` (+ the `branch-name` it derives),
+  `parent`, `related` are now editable on both `Draft` (creation) and
+  `Editor` (existing tickets); `epic` is now editable on `Editor` too, not
+  just at creation; `assignee` is now editable on `Draft` too. Two
+  different write paths stayed different on purpose:
+  - **`Draft` → `create::Draft::prepare`/`NewTicket`** — unchanged
+    plumbing, just no longer hardcoding `branch_type`/`assignee`/
+    `parent`/`related`/`tags` to empty. Validation (unknown branch type,
+    unresolved parent/related ref) was already there for free.
+  - **`Editor` → `Task::apply_edit`/`EditFields`** — extended from
+    title/assignee/points/body to also take tags/branch-type/parent/
+    related, still **one write**: `parent`/`related` refs are resolved
+    against `board.find` (bailing before anything is written, same as
+    creation) and `branch-type` is validated and re-derives `branch-name`
+    from itself + the current title, all *before* `write_checked` runs —
+    the sequential-writes-against-one-stale-hash bug `apply_edit` exists to
+    prevent (see its own doc comment) would otherwise bite the moment a
+    second field setter tried to reuse the same captured hash.
+    Deliberately **not** reciprocal the way `amd link` is: unlike creation
+    (which calls `add_child_link`/`add_related` on the other tickets too),
+    editing `parent`/`related` from the GUI only rewrites *this* ticket's
+    frontmatter. Doing the reciprocal write safely would mean hash-checking
+    several files as one transaction, which nothing in this codebase does
+    today — a known, deliberate gap, not a half-built feature. `amd link`
+    remains the one path that updates both sides.
+  - **`epic` is on `Editor` now too, but it's not part of `apply_edit` at
+    all** — it goes through `Board::set_epic` (which can move the file
+    inside `backlog/`), the same call the membership checkbox already
+    makes, run as a second step in `save()` *after* `apply_edit` succeeds
+    (against the task's current state post-edit, not the stale captured
+    hash — `set_epic` re-reads its own hash internally, same as the
+    membership checkbox's `toggle_membership` already relies on). The two
+    mechanisms can't drift apart since they're the same function call; this
+    is why the ticket's own acceptance criteria asked to confirm there's no
+    collision.
+  - Both dialogs' `tags`/`related` fields are one `TextEdit`, comma
+    separated, parsed with `task::parse_list` (already tolerant of
+    brackets/quotes/spaces, so it doubles as a plain comma-splitter) rather
+    than inventing a second format.
+  - Visual verification was only partial: a screenshot confirmed the New
+    ticket dialog renders every new field correctly, but a full
+    create-and-inspect round trip through the GUI, and opening the Editor
+    dialog at all, hit the same `xdotool`/window-manager instability
+    documented against ticket 070 (window geometry drifting between calls,
+    clicks not landing) — not a code defect, left honestly unverified
+    rather than claimed. The write paths are covered directly instead:
+    `task::tests::apply_edit_writes_every_field_in_one_pass` and its two
+    "refuses before writing anything" siblings.
 - **`GroupDraft.repo` and `New ticket` both resolve to `self.backlog_repo`
   regardless of which view is showing** — Board has no repo selector of
   its own, so it targets the same repo Backlog would.
