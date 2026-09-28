@@ -1154,14 +1154,23 @@ mod tests {
 
     #[test]
     fn apply_edit_also_rejects_a_non_fibonacci_points_value() {
-        let dir = tempfile::tempdir().unwrap();
+        let (_dir, board) = board_with_a_ticket();
         let task = ranked(
-            dir.path(),
-            "001-a.md",
-            "---\nid: \"001\"\ntitle: \"Old\"\nassignee: \"\"\npoints: \"\"\n---\n\nbody\n",
+            &board.dir(Column::Backlog),
+            "002-a.md",
+            "---\nid: \"002\"\ntitle: \"Old\"\nassignee: \"\"\npoints: \"\"\n---\n\nbody\n",
         );
         let err = task
-            .apply_edit(task.hash().unwrap(), "New", "sam", "7", "body\n")
+            .apply_edit(
+                task.hash().unwrap(),
+                &board,
+                EditFields {
+                    title: "New",
+                    assignee: "sam",
+                    points: "7",
+                    ..no_edit()
+                },
+            )
             .unwrap_err()
             .to_string();
         assert!(err.contains("invalid points '7'"), "{err}");
