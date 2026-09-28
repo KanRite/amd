@@ -681,6 +681,49 @@ changes):
 - egui/eframe, the same stack as rustmark, so the two look alike and a ticket
   body could be handed to it. `App::ui` takes a `&mut Ui`, not a context —
   0.36 moved panels onto `Ui`.
+- **There is no raw-markdown fallback any more (ticket 069) — `richtext::ui`
+  is the only way to edit a ticket body in `amdui`.** The "MD"/"RT" toggle
+  and the `TextEdit::multiline().code_editor()` branch are both gone from
+  `draft_ui`/`editor_ui`. That was only safe to do once `richtext::Kind`
+  actually covered what this board's own tickets use — confirmed directly,
+  not assumed, before the toggle came out:
+  - **Fenced code blocks and markdown tables span more than one line, which
+    a per-line, context-free `classify` can't see on its own** — see
+    `richtext.rs`'s own module doc for the reasoning. A fence's *content*
+    lines are tracked with a running `in_fence` flag inside `ui`'s own loop
+    (not `classify`, which stays pure and one-line), so a `- [ ]`-shaped
+    line typed inside a code block still renders as code, never as a
+    checkbox. Table rows classify and render individually
+    (`Kind::Table`, one bordered `egui::Frame::group` row each) rather than
+    being accumulated into one aligned grid across rows — a real grid needs
+    the same cross-line grouping a fence does, and a bordered row per line
+    already clears the actual bar ("rendered, not raw `Kind::Text`"),
+    without a second stateful-loop mechanism to get equally right.
+  - **Numbered lists** (`Kind::Numbered`) parse and continue like bullets do
+    — Enter after `"1. foo"` opens `"2. "`, not a repeat `"1. "`.
+  - **Inline spans** (`richtext::spans`, private to the module) — code
+    spans, `[[wikilinks]]`, `[text](url)` links, `**bold**`, `*italic*`/
+    `_italic_` — are parsed for *display only* and never fed back into the
+    source; an edited line is still a straight rewrite of that one line, so
+    nothing about this is lossy the way a real parse-and-regenerate editor
+    would be. A real `[text](url)` opens via `ui.hyperlink_to`; a
+    `[[wikilink]]` renders distinctly (hyperlink-coloured) but — since
+    nothing in `amdui` resolves a wikilink to another ticket, and nothing
+    did before this ticket either — clicking it does the same thing
+    clicking anywhere else on the line does: opens it for editing. Not a
+    dead link pretending to work, just not cross-ticket navigation this
+    pass didn't build.
+  - **Visual verification did not happen.** Eleven unit tests cover
+    `classify`/`continuation`/`spans` directly, including this project's
+    own real inline-markdown shapes (a table row copied from
+    `[[068-cli-markdown-template-and-gui-rich-text-ticket-edi]]`'s own
+    body), but nobody has looked at the rendered result in a live `amdui`
+    window — the `xdotool`/window-manager instability already logged
+    against tickets 068 and 070 recurred again this session, across
+    several freshly-launched windows, not just a one-off. Left for a real
+    eyes-on check once that workflow is behaving normally; until then,
+    treat the *rendering* (as opposed to the parsing, which is tested) as
+    unverified.
 - Two ways in, one `gui::run()`: the `amdui` binary and `amd gui`. Neither
   needs a board — both resolve repositories through the registry, so the
   window opens from anywhere.
