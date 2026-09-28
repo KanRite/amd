@@ -125,7 +125,14 @@ unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 - `crates/amd-lib/src/task.rs` — `Task` (path, column, id, stem), frontmatter `meta` lookup,
   `slugify` (transliterates via `deunicode`, so a title in any script still
   makes a plain-ASCII filename and branch; symbols stay separators so an emoji
-  doesn't become a word).
+  doesn't become a word). `points` is fixed sprint-planning Fibonacci
+  (`VALID_POINTS`: `1 2 3 5 8 13`), enforced once, in `validate_points`,
+  called from both write paths (`set_points`, the CLI's `amd set points`;
+  `apply_edit`, the GUI editor's combined save) so neither can produce an
+  invalid value — empty always allowed, clears the field. Not
+  configurable: nobody asked for a board to pick its own scale, and a
+  fixed list is what makes the GUI's points field a dropdown
+  (`points_combo`, `gui/mod.rs`) rather than free text.
 - `crates/amd-lib/src/templates.rs` — the MiniJinja `Environment`, built-in templates, board
   overrides, `TaskContext`, `required_extras`.
 - `crates/amd-cli/src/form.rs` — every interactive prompt, built on `inquire` (text, select,

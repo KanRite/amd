@@ -471,6 +471,11 @@ work="$(mktemp -d)"
   && "${AMD}" new "First" >/dev/null && "${AMD}" new "Second" >/dev/null )
 assert "set points sizes a ticket" \
   bash -c "cd '${work}' && '${AMD}' set 001 points 5 | grep -q 'sized 5' && grep -q '^points: \"5\"\$' tasks/backlog/001-first.md"
+assert "set points rejects a non-Fibonacci value" \
+  bash -c "cd '${work}' && '${AMD}' set 001 points 4 2>&1 | grep -q 'invalid points'"
+assert "set points clears with an empty value, unaffected by the Fibonacci check" \
+  bash -c "cd '${work}' && '${AMD}' set 001 points '' | grep -q 'sized' && grep -q '^points: \"\"\$' tasks/backlog/001-first.md"
+( cd "${work}" && "${AMD}" set 001 points 5 >/dev/null )
 assert "set title rewrites the title, not the filename" \
   bash -c "cd '${work}' && '${AMD}' set 001 title 'Renamed thing' | grep -q 'retitled' && grep -q '^title: \"Renamed thing\"\$' tasks/backlog/001-first.md"
 assert "set order ranks a ticket fractionally" \
