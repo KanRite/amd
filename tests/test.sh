@@ -369,6 +369,23 @@ assert "the project-wide declaration survives deregistering locally" \
 assert "deregistering something not registered locally fails" \
   bash -c "! '${AMD}' deregister nope"
 
+echo "aliases:"
+pu_name="$(basename "${periods_and_underscores}")"
+alias_other="$(mktemp -d)"
+(cd "${alias_other}" && git init -q)
+other_name="$(basename "${alias_other}")"
+"${AMD}" register "${periods_and_underscores}" >/dev/null
+"${AMD}" register "${alias_other}" >/dev/null
+assert "amd alias assigns a short name to a registered repository" \
+  bash -c "'${AMD}' alias \"${pu_name}\" pnick | grep -q '^pnick -> '"
+assert "aliasing an unregistered repository is refused" \
+  bash -c "! '${AMD}' alias not-a-real-repo somealias"
+assert "an alias cannot collide with a different repo's real registered name" \
+  bash -c "! '${AMD}' alias \"${pu_name}\" \"${other_name}\""
+assert "amd deregister resolves an alias to its real name" \
+  bash -c "'${AMD}' deregister pnick | grep -q \"deregistered ${pu_name}\""
+rm -rf "${alias_other}"
+
 echo "related tickets:"
 assert "related is empty by default" \
   bash -c "grep -q '^related: \[\]$' tasks/*/001-first-task.md"
