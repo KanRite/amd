@@ -316,6 +316,35 @@ fn spans(text: &str) -> Vec<Span> {
 #[cfg(feature = "gui")]
 pub type Editing = Option<(usize, bool)>;
 
+/// The click target for a line with nothing in it. An empty `Label`'s own
+/// content is a point, not a rectangle — rendered that way, a blank body
+/// line (or an emptied-out list item) is *technically* clickable but has no
+/// real hit-box to find, which is exactly what made this editor's blank
+/// space unusable once there was no raw-markdown fallback left to fall back
+/// to (ticket 069's own follow-up: the parsing was right, this interaction
+/// never was). This claims a real, full-width strip instead, with a hint so
+/// it doesn't read as dead space either.
+#[cfg(feature = "gui")]
+fn empty_line_ui(ui: &mut egui::Ui, enter_edit: &mut bool) {
+    let height = ui.text_style_height(&egui::TextStyle::Body);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width().max(1.0), height),
+        egui::Sense::click(),
+    );
+    if ui.is_rect_visible(rect) {
+        ui.painter().text(
+            rect.left_center(),
+            egui::Align2::LEFT_CENTER,
+            "click to write…",
+            egui::TextStyle::Body.resolve(ui.style()),
+            ui.visuals().weak_text_color(),
+        );
+    }
+    if response.clicked() {
+        *enter_edit = true;
+    }
+}
+
 /// Draw one line's inline spans, each a separately clickable run so a real
 /// `[text](url)` link can open the URL instead of starting an edit. `style`
 /// applies whatever the *line* kind wants on top (heading size, a struck-
@@ -328,16 +357,12 @@ fn line_ui(
     style: impl Fn(egui::RichText) -> egui::RichText,
     enter_edit: &mut bool,
 ) {
+    if text.is_empty() {
+        return empty_line_ui(ui, enter_edit);
+    }
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        // An empty line still needs something to click, or a freshly-opened
-        // empty list item could never be reopened once it lost focus.
-        let text_spans = if text.is_empty() {
-            vec![Span::Plain(String::new())]
-        } else {
-            spans(text)
-        };
-        for span in text_spans {
+        for span in spans(text) {
             let (rich, clickable) = match span {
                 Span::Plain(s) => (style(egui::RichText::new(s)), true),
                 Span::Bold(s) => (style(egui::RichText::new(s)).strong(), true),
@@ -424,25 +449,24 @@ pub fn ui(ui: &mut egui::Ui, body: &mut String, editing: &mut Editing) -> bool {
         let mut enter_edit = false;
 
         if fenced_content {
-            // Deliberately not run through `spans()`: code is not prose, and
-            // parsing `*ptr` or `**kwargs` as markdown formatting would be a
-            // real, silent misrendering of the actual content.
-            let shown = if line.is_empty() { " " } else { &line };
-            let response = ui.add(
-                egui::Label::new(egui::RichText::new(shown).monospace())
-                    .sense(egui::Sense::click()),
-            );
-            if response.clicked() {
-                enter_edit = true;
+            // Deliberately not run through `spans()`/`line_ui`: code is not
+            // prose, and parsing `*ptr` or `**kwargs` as markdown formatting
+            // would be a real, silent misrendering of the actual content.
+            if line.is_empty() {
+                empty_line_ui(ui, &mut enter_edit);
+            } else {
+                let response = ui.add(
+                    egui::Label::new(egui::RichText::new(&line).monospace())
+                        .sense(egui::Sense::click()),
+                );
+                if response.clicked() {
+                    enter_edit = true;
+                }
             }
         } else {
             match classify(&line) {
                 Kind::Blank => {
-                    // Still clickable, or an empty line could never be typed into.
-                    let response = ui.add(egui::Label::new(" ").sense(egui::Sense::click()));
-                    if response.clicked() {
-                        enter_edit = true;
-                    }
+                    empty_line_ui(ui, &mut enter_edit);
                 }
                 Kind::Fence { lang, .. } => {
                     let label = if lang.is_empty() {
