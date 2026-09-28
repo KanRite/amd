@@ -324,18 +324,30 @@ pub type Editing = Option<(usize, bool)>;
 /// to (ticket 069's own follow-up: the parsing was right, this interaction
 /// never was). This claims a real, full-width strip instead, with a hint so
 /// it doesn't read as dead space either.
+///
+/// Painting the hint with `ui.painter()` directly (rather than a real
+/// `Label` widget) was the first attempt, and it was wrong in a way manual
+/// testing alone didn't catch: the painter draws pixels, nothing more — it
+/// registers no accessibility node, so the strip was invisible to a screen
+/// reader and, not coincidentally, to `egui_kittest`'s own queries (which
+/// walk the same AccessKit tree). `response.widget_info` is what a custom
+/// widget is for: it attaches the label by hand to the `Response` this
+/// function already builds, the same information a `Label` would have
+/// registered on its own.
 #[cfg(feature = "gui")]
 fn empty_line_ui(ui: &mut egui::Ui, enter_edit: &mut bool) {
+    const HINT: &str = "click to write…";
     let height = ui.text_style_height(&egui::TextStyle::Body);
     let (rect, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width().max(1.0), height),
         egui::Sense::click(),
     );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, HINT));
     if ui.is_rect_visible(rect) {
         ui.painter().text(
             rect.left_center(),
             egui::Align2::LEFT_CENTER,
-            "click to write…",
+            HINT,
             egui::TextStyle::Body.resolve(ui.style()),
             ui.visuals().weak_text_color(),
         );
@@ -758,6 +770,140 @@ mod tests {
         assert_eq!(
             spans("`**not bold**`"),
             vec![Span::Code("**not bold**".into())]
+        );
+    }
+}
+
+/// Interaction tests for `ui()` itself — the click-to-edit behaviour the
+/// tests above can't reach, since they only exercise `classify`/`spans`.
+/// `egui_kittest` runs the real widget tree headless and drives it through
+/// its accessibility tree, which is what actually caught ticket 071 (a
+/// blank line's click target being too small to find in practice): no
+/// display, no compositor, no `xdotool` — a real regression test instead of
+/// a screenshot that can only be looked at once, by hand, if the GNOME
+/// workflow happens to be cooperating that day.
+#[cfg(all(test, feature = "gui"))]
+mod interaction_tests {
+    use super::*;
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    /// What the harness reads and writes back — the same two pieces of
+    /// state `Draft`/`Editor` hand `ui()` in the real app.
+    struct State {
+        body: String,
+        editing: Editing,
+    }
+
+    fn harness_with(body: &str) -> Harness<'static, State> {
+        let state = State {
+            body: body.to_string(),
+            editing: None,
+        };
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(500.0, 400.0))
+            .build_ui_state(
+                |the_ui, state: &mut State| {
+                    ui(the_ui, &mut state.body, &mut state.editing);
+                },
+                state,
+            );
+        harness.run();
+        harness
+    }
+
+    /// The exact shape reported live: the New-ticket template's blank line
+    /// under a heading did nothing when clicked, though the heading itself
+    /// (clicking "Notes") opened fine for editing. Both are checked here so
+    /// a fix for one can't silently break the other. Deliberately a single
+    /// blank line, not the full multi-blank-line template — several
+    /// identical "click to write…" targets would make the query ambiguous,
+    /// which is a test-data problem, not the thing being tested.
+    #[test]
+    fn clicking_the_blank_line_under_a_heading_opens_it_for_typing() {
+        let mut harness = harness_with("## Notes\n");
+
+        harness.get_by_label_contains("click to write").click();
+        harness.run();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text("Talked to the team".into()));
+        harness.run();
+
+        assert!(
+            harness.state().body.contains("Talked to the team"),
+            "typing after clicking the blank line should reach the body: {:?}",
+            harness.state().body
+        );
+    }
+
+    #[test]
+    fn clicking_a_heading_edits_the_heading_not_the_line_below() {
+        let mut harness = harness_with("\n## Notes\n\n\n## Acceptance criteria\n\n- [ ] \n");
+
+        harness.get_by_label("Notes").click();
+        harness.run();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text(" and questions".into()));
+        harness.run();
+
+        let body = &harness.state().body;
+        assert!(
+            body.contains("## Notes and questions"),
+            "typing after clicking the heading should edit the heading line: {body:?}"
+        );
+    }
+
+    /// A list item with nothing typed after its marker yet (`"- [ ] "`, the
+    /// template's own starting checklist item) has the same near-empty
+    /// click-target problem a blank line does.
+    #[test]
+    fn clicking_an_empty_checklist_item_opens_it_for_typing() {
+        // No trailing newline: one would add a second, ambiguous blank line.
+        let mut harness = harness_with("- [ ] ");
+
+        harness.get_by_label_contains("click to write").click();
+        harness.run();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text("write the ticket".into()));
+        harness.run();
+
+        assert!(
+            harness.state().body.contains("- [ ] write the ticket"),
+            "{:?}",
+            harness.state().body
+        );
+    }
+
+    #[test]
+    fn an_empty_line_inside_a_fence_is_still_clickable_and_stays_raw() {
+        // No trailing newline after the closing fence: one would add a
+        // second, ambiguous blank line outside it.
+        let mut harness = harness_with("```rust\n\nlet x = 1;\n```");
+
+        harness.get_by_label_contains("click to write").click();
+        harness.run();
+        // A literal asterisk, typed into a code line, must never come back
+        // out through the inline markdown parser as emphasis — it isn't
+        // reachable from here (this only asserts the raw body), but the
+        // fence-content branch bypassing `spans()` is what `richtext.rs`'s
+        // own module doc promises, and this is the line that would silently
+        // stop being true if that branch regressed to going through `line_ui`.
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text("*ptr".into()));
+        harness.run();
+
+        assert!(
+            harness.state().body.contains("*ptr"),
+            "{:?}",
+            harness.state().body
         );
     }
 }

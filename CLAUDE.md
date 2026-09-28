@@ -688,6 +688,64 @@ changes):
 - egui/eframe, the same stack as rustmark, so the two look alike and a ticket
   body could be handed to it. `App::ui` takes a `&mut Ui`, not a context —
   0.36 moved panels onto `Ui`.
+- **`egui_kittest` (dev-dependency, pinned to the same `0.36` line as
+  `egui`/`eframe` — a version mismatch pulls in two copies of egui and fails
+  to compile) drives the real widget tree headless, through its
+  accessibility tree — no display, no compositor, no `xdotool`.** Added after
+  the GNOME screenshot workflow's `xdotool`/window-manager instability (first
+  logged against tickets 068/070, then blocking verification again for 069)
+  turned out to be a compositor input-guard window swallowing every
+  synthetic pointer event this session — not fixable from here, and not
+  something to keep working around by hand. `richtext.rs::interaction_tests`
+  and `gui::tests::the_default_draft_body_has_exactly_one_empty_hint_per_section`
+  are the first tests written against it; more GUI interaction bugs should
+  get a kittest test before (or instead of) a live click-through, the same
+  way a Rust bug gets a unit test before a manual repro.
+  - **`Harness::builder().build_ui_state(|ui, state| .., state)`** is the
+    shape used here — a plain `fn(ui, body, editing)` like `richtext::ui`
+    has no outside `eframe::App`, so `build_eframe` isn't needed.
+  - **Widget lookup walks the AccessKit tree**, the same one a screen reader
+    uses — which is what caught a *second* bug in ticket 071's own fix: the
+    first attempt painted the "click to write…" hint with `ui.painter()`
+    directly, which draws pixels and registers no accessibility node at all.
+    Invisible to a screen reader, and, for exactly the same reason,
+    invisible to `get_by_label_contains`. `Response::widget_info(|| ..)` is
+    what a custom (non-widget-macro) click target needs to attach a label by
+    hand — the fix, not a workaround for the test.
+  - **A query panics on more than one match** (`get_by_label_contains`,
+    `get_by_label`) — deliberately, so an ambiguous query is a test bug,
+    caught immediately, not a silent "clicked *something*". Test bodies pass
+    to `richtext::ui` are kept minimal and precise for exactly this reason:
+    the real New-ticket template has several blank lines, so asserting
+    against a copy of the *real* template needs `get_all_by_*` or a
+    deliberately trimmed fixture, not a single `get_by_*`.
+- **A blank (or otherwise empty) line in `richtext::ui` needs its own click
+  target, `empty_line_ui`, not a bare `Label::new(" ")` (ticket 071).** An
+  empty/near-empty `Label`'s own content defines its hit-box, so there was
+  effectively nothing to click — harmless while the "MD" raw-markdown
+  fallback existed (stuck on a blank line, switch modes and type there
+  instead), a hard block on writing a ticket body through the GUI at all
+  once ticket 069 removed that fallback. `empty_line_ui` claims a real,
+  full-width strip via `ui.allocate_exact_size` and paints a "click to
+  write…" hint so it reads as an entry point — see the `egui_kittest` bullet
+  above for the accessibility-label half of this fix. Shared by
+  `line_ui`'s empty-text case, `Kind::Blank`, and the fenced-content branch
+  (which calls it directly, never through `line_ui`/`spans()` — code must
+  never be interpreted as markdown).
+- **`DEFAULT_DRAFT_BODY` (`gui/mod.rs`) has exactly one empty click target
+  per section, not two stacked ones (ticket 072).** Once blank lines became
+  properly clickable (071), the New-ticket dialog's original body — two
+  blank lines under "## Notes", a blank line *and* the empty checklist item
+  under "## Acceptance criteria" — turned into two visually-identical
+  "click to write…" hints sitting back to back, found live by the user
+  through the (now-working) rich-text editor itself. Trimmed to one blank
+  line under Notes and the checklist item alone under Acceptance criteria,
+  with no leading or trailing blank line either (each was a third, isolated
+  stray hint). `gui::tests::the_default_draft_body_has_exactly_one_empty_hint_per_section`
+  counts the real rendered hints via `egui_kittest` rather than trusting the
+  literal by eye. The CLI's own `templates/ticket.md.jinja` keeps its extra
+  blank lines deliberately — opened in a real `$EDITOR`, they're free
+  spacing, not a stray clickable hint, so there's nothing there to fix.
 - **There is no raw-markdown fallback any more (ticket 069) — `richtext::ui`
   is the only way to edit a ticket body in `amdui`.** The "MD"/"RT" toggle
   and the `TextEdit::multiline().code_editor()` branch are both gone from
