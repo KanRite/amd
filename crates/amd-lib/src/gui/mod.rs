@@ -24,6 +24,13 @@ use settings::{Accent, FontSize, GuiSettings, Theme};
 /// narrow enough that three columns and a scrollbar fit a laptop screen.
 const COLUMN_WIDTH: f32 = 260.0;
 
+/// The New-ticket dialog's starting body: one blank line to write notes on,
+/// then a checklist item to write the first acceptance criterion on — one
+/// empty click target per section, not two stacked ones (ticket 072, found
+/// through the rich-text editor's own accessibility labels: two identical
+/// "click to write…" hints back to back reads as a glitch, not an invitation).
+const DEFAULT_DRAFT_BODY: &str = "## Notes\n\n## Acceptance criteria\n- [ ] ";
+
 /// A card being dragged. Carries where it came from, so the drop can tell a
 /// reorder from a status change — and refuse a move between repositories,
 /// which would need a new id rather than a rename.
@@ -709,7 +716,7 @@ impl eframe::App for BoardApp {
                         branch_type: crate::branch::NONE.to_string(),
                         parent: String::new(),
                         related: String::new(),
-                        body: "\n## Notes\n\n\n## Acceptance criteria\n\n- [ ] \n".to_string(),
+                        body: DEFAULT_DRAFT_BODY.to_string(),
                         line: None,
                     });
                 }
@@ -1948,6 +1955,41 @@ mod tests {
         assert!(
             card_visible(&tagged, &filter),
             "matches any tag in the filter (OR), not all of them"
+        );
+    }
+
+    /// Found live, right after ticket 071 fixed the blank-line click target:
+    /// the New-ticket dialog's default body had *two* empty click targets
+    /// back to back under each heading (two blank lines under "## Notes";
+    /// a blank line then the empty checklist item under "## Acceptance
+    /// criteria"), which reads as a glitch — identical "click to write…"
+    /// hints stacked with nothing to tell them apart. `egui_kittest` counts
+    /// the real rendered hints directly, so a future edit that reintroduces
+    /// an extra blank line fails here instead of needing someone to notice
+    /// it by eye in a live dialog again.
+    #[test]
+    fn the_default_draft_body_has_exactly_one_empty_hint_per_section() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        let body = DEFAULT_DRAFT_BODY.to_string();
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(500.0, 400.0))
+            .build_ui_state(
+                |ui, body: &mut String| {
+                    let mut editing = None;
+                    richtext::ui(ui, body, &mut editing);
+                },
+                body,
+            );
+        harness.run();
+
+        let hints = harness.get_all_by_label_contains("click to write");
+        assert_eq!(
+            hints.count(),
+            2,
+            "one for the Notes blank line, one for the empty Acceptance \
+             criteria checklist item — not a stacked duplicate of either"
         );
     }
 }

@@ -27,6 +27,7 @@ eframe = { version = "0.36", default-features = false, features = [
     "wayland",
     "x11",
 ] }
+egui_kittest = "0.36"
 inquire = "0.9"
 libc = "0.2.189"
 minijinja = "2"

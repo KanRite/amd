@@ -39,3 +39,4 @@ gui = ["dep:eframe", "dep:egui"]
 
 [dev-dependencies]
 tempfile.workspace = true
+egui_kittest.workspace = true
