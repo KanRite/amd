@@ -101,7 +101,6 @@ struct Draft {
     related: String,
     /// Notes written while creating, appended to the template's body.
     body: String,
-    markdown: bool,
     line: richtext::Editing,
 }
 
@@ -148,9 +147,6 @@ struct Editor {
     /// ticket changed elsewhere while this was open; the fields above are
     /// stale and saving them would silently discard whatever changed it.
     hash: ContentHash,
-    /// Rich text unless asked otherwise — the markdown is there for when you
-    /// want it, not as the price of writing a sentence.
-    markdown: bool,
     /// Which line the rich-text editor has open, kept between frames.
     line: richtext::Editing,
 }
@@ -179,7 +175,6 @@ impl Editor {
             related: card.task.related().join(","),
             body: card.task.body()?,
             hash: card.task.hash()?,
-            markdown: false,
             line: None,
         })
     }
@@ -715,7 +710,6 @@ impl eframe::App for BoardApp {
                         parent: String::new(),
                         related: String::new(),
                         body: "\n## Notes\n\n\n## Acceptance criteria\n\n- [ ] \n".to_string(),
-                        markdown: false,
                         line: None,
                     });
                 }
@@ -1294,29 +1288,11 @@ impl BoardApp {
                 });
 
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label("Body");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let label = if draft.markdown { "RT" } else { "MD" };
-                    if ui.button(label).clicked() {
-                        draft.markdown = !draft.markdown;
-                        draft.line = None;
-                    }
-                });
-            });
+            ui.label("Body");
             egui::ScrollArea::vertical()
                 .max_height(220.0)
                 .show(ui, |ui| {
-                    if draft.markdown {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut draft.body)
-                                .code_editor()
-                                .desired_width(f32::INFINITY)
-                                .desired_rows(10),
-                        );
-                    } else {
-                        richtext::ui(ui, &mut draft.body, &mut draft.line);
-                    }
+                    richtext::ui(ui, &mut draft.body, &mut draft.line);
                 });
 
             ui.separator();
@@ -1488,38 +1464,11 @@ impl BoardApp {
                 });
 
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.label("Body");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Top right, and it says what you get, not what you are in.
-                    let label = if editor.markdown { "RT" } else { "MD" };
-                    if ui
-                        .button(label)
-                        .on_hover_text(if editor.markdown {
-                            "switch to rich text"
-                        } else {
-                            "switch to markdown"
-                        })
-                        .clicked()
-                    {
-                        editor.markdown = !editor.markdown;
-                        editor.line = None;
-                    }
-                });
-            });
+            ui.label("Body");
             egui::ScrollArea::vertical()
                 .max_height(320.0)
                 .show(ui, |ui| {
-                    if editor.markdown {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut editor.body)
-                                .code_editor()
-                                .desired_width(f32::INFINITY)
-                                .desired_rows(16),
-                        );
-                    } else {
-                        richtext::ui(ui, &mut editor.body, &mut editor.line);
-                    }
+                    richtext::ui(ui, &mut editor.body, &mut editor.line);
                 });
 
             ui.separator();
