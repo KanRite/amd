@@ -166,11 +166,16 @@ pub fn toggle(line: &str) -> String {
 /// What pressing Enter at the end of this line should open next.
 ///
 /// `Some("- [ ] ")` after a checklist item, `Some("- ")` after a bullet,
-/// `Some("2. ")` after `"1. "`, `Some("")` after an ordinary line of prose
-/// (so Notes can run to more than one line the same way a checklist can run
-/// to more than one item), and `None` after anything else — including an
-/// empty line or an empty list item, where continuing would either fight
-/// the editor to stop a list or open blank line after blank line forever.
+/// `Some("2. ")` after `"1. "`, and `None` after anything else — including
+/// an empty list item, where continuing would mean fighting the editor to
+/// stop a list. Only consulted for a single atomic line (a list item, a
+/// heading, …) — plain prose doesn't go through here at all any more: a
+/// paragraph gets a real multi-line box (see [`ui`]'s own `Paragraph`
+/// session), where Enter is a literal line break the widget already
+/// handles, not something this function needs an opinion on. (Ticket 074
+/// briefly gave `Kind::Text` an arm here — "continue with a blank line" —
+/// as a stopgap before 075 built the real thing; superseded, not kept
+/// as a second, redundant path.)
 pub fn continuation(line: &str) -> Option<String> {
     match classify(line) {
         Kind::Check { indent, text, .. } if !text.trim().is_empty() => {
@@ -191,10 +196,6 @@ pub fn continuation(line: &str) -> Option<String> {
             let next = number.parse::<u64>().ok()?.checked_add(1)?;
             Some(format!("{indent}{next}. "))
         }
-        // Plain prose: `classify` only returns `Text` for a non-blank line
-        // (a blank one is `Kind::Blank`), so there's no separate emptiness
-        // guard to write here — an empty line already can't reach this arm.
-        Kind::Text => Some(String::new()),
         _ => None,
     }
 }
@@ -313,14 +314,80 @@ fn spans(text: &str) -> Vec<Span> {
     out
 }
 
-/// Draw a body as rich text, editing one line at a time.
+/// What's currently open for editing, kept by the caller across frames the
+/// same way any `TextEdit`'s backing buffer always must be — a box that's
+/// only just appeared has to ask for focus once, or typing would go nowhere.
 ///
-/// Returns whether the body changed. `editing` is the line being typed into
-/// and whether it has just opened, kept by the caller so it survives between
-/// frames — a box that has only just appeared has to ask for focus, or typing
-/// would go nowhere.
+/// Two shapes, not one, because they behave genuinely differently rather
+/// than just looking different: a `Line` is edited in place (`rows[row]`
+/// stays the backing buffer, exactly as it always has); a `Paragraph` needs
+/// its own scratch buffer instead; see the variant's own doc for why.
 #[cfg(feature = "gui")]
-pub type Editing = Option<(usize, bool)>;
+pub enum Session {
+    /// A single atomic line — a heading, a checklist/bullet/numbered item,
+    /// a fence delimiter, a table cell. Enter asks [`continuation`] what,
+    /// if anything, comes next; anything else about losing focus just ends
+    /// the session.
+    Line { row: usize, fresh: bool },
+    /// A contiguous run of prose rows (`start..start + original_len` in the
+    /// body as it was when this session opened), edited together as one
+    /// auto-expanding multi-line box. `text` is a scratch buffer, not a
+    /// borrow of `rows[start]`, *because* its own line count can drift from
+    /// `original_len` while it's being typed into — a one-line paragraph
+    /// can grow to three, a three-line one can shrink back to one — so
+    /// there's no single `rows` slot for a `TextEdit` to borrow directly.
+    /// Splitting `text` on `'\n'` and splicing it over the original range
+    /// is what commits the result back, on losing focus.
+    Paragraph {
+        start: usize,
+        original_len: usize,
+        text: String,
+        fresh: bool,
+    },
+}
+
+#[cfg(feature = "gui")]
+pub type Editing = Option<Session>;
+
+/// For every row, whether it's a fenced code block's *content* — never its
+/// own delimiter line, which toggles this but is never "inside" itself.
+/// Precomputed once per frame rather than tracked inline in [`ui`]'s own
+/// loop, so [`paragraph_range`] can consult the same answer without
+/// re-deriving it (and, unlike a running boolean, it can be indexed at any
+/// row, in any order, which grouping a paragraph range needs to do).
+fn fence_mask(rows: &[String]) -> Vec<bool> {
+    let mut mask = Vec::with_capacity(rows.len());
+    let mut in_fence = false;
+    for row in rows {
+        let is_delim = matches!(classify(row), Kind::Fence { .. });
+        mask.push(in_fence && !is_delim);
+        if is_delim {
+            in_fence = !in_fence;
+        }
+    }
+    mask
+}
+
+/// The contiguous run of `Blank`/`Text` rows that `index` belongs to — a
+/// "paragraph," in the sense that matters here: no marker, no fence, no
+/// table shape of its own, so it reads (and edits) as one flowing block
+/// rather than one clickable strip per source line. A row inside a fenced
+/// code block is never included even if it would otherwise classify as
+/// `Blank`/`Text` in isolation — `fenced` (from [`fence_mask`]) is what
+/// keeps code out of prose grouping, the same as it already keeps code out
+/// of the inline markdown parser.
+fn paragraph_range(rows: &[String], fenced: &[bool], index: usize) -> std::ops::Range<usize> {
+    let is_prose = |i: usize| !fenced[i] && matches!(classify(&rows[i]), Kind::Blank | Kind::Text);
+    let mut start = index;
+    while start > 0 && is_prose(start - 1) {
+        start -= 1;
+    }
+    let mut end = index + 1;
+    while end < rows.len() && is_prose(end) {
+        end += 1;
+    }
+    start..end
+}
 
 /// The click target for a line with nothing in it. An empty `Label`'s own
 /// content is a point, not a rectangle — rendered that way, a blank body
@@ -416,60 +483,101 @@ fn line_ui(
 pub fn ui(ui: &mut egui::Ui, body: &mut String, editing: &mut Editing) -> bool {
     let mut rows = lines(body);
     let mut changed = false;
-    // Whether the *previous* line opened (and didn't yet close) a fenced
-    // code block — tracked here, not in `classify`, because a fence spans
-    // several lines and `classify` only ever sees one. A line found to be a
-    // delimiter itself toggles this but is never treated as fenced content.
-    let mut in_fence = false;
+    let fenced = fence_mask(&rows);
 
-    for index in 0..rows.len() {
-        let is_fence_delim = matches!(classify(&rows[index]), Kind::Fence { .. });
-        let fenced_content = in_fence && !is_fence_delim;
-        if is_fence_delim {
-            in_fence = !in_fence;
-        }
-
-        if editing.map(|(line, _)| line) == Some(index) {
-            let id = egui::Id::new(("richtext-line", index));
-            let response = ui.add(
-                egui::TextEdit::singleline(&mut rows[index])
-                    .id(id)
-                    .desired_width(f32::INFINITY),
-            );
-            if response.changed() {
-                changed = true;
-            }
-            // A box that has just appeared has no focus yet; ask once, then
-            // stop, or it would steal focus back on every frame.
-            if editing.is_some_and(|(_, fresh)| fresh) {
-                response.request_focus();
-                *editing = Some((index, false));
-            }
-            let entered = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if entered {
-                match continuation(&rows[index]) {
-                    Some(prefix) => {
-                        rows.insert(index + 1, prefix);
-                        *editing = Some((index + 1, true));
-                        changed = true;
-                    }
-                    None => *editing = None,
+    let mut index = 0;
+    while index < rows.len() {
+        match editing {
+            Some(Session::Line { row, fresh }) if *row == index => {
+                let id = egui::Id::new(("richtext-line", index));
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut rows[index])
+                        .id(id)
+                        .desired_width(f32::INFINITY),
+                );
+                if response.changed() {
+                    changed = true;
                 }
-                break;
+                // A box that has just appeared has no focus yet; ask once,
+                // then stop, or it would steal focus back on every frame.
+                if *fresh {
+                    response.request_focus();
+                    *fresh = false;
+                }
+                let entered =
+                    response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if entered {
+                    match continuation(&rows[index]) {
+                        Some(prefix) => {
+                            rows.insert(index + 1, prefix);
+                            *editing = Some(Session::Line {
+                                row: index + 1,
+                                fresh: true,
+                            });
+                            changed = true;
+                        }
+                        None => *editing = None,
+                    }
+                    break;
+                }
+                if response.lost_focus() {
+                    *editing = None;
+                }
+                index += 1;
+                continue;
             }
-            if response.lost_focus() {
-                *editing = None;
+            Some(Session::Paragraph {
+                start,
+                original_len,
+                text,
+                fresh,
+            }) if *start == index => {
+                let id = egui::Id::new(("richtext-paragraph", index));
+                let response = ui.add(
+                    egui::TextEdit::multiline(text)
+                        .id(id)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(1),
+                );
+                if response.changed() {
+                    changed = true;
+                }
+                if *fresh {
+                    response.request_focus();
+                    *fresh = false;
+                }
+                // Enter is a literal line break inside a multiline box —
+                // `TextEdit`'s own default, nothing to intercept here.
+                // Losing focus (clicking away, Tab, Escape) is what commits:
+                // split the scratch buffer back into rows and splice it
+                // over the range this session opened with. The split can
+                // land on a different number of rows than it started with —
+                // that's the entire point of a scratch buffer instead of
+                // borrowing `rows[start]` directly.
+                if response.lost_focus() {
+                    let new_rows: Vec<String> = text.split('\n').map(str::to_string).collect();
+                    rows.splice(*start..*start + *original_len, new_rows);
+                    *editing = None;
+                    changed = true;
+                    break;
+                }
+                // The whole original range is one widget while it's open;
+                // nothing left inside it to draw separately this frame.
+                index = *start + *original_len;
+                continue;
             }
-            continue;
+            _ => {}
         }
 
-        let line = rows[index].clone();
-        let mut enter_edit = false;
+        let fenced_content = fenced[index];
 
         if fenced_content {
-            // Deliberately not run through `spans()`/`line_ui`: code is not
-            // prose, and parsing `*ptr` or `**kwargs` as markdown formatting
-            // would be a real, silent misrendering of the actual content.
+            // Deliberately not run through `spans()`/`line_ui`/paragraph
+            // grouping: code is not prose, and parsing `*ptr` or `**kwargs`
+            // as markdown formatting would be a real, silent misrendering
+            // of the actual content.
+            let line = rows[index].clone();
+            let mut enter_edit = false;
             if line.is_empty() {
                 empty_line_ui(ui, &mut enter_edit);
             } else {
@@ -481,103 +589,148 @@ pub fn ui(ui: &mut egui::Ui, body: &mut String, editing: &mut Editing) -> bool {
                     enter_edit = true;
                 }
             }
-        } else {
-            match classify(&line) {
-                Kind::Blank => {
-                    empty_line_ui(ui, &mut enter_edit);
+            if enter_edit {
+                *editing = Some(Session::Line {
+                    row: index,
+                    fresh: true,
+                });
+            }
+            index += 1;
+            continue;
+        }
+
+        if matches!(classify(&rows[index]), Kind::Blank | Kind::Text) {
+            // A run of plain prose reads — and edits — as one block, not
+            // one clickable strip per source line (ticket 075: the
+            // per-line model suits headings/lists/tables/fences, which are
+            // each genuinely one unit, but not a paragraph, which isn't).
+            let range = paragraph_range(&rows, &fenced, index);
+            let mut enter_edit = false;
+            for i in range.clone() {
+                let line = rows[i].clone();
+                line_ui(ui, &line, |rich| rich, &mut enter_edit);
+            }
+            if enter_edit {
+                *editing = Some(Session::Paragraph {
+                    start: range.start,
+                    original_len: range.len(),
+                    text: join(&rows[range.clone()]),
+                    fresh: true,
+                });
+            }
+            index = range.end;
+            continue;
+        }
+
+        let line = rows[index].clone();
+        let mut enter_edit = false;
+
+        match classify(&line) {
+            Kind::Fence { lang, .. } => {
+                let label = if lang.is_empty() {
+                    "```".to_string()
+                } else {
+                    format!("```{lang}")
+                };
+                let response = ui.add(
+                    egui::Label::new(egui::RichText::new(label).monospace().weak())
+                        .sense(egui::Sense::click()),
+                );
+                if response.clicked() {
+                    enter_edit = true;
                 }
-                Kind::Fence { lang, .. } => {
-                    let label = if lang.is_empty() {
-                        "```".to_string()
-                    } else {
-                        format!("```{lang}")
-                    };
-                    let response = ui.add(
-                        egui::Label::new(egui::RichText::new(label).monospace().weak())
-                            .sense(egui::Sense::click()),
-                    );
-                    if response.clicked() {
-                        enter_edit = true;
+            }
+            Kind::Heading { level, text } => {
+                let size = match level {
+                    1 => 20.0,
+                    2 => 17.0,
+                    _ => 15.0,
+                };
+                line_ui(
+                    ui,
+                    &text,
+                    move |rich| rich.size(size).strong(),
+                    &mut enter_edit,
+                );
+            }
+            Kind::Check { done, text, indent } => {
+                ui.horizontal(|ui| {
+                    ui.add_space(indent.len() as f32 * 8.0);
+                    let mut ticked = done;
+                    // The box is the one thing you can change without opening
+                    // the line for editing — it is the common case by far.
+                    if ui.checkbox(&mut ticked, "").changed() {
+                        rows[index] = toggle(&line);
+                        changed = true;
                     }
-                }
-                Kind::Heading { level, text } => {
-                    let size = match level {
-                        1 => 20.0,
-                        2 => 17.0,
-                        _ => 15.0,
-                    };
                     line_ui(
                         ui,
                         &text,
-                        move |rich| rich.size(size).strong(),
+                        move |rich| {
+                            if done {
+                                rich.strikethrough().weak()
+                            } else {
+                                rich
+                            }
+                        },
                         &mut enter_edit,
                     );
-                }
-                Kind::Check { done, text, indent } => {
-                    ui.horizontal(|ui| {
-                        ui.add_space(indent.len() as f32 * 8.0);
-                        let mut ticked = done;
-                        // The box is the one thing you can change without opening
-                        // the line for editing — it is the common case by far.
-                        if ui.checkbox(&mut ticked, "").changed() {
-                            rows[index] = toggle(&line);
-                            changed = true;
-                        }
-                        line_ui(
-                            ui,
-                            &text,
-                            move |rich| {
-                                if done {
-                                    rich.strikethrough().weak()
-                                } else {
-                                    rich
-                                }
-                            },
-                            &mut enter_edit,
-                        );
-                    });
-                }
-                Kind::Bullet { text, indent, .. } => {
-                    ui.horizontal(|ui| {
-                        ui.add_space(indent.len() as f32 * 8.0);
-                        ui.weak("•");
-                        line_ui(ui, &text, |rich| rich, &mut enter_edit);
-                    });
-                }
-                Kind::Numbered {
-                    text,
-                    indent,
-                    number,
-                } => {
-                    ui.horizontal(|ui| {
-                        ui.add_space(indent.len() as f32 * 8.0);
-                        ui.weak(format!("{number}."));
-                        line_ui(ui, &text, |rich| rich, &mut enter_edit);
-                    });
-                }
-                Kind::Table { cells } => {
-                    ui.horizontal(|ui| {
-                        for cell in cells {
-                            egui::Frame::group(ui.style())
-                                .inner_margin(4.0)
-                                .show(ui, |ui| line_ui(ui, &cell, |rich| rich, &mut enter_edit));
-                        }
-                    });
-                }
-                Kind::Text => {
-                    line_ui(ui, &line, |rich| rich, &mut enter_edit);
-                }
+                });
+            }
+            Kind::Bullet { text, indent, .. } => {
+                ui.horizontal(|ui| {
+                    ui.add_space(indent.len() as f32 * 8.0);
+                    ui.weak("•");
+                    line_ui(ui, &text, |rich| rich, &mut enter_edit);
+                });
+            }
+            Kind::Numbered {
+                text,
+                indent,
+                number,
+            } => {
+                ui.horizontal(|ui| {
+                    ui.add_space(indent.len() as f32 * 8.0);
+                    ui.weak(format!("{number}."));
+                    line_ui(ui, &text, |rich| rich, &mut enter_edit);
+                });
+            }
+            Kind::Table { cells } => {
+                ui.horizontal(|ui| {
+                    for cell in cells {
+                        egui::Frame::group(ui.style())
+                            .inner_margin(4.0)
+                            .show(ui, |ui| line_ui(ui, &cell, |rich| rich, &mut enter_edit));
+                    }
+                });
+            }
+            // Handled above, before this match — reaching either here would
+            // be a real bug, not a case to render some other way.
+            Kind::Blank | Kind::Text => {
+                unreachable!("paragraph_range's Blank|Text branch already continue'd past this row")
             }
         }
 
         if enter_edit {
-            *editing = Some((index, true));
+            *editing = Some(Session::Line {
+                row: index,
+                fresh: true,
+            });
         }
+        index += 1;
     }
 
-    // A body with nowhere to click needs a way in.
+    // A body with nowhere to click needs a way in. With nothing else on the
+    // board, the whole thing is one (empty) paragraph — a `Line` session
+    // wouldn't even have a single-line box to reuse the way a normal atomic
+    // edit does, since there is no atomic line here at all.
     if rows.iter().all(|line| line.trim().is_empty()) && ui.button("Write something…").clicked() {
-        *editing = Some((rows.len().saturating_sub(1), true));
+        *editing = Some(Session::Paragraph {
+            start: 0,
+            original_len: rows.len(),
+            text: join(&rows),
+            fresh: true,
+        });
     }
 
     if changed {
@@ -640,16 +793,38 @@ mod tests {
         assert_eq!(continuation("- "), None);
     }
 
-    /// Notes (and any other plain prose) can run to more than one line, the
-    /// same way a checklist can run to more than one item — Enter opens a
-    /// new blank line to keep typing on, and an empty line stops rather
-    /// than opening blank line after blank line forever.
+    /// Plain prose isn't continued via `continuation` at all any more
+    /// (ticket 075 superseded 074's stopgap with a real multi-line box) —
+    /// confirms the arm is actually gone, not just unreachable in practice.
     #[test]
-    fn enter_continues_plain_text_with_a_blank_line() {
-        assert_eq!(continuation("just words").as_deref(), Some(""));
-        assert_eq!(continuation("  indented words").as_deref(), Some(""));
-        assert_eq!(continuation(""), None);
-        assert_eq!(continuation("   "), None);
+    fn continuation_has_no_opinion_on_plain_text() {
+        assert_eq!(continuation("just words"), None);
+        assert_eq!(continuation("  indented words"), None);
+    }
+
+    #[test]
+    fn paragraph_range_groups_contiguous_prose_and_stops_at_structure() {
+        let rows: Vec<String> = lines("## Notes\n\nfirst\nsecond\n\n## AC\n- [ ] x\n\nmore");
+        let fenced = fence_mask(&rows);
+        // rows: ["## Notes","","first","second","","## AC","- [ ] x","","more"]
+        // The blank line and both prose lines between the two headings are
+        // one contiguous run, regardless of which of the three is clicked.
+        assert_eq!(paragraph_range(&rows, &fenced, 1), 1..5);
+        assert_eq!(paragraph_range(&rows, &fenced, 2), 1..5);
+        assert_eq!(paragraph_range(&rows, &fenced, 3), 1..5);
+        assert_eq!(paragraph_range(&rows, &fenced, 4), 1..5);
+        // A checklist item breaks the run — a separate paragraph starts
+        // fresh after it, not merged across the list item.
+        assert_eq!(paragraph_range(&rows, &fenced, 7), 7..9);
+    }
+
+    #[test]
+    fn paragraph_range_excludes_fenced_content() {
+        let rows: Vec<String> = lines("prose\n```\nnot prose\n```\nmore prose");
+        let fenced = fence_mask(&rows);
+        assert_eq!(fenced, [false, false, true, false, false]);
+        assert_eq!(paragraph_range(&rows, &fenced, 0), 0..1);
+        assert_eq!(paragraph_range(&rows, &fenced, 4), 4..5);
     }
 
     #[test]
@@ -855,6 +1030,11 @@ mod interaction_tests {
             .events
             .push(egui::Event::Text("Talked to the team".into()));
         harness.run();
+        // A paragraph session (ticket 075) commits on losing focus, the
+        // same as any other text box — Escape is the standard way to blur
+        // one deliberately rather than by clicking some other widget.
+        harness.key_press(egui::Key::Escape);
+        harness.run();
 
         assert!(
             harness.state().body.contains("Talked to the team"),
@@ -863,14 +1043,13 @@ mod interaction_tests {
         );
     }
 
-    /// Reported right after the click-target fix landed: Acceptance
-    /// criteria could run to several lines (Enter continues a checklist),
-    /// but Notes could only ever hold one — Enter just closed the line
-    /// instead of opening another, since plain prose had no continuation
-    /// at all. `continuation`'s own unit tests cover the string logic;
-    /// this proves it end to end, through the actual keypress.
+    /// Ticket 075: Notes gets a real, auto-expanding multi-line box — Enter
+    /// is a literal line break `TextEdit::multiline` already handles, not
+    /// something this editor has to intercept (contrast ticket 074's
+    /// earlier stopgap, superseded, which asked `continuation` to open a
+    /// new single-line row per keypress instead).
     #[test]
-    fn enter_after_a_line_of_notes_opens_a_new_line_to_keep_typing() {
+    fn enter_inside_a_paragraph_is_a_real_line_break() {
         let mut harness = harness_with("## Notes\n");
 
         harness.get_by_label_contains("click to write").click();
@@ -887,11 +1066,54 @@ mod interaction_tests {
             .events
             .push(egui::Event::Text("Second line".into()));
         harness.run();
+        harness.key_press(egui::Key::Escape);
+        harness.run();
 
         assert!(
             harness.state().body.contains("First line\nSecond line"),
             "{:?}",
             harness.state().body
+        );
+    }
+
+    /// The scratch buffer growing from one row to several has to *splice*
+    /// over the original range, not just overwrite `rows[start]` — a
+    /// one-line paragraph becoming three is two extra rows that everything
+    /// after it (here, the Acceptance criteria heading and its checklist)
+    /// needs to shift past, not get silently overwritten by.
+    #[test]
+    fn a_growing_paragraph_does_not_corrupt_what_comes_after_it() {
+        let mut harness = harness_with("## Notes\n\n## Acceptance criteria\n- [ ] first");
+
+        harness.get_by_label_contains("click to write").click();
+        harness.run();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text("one".into()));
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text("two".into()));
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        harness
+            .input_mut()
+            .events
+            .push(egui::Event::Text("three".into()));
+        harness.run();
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+
+        let body = &harness.state().body;
+        assert!(body.contains("one\ntwo\nthree"), "{body:?}");
+        assert!(
+            body.contains("## Acceptance criteria\n- [ ] first"),
+            "the checklist below must survive untouched: {body:?}"
         );
     }
 

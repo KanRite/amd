@@ -758,21 +758,52 @@ changes):
   literal by eye. The CLI's own `templates/ticket.md.jinja` keeps its extra
   blank lines deliberately — opened in a real `$EDITOR`, they're free
   spacing, not a stray clickable hint, so there's nothing there to fix.
-- **`continuation` treats plain prose as continuable too, not just lists
-  (ticket 074).** A checklist item could already run to several lines —
-  Enter opens the next `- [ ] ` — but `Kind::Text` fell through to
-  `continuation`'s `_ => None` arm, same as a heading or an empty line,
-  which stops editing rather than opening a new line. Pressing Enter after
-  a line of Notes prose now opens a blank line the same way a fresh Notes
-  section already does (`Kind::Text => Some(String::new())`); an empty line
-  still stops the chain, since `classify` only ever returns `Text` for a
-  non-blank one, so there's no separate emptiness guard to write. Headings
-  are deliberately unchanged. This is a stopgap, not the end state — see
-  `[[075-a-free-flowing-auto-expanding-text-area-for-notes]]` for the real
-  shape wanted (an actual auto-expanding multi-line text area for a
-  paragraph, not one `TextEdit::singleline` row per line with Enter
-  standing in for a line break), and why that's real design work, not a
-  toggle, against `richtext.rs`'s one-row-at-a-time editing model.
+- **Ticket 074's `continuation`-based fix for multi-line Notes is
+  superseded — a `Session::Paragraph` now edits a whole prose block at
+  once (ticket 075).** 074's stopgap gave `Kind::Text` a `continuation`
+  arm (`Some(String::new())`) so Enter opened a new single-line row, the
+  same trick a checklist already used. That's gone now — `continuation`
+  has no opinion on plain text at all (only lists still consult it). What
+  replaced it is a real second editing mode, not a bigger patch on the
+  first one:
+  - **`Editing` is `Option<Session>`, and `Session` has two shapes, not
+    one, because they behave genuinely differently**: `Session::Line`
+    is today's original mechanism, unchanged — one row, edited in place
+    (`rows[row]` is the `TextEdit`'s own backing buffer), used for a
+    heading, a checklist/bullet/numbered item, a fence delimiter, a table
+    cell. `Session::Paragraph` is new: `start`/`original_len` name a
+    *range* of rows (a contiguous run of `Blank`/`Text`, found by
+    `paragraph_range`, which stops at any structural line — a heading,
+    list item, fence, table row — the same way `fence_mask` already stops
+    fenced-content grouping at a delimiter), edited together as one
+    `TextEdit::multiline` against a **scratch buffer**, not a borrow of
+    any single `rows` slot.
+  - **Why a scratch buffer, not `rows[start]` directly**: a paragraph's
+    own line count can drift while it's being typed into — a one-line
+    paragraph can grow to three (real Enter presses, since
+    `TextEdit::multiline` treats Enter as a literal line break, nothing
+    to intercept), a three-line one can shrink back to one. There's no
+    single `rows` slot a widget could borrow for that. On losing focus,
+    `text.split('\n')` and `rows.splice(start..start+original_len, ..)`
+    is what commits the result — replacing however many rows the
+    paragraph originally spanned with however many lines it now has,
+    without disturbing anything before or after that range (a real risk
+    worth testing directly, not assuming: see
+    `a_growing_paragraph_does_not_corrupt_what_comes_after_it`).
+  - **The main render loop became a manual `while`, not a `for`**,
+    because a paragraph's rows need to be drawn once as a group and then
+    *skipped* (`index = range.end`) rather than iterated one at a time —
+    the same reason fenced content already needed its own tracking
+    (`fence_mask`, computed once up front now, not an inline running
+    flag) rather than living in `classify`, which stays pure and
+    context-free by design.
+  - Not evaluated by this pass, left in ticket 075 as still-open
+    territory if it turns out to matter: whether the same paragraph
+    treatment should ever apply to something other than "the run of
+    prose between two structural lines" (it doesn't need heading-name
+    special-casing today — any contiguous `Blank`/`Text` run qualifies,
+    which is what makes an entirely-empty body, or the space between any
+    two headings, work the same way without extra code).
 - **There is no raw-markdown fallback any more (ticket 069) — `richtext::ui`
   is the only way to edit a ticket body in `amdui`.** The "MD"/"RT" toggle
   and the `TextEdit::multiline().code_editor()` branch are both gone from
