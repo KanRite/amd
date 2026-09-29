@@ -29,6 +29,18 @@ crates/amd-ui/    → binary `amdui`  (egui/eframe)
 The library keeps the crate name `agile_md`, so every `use` in the workspace is
 unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 
+**`crates/amd-tauri/` is a fourth crate, deliberately not a workspace
+member** (ticket 078): a spike proving `amd-lib` drops into a Tauri
+backend with zero changes, not a shipped interface — read-only board view
+only, no drag-and-drop, no ticket editor, none of 068/069/071/074's
+rich-text/field work re-implemented. Its own `src-tauri/Cargo.toml`
+declares an empty `[workspace]` table on purpose, so it carries its own
+`Cargo.lock`/target dir rather than growing this workspace's dependency
+graph before there's an actual decision to keep it. The ticket has the
+real findings (binary size, idle memory, the Linux build-cost tradeoff)
+and the recommendation (keep exploring cautiously, not a switch) — read
+that before assuming this is either abandoned or committed to.
+
 - `crates/amd-lib/src/lib.rs` — the library: `board`, `board_settings`,
   `branch`, `create`, `git`, `group`, `project_trust`, `registry`,
   `settings`, `task`, `templates` (and `gui` behind the feature, pending
