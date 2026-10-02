@@ -35,7 +35,7 @@ pub enum ProtectionOutcome {
 /// `require_review` selects the tier: `false` (the tickets repository)
 /// leaves `required_pull_request_reviews` unset entirely, so an ordinary
 /// direct push is completely unaffected — only history-rewriting and
-/// deletion are blocked. `true` (the governance repository) additionally
+/// deletion are blocked. `true` (the documents repository) additionally
 /// requires one approving review. `require_last_push_approval` is
 /// deliberately never set: that combination is what previously made a solo
 /// pusher's own PRs permanently unmergeable elsewhere in this org — a solo

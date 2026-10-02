@@ -59,25 +59,25 @@ that before assuming this is either abandoned or committed to.
   (`<repo-root>/.settings`, git-tracked, hidden to match the legacy
   `.next-id` file it partly replaces): the `next-id` ticket counter and the
   `commit` auto-commit toggle stay here. `project`/`repos`/`wip-todo`/
-  `wip-limit`/`lease-hours` move to `{project}-governance`'s own
+  `wip-limit`/`lease-hours` move to `{project}-documents`'s own
   `.settings/` **directory** once one is locatable (ticket 057) — one small
   file per key, so each reviews as its own legible diff in a repository
   that's already PR-reviewed, rather than a bare commit to this one's own
-  `main`. `governance_root()` finds it by sibling-path derivation
-  (`{project}-tickets` next to `{project}-governance`, the standing
+  `main`. `documents_root()` finds it by sibling-path derivation
+  (`{project}-tickets` next to `{project}-documents`, the standing
   `rfc/0003` layout) first, falling back to a **project-scoped** registry
-  lookup (`{project}-governance`, using this board's own possibly-stale
-  `project` value) — deliberately never the machine-wide `governance`
+  lookup (`{project}-documents`, using this board's own possibly-stale
+  `project` value) — deliberately never the machine-wide `documents`
   alias (`crates/amd-lib/src/alias.rs`), which would silently leak a
   *different* project's settings into this one on any machine juggling
   more than one project — confirmed live, the hard way, as a real
   `project_trust` violation while building this. A board with no
-  locatable governance sibling (a single-repo board, or one that predates
+  locatable documents sibling (a single-repo board, or one that predates
   the split) keeps storing the moved keys in its own file exactly as
   before — every getter's own body is unchanged; only `load`/`save` know
-  where each key actually lives. Writing a governance-shaped key never
+  where each key actually lives. Writing a documents-shaped key never
   commits or pushes it there (`cmd_register`/`amd wip-limit` print where
-  the file landed and that it needs a PR) — governance is PR-reviewed,
+  the file landed and that it needs a PR) — documents is PR-reviewed,
   same `adr/0006` boundary as `{project}-documents` always was.
 - `crates/amd-lib/src/project_trust.rs` — a per-machine, trust-on-first-use
   check that a board's declared `project` hasn't changed unexpectedly since
@@ -95,17 +95,17 @@ that before assuming this is either abandoned or committed to.
   `form.rs`, `value.rs`, `completions.rs` and `init.rs`, which are CLI-only.
 - `crates/amd-cli/src/init.rs` — `amd init <project>`: finds or creates
   **two** private GitHub repositories, `<project>-tickets` and
-  `<project>-governance` (via `gh`, as siblings under the current
+  `<project>-documents` (via `gh`, as siblings under the current
   directory), clones each, scaffolds them, registers both locally, and
-  aliases them `tickets`/`governance` (`crates/amd-lib/src/alias.rs`,
+  aliases them `tickets`/`documents` (`crates/amd-lib/src/alias.rs`,
   ticket 026) — warning rather than failing if either alias is already
   taken by something else on this machine. Tickets gets the board;
-  governance gets `adr/`, `rfc/`, `docs/`, `README.md`, `CHANGELOG.md`, and
+  documents gets `adr/`, `rfc/`, `docs/`, `README.md`, `CHANGELOG.md`, and
   a `.settings/` **directory** (ticket 057 — one small file per key, so a
   changed setting reviews as its own small diff; `.settings/project` is
   the only file `init` writes today). Each repository gets its own branch
   protection tier via `github.rs`'s `protect_main()` — tickets: blocks
-  force-push/deletion only; governance: additionally requires one approving
+  force-push/deletion only; documents: additionally requires one approving
   review — both `enforce_admins: true` so the owner can't silently bypass
   it, neither ever sets `require_last_push_approval` (that combination is
   what previously made a solo pusher's own PRs permanently unmergeable
@@ -113,14 +113,14 @@ that before assuming this is either abandoned or committed to.
   plan**, where GitHub's branch-protection API (both the classic endpoint
   and the newer rulesets one) returns `403 Upgrade to GitHub Pro` for
   *any* payload — `protect_main` treats that as `ProtectionOutcome::Unavailable`,
-  not an error, and `init` just warns; review on governance is a human
+  not an error, and `init` just warns; review on documents is a human
   convention until the org upgrades or the repos go public, not something
   GitHub enforces yet. **Refuses to run from inside an existing git
   repository** — a guard, not an inference: an earlier version tried
   placing the new repos as siblings of whatever repo you happened to be
   standing in, which was a real source of confusion. `--local-only` is the
   command for "inside a repo" — it skips all of the above (tickets board
-  only, no governance sibling, no protection) and just scaffolds here, the
+  only, no documents sibling, no protection) and just scaffolds here, the
   way bare `amd init` always has.
 - `crates/amd-cli/src/github.rs` — `protect_main(full_name, require_review)`:
   the only thing that shells out to `gh api` rather than plain `gh repo`/
@@ -202,7 +202,7 @@ that before assuming this is either abandoned or committed to.
     directory's own immediate children for exactly one that's both a git
     repo and has a board of its own (`project_siblings()`) — the layout
     `amd init <project>` creates, a plain parent folder holding
-    `{project}-tickets` and `{project}-governance` as siblings. Lets
+    `{project}-tickets` and `{project}-documents` as siblings. Lets
     `amd`/`amdui` run from that parent directory itself, not only one `cd`
     deeper. Two or more qualifying children **errors**, naming all of
     them, never a guess, same as `find` on an ambiguous ticket reference —
@@ -382,7 +382,7 @@ that before assuming this is either abandoned or committed to.
     `amd group` command including `empty` (one commit for every ticket it
     moves, not one per ticket — a single logical action). Not in scope:
     `amd register`/`deregister` (the registry, not the board),
-    `{project}-governance` (a different repository entirely, PR-reviewed by
+    `{project}-documents` (a different repository entirely, PR-reviewed by
     design, never auto-committed).
   - **`amd log`** (`cmd_log`) renders the board's transition history —
     `date time action id title sha` — from `git log --name-status -M`,

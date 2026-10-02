@@ -134,8 +134,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Create or connect this project's dedicated tickets and governance
-    /// repositories ({project}-tickets, {project}-governance)
+    /// Create or connect this project's dedicated tickets and documents
+    /// repositories ({project}-tickets, {project}-documents)
     Init {
         /// The project's declared identity — cannot be changed once set
         #[arg(value_name = "PROJECT")]
@@ -1055,17 +1055,17 @@ fn cmd_wip_limit(board: &Board, limit: u32) -> Result<()> {
         0 => println!("doing/'s WIP limit is now off"),
         n => println!("doing/'s WIP limit is now {n}"),
     }
-    note_if_written_to_governance(&settings);
+    note_if_written_to_documents(&settings);
     Ok(())
 }
 
-/// `board_settings::save` writes a governance-shaped setting into
-/// governance's own local clone, but never commits or pushes it there —
-/// unlike the tickets repo, governance is PR-reviewed, so `amd` doesn't
-/// commit on the user's behalf (`adr/0006`'s tickets/governance boundary).
+/// `board_settings::save` writes a documents-shaped setting into
+/// documents's own local clone, but never commits or pushes it there —
+/// unlike the tickets repo, documents is PR-reviewed, so `amd` doesn't
+/// commit on the user's behalf (`adr/0006`'s tickets/documents boundary).
 /// This just says where the file landed and what still needs doing.
-fn note_if_written_to_governance(settings: &board_settings::BoardSettings) {
-    if let Some(root) = settings.governance_root() {
+fn note_if_written_to_documents(settings: &board_settings::BoardSettings) {
+    if let Some(root) = settings.documents_root() {
         println!(
             "  written to {} — commit and open a PR there to apply it",
             root.join(".settings").display()
@@ -1105,7 +1105,7 @@ fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
         true => println!("registered {name}"),
         false => println!("{name} was already registered on this machine"),
     }
-    note_if_written_to_governance(&settings);
+    note_if_written_to_documents(&settings);
     Ok(())
 }
 
