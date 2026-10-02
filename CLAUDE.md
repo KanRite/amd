@@ -43,8 +43,24 @@ that before assuming this is either abandoned or committed to.
 
 - `crates/amd-lib/src/lib.rs` — the library: `board`, `board_settings`,
   `branch`, `create`, `git`, `group`, `project_trust`, `registry`,
-  `settings`, `task`, `templates` (and `gui` behind the feature, pending
-  phase 4). **No `render`** — drawing is a front end's business.
+  `settings`, `task`, `templates`, `model`, `transition` (and `gui` behind
+  the feature, pending phase 4). **No `render`** — drawing is a front end's
+  business.
+- `crates/amd-lib/src/transition.rs` — moving a ticket the way `amd todo`/
+  `doing`/`done` do: the move, the lease on entering `todo`/`doing`, the
+  branch switch on entering `todo`, and the auto-commit (`with_auto_commit`).
+  Shared by the CLI and the terminal board so a move leaves the board, git
+  history and working tree in the same state from either. **Nothing here
+  prints** — a front end that owns the screen can't have the library writing
+  over it — so it returns ordered `Event::Info`/`Event::Warn`s, which the CLI
+  prints on stdout/stderr (`report()` in `main.rs`). The desktop board's
+  `apply()` does *not* use it yet (it takes a lease but neither branches nor
+  commits) — a known gap, not a design choice.
+- `crates/amd-lib/src/model.rs` — the egui-free board model lifted out of
+  `gui/`: `Card`, `RepoBoard`, `read_lanes`/`read_groups`, `card_visible`/
+  `card_in_group`, `rank_between`, `splice_body`, and `load_repos()` (the
+  current project's board plus every declared, registered repository). The
+  desktop board and the terminal board both read tickets through it.
 - `crates/amd-lib/src/create.rs` — making a ticket, split into `Draft::prepare` (resolve and
   render, touching nothing) and `Draft::write` (file, child link, backlinks).
   That gap is what lets the CLI put the rendered ticket in `$EDITOR` before

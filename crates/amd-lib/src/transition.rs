@@ -190,3 +190,75 @@ fn maybe_take_lease(board: &Board, task: &Task) -> Option<String> {
         .err()
         .map(|err| format!("could not claim the lease automatically: {err:#}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn board_with(dir: &std::path::Path, name: &str, column: Column) -> (Board, Task) {
+        let board = Board::at(dir.join("tasks"));
+        board.create().expect("board");
+        let body = format!("---\nid: \"{}\"\ntitle: \"T\"\n---\n\nbody\n", &name[..3]);
+        let path = board.dir(column).join(name);
+        std::fs::write(&path, body).unwrap();
+        let task = Task::from_path(&path, column).unwrap();
+        (board, task)
+    }
+
+    #[test]
+    fn moving_to_done_reports_the_move_and_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let (board, task) = board_with(dir.path(), "001-t.md", Column::Doing);
+        let outcome = move_to(&board, &task, Column::Done, false).unwrap();
+        assert_eq!(
+            outcome.events,
+            [Event::Info("moved 001-t.md -> done/".to_string())]
+        );
+        assert!(board.dir(Column::Done).join("001-t.md").exists());
+        assert_eq!(outcome.dest, Some(board.dir(Column::Done).join("001-t.md")));
+    }
+
+    #[test]
+    fn a_refused_move_is_an_error_and_moves_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (board, task) = board_with(dir.path(), "001-t.md", Column::Done);
+        assert!(move_to(&board, &task, Column::Done, false).is_err());
+        assert!(board.dir(Column::Done).join("001-t.md").exists());
+    }
+
+    #[test]
+    fn entering_todo_without_a_branch_type_says_so_and_leaves_the_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let (board, task) = board_with(dir.path(), "002-t.md", Column::Backlog);
+        let outcome = enter_todo(&board, &task, &TodoOptions::default()).unwrap();
+        assert!(board.dir(Column::Todo).join("002-t.md").exists());
+        assert!(
+            outcome.events.contains(&Event::Warn(
+                "no branch type on this ticket; left the branch alone".to_string()
+            )),
+            "{:?}",
+            outcome.events
+        );
+    }
+
+    #[test]
+    fn no_branch_skips_the_branch_step_entirely() {
+        let dir = tempfile::tempdir().unwrap();
+        let (board, task) = board_with(dir.path(), "002-t.md", Column::Backlog);
+        let outcome = enter_todo(
+            &board,
+            &task,
+            &TodoOptions {
+                no_branch: true,
+                ..TodoOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            !outcome
+                .events
+                .iter()
+                .any(|event| matches!(event, Event::Warn(text) if text.contains("branch")))
+        );
+    }
+}
