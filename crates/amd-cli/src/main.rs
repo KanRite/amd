@@ -28,7 +28,7 @@ use agile_md::board::{ABANDON, Board, Column};
 use agile_md::create::{Draft, NewTicket};
 use agile_md::registry::Registry;
 use agile_md::templates::{DEFAULT_TEMPLATE, TEMPLATE_SUFFIX, Templates};
-use agile_md::{alias, board_settings, branch, git, task, templates};
+use agile_md::{alias, board_settings, branch, git, task, templates, transition};
 
 const AFTER_HELP: &str = "\
 A <REF> is a task id (e.g. 7 or 007) or a unique slug substring. Leave it out
@@ -696,14 +696,9 @@ fn cmd_unlock(board: &Board, reference: &str, force: bool) -> Result<()> {
     })
 }
 
-/// Move a task into todo/ and put the working tree on its branch. This is
-/// what `amd start` used to do on entry to `doing/`; the trigger moved
-/// earlier, to `todo/`-entry, because "todo/ is what you have committed to"
-/// — the workspace should be ready once you've committed to the work, not
-/// only once you start typing (docs/adr/0006).
-///
-/// Order matters: the `git mv` is staged first so it travels with the switch
-/// and lands on the task's own branch.
+/// Move a task into todo/ and put the working tree on its branch. The work
+/// lives in `agile_md::transition` so the terminal board does exactly the
+/// same; this only prints what it reports.
 fn cmd_enter_todo(
     board: &Board,
     task: &task::Task,
@@ -711,42 +706,28 @@ fn cmd_enter_todo(
     no_branch: bool,
     force: bool,
 ) -> Result<()> {
-    // Read everything off the ticket before the move — afterwards the path is
-    // stale. A ticket with no branch type has nothing to check out, so there's
-    // nothing to switch to unless --branch says otherwise.
-    let wanted = match override_branch {
-        Some(name) => Some(name),
-        None => match task.branch() {
-            Some(name) => Some(name),
-            // A ticket edited by hand may name a branch type but no branch.
-            None => match task.branch_type() {
-                Some(kind) => {
-                    let name = branch::for_title(&kind, &task.title())?;
-                    (!name.is_empty()).then_some(name)
-                }
-                None => None,
-            },
+    let outcome = transition::enter_todo(
+        board,
+        task,
+        &transition::TodoOptions {
+            force,
+            branch: override_branch,
+            no_branch,
         },
-    };
-
-    move_and_report(board, task, Column::Todo, force)?;
-
-    if no_branch || std::env::var("AMD_NO_BRANCH").as_deref() == Ok("1") {
-        return Ok(());
-    }
-    let Some(name) = wanted else {
-        eprintln!("amd: no branch type on this ticket; left the branch alone");
-        return Ok(());
-    };
-    branch::validate(&name)?;
-    if git::current_branch(&board.root).as_deref() == Some(name.as_str()) {
-        println!("already on {name}");
-        return Ok(());
-    }
-    let exists = git::branch_exists(&board.root, &name);
-    git::switch_branch(&board.root, &name, !exists)?;
-    println!("{} {name}", if exists { "switched to" } else { "branch" });
+    )?;
+    report(&outcome);
     Ok(())
+}
+
+/// Print a transition's events the way the CLI always has: information on
+/// stdout, best-effort failures on stderr behind the `amd:` prefix.
+fn report(outcome: &transition::Outcome) {
+    for event in &outcome.events {
+        match event {
+            transition::Event::Info(text) => println!("{text}"),
+            transition::Event::Warn(text) => eprintln!("amd: {text}"),
+        }
+    }
 }
 
 /// Link tickets together. The relation is symmetric by default — "related"
@@ -793,58 +774,16 @@ fn cmd_gui() -> Result<()> {
 
 /// Move a ticket and say so. The wording is the CLI's, not the library's —
 /// `Board::move_task` returns where the ticket landed and leaves the reporting
-/// to whoever asked for the move.
+/// to whoever asked for the move; `transition::move_to` does the move, the
+/// lease and the auto-commit.
 fn move_and_report(board: &Board, task: &task::Task, to: Column, force: bool) -> Result<()> {
-    // Captured before the move: id_display()/title() read the ticket's own
-    // file, which move_task is about to relocate.
-    let (id_display, title) = (task.id_display(), task.title());
-    with_auto_commit(board, to.as_str(), &id_display, &title, || {
-        let dest = board.move_task(task, to, force)?;
-        println!("moved {} -> {to}/", task.file_name());
-        // Entering todo/doing already means "I'm starting this" — claiming
-        // the lease at the same moment matches that intent with no extra
-        // step. Every other column move (and every column move that's
-        // already leased by someone else) is refused earlier, inside
-        // move_task itself.
-        if matches!(to, Column::Todo | Column::Doing)
-            && let Some(moved) = task::Task::from_path(&dest, to)
-        {
-            maybe_take_lease(board, &moved);
-        }
-        Ok(())
-    })
+    report(&transition::move_to(board, task, to, force)?);
+    Ok(())
 }
 
-/// Best-effort: a failure here (no git email configured, or someone else
-/// grabbing the lease in the instant between the move and this call) must
-/// never undo a move that already succeeded — it only gets a note, the same
-/// tone as "no branch type on this ticket; left the branch alone".
-fn maybe_take_lease(board: &Board, task: &task::Task) {
-    let Ok(hash) = task.hash() else { return };
-    let hours = board_settings::load(board).lease_hours();
-    if let Err(err) = task.take_lease(hash, hours) {
-        eprintln!("amd: could not claim the lease automatically: {err:#}");
-    }
-}
-
-/// Runs `mutate`, then — if `commit` is on for this board — commits and
-/// pushes exactly the paths it changed, determined by diffing `git status`
-/// before and after rather than a hand-maintained list. That's not a
-/// simplification: `Board::record_id` writes `.settings`'s `next-id`
-/// alongside a new ticket, so `amd new` genuinely touches two files in one
-/// operation, and a hand-picked paths argument at each call site is exactly
-/// the shape of place a second incidental write like that gets missed.
-/// Anything already dirty *before* `mutate` runs — this repo's own
-/// unrelated in-progress state — is excluded by construction, since it
-/// appears in both snapshots.
-///
-/// Best-effort in the same spirit as `maybe_take_lease`: a commit or push
-/// failure (a locked signing key, no agent, the network down, a moved
-/// remote) must never undo a board change that already succeeded on disk.
-/// It warns and moves on — never fails the command, never rolls back —
-/// because failing at this point would misreport a move that actually
-/// worked, and there is nothing sane to roll back to that wouldn't be its
-/// own surprise.
+/// Runs `mutate`, then commits and pushes what it changed (see
+/// `transition::with_auto_commit`), warning rather than failing if that
+/// can't be done.
 fn with_auto_commit<T>(
     board: &Board,
     verb: &str,
@@ -852,18 +791,9 @@ fn with_auto_commit<T>(
     detail: &str,
     mutate: impl FnOnce() -> Result<T>,
 ) -> Result<T> {
-    let auto_commit = board_settings::load(board).auto_commit();
-    let before = auto_commit.then(|| git::dirty_paths(board.repo_root()).unwrap_or_default());
-    let result = mutate()?;
-    if let Some(before) = before {
-        let after = git::dirty_paths(board.repo_root()).unwrap_or_default();
-        let changed = git::changed_paths(&before, &after);
-        if !changed.is_empty() {
-            let message = format!("{verb}: {subject} \"{detail}\"");
-            if let Err(err) = git::commit_paths(board.repo_root(), &message, &changed) {
-                eprintln!("amd: could not commit/push automatically: {err:#}");
-            }
-        }
+    let (result, warning) = transition::with_auto_commit(board, verb, subject, detail, mutate)?;
+    if let Some(warning) = warning {
+        eprintln!("amd: {warning}");
     }
     Ok(result)
 }

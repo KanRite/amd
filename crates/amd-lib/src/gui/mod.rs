@@ -14,9 +14,12 @@ use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
 
-use crate::board::{Board, Column};
+use crate::board::Column;
 use crate::group::{DEFAULT_DAYS, Group, Kind, State};
-use crate::registry::Registry;
+use crate::model::{
+    Card, RepoBoard, Repos, card_in_group, card_visible, load_repos, read_groups, read_lanes,
+    splice_body,
+};
 use crate::task::{ContentHash, Task, VALID_POINTS};
 use settings::{Accent, FontSize, GuiSettings, Theme};
 
@@ -51,35 +54,6 @@ enum Drop {
         column: Column,
         index: usize,
     },
-}
-
-struct Card {
-    task: Task,
-    title: String,
-    id: String,
-    assignee: Option<String>,
-    points: Option<String>,
-    /// Sort key: the hand-set order when there is one, otherwise the id, so a
-    /// board nobody has dragged still reads in id order.
-    rank: f64,
-}
-
-struct RepoBoard {
-    name: String,
-    board: Board,
-    lanes: Vec<Vec<Card>>,
-    /// Backlog tickets grouped by folder. `None` is the loose backlog —
-    /// everything not filed under an epic or sprint yet.
-    groups: Vec<(Option<Group>, Vec<Card>)>,
-    visible: bool,
-    /// Which list the epic/sprint dropdown shows. Per-repo, like `groups`
-    /// itself — each registered repository has its own independent set.
-    selected_kind: Kind,
-    /// The chosen group, if any. `None` means no filter: the loose backlog
-    /// and every column, unfiltered, exactly as before this feature existed.
-    /// Switching `selected_kind` clears this — a name from the other kind's
-    /// list doesn't carry over into the new one.
-    selected_group: Option<String>,
 }
 
 /// Which of the two boards is on screen. The board is the committed work;
@@ -227,42 +201,13 @@ pub struct BoardApp {
     wip_doing_input: String,
 }
 
-/// Whether `card` should be drawn under the current tag filter. An empty
-/// filter matches everything, same as no filter at all.
-fn card_visible(card: &Card, filter: &BTreeSet<String>) -> bool {
-    filter.is_empty() || card.task.tags().iter().any(|tag| filter.contains(tag))
-}
-
 impl BoardApp {
     pub fn load() -> Result<Self> {
-        // A hard error now, not a `.ok()` folded away — `amdui` operates on
-        // exactly one project (the one launched from), never a personal
-        // cross-project stack the way the old machine-wide registry allowed.
-        let current = Board::discover()?;
-        let current_root = current.repo_root().to_path_buf();
-        let declared = crate::board_settings::load(&current).repos();
-        let registry = Registry::load();
-
-        let mut repos = vec![open_repo_board(current_root.clone(), current)?];
-        // A name this project declares but that isn't registered locally
-        // (or is, but its board has since gone missing) — rendered greyed
-        // out in the repo-visibility row, not silently omitted, so a
-        // teammate who's added a repository sees it exists before they've
-        // cloned it.
-        let mut unregistered = Vec::new();
-        for name in &declared {
-            match registry.find(name) {
-                Some(entry) if entry.root == current_root => {} // already added, above
-                Some(entry) if entry.has_board() => {
-                    repos.push(open_repo_board(entry.root.clone(), entry.board())?);
-                }
-                _ => unregistered.push(name.clone()),
-            }
-        }
-        // `user.email` is ordinarily global, so any registered repo's
-        // context resolves the same identity — the first one is as good as
-        // any other.
-        let identity = crate::git::config(&repos[0].board.root, "user.email");
+        let Repos {
+            repos,
+            unregistered,
+            identity,
+        } = load_repos()?;
         // Always 0: `repos[0]` is `current`, pushed first above by
         // construction, not found by position in an alphabetically-sorted
         // list the way the old cross-project registry required.
@@ -409,16 +354,7 @@ impl BoardApp {
             .filter(|card| card.task.path != path)
             .map(|card| card.rank)
             .collect();
-        let index = index.min(lane.len());
-        let rank = match (
-            index.checked_sub(1).and_then(|i| lane.get(i)),
-            lane.get(index),
-        ) {
-            (Some(before), Some(after)) => (before + after) / 2.0,
-            (Some(before), None) => before + 1.0,
-            (None, Some(after)) => after - 1.0,
-            (None, None) => 0.0,
-        };
+        let rank = crate::model::rank_between(&lane, index);
 
         let mut lease_note = None;
         let outcome = (|| -> Result<()> {
@@ -457,97 +393,6 @@ impl BoardApp {
         }
         self.reload();
     }
-}
-
-/// The backlog, split into the loose tickets and one group per epic folder.
-/// The loose group comes first and is always present, so there is somewhere to
-/// drop a ticket you want to take *out* of an epic.
-fn read_groups(board: &Board) -> Result<Vec<(Option<Group>, Vec<Card>)>> {
-    let all = board.tasks_in(Column::Backlog)?;
-    let mut groups: Vec<(Option<Group>, Vec<Card>)> = vec![(None, Vec::new())];
-    for group in board.groups()? {
-        groups.push((Some(group), Vec::new()));
-    }
-    for task in all {
-        let slot = groups
-            .iter_mut()
-            .find(|(group, _)| group.as_ref().map(|g| g.name.as_str()) == task.epic.as_deref());
-        if let Some((_, cards)) = slot {
-            cards.push(card_from(task));
-        }
-    }
-    for (_, cards) in &mut groups {
-        sort_cards(cards);
-    }
-    Ok(groups)
-}
-
-fn card_from(task: Task) -> Card {
-    let rank = task
-        .order()
-        .unwrap_or_else(|| task.id.map(f64::from).unwrap_or(f64::MAX));
-    Card {
-        title: task.title(),
-        id: task.id_display(),
-        assignee: task.assignee(),
-        points: task.points(),
-        rank,
-        task,
-    }
-}
-
-fn sort_cards(cards: &mut [Card]) {
-    cards.sort_by(|a, b| {
-        a.rank
-            .partial_cmp(&b.rank)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-}
-
-/// Put a typed body into a rendered ticket, keeping its frontmatter.
-///
-/// An empty body leaves the template's own, so clearing the box gets you the
-/// default ticket rather than an empty file that `write` would refuse.
-fn splice_body(rendered: &str, body: &str) -> String {
-    if body.trim().is_empty() {
-        return rendered.to_string();
-    }
-    match crate::task::split_body(rendered) {
-        Some((head, _)) => format!("{head}{body}"),
-        // No frontmatter to keep: the template is not one we understand, so
-        // don't pretend — write what it rendered.
-        None => rendered.to_string(),
-    }
-}
-
-fn read_lanes(board: &Board) -> Result<Vec<Vec<Card>>> {
-    let mut lanes = Vec::new();
-    for column in Column::ALL {
-        let mut cards: Vec<Card> = board.tasks_in(column)?.into_iter().map(card_from).collect();
-        sort_cards(&mut cards);
-        lanes.push(cards);
-    }
-    Ok(lanes)
-}
-
-/// Builds a `RepoBoard` from a repository root and the `Board` inside it.
-/// The directory's own basename names it, not `Board::name()` — a board's
-/// root is `<repo>/tasks`, so the latter would label every repository
-/// "tasks".
-fn open_repo_board(root: PathBuf, board: Board) -> Result<RepoBoard> {
-    let name = root
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| root.display().to_string());
-    Ok(RepoBoard {
-        name,
-        lanes: read_lanes(&board)?,
-        groups: read_groups(&board)?,
-        board,
-        visible: true,
-        selected_kind: Kind::Epic,
-        selected_group: None,
-    })
 }
 
 #[cfg(feature = "gui")]
@@ -1735,20 +1580,6 @@ fn slot(ui: &mut egui::Ui, repo_index: usize, column: Column, index: usize) -> O
     })
 }
 
-/// Whether `card`'s task currently belongs to the group named `name`. Inside
-/// `backlog/` the folder decides (`task.epic`, set from where the file was
-/// found); outside it there's no group directory, so the frontmatter key is
-/// the only carrier (`epic_meta()`, a fresh read) — same split
-/// `Board::tasks_in_group` already makes.
-#[cfg(feature = "gui")]
-fn card_in_group(card: &Card, name: &str) -> bool {
-    if card.task.column == Column::Backlog {
-        card.task.epic.as_deref() == Some(name)
-    } else {
-        card.task.epic_meta().as_deref() == Some(name)
-    }
-}
-
 #[cfg(feature = "gui")]
 struct CardResponse {
     /// The card was double-clicked to open it.
@@ -1885,6 +1716,7 @@ pub fn run() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::card_from;
 
     const RENDERED: &str = "---\nid: \"001\"\ntitle: \"T\"\npoints: \"\"\n---\n\n## Notes\n\n\n";
 

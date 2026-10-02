@@ -17,11 +17,13 @@ pub mod create;
 pub mod git;
 pub mod group;
 pub mod import;
+pub mod model;
 pub mod project_trust;
 pub mod registry;
 pub mod settings;
 pub mod task;
 pub mod templates;
+pub mod transition;
 
 #[cfg(feature = "gui")]
 pub mod gui;
