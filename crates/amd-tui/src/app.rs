@@ -81,6 +81,10 @@ pub struct App {
     /// handling and any later click handling need it back, and the renderer
     /// only gets `&App`, hence `Cell`.
     pub offsets: [Cell<usize>; 4],
+    /// Columns folded down to a title and a count (`z`), so a long Backlog or
+    /// Done doesn't take the screen when it isn't wanted. Nothing in a folded
+    /// column can be selected.
+    pub collapsed: [bool; 4],
 }
 
 impl App {
@@ -106,6 +110,7 @@ impl App {
             status: None,
             quit: false,
             offsets: Default::default(),
+            collapsed: [false; 4],
         }
     }
 
@@ -133,8 +138,11 @@ impl App {
         entries
     }
 
-    /// The selected ticket, if the selected column has one.
+    /// The selected ticket, if the selected column has one showing.
     pub fn selected(&self) -> Option<Entry> {
+        if self.collapsed[self.col] {
+            return None;
+        }
         self.visible(self.col).get(self.row).copied()
     }
 
@@ -183,6 +191,7 @@ impl App {
             KeyCode::Char('H') | KeyCode::Char('<') => self.move_selected(-1),
             KeyCode::Char('L') | KeyCode::Char('>') => self.move_selected(1),
             KeyCode::Enter => self.open_selected(),
+            KeyCode::Char('z') => self.collapsed[self.col] = !self.collapsed[self.col],
             KeyCode::Char('n') => self.start_new(),
             KeyCode::Char('e') => self.start_edit(),
             KeyCode::Char('r') => {
@@ -242,6 +251,9 @@ impl App {
                 self.status = Some(summarise(&outcome.events));
                 self.reload();
                 self.col = target;
+                // A ticket moved into a folded column would vanish from view;
+                // open it so it lands where you can see it.
+                self.collapsed[target] = false;
                 // Follow the ticket into its new column.
                 let row = self.visible(target).iter().position(|e| {
                     e.repo == entry.repo
@@ -355,6 +367,7 @@ impl App {
             if let Some(row) = found {
                 self.col = col;
                 self.row = row;
+                self.collapsed[col] = false;
                 return;
             }
         }
@@ -798,5 +811,43 @@ mod tests {
         let mut app = app_in(dir.path());
         press(&mut app, "lle");
         assert_eq!(app.mode, Mode::Board, "done is empty");
+    }
+
+    #[test]
+    fn z_folds_and_unfolds_the_selected_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_in(dir.path());
+        press(&mut app, "z");
+        assert!(app.collapsed[1]);
+        assert_eq!(
+            app.selected(),
+            None,
+            "nothing in a folded column is selectable"
+        );
+        press(&mut app, "z");
+        assert!(!app.collapsed[1]);
+        assert!(app.selected().is_some());
+    }
+
+    #[test]
+    fn a_folded_column_ignores_moves_and_opens() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_in(dir.path());
+        press(&mut app, "zL");
+        assert!(dir.path().join("tasks/todo/001-a.md").exists());
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.mode, Mode::Board);
+    }
+
+    #[test]
+    fn moving_a_ticket_into_a_folded_column_opens_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_in(dir.path());
+        // Done is empty and folded; move 003 (doing) into it.
+        app.collapsed[3] = true;
+        press(&mut app, "lL");
+        assert!(dir.path().join("tasks/done/003-c.md").exists());
+        assert!(!app.collapsed[3], "the column opened to show the ticket");
+        assert_eq!(app.col, 3);
     }
 }
