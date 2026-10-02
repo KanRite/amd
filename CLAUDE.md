@@ -1024,6 +1024,10 @@ changes):
   auto-commit all behave exactly as `amd todo`/`doing`/`done`. A refusal (WIP
   limit, someone else's lease) lands on the status line and moves nothing.
   After a move the selection follows the ticket into its new column.
+- **`z` folds a column** down to a title and a count (`DONE (31)`), so a long
+  Backlog or Done doesn't take the screen. Nothing in a folded column can be
+  selected, moved or opened, and moving a ticket into one opens it so the
+  ticket lands in view. Folding isn't remembered between runs.
 - **Filters are a screen of their own (`f`), not a toolbar** — three lists
   (repositories, tags, epic/sprint) toggled with `Space`, `Tab` between them,
   `c` clears everything. Tags are OR, a group is a single choice, and the

@@ -93,7 +93,7 @@ fn footer_line(app: &App) -> Paragraph<'static> {
     let text = match (&app.status, &app.mode) {
         (Some(status), _) => status.clone(),
         (None, Mode::Board) => {
-            "h/l column  j/k ticket  H/L move  Enter open  n new  e edit  f filters  r reload  ? help  q quit"
+            "h/l column  j/k ticket  H/L move  Enter open  n new  e edit  z fold  f filters  r reload  ? help  q quit"
                 .to_string()
         }
         (None, Mode::Ticket { .. }) => "j/k scroll  Esc back".to_string(),
@@ -112,10 +112,40 @@ fn footer_line(app: &App) -> Paragraph<'static> {
 }
 
 fn board(frame: &mut Frame, app: &App, area: Rect) {
-    let columns = Layout::horizontal(Column::ALL.map(|_| Constraint::Fill(1))).split(area);
+    // A folded column keeps just enough width for its title and count.
+    let columns = Layout::horizontal(Column::ALL.iter().enumerate().map(|(at, _)| {
+        if app.collapsed[at] {
+            Constraint::Length(16)
+        } else {
+            Constraint::Fill(1)
+        }
+    }))
+    .split(area);
     let several = app.several_repos();
     for (index, column) in Column::ALL.iter().enumerate() {
         let entries = app.visible(index);
+        if app.collapsed[index] {
+            let border = if index == app.col {
+                Style::new().fg(ACCENT)
+            } else {
+                Style::new().add_modifier(Modifier::DIM)
+            };
+            let block = Block::new()
+                .borders(Borders::ALL)
+                .border_style(border)
+                .title(format!(
+                    " {} ({}) ",
+                    column.as_str().to_uppercase(),
+                    entries.len()
+                ));
+            frame.render_widget(
+                Paragraph::new("z to open")
+                    .style(Style::new().add_modifier(Modifier::DIM))
+                    .block(block),
+                columns[index],
+            );
+            continue;
+        }
         let items: Vec<ListItem> = entries
             .iter()
             .map(|entry| {
@@ -369,6 +399,7 @@ fn help(frame: &mut Frame, area: Rect) {
         "H / L, < / >    move the ticket one column left / right",
         "Enter           open the ticket (read-only)",
         "n / e           new ticket / edit the selected one",
+        "z               fold / unfold the column (a long Backlog or Done)",
         "f               filters: repositories, tags, epic / sprint",
         "r               reload from disk",
         "q, Esc          quit",
@@ -540,5 +571,19 @@ mod tests {
         assert!(screen.contains("new ticket in"), "{screen}");
         let last = screen.lines().last().unwrap_or_default().trim().to_string();
         assert!(!last.is_empty() && !last.contains("Ctrl-S"), "{last:?}");
+    }
+
+    #[test]
+    fn a_folded_column_shows_only_its_title_and_count() {
+        let (_dir, mut app) = app(&[
+            ("001-a.md", Column::Todo, ""),
+            ("002-b.md", Column::Done, ""),
+        ]);
+        app.collapsed[3] = true;
+        let screen = render(&app, 120, 10);
+        assert!(screen.contains("DONE (1)"), "{screen}");
+        assert!(screen.contains("z to open"), "{screen}");
+        assert!(!screen.contains("002 T002"), "{screen}");
+        assert!(screen.contains("001 T001"), "other columns are unaffected");
     }
 }
