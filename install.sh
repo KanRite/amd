@@ -75,6 +75,10 @@ build_from_source() {
   if [ -f "${SELF}/target/release/amdui" ]; then
     cp "${SELF}/target/release/amdui" "${DIR}/amdui"
   fi
+  # Same for the terminal board.
+  if [ -f "${SELF}/target/release/amd-tui" ]; then
+    cp "${SELF}/target/release/amd-tui" "${DIR}/amd-tui"
+  fi
 }
 
 download_release() {
@@ -101,6 +105,9 @@ download_release() {
   if [ -f "${TMP}/amdui" ]; then
     cp "${TMP}/amdui" "${DIR}/amdui"
   fi
+  if [ -f "${TMP}/amd-tui" ]; then
+    cp "${TMP}/amd-tui" "${DIR}/amd-tui"
+  fi
 }
 
 if [ "${FROM_SOURCE}" = "1" ]; then
@@ -120,6 +127,10 @@ if [ -f "${DIR}/amdui" ]; then
   chmod +x "${DIR}/amdui"
   echo "Installed amdui -> ${DIR}/amdui   (the desktop board)"
 fi
+if [ -f "${DIR}/amd-tui" ]; then
+  chmod +x "${DIR}/amd-tui"
+  echo "Installed amd-tui -> ${DIR}/amd-tui   (the terminal board)"
+fi
 case ":${PATH}:" in
   *":${DIR}:"*) ;;
   *) echo "Note: ${DIR} is not on your PATH. Add this to your shell profile:"
@@ -127,3 +138,4 @@ case ":${PATH}:" in
 esac
 echo "Then, in any repo:  amd init  &&  amd new \"My first task\""
 echo "For the desktop board:  amdui   (or amd gui)"
+echo "For the terminal board:  amd-tui   (or amd tui)"

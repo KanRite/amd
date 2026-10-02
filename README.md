@@ -30,13 +30,14 @@ into `/usr/local/bin` when it's writable, otherwise `~/bin`. Override with
 `--from-source` (needs [Rust](https://rustup.rs)). From a clone:
 
 ```bash
-cargo build --release        # target/release/{amd,amdui}
+cargo build --release        # target/release/{amd,amdui,amd-tui}
 # a workspace: crates/amd-lib (the library), crates/amd-cli, crates/amd-ui
 ./install.sh                 # builds and installs
 ```
 
-Two commands: **`amd`** is the command line, **`amdui`** is the desktop board.
-Both are in the release zip, and `amd gui` opens the same window as `amdui`.
+Three commands: **`amd`** is the command line, **`amdui`** is the desktop board,
+**`amd-tui`** is the terminal board. `amd gui` opens the same window as `amdui`
+and `amd tui` the same board as `amd-tui`.
 
 ## Use
 

@@ -797,6 +797,26 @@ else
   echo "  skip - no amdui binary (built without the gui feature)"
 fi
 
+# The terminal board is a binary too, so the suite checks it the same way: built,
+# and answering without taking over a terminal. A --no-default-features build
+# has no amd-tui, and that's not a failure.
+echo "the terminal binary:"
+AMDTUI="${AMDTUI_BIN:-${ROOT}/target/debug/amd-tui}"
+if [ -x "${AMDTUI}" ]; then
+  assert "amd-tui --version names itself" \
+    bash -c "'${AMDTUI}' --version | grep -q '^amd-tui '"
+  assert "amd-tui --help mentions the terminal board" \
+    bash -c "'${AMDTUI}' --help | grep -q 'terminal board'"
+  assert "amd-tui rejects an unknown argument" \
+    bash -c "! '${AMDTUI}' --nope"
+  assert "amd-tui outside any board is an error, not a hang" \
+    bash -c "cd '${nongit}' && ! '${AMDTUI}' </dev/null 2>/dev/null"
+else
+  echo "  skip - no amd-tui binary"
+fi
+assert "amd tui is listed in the command help" \
+  bash -c "'${AMD}' --help | grep -q 'terminal board'"
+
 echo "guards:"
 assert "errors outside a git repository" \
   bash -c "cd '${nongit}' && ! '${AMD}' board"

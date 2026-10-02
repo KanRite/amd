@@ -331,6 +331,9 @@ enum Cmd {
     /// Open the desktop board across every registered repository (same window
     /// as the `amdui` command)
     Gui,
+    /// Open the terminal board across every registered repository (same board
+    /// as the `amd-tui` command)
+    Tui,
     /// Print a shell completion script (bash, zsh, fish, …)
     Completions {
         /// Shell to generate for; defaults to $SHELL
@@ -501,6 +504,11 @@ fn run() -> Result<()> {
     if let Cmd::Gui = command {
         return cmd_gui();
     }
+    // The terminal board resolves its repositories the same way, from wherever
+    // it is launched.
+    if let Cmd::Tui = command {
+        return cmd_tui();
+    }
 
     // `init` is the one command that runs without an existing board.
     if let Cmd::Init {
@@ -517,7 +525,7 @@ fn run() -> Result<()> {
     // changed since amd last saw it — see project_trust.rs.
     agile_md::project_trust::check(&board)?;
     match command {
-        Cmd::Init { .. } | Cmd::Completions { .. } | Cmd::Gui => {
+        Cmd::Init { .. } | Cmd::Completions { .. } | Cmd::Gui | Cmd::Tui => {
             unreachable!("handled above")
         }
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
@@ -770,6 +778,16 @@ fn cmd_gui() -> Result<()> {
 #[cfg(not(feature = "gui"))]
 fn cmd_gui() -> Result<()> {
     bail!("this build has no desktop board — rebuild with --features gui")
+}
+
+#[cfg(feature = "tui")]
+fn cmd_tui() -> Result<()> {
+    amd_tui::run()
+}
+
+#[cfg(not(feature = "tui"))]
+fn cmd_tui() -> Result<()> {
+    bail!("this build has no terminal board — rebuild with --features tui")
 }
 
 /// Move a ticket and say so. The wording is the CLI's, not the library's —

@@ -7,6 +7,41 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Whether git's own output is kept off the terminal. The command line wants
+/// to show it (`Switched to a new branch ...` is part of what `amd todo`
+/// says); a full-screen front end can't have a child process writing over its
+/// display, so it turns this on and gets the failure text back in the error
+/// instead.
+static QUIET: AtomicBool = AtomicBool::new(false);
+
+/// Keep git's stdout and stderr off the terminal from now on, for the whole
+/// process. Failures still carry git's own message.
+pub fn set_quiet(quiet: bool) {
+    QUIET.store(quiet, Ordering::Relaxed);
+}
+
+/// Run a git command whose output a person might want to see. Returns whether
+/// it succeeded and, when output is being kept quiet, git's stderr (so the
+/// reason a push failed isn't lost along with the noise).
+fn run(command: &mut Command) -> std::io::Result<(bool, String)> {
+    if QUIET.load(Ordering::Relaxed) {
+        let out = command.stdin(Stdio::null()).output()?;
+        let detail = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        Ok((out.status.success(), detail))
+    } else {
+        Ok((command.status()?.success(), String::new()))
+    }
+}
+
+/// `"git X failed"`, plus git's own reason when there is one.
+fn failed(what: &str, detail: &str) -> String {
+    match detail.lines().last() {
+        Some(reason) if !reason.is_empty() => format!("{what} failed: {reason}"),
+        _ => format!("{what} failed"),
+    }
+}
 use std::time::SystemTime;
 
 use anyhow::{Context, Result, bail};
@@ -46,16 +81,18 @@ pub fn is_tracked(repo: &Path, file: &Path) -> bool {
 /// `git mv` — the rename is then part of the history, so `git log --follow`
 /// reconstructs when a task started and finished.
 pub fn mv(repo: &Path, from: &Path, to: &Path) -> Result<()> {
-    let status = Command::new("git")
+    let (ok, detail) = run(Command::new("git")
         .arg("-C")
         .arg(repo)
         .arg("mv")
         .arg(from)
-        .arg(to)
-        .status()
-        .context("running git mv")?;
-    if !status.success() {
-        bail!("git mv {} {} failed", from.display(), to.display());
+        .arg(to))
+    .context("running git mv")?;
+    if !ok {
+        bail!(failed(
+            &format!("git mv {} {}", from.display(), to.display()),
+            &detail
+        ));
     }
     Ok(())
 }
@@ -101,12 +138,10 @@ pub fn switch_branch(repo: &Path, name: &str, create: bool) -> Result<()> {
     if create {
         command.arg("-c");
     }
-    let status = command
-        .arg(name)
-        .status()
-        .with_context(|| format!("running git switch {name}"))?;
-    if !status.success() {
-        bail!("git switch {name} failed");
+    let (ok, detail) =
+        run(command.arg(name)).with_context(|| format!("running git switch {name}"))?;
+    if !ok {
+        bail!(failed(&format!("git switch {name}"), &detail));
     }
     Ok(())
 }
@@ -251,14 +286,13 @@ pub fn commit_all(repo: &Path, message: &str) -> Result<()> {
 /// `git push -u origin HEAD` — sets the upstream, which a freshly cloned,
 /// still-commit-less GitHub repository doesn't have yet.
 pub fn push(repo: &Path) -> Result<()> {
-    let status = Command::new("git")
+    let (ok, detail) = run(Command::new("git")
         .arg("-C")
         .arg(repo)
-        .args(["push", "-u", "origin", "HEAD"])
-        .status()
-        .context("running git push")?;
-    if !status.success() {
-        bail!("git push failed");
+        .args(["push", "-u", "origin", "HEAD"]))
+    .context("running git push")?;
+    if !ok {
+        bail!(failed("git push", &detail));
     }
     Ok(())
 }
@@ -377,28 +411,26 @@ pub fn commit_paths(repo: &Path, message: &str, paths: &BTreeSet<PathBuf>) -> Re
         .filter(|path| repo.join(path).exists())
         .collect();
     if !existing.is_empty() {
-        let status = Command::new("git")
+        let (ok, detail) = run(Command::new("git")
             .arg("-C")
             .arg(repo)
             .arg("add")
             .arg("--")
-            .args(existing)
-            .status()
-            .context("running git add")?;
-        if !status.success() {
-            bail!("git add failed");
+            .args(existing))
+        .context("running git add")?;
+        if !ok {
+            bail!(failed("git add", &detail));
         }
     }
-    let status = Command::new("git")
+    let (ok, detail) = run(Command::new("git")
         .arg("-C")
         .arg(repo)
         .args(["commit", "-m", message])
         .arg("--")
-        .args(paths)
-        .status()
-        .context("running git commit")?;
-    if !status.success() {
-        bail!("git commit failed");
+        .args(paths))
+    .context("running git commit")?;
+    if !ok {
+        bail!(failed("git commit", &detail));
     }
     push(repo)
 }
@@ -433,6 +465,15 @@ pub fn config(repo: &Path, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failure_carries_gits_own_reason_when_there_is_one() {
+        assert_eq!(failed("git push", ""), "git push failed");
+        assert_eq!(
+            failed("git push", "hint: x\nfatal: no remote"),
+            "git push failed: fatal: no remote"
+        );
+    }
 
     fn git(repo: &Path, args: &[&str]) {
         let status = Command::new("git")
