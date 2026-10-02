@@ -73,21 +73,39 @@ pub fn with_auto_commit<T>(
     detail: &str,
     mutate: impl FnOnce() -> Result<T>,
 ) -> Result<(T, Option<String>)> {
-    let auto_commit = board_settings::load(board).auto_commit();
-    let before = auto_commit.then(|| git::dirty_paths(board.repo_root()).unwrap_or_default());
+    let before = snapshot(board);
     let result = mutate()?;
-    let mut warning = None;
-    if let Some(before) = before {
-        let after = git::dirty_paths(board.repo_root()).unwrap_or_default();
-        let changed = git::changed_paths(&before, &after);
-        if !changed.is_empty() {
-            let message = format!("{verb}: {subject} \"{detail}\"");
-            if let Err(err) = git::commit_paths(board.repo_root(), &message, &changed) {
-                warning = Some(format!("could not commit/push automatically: {err:#}"));
-            }
-        }
-    }
+    let warning = commit_since(board, before, &format!("{verb}: {subject} \"{detail}\""));
     Ok((result, warning))
+}
+
+/// The repository's dirty paths as they stand, when auto-commit is on for
+/// this board; `None` when it is off, so a caller can pass it straight back
+/// to [`commit_since`] without asking again.
+fn snapshot(
+    board: &Board,
+) -> Option<std::collections::BTreeMap<PathBuf, Option<std::time::SystemTime>>> {
+    board_settings::load(board)
+        .auto_commit()
+        .then(|| git::dirty_paths(board.repo_root()).unwrap_or_default())
+}
+
+/// Commit and push whatever changed since `before` was taken, with `message`.
+/// Returns the warning to show if that couldn't be done.
+fn commit_since(
+    board: &Board,
+    before: Option<std::collections::BTreeMap<PathBuf, Option<std::time::SystemTime>>>,
+    message: &str,
+) -> Option<String> {
+    let before = before?;
+    let after = git::dirty_paths(board.repo_root()).unwrap_or_default();
+    let changed = git::changed_paths(&before, &after);
+    if changed.is_empty() {
+        return None;
+    }
+    git::commit_paths(board.repo_root(), message, &changed)
+        .err()
+        .map(|err| format!("could not commit/push automatically: {err:#}"))
 }
 
 /// Move a ticket and claim its lease when it enters `todo/` or `doing/`,
@@ -191,6 +209,122 @@ fn maybe_take_lease(board: &Board, task: &Task) -> Option<String> {
         .map(|err| format!("could not claim the lease automatically: {err:#}"))
 }
 
+/// Everything a front end gathers to make or change a ticket.
+#[derive(Debug, Default, Clone)]
+pub struct TicketFields {
+    pub title: String,
+    pub assignee: String,
+    /// One of `task::VALID_POINTS`, or empty.
+    pub points: String,
+    /// The epic or sprint to file it under, if any.
+    pub epic: Option<String>,
+    pub tags: Vec<String>,
+    /// A branch type, or empty for a ticket with no branch.
+    pub branch_type: String,
+    /// A ref (id or slug), or empty.
+    pub parent: String,
+    pub related: Vec<String>,
+    /// The ticket body — everything after the frontmatter.
+    pub body: String,
+}
+
+/// Make a ticket the way `amd new` does: render it from the templates, write
+/// it into `backlog/`, size it, file it under its epic, and auto-commit.
+/// `outcome.dest` is where it landed.
+pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
+    let templates = crate::templates::Templates::load(board)?;
+    let draft = crate::create::Draft::prepare(
+        board,
+        &templates,
+        crate::create::NewTicket {
+            title: fields.title.trim().to_string(),
+            template: crate::templates::DEFAULT_TEMPLATE.to_string(),
+            branch_type: fields.branch_type.trim().to_string(),
+            assignee: fields.assignee.trim().to_string(),
+            parent: Some(fields.parent.trim().to_string()).filter(|p| !p.is_empty()),
+            related: fields.related.clone(),
+            tags: fields.tags.clone(),
+            extra: Default::default(),
+        },
+    )?;
+    // `write` takes the whole file, not just the notes — the same shape `amd
+    // new` hands it after the editor has been over the rendered ticket.
+    let text = crate::model::splice_body(&draft.body, &fields.body);
+    // A new ticket's id isn't allocated until `write` runs, so the commit
+    // message can't be built up front the way `with_auto_commit` wants it.
+    let before = snapshot(board);
+    let created = draft.write(board, Some(text))?;
+    if !fields.points.trim().is_empty() {
+        created
+            .task
+            .set_points(created.task.hash()?, fields.points.trim())?;
+    }
+    // Read what the report and the commit message need before filing it under
+    // an epic: inside `backlog/` that moves the file, after which `created.task`
+    // points at a path that is gone and would read back as an empty title.
+    let (id_display, title, file_name) = (
+        created.task.id_display(),
+        created.task.title(),
+        created.task.file_name(),
+    );
+    let dest = board.set_epic(&created.task, fields.epic.as_deref())?;
+    let mut outcome = Outcome::default();
+    for id in &created.linked {
+        outcome
+            .events
+            .push(Event::Info(format!("{id} now links to {id_display}")));
+    }
+    outcome.events.push(Event::Info(format!(
+        "created {}/{file_name}",
+        Column::Backlog
+    )));
+    let message = format!("new: {id_display} \"{title}\"");
+    if let Some(warning) = commit_since(board, before, &message) {
+        outcome.events.push(Event::Warn(warning));
+    }
+    outcome.dest = Some(dest);
+    Ok(outcome)
+}
+
+/// Save every editable field of an existing ticket in one write, checked
+/// against `expected` — the fingerprint taken when the form opened — so a
+/// ticket that changed underneath it is refused with the conflict rather than
+/// overwritten. Auto-commits like `amd edit`.
+pub fn edit_ticket(
+    board: &Board,
+    task: &Task,
+    expected: crate::task::ContentHash,
+    fields: &TicketFields,
+) -> Result<Outcome> {
+    let (id_display, title) = (task.id_display(), task.title());
+    let ((), warning) = with_auto_commit(board, "edit", &id_display, &title, || {
+        task.apply_edit(
+            expected,
+            board,
+            crate::task::EditFields {
+                title: &fields.title,
+                assignee: &fields.assignee,
+                points: &fields.points,
+                tags: &fields.tags,
+                branch_type: &fields.branch_type,
+                parent: &fields.parent,
+                related: &fields.related,
+                body: &fields.body,
+            },
+        )?;
+        board.set_epic(task, fields.epic.as_deref())?;
+        Ok(())
+    })?;
+    let mut outcome = Outcome::default();
+    outcome
+        .events
+        .push(Event::Info(format!("saved {id_display}")));
+    if let Some(warning) = warning {
+        outcome.events.push(Event::Warn(warning));
+    }
+    Ok(outcome)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,5 +394,111 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, Event::Warn(text) if text.contains("branch")))
         );
+    }
+
+    fn empty_board(dir: &std::path::Path) -> Board {
+        let board = Board::at(dir.join("tasks"));
+        board.create().expect("board");
+        board
+    }
+
+    fn fields(title: &str) -> TicketFields {
+        TicketFields {
+            title: title.to_string(),
+            points: "3".to_string(),
+            tags: vec!["ux".to_string()],
+            body: "## Notes\nhello\n".to_string(),
+            ..TicketFields::default()
+        }
+    }
+
+    #[test]
+    fn creating_a_ticket_writes_it_into_the_backlog_sized_and_tagged() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = empty_board(dir.path());
+        let outcome = create_ticket(&board, &fields("Make a thing")).unwrap();
+        let path = outcome.dest.expect("where it landed");
+        assert!(path.starts_with(board.dir(Column::Backlog)), "{path:?}");
+        let task = Task::from_path(&path, Column::Backlog).unwrap();
+        assert_eq!(task.title(), "Make a thing");
+        assert_eq!(task.points().as_deref(), Some("3"));
+        assert_eq!(task.tags(), ["ux"]);
+        assert!(task.body().unwrap().contains("hello"));
+        assert!(
+            matches!(outcome.events.first(), Some(Event::Info(text)) if text.starts_with("created backlog/001-")),
+            "{:?}",
+            outcome.events
+        );
+    }
+
+    #[test]
+    fn a_ticket_filed_under_an_epic_reports_where_it_really_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = empty_board(dir.path());
+        board
+            .create_group(&crate::group::Group {
+                dir: board.dir(Column::Backlog).join("Ep"),
+                name: "Ep".to_string(),
+                kind: crate::group::Kind::Epic,
+                description: String::new(),
+                days: 0,
+                state: crate::group::State::Pending,
+            })
+            .unwrap();
+        let mut with_epic = fields("Filed away");
+        with_epic.epic = Some("Ep".to_string());
+        let outcome = create_ticket(&board, &with_epic).unwrap();
+        let path = outcome.dest.unwrap();
+        assert!(
+            path.exists(),
+            "dest must be where the file is now: {path:?}"
+        );
+        assert!(path.to_string_lossy().contains("/Ep/"), "{path:?}");
+    }
+
+    #[test]
+    fn a_ticket_with_nothing_sluggable_in_its_title_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = empty_board(dir.path());
+        assert!(create_ticket(&board, &fields("!!!")).is_err());
+        assert!(board.tasks_in(Column::Backlog).unwrap().is_empty());
+    }
+
+    #[test]
+    fn editing_saves_every_field_in_one_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = empty_board(dir.path());
+        let path = create_ticket(&board, &fields("Old title"))
+            .unwrap()
+            .dest
+            .unwrap();
+        let task = Task::from_path(&path, Column::Backlog).unwrap();
+        let hash = task.hash().unwrap();
+        let mut edited = fields("New title");
+        edited.assignee = "sam".to_string();
+        edited.body = "## Notes\nchanged\n".to_string();
+        edit_ticket(&board, &task, hash, &edited).unwrap();
+        let task = Task::from_path(&path, Column::Backlog).unwrap();
+        assert_eq!(task.title(), "New title");
+        assert_eq!(task.assignee().as_deref(), Some("sam"));
+        assert!(task.body().unwrap().contains("changed"));
+    }
+
+    #[test]
+    fn editing_a_ticket_that_changed_underneath_is_refused_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = empty_board(dir.path());
+        let path = create_ticket(&board, &fields("Old title"))
+            .unwrap()
+            .dest
+            .unwrap();
+        let task = Task::from_path(&path, Column::Backlog).unwrap();
+        let stale = task.hash().unwrap();
+        // Someone else saves first.
+        task.set_title(stale, "Theirs").unwrap();
+        let result = edit_ticket(&board, &task, stale, &fields("Mine"));
+        assert!(result.is_err());
+        let task = Task::from_path(&path, Column::Backlog).unwrap();
+        assert_eq!(task.title(), "Theirs");
     }
 }

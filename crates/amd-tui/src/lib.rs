@@ -12,6 +12,7 @@
 pub mod app;
 #[cfg(test)]
 mod fixture;
+pub mod form;
 pub mod ui;
 
 use anyhow::Result;

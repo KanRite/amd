@@ -6,6 +6,8 @@ use std::collections::BTreeSet;
 use agile_md::board::Column;
 use agile_md::model::{self, RepoBoard};
 use agile_md::transition::{self, Event};
+
+use crate::form::{Form, Outcome, Target};
 use anyhow::Result;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -53,6 +55,8 @@ pub enum Mode {
         section: Section,
         cursor: usize,
     },
+    /// Making or editing a ticket.
+    Form(Box<Form>),
     Help,
 }
 
@@ -148,11 +152,20 @@ impl App {
         // A message lives until the next key; whatever that key does may set a
         // fresh one.
         self.status = None;
+        if let Mode::Form(form) = &mut self.mode {
+            match form.handle_key(key) {
+                Outcome::Editing => {}
+                Outcome::Cancel => self.mode = Mode::Board,
+                Outcome::Save => self.save_form(),
+            }
+            return;
+        }
         match self.mode.clone() {
             Mode::Board => self.board_key(key.code),
             Mode::Ticket { .. } => self.ticket_key(key.code),
             Mode::Filter { section, cursor } => self.filter_key(key.code, section, cursor),
             Mode::Help => self.mode = Mode::Board,
+            Mode::Form(_) => {}
         }
     }
 
@@ -170,6 +183,8 @@ impl App {
             KeyCode::Char('H') | KeyCode::Char('<') => self.move_selected(-1),
             KeyCode::Char('L') | KeyCode::Char('>') => self.move_selected(1),
             KeyCode::Enter => self.open_selected(),
+            KeyCode::Char('n') => self.start_new(),
+            KeyCode::Char('e') => self.start_edit(),
             KeyCode::Char('r') => {
                 self.reload();
                 self.status = Some("reloaded".to_string());
@@ -235,6 +250,113 @@ impl App {
                 self.select_row(row.unwrap_or(self.row));
             }
             Err(err) => self.status = Some(format!("{err:#}")),
+        }
+    }
+
+    /// The names of a repository's epics and sprints, for the form's choice.
+    fn group_names(&self, repo: usize) -> Vec<String> {
+        self.repos[repo]
+            .groups
+            .iter()
+            .filter_map(|(group, _)| group.as_ref().map(|group| group.name.clone()))
+            .collect()
+    }
+
+    /// Open a blank form. The ticket goes to the selected ticket's repository
+    /// (or the first one showing), and into the group being filtered on.
+    fn start_new(&mut self) {
+        let repo = self
+            .selected()
+            .map(|entry| entry.repo)
+            .or_else(|| self.repos.iter().position(|repo| repo.visible))
+            .unwrap_or(0);
+        let groups = self.group_names(repo);
+        self.mode = Mode::Form(Box::new(Form::new_ticket(
+            repo,
+            &groups,
+            self.group.as_deref(),
+        )));
+    }
+
+    /// Open the selected ticket in the form, fingerprinted so a save notices
+    /// if the file changed in the meantime.
+    fn start_edit(&mut self) {
+        let Some(entry) = self.selected() else {
+            return;
+        };
+        let task = &self.repos[entry.repo].lanes[self.col][entry.card].task;
+        let groups = self.group_names(entry.repo);
+        match (task.hash(), task.body()) {
+            (Ok(hash), Ok(body)) => {
+                self.mode = Mode::Form(Box::new(Form::edit_ticket(
+                    entry.repo, task, &groups, hash, body,
+                )));
+            }
+            (Err(err), _) | (_, Err(err)) => self.status = Some(format!("{err:#}")),
+        }
+    }
+
+    /// Save the open form through the library — the same path `amd new` and a
+    /// field edit take. A refusal (an unknown parent, a stale file) keeps the
+    /// form open with the reason, so nothing typed is lost.
+    fn save_form(&mut self) {
+        let Mode::Form(form) = std::mem::replace(&mut self.mode, Mode::Board) else {
+            return;
+        };
+        let fields = form.to_fields();
+        let (repo, result) = match &form.target {
+            Target::New { repo } => (
+                *repo,
+                transition::create_ticket(&self.repos[*repo].board, &fields),
+            ),
+            Target::Edit { repo, stem, hash } => {
+                let board = &self.repos[*repo].board;
+                (
+                    *repo,
+                    board
+                        .find(stem)
+                        .and_then(|task| transition::edit_ticket(board, &task, *hash, &fields)),
+                )
+            }
+        };
+        match result {
+            Ok(outcome) => {
+                self.status = Some(summarise(&outcome.events));
+                let stem = match &form.target {
+                    Target::Edit { stem, .. } => Some(stem.clone()),
+                    Target::New { .. } => outcome
+                        .dest
+                        .as_ref()
+                        .and_then(|path| path.file_stem())
+                        .map(|stem| stem.to_string_lossy().into_owned()),
+                };
+                let status = self.status.take();
+                self.reload();
+                self.status = status;
+                if let Some(stem) = stem {
+                    self.select_ticket(repo, &stem);
+                }
+            }
+            Err(err) => {
+                let mut form = form;
+                form.error = Some(format!("{err:#}"));
+                self.mode = Mode::Form(form);
+            }
+        }
+    }
+
+    /// Put the selection on a ticket, wherever it now is, if the filters let
+    /// it show.
+    fn select_ticket(&mut self, repo: usize, stem: &str) {
+        for col in 0..Column::ALL.len() {
+            let found = self.visible(col).iter().position(|entry| {
+                entry.repo == repo && self.repos[repo].lanes[col][entry.card].task.stem == stem
+            });
+            if let Some(row) = found {
+                self.col = col;
+                self.row = row;
+                return;
+            }
         }
     }
 
@@ -578,5 +700,103 @@ mod tests {
         let mut app = app_in(dir.path());
         app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
         assert!(app.quit);
+    }
+
+    fn ctrl(app: &mut App, c: char) {
+        app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL));
+    }
+
+    fn special(app: &mut App, code: KeyCode) {
+        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn a_new_ticket_is_written_to_the_backlog_and_selected() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_in(dir.path());
+        press(&mut app, "n");
+        assert!(matches!(app.mode, Mode::Form(_)));
+        press(&mut app, "Brand new");
+        ctrl(&mut app, 's');
+        assert_eq!(app.mode, Mode::Board, "{:?}", app.status);
+        assert!(dir.path().join("tasks/backlog/004-brand-new.md").exists());
+        assert_eq!(app.col, 0, "the selection went to the new ticket");
+        let entry = app.selected().unwrap();
+        assert_eq!(app.repos[0].lanes[0][entry.card].title, "Brand new");
+        assert!(
+            app.status.as_deref().is_some_and(|s| s.contains("created")),
+            "{:?}",
+            app.status
+        );
+    }
+
+    #[test]
+    fn saving_a_new_ticket_with_no_title_keeps_the_form_and_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_in(dir.path());
+        press(&mut app, "n");
+        ctrl(&mut app, 's');
+        match &app.mode {
+            Mode::Form(form) => assert!(form.error.is_some(), "no reason given"),
+            other => panic!("the form should still be open, got {other:?}"),
+        }
+        assert!(app.repos[0].lanes[0].is_empty(), "nothing was created");
+        app.reload();
+        assert!(app.repos[0].lanes[0].is_empty(), "nothing on disk either");
+    }
+
+    #[test]
+    fn editing_opens_filled_in_and_saves_over_the_same_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_in(dir.path());
+        press(&mut app, "e");
+        let Mode::Form(form) = &app.mode else {
+            panic!("expected the form");
+        };
+        assert_eq!(form.to_fields().title, "T001");
+        press(&mut app, " edited");
+        ctrl(&mut app, 's');
+        assert_eq!(app.mode, Mode::Board, "{:?}", app.status);
+        let entry = app.selected().unwrap();
+        assert_eq!(app.repos[0].lanes[1][entry.card].title, "T001 edited");
+        assert!(dir.path().join("tasks/todo/001-a.md").exists());
+    }
+
+    #[test]
+    fn a_ticket_changed_while_the_form_was_open_is_refused_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_in(dir.path());
+        press(&mut app, "e");
+        // Someone else saves the ticket first.
+        let path = dir.path().join("tasks/todo/001-a.md");
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, text.replace("T001", "Theirs")).unwrap();
+        press(&mut app, " mine");
+        ctrl(&mut app, 's');
+        match &app.mode {
+            Mode::Form(form) => assert!(form.error.is_some()),
+            other => panic!("the form should still be open, got {other:?}"),
+        }
+        assert!(std::fs::read_to_string(&path).unwrap().contains("Theirs"));
+    }
+
+    #[test]
+    fn escape_discards_the_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_in(dir.path());
+        press(&mut app, "nabandoned");
+        special(&mut app, KeyCode::Esc);
+        assert_eq!(app.mode, Mode::Board);
+        assert!(app.repos[0].lanes[0].is_empty(), "nothing was created");
+        app.reload();
+        assert!(app.repos[0].lanes[0].is_empty(), "nothing on disk either");
+    }
+
+    #[test]
+    fn editing_with_nothing_selected_does_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_in(dir.path());
+        press(&mut app, "lle");
+        assert_eq!(app.mode, Mode::Board, "done is empty");
     }
 }

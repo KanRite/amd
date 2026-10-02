@@ -8,6 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 
 use crate::app::{App, Mode, Section};
+use crate::form::{Form, Input, Target};
 
 const ACCENT: Color = Color::Cyan;
 
@@ -24,6 +25,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         Mode::Board | Mode::Help => board(frame, app, body),
         Mode::Ticket { lines, scroll } => ticket(frame, lines, *scroll, body),
         Mode::Filter { section, cursor } => filters(frame, app, *section, *cursor, body),
+        Mode::Form(form) => form_screen(frame, app, form, body),
     }
     frame.render_widget(footer_line(app), footer);
     if app.mode == Mode::Help {
@@ -79,10 +81,19 @@ pub fn filter_summary(app: &App) -> String {
 }
 
 fn footer_line(app: &App) -> Paragraph<'static> {
+    if let Mode::Form(form) = &app.mode {
+        return match &form.error {
+            Some(error) => Paragraph::new(error.clone()).style(Style::new().fg(Color::Red)),
+            None => Paragraph::new(
+                "Tab/Shift-Tab field  ←/→ cursor or choice  Ctrl-S save  Ctrl-T tick box  Esc cancel",
+            )
+            .style(Style::new().add_modifier(Modifier::DIM)),
+        };
+    }
     let text = match (&app.status, &app.mode) {
         (Some(status), _) => status.clone(),
         (None, Mode::Board) => {
-            "h/l column  j/k ticket  H/L move  Enter open  f filters  r reload  ? help  q quit"
+            "h/l column  j/k ticket  H/L move  Enter open  n new  e edit  f filters  r reload  ? help  q quit"
                 .to_string()
         }
         (None, Mode::Ticket { .. }) => "j/k scroll  Esc back".to_string(),
@@ -90,6 +101,7 @@ fn footer_line(app: &App) -> Paragraph<'static> {
             "Tab section  j/k move  Space toggle  c clear all  Esc back".to_string()
         }
         (None, Mode::Help) => "any key closes this".to_string(),
+        (None, Mode::Form(_)) => String::new(),
     };
     let style = if app.status.is_some() {
         Style::new().fg(Color::Yellow)
@@ -245,6 +257,102 @@ fn filter_list(
     frame.render_stateful_widget(list, area, &mut state);
 }
 
+/// The new/edit form: one row per field, then the body filling the rest.
+fn form_screen(frame: &mut Frame, app: &App, form: &Form, area: Rect) {
+    let title = match &form.target {
+        Target::New { repo } => format!(" new ticket in {} ", app.repos[*repo].name),
+        Target::Edit { repo, stem, .. } => {
+            format!(" edit {stem} in {} ", app.repos[*repo].name)
+        }
+    };
+    let block = Block::new()
+        .borders(Borders::ALL)
+        .border_style(Style::new().fg(ACCENT))
+        .title(title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let [fields_area, body_area] = Layout::vertical([
+        Constraint::Length(form.fields.len() as u16 + 1),
+        Constraint::Fill(1),
+    ])
+    .areas(inner);
+
+    let label_width = form
+        .fields
+        .iter()
+        .map(|field| field.label.chars().count())
+        .max()
+        .unwrap_or(0)
+        + 2;
+    let mut lines = Vec::new();
+    for (at, field) in form.fields.iter().enumerate() {
+        let focused = form.focus == at;
+        let label = Span::styled(
+            format!("{:<label_width$}", format!("{}:", field.label)),
+            if focused {
+                Style::new().fg(ACCENT).add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().add_modifier(Modifier::DIM)
+            },
+        );
+        let value = match &field.input {
+            Input::Text(line) => Span::raw(line.text.clone()),
+            Input::Pick(choice) => Span::styled(
+                format!("‹ {} ›", choice.value()),
+                Style::new().add_modifier(if focused {
+                    Modifier::REVERSED
+                } else {
+                    Modifier::empty()
+                }),
+            ),
+        };
+        let mut spans = vec![label, value];
+        if focused && !field.hint.is_empty() {
+            spans.push(Span::styled(
+                format!("   {}", field.hint),
+                Style::new().add_modifier(Modifier::DIM),
+            ));
+        }
+        lines.push(Line::from(spans));
+        if focused && let Input::Text(line) = &field.input {
+            frame.set_cursor_position((
+                fields_area.x + label_width as u16 + line.cursor as u16,
+                fields_area.y + at as u16,
+            ));
+        }
+    }
+    frame.render_widget(Paragraph::new(lines), fields_area);
+
+    let body_block = Block::new()
+        .borders(Borders::TOP)
+        .border_style(if form.in_body() {
+            Style::new().fg(ACCENT)
+        } else {
+            Style::new().add_modifier(Modifier::DIM)
+        })
+        .title(" body ");
+    let text_area = body_block.inner(body_area);
+    frame.render_widget(body_block, body_area);
+    // Scroll just enough to keep the cursor's line on screen.
+    let height = text_area.height.max(1) as usize;
+    let top = form.row.saturating_sub(height - 1);
+    let shown: Vec<Line> = form
+        .body
+        .iter()
+        .skip(top)
+        .take(height)
+        .map(|line| Line::raw(line.text.as_str()))
+        .collect();
+    frame.render_widget(Paragraph::new(shown), text_area);
+    if form.in_body() {
+        frame.set_cursor_position((
+            text_area.x + form.body[form.row].cursor as u16,
+            text_area.y + (form.row - top) as u16,
+        ));
+    }
+}
+
 fn check(on: bool) -> &'static str {
     if on { "[x]" } else { "[ ]" }
 }
@@ -260,9 +368,13 @@ fn help(frame: &mut Frame, area: Rect) {
         "g / G           first / last ticket",
         "H / L, < / >    move the ticket one column left / right",
         "Enter           open the ticket (read-only)",
+        "n / e           new ticket / edit the selected one",
         "f               filters: repositories, tags, epic / sprint",
         "r               reload from disk",
         "q, Esc          quit",
+        "",
+        "In the form: Tab / Shift-Tab change field, Ctrl-S saves, Esc cancels,",
+        "Ctrl-T ticks or unticks a checklist line, Enter continues a list.",
         "",
         "Moving a ticket does exactly what amd todo / doing / done do:",
         "WIP limit, lease, branch on entering todo, auto-commit.",
@@ -387,5 +499,46 @@ mod tests {
         let screen = render(&app, 100, 20);
         assert!(screen.contains("keys"), "{screen}");
         assert!(screen.contains("WIP limit, lease"), "{screen}");
+    }
+
+    #[test]
+    fn the_form_shows_its_fields_and_the_body() {
+        let (_dir, mut app) = app(&[("001-a.md", Column::Todo, "ux")]);
+        app.handle_key(ratatui::crossterm::event::KeyEvent::new(
+            ratatui::crossterm::event::KeyCode::Char('e'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
+        let screen = render(&app, 100, 24);
+        for want in [
+            "edit 001-a",
+            "Title:",
+            "T001",
+            "Assignee:",
+            "Points:",
+            "Branch type:",
+            "Epic / sprint:",
+            "body of 001",
+            "Ctrl-S save",
+        ] {
+            assert!(screen.contains(want), "missing {want:?} in:\n{screen}");
+        }
+    }
+
+    #[test]
+    fn a_failed_save_is_shown_in_the_footer() {
+        let (_dir, mut app) = app(&[]);
+        for event in [
+            ('n', ratatui::crossterm::event::KeyModifiers::NONE),
+            ('s', ratatui::crossterm::event::KeyModifiers::CONTROL),
+        ] {
+            app.handle_key(ratatui::crossterm::event::KeyEvent::new(
+                ratatui::crossterm::event::KeyCode::Char(event.0),
+                event.1,
+            ));
+        }
+        let screen = render(&app, 100, 24);
+        assert!(screen.contains("new ticket in"), "{screen}");
+        let last = screen.lines().last().unwrap_or_default().trim().to_string();
+        assert!(!last.is_empty() && !last.contains("Ctrl-S"), "{last:?}");
     }
 }

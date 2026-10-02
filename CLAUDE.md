@@ -45,7 +45,7 @@ that before assuming this is either abandoned or committed to.
 
 - `crates/amd-lib/src/lib.rs` — the library: `board`, `board_settings`,
   `branch`, `create`, `git`, `group`, `project_trust`, `registry`,
-  `settings`, `task`, `templates`, `model`, `transition` (and `gui` behind
+  `settings`, `task`, `templates`, `model`, `richtext`, `transition` (and `gui` behind
   the feature, pending phase 4). **No `render`** — drawing is a front end's
   business.
 - `crates/amd-lib/src/transition.rs` — moving a ticket the way `amd todo`/
@@ -57,7 +57,12 @@ that before assuming this is either abandoned or committed to.
   over it — so it returns ordered `Event::Info`/`Event::Warn`s, which the CLI
   prints on stdout/stderr (`report()` in `main.rs`). The desktop board's
   `apply()` does *not* use it yet (it takes a lease but neither branches nor
-  commits) — a known gap, not a design choice.
+  commits) — a known gap, not a design choice. It also holds `create_ticket`/
+  `edit_ticket` (what `amd new` and a field edit do, with the auto-commit),
+  which the desktop board's own save path still duplicates.
+- `crates/amd-lib/src/richtext.rs` — the line-oriented body rules with no
+  drawing in them: `classify`, `continuation`, `toggle`, `spans`. `gui/richtext.rs`
+  draws them in egui; the terminal board's form follows the same rules.
 - `crates/amd-lib/src/model.rs` — the egui-free board model lifted out of
   `gui/`: `Card`, `RepoBoard`, `read_lanes`/`read_groups`, `card_visible`/
   `card_in_group`, `rank_between`, `splice_body`, and `load_repos()` (the
@@ -1036,10 +1041,27 @@ changes):
   (`Cell`, since the renderer only gets `&App`) and seeded back each frame —
   a fresh `ListState` per frame resets the scroll. `ui::tests` has a test
   that fails if it stops being kept.
-- **Not built yet** (ticket 080's later PRs): creating and editing tickets,
-  mouse support, drag-and-drop. `release.yml`'s `bin-name` does not list
-  `amd-tui` yet — see the `bin-name` note under Layout; a tagged release
-  doesn't carry it until `rust-release` takes a list and that file is updated.
+- **Creating and editing (`form.rs`, `n` and `e`).** One form for both: title,
+  assignee, points, branch type, tags, parent, related, epic/sprint, then the
+  body. Text fields have a real cursor (←/→/Home/End/Delete); points, branch
+  type and epic are a pick-one you cycle with ←/→. The body is edited a line at
+  a time with `agile_md::richtext`, the same rules as the desktop board: Enter
+  on a list item opens the next one, Enter on an *empty* list item ends the
+  list, `Ctrl-T` ticks a checkbox. `Ctrl-S` saves, `Esc` discards. The body
+  is saved as the lines typed — never re-rendered.
+  - Saving goes through `transition::create_ticket`/`edit_ticket`, the same
+    steps as `amd new`/a field edit, including the auto-commit, so the history
+    matches the CLI's. A refusal (an unknown parent, a title with nothing
+    sluggable, a ticket that changed on disk since the form opened — the edit
+    is checked against the fingerprint taken at open) **keeps the form open
+    with the reason in the footer**, so nothing typed is lost.
+  - Known limitation: editing a parent/related link only rewrites *this*
+    ticket, as in the desktop board; `amd link` still updates both sides.
+- **Not built yet:** mouse support, drag-and-drop, a free-flowing Notes
+  editor (ticket 075), managing epics/sprints and settings from the board.
+  `release.yml`'s `bin-name` does not list `amd-tui` yet — see the `bin-name`
+  note under Layout; a tagged release doesn't carry it until `rust-release`
+  takes a list and that file is updated.
 
 ## Conventions
 
