@@ -150,7 +150,7 @@ impl Board {
 
     /// `locate()`, plus two fallbacks for the layout `amd init <project>`
     /// creates: a plain parent directory holding `{project}-tickets` (and
-    /// `{project}-governance`) as siblings.
+    /// `{project}-documents`) as siblings.
     ///
     /// **Standing inside a git repository that has no board of its own** —
     /// a team member working in the *code* repository, a sibling of the

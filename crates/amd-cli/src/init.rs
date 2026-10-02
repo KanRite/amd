@@ -1,10 +1,10 @@
 //! `amd init <project>` — create or connect a project's dedicated tickets
-//! *and* governance repositories, or (`--local-only`) just scaffold the
+//! *and* documents repositories, or (`--local-only`) just scaffold the
 //! board here.
 //!
 //! Two sibling repositories, not one (`rfc/0003-ticket-repository-topology-and-team-collaboration.md`
 //! in `agile-md-documents`): `{project}-tickets` behaves exactly as it
-//! always has — a board, direct pushes, no PR. `{project}-governance` is
+//! always has — a board, direct pushes, no PR. `{project}-documents` is
 //! new — ADRs, RFCs, docs, and (ticket 057) the settings that are worth a
 //! review before they take effect — PR-reviewed. One repository can't
 //! carry both policies at once, since GitHub branch protection is
@@ -42,23 +42,23 @@ pub fn run(project: String, local_only: bool, org: Option<String>) -> Result<()>
     }
     let base = std::env::current_dir().context("reading the current directory")?;
 
-    // Tickets first, governance second: `init_tickets`'s own `set_project`
-    // runs before governance exists to be found (ticket 057's sibling
+    // Tickets first, documents second: `init_tickets`'s own `set_project`
+    // runs before documents exists to be found (ticket 057's sibling
     // derivation needs the directory already there), so `project` lands in
-    // the tickets repo's own file too, not just governance's. Harmless —
+    // the tickets repo's own file too, not just documents's. Harmless —
     // once both repos exist, `board_settings::load` always prefers
-    // governance's copy — but worth knowing before "why is `project` in
+    // documents's copy — but worth knowing before "why is `project` in
     // both places" looks like a bug.
     let tickets = init_tickets(&base, &project, org.as_deref())?;
-    let governance = init_governance(&base, &project, org.as_deref())?;
+    let documents = init_documents(&base, &project, org.as_deref())?;
 
     println!("Initialised project '{project}':");
     println!("  tickets:    {}", tickets.display());
     if let Some(url) = git::remote_url(&tickets) {
         println!("              {url}");
     }
-    println!("  governance: {}", governance.display());
-    if let Some(url) = git::remote_url(&governance) {
+    println!("  documents: {}", documents.display());
+    if let Some(url) = git::remote_url(&documents) {
         println!("              {url}");
     }
     Ok(())
@@ -67,7 +67,7 @@ pub fn run(project: String, local_only: bool, org: Option<String>) -> Result<()>
 /// Creates or connects `{project}-tickets`, scaffolds the board, registers
 /// it, aliases it `tickets`, and — for a freshly created repository — sets
 /// its (lighter) branch protection tier. Unchanged in behaviour from
-/// before this repository had a governance sibling; only pulled out of
+/// before this repository had a documents sibling; only pulled out of
 /// `run()` so both repositories share the same creation path.
 fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf> {
     let target = base.join(format!("{project}-tickets"));
@@ -100,17 +100,17 @@ fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf
     Ok(target)
 }
 
-/// Creates or connects `{project}-governance`: `adr/`, `rfc/`, `docs/`,
+/// Creates or connects `{project}-documents`: `adr/`, `rfc/`, `docs/`,
 /// `README.md`, `CHANGELOG.md`, and a `.settings/` **directory** (ticket
 /// 057's shape — one small file per key, so each setting reviews as its
 /// own legible diff) holding just `project` for now. `repos`/`wip-limit`/
 /// `lease-hours` (057) stay unset here — a team sets them later via a PR,
-/// same as any other governance change. Registered and aliased
-/// `governance`, same as tickets, since ticket 057's settings-reader needs
+/// same as any other documents change. Registered and aliased
+/// `documents`, same as tickets, since ticket 057's settings-reader needs
 /// this repository to be locatable on disk the same way.
-fn init_governance(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf> {
-    let target = base.join(format!("{project}-governance"));
-    let full_name = format!("{}/{project}-governance", owner_for(project, org));
+fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf> {
+    let target = base.join(format!("{project}-documents"));
+    let full_name = format!("{}/{project}-documents", owner_for(project, org));
 
     let created_new = if target.exists() {
         warn_if_already_present(&target)?;
@@ -121,15 +121,15 @@ fn init_governance(base: &Path, project: &str, org: Option<&str>) -> Result<Path
         true
     };
 
-    scaffold_governance(&target, project)?;
+    scaffold_documents(&target, project)?;
 
     if created_new {
-        git::commit_all(&target, &format!("Initialise {project} governance"))?;
+        git::commit_all(&target, &format!("Initialise {project} documents"))?;
         git::push(&target)?;
         warn_if_protection_unavailable(&full_name, github::protect_main(&full_name, true)?);
     }
 
-    register_and_alias(&target, "governance")?;
+    register_and_alias(&target, "documents")?;
     Ok(target)
 }
 
@@ -175,7 +175,7 @@ fn warn_if_protection_unavailable(full_name: &str, outcome: github::ProtectionOu
         eprintln!(
             "warning: {full_name} has no branch protection — GitHub Pro is required for a \
              private repository on this plan. Direct pushes still work; nothing beyond a \
-             force-push or deletion is blocked, and (for governance) review is a convention \
+             force-push or deletion is blocked, and (for documents) review is a convention \
              for now, not something GitHub enforces yet."
         );
     }
@@ -186,7 +186,7 @@ fn warn_if_protection_unavailable(full_name: &str, outcome: github::ProtectionOu
 /// three fields ticket 057 also moves here (`repos`/`wip-limit`/
 /// `lease-hours`) are left for a team to set later via a PR, not written
 /// with defaults up front.
-fn scaffold_governance(target: &Path, project: &str) -> Result<()> {
+fn scaffold_documents(target: &Path, project: &str) -> Result<()> {
     for dir in ["adr", "rfc", "docs"] {
         std::fs::create_dir_all(target.join(dir))
             .with_context(|| format!("creating {}/{dir}", target.display()))?;
@@ -197,7 +197,7 @@ fn scaffold_governance(target: &Path, project: &str) -> Result<()> {
         std::fs::write(
             &readme,
             format!(
-                "# {project} governance\n\nADRs, RFCs, docs, and reviewed settings for {project}.\n"
+                "# {project} documents\n\nADRs, RFCs, docs, and reviewed settings for {project}.\n"
             ),
         )?;
     }
@@ -303,11 +303,11 @@ mod tests {
     }
 
     #[test]
-    fn scaffold_governance_creates_the_three_directories_and_files() {
+    fn scaffold_documents_creates_the_three_directories_and_files() {
         let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("proj-governance");
+        let target = dir.path().join("proj-documents");
         std::fs::create_dir_all(&target).unwrap();
-        scaffold_governance(&target, "proj").unwrap();
+        scaffold_documents(&target, "proj").unwrap();
 
         for sub in ["adr", "rfc", "docs"] {
             assert!(target.join(sub).is_dir(), "{sub} missing");
@@ -321,12 +321,12 @@ mod tests {
     }
 
     #[test]
-    fn scaffold_governance_never_overwrites_an_existing_readme() {
+    fn scaffold_documents_never_overwrites_an_existing_readme() {
         let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("proj-governance");
+        let target = dir.path().join("proj-documents");
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join("README.md"), "hand-written\n").unwrap();
-        scaffold_governance(&target, "proj").unwrap();
+        scaffold_documents(&target, "proj").unwrap();
         assert_eq!(
             std::fs::read_to_string(target.join("README.md")).unwrap(),
             "hand-written\n"
@@ -334,12 +334,12 @@ mod tests {
     }
 
     #[test]
-    fn scaffold_governance_never_overwrites_an_existing_project_file() {
+    fn scaffold_documents_never_overwrites_an_existing_project_file() {
         let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("proj-governance");
+        let target = dir.path().join("proj-documents");
         std::fs::create_dir_all(target.join(".settings")).unwrap();
         std::fs::write(target.join(".settings").join("project"), "hand-edited\n").unwrap();
-        scaffold_governance(&target, "proj").unwrap();
+        scaffold_documents(&target, "proj").unwrap();
         assert_eq!(
             std::fs::read_to_string(target.join(".settings").join("project")).unwrap(),
             "hand-edited\n"
