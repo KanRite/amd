@@ -564,7 +564,7 @@ impl Task {
 
 /// `[003,007]` -> `["003", "007"]`. Tolerant of spaces and quotes, since a
 /// human may well have typed the line.
-pub(crate) fn parse_list(raw: &str) -> Vec<String> {
+pub fn parse_list(raw: &str) -> Vec<String> {
     raw.trim()
         .trim_start_matches('[')
         .trim_end_matches(']')

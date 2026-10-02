@@ -20,6 +20,7 @@ pub mod import;
 pub mod model;
 pub mod project_trust;
 pub mod registry;
+pub mod richtext;
 pub mod settings;
 pub mod task;
 pub mod templates;
