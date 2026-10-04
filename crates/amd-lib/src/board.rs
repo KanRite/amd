@@ -62,6 +62,18 @@ impl Column {
             .into_iter()
             .find(|column| column.as_str() == name.to_ascii_lowercase())
     }
+
+    /// Position on the board, left to right.
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Whether a ticket may move straight from this column to `to`: one
+    /// column at a time, forwards or back (ticket 083). Work goes through
+    /// every column, so the history shows each step.
+    pub fn next_to(self, to: Column) -> bool {
+        self.index().abs_diff(to.index()) == 1
+    }
 }
 
 impl fmt::Display for Column {
@@ -401,22 +413,57 @@ impl Board {
     /// Create an epic or a sprint. The directory name is the identity, so a
     /// second group of the same name is a mistake rather than a merge.
     pub fn create_group(&self, group: &Group) -> Result<()> {
-        if group.name.trim().is_empty() {
-            bail!("a group needs a name");
-        }
-        // The destination-verb dispatch (`amd <name> <ref>`) is checked
-        // against columns, `abandon`, and epics in that order — a group
-        // sharing a name with the first two would be silently unreachable.
-        if Column::parse(&group.name).is_some() || group.name.eq_ignore_ascii_case(ABANDON) {
-            bail!(
-                "'{}' collides with the destination verb of the same name — pick another name",
-                group.name
-            );
-        }
+        check_group_name(&group.name)?;
         if group.dir.exists() {
             bail!("{} already exists", group.name);
         }
         group.save()
+    }
+
+    /// Rename an epic or sprint everywhere it is recorded (ticket 083): its
+    /// directory, the `name` in its `_group.md`, and the `epic` of every
+    /// ticket in it — those in its folder and those that have moved on to
+    /// other columns. Refuses, changing nothing, if any of those tickets is
+    /// leased by someone else. Returns the group's new directory.
+    pub fn rename_group(&self, from: &str, to: &str) -> Result<PathBuf> {
+        let to = to.trim();
+        let mut group = self.group(from)?;
+        if to == from {
+            bail!("{from} is already called that");
+        }
+        check_group_name(to)?;
+        let dest = self.dir(Column::Backlog).join(to);
+        // A different spelling of the same name is fine (`ui` → `UI`), but
+        // never another group's folder.
+        if dest.exists() && !from.eq_ignore_ascii_case(to) {
+            bail!("{to} already exists");
+        }
+        let members = self.tasks_in_group(from)?;
+        for task in &members {
+            task.ensure_not_leased()?;
+        }
+
+        if git::is_tracked(&self.root, &group.dir.join(GROUP_FILE))
+            || members.iter().any(|t| git::is_tracked(&self.root, &t.path))
+        {
+            git::mv(&self.root, &group.dir, &dest)?;
+        } else {
+            fs::rename(&group.dir, &dest)
+                .with_context(|| format!("renaming {}", group.dir.display()))?;
+        }
+        group.dir = dest.clone();
+        group.name = to.to_string();
+        group.save()?;
+        for task in self.tasks_in_group(from)?.into_iter().chain(
+            self.tasks_in(Column::Backlog)?
+                .into_iter()
+                .filter(|t| t.epic.as_deref() == Some(to)),
+        ) {
+            if task.epic_meta().as_deref() != Some(to) {
+                task.set_epic_meta(task.hash()?, to)?;
+            }
+        }
+        Ok(dest)
     }
 
     /// File a ticket under an epic, or move it back to the loose backlog with
@@ -431,12 +478,26 @@ impl Board {
         // afterwards — that would risk a half-moved, half-refused ticket if
         // someone else holds the lease.
         task.ensure_not_leased()?;
-        // A started sprint takes tickets in and lets them out. Teams do this —
-        // more often when they are new — and it is poor practice that skews the
-        // charts, but a tool that refuses leaves people editing frontmatter by
-        // hand, which skews the charts *and* loses the record. Every move is a
-        // `git mv`, so the scope change is dated in the history and a burnup
-        // can show it (docs/adr/0009-sprint-scope-and-archiving.md).
+        // A started sprint is a commitment (ticket 083, replacing ADR-0009's
+        // "in and out" rule): it takes no more tickets, and gives none back —
+        // its tickets only move on, to todo.
+        let current = match task.column {
+            Column::Backlog => task.epic.clone(),
+            _ => task.epic_meta(),
+        };
+        if current.as_deref() != epic {
+            if let Some(name) = current.as_deref()
+                && let Ok(group) = self.group(name)
+                && !group.accepts_changes()
+            {
+                bail!("{name} has started: its tickets can only move on to todo");
+            }
+            if let Some(name) = epic
+                && !self.group(name)?.accepts_changes()
+            {
+                bail!("{name} has started: no more tickets can be added to it");
+            }
+        }
         if let Some(name) = epic {
             let group = self.group(name)?;
             // An unsized ticket in a sprint makes the sprint's total a lie,
@@ -685,7 +746,7 @@ impl Board {
             && !group.accepts_changes()
         {
             bail!(
-                "{} is in {name}, which has started — move it out of the sprint before archiving it",
+                "{} is in {name}, which has started — move it on to todo before archiving it",
                 task.stem
             );
         }
@@ -752,6 +813,13 @@ impl Board {
     /// Move a task to another column, preferring `git mv` so the rename is
     /// tracked. Deliberately does not commit — that stays the user's call.
     ///
+    /// The rules (ticket 083): one column at a time, forwards or back. Any
+    /// epic or sprint feeds todo, and the ticket keeps its `epic` there. Sent
+    /// back from todo it returns to that epic or sprint — the loose backlog
+    /// is just the default epic — unless the epic is gone, or it is a sprint
+    /// that has started (or one it no longer qualifies for); then it lands in
+    /// the loose backlog.
+    ///
     /// Returns where the ticket landed. It deliberately says nothing: a window
     /// has nowhere to put a line of text, and a library that prints is a
     /// library that has decided what its caller's output looks like
@@ -759,6 +827,13 @@ impl Board {
     pub fn move_task(&self, task: &Task, to: Column, force: bool) -> Result<PathBuf> {
         if task.column == to {
             bail!("already in {to}/");
+        }
+        if !task.column.next_to(to) {
+            bail!(
+                "{} cannot move from {}/ to {to}/: tickets move one column at a time",
+                task.stem,
+                task.column
+            );
         }
         task.ensure_not_leased()?;
         if !force && let Some(limit) = crate::board_settings::load(self).wip_limit(to) {
@@ -772,7 +847,10 @@ impl Board {
                 .into());
             }
         }
-        let dir = self.dir(to);
+        let dir = match self.home_group(task, to) {
+            Some(group) => group.dir,
+            None => self.dir(to),
+        };
         fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
         let dest = dir.join(task.file_name());
         if dest.exists() {
@@ -786,6 +864,37 @@ impl Board {
         }
         Ok(dest)
     }
+
+    /// The epic or sprint a ticket returns to when it goes back from todo to
+    /// the backlog: the one its `epic` names, if that still exists and will
+    /// take it.
+    fn home_group(&self, task: &Task, to: Column) -> Option<Group> {
+        if task.column != Column::Todo || to != Column::Backlog {
+            return None;
+        }
+        let group = self.group(&task.epic_meta()?).ok()?;
+        let fits = group.accepts_changes() && (!group.is_sprint() || task.points().is_some());
+        fits.then_some(group)
+    }
+}
+
+/// Whether `name` can name an epic or sprint: it becomes a directory and a
+/// destination verb, so it must be neither empty, nor a path, nor a verb
+/// the board already uses.
+fn check_group_name(name: &str) -> Result<()> {
+    if name.trim().is_empty() {
+        bail!("a group needs a name");
+    }
+    if name.contains(['/', '\\']) || name.starts_with('.') {
+        bail!("'{name}' can't be a group name: no slashes, and it can't start with a dot");
+    }
+    // The destination-verb dispatch (`amd <name> <ref>`) is checked
+    // against columns, `abandon`, and epics in that order — a group
+    // sharing a name with the first two would be silently unreachable.
+    if Column::parse(name).is_some() || name.eq_ignore_ascii_case(ABANDON) {
+        bail!("'{name}' collides with the destination verb of the same name — pick another name");
+    }
+    Ok(())
 }
 
 fn dir_name() -> String {
@@ -840,6 +949,22 @@ mod tests {
         let board = Board::at(dir.join("tasks"));
         board.create().expect("board");
         board
+    }
+
+    /// Moves ticket `id` column by column until it reaches `to`.
+    fn walk(board: &Board, id: &str, to: Column) {
+        loop {
+            let task = board.find(id).unwrap();
+            if task.column == to {
+                return;
+            }
+            let next = Column::ALL[if to.index() > task.column.index() {
+                task.column.index() + 1
+            } else {
+                task.column.index() - 1
+            }];
+            board.move_task(&task, next, false).unwrap();
+        }
     }
 
     fn touch(board: &Board, name: &str) {
@@ -1050,11 +1175,9 @@ mod tests {
     }
 
     #[test]
-    fn a_started_sprint_takes_tickets_in_and_out_but_refuses_an_archive() {
-        // ADR-0009. The old rule — a started sprint is immutable — was one
-        // `amd abandon` wide, and refusing only pushed the change out of the
-        // tool's sight. What it defends now is the *record*: a move out is a
-        // git mv, an archive is gitignored and is not.
+    fn a_started_sprint_takes_nothing_more_and_gives_nothing_back() {
+        // Ticket 083, replacing ADR-0009's "in and out": once started, a
+        // sprint's scope is fixed. Its tickets only move on, to todo.
         let dir = tempfile::tempdir().unwrap();
         let board = board_at(dir.path());
         let mut group = sprint(&board, "sprint-1");
@@ -1066,34 +1189,85 @@ mod tests {
         board.set_epic(&inside, Some("sprint-1")).unwrap();
         group.start().unwrap();
 
-        // Tickets go in after the start...
+        // Nothing more goes in, sized or not...
         let outside = board.find("002").unwrap();
         outside.set_points(outside.hash().unwrap(), "2").unwrap();
-        board
-            .set_epic(&outside, Some("sprint-1"))
-            .expect("a started sprint takes a sized ticket");
+        let err = board
+            .set_epic(&board.find("002").unwrap(), Some("sprint-1"))
+            .unwrap_err();
+        assert!(err.to_string().contains("no more tickets"), "{err}");
 
-        // ...and come back out again.
+        // ...nothing comes back out to the backlog, or into the archive...
         let inside = board.find("001").unwrap();
-        board
-            .set_epic(&inside, None)
-            .expect("a started sprint lets a ticket out");
+        let err = board.set_epic(&inside, None).unwrap_err();
+        assert!(err.to_string().contains("only move on to todo"), "{err}");
+        let err = board.archive(&inside).unwrap_err();
+        assert!(err.to_string().contains("before archiving"), "{err}");
 
-        // But not straight into the archive.
-        let still_in = board.find("002").unwrap();
-        let err = board.archive(&still_in).unwrap_err();
+        // ...but its tickets move on to todo, still in the sprint, and sent
+        // back they cannot rejoin it: they land in the loose backlog.
+        board.move_task(&inside, Column::Todo, false).unwrap();
+        let moved = board.find("001").unwrap();
+        assert_eq!(moved.epic_meta().as_deref(), Some("sprint-1"));
+        let err = board.set_epic(&moved, None).unwrap_err();
+        assert!(err.to_string().contains("only move on to todo"), "{err}");
+        board.move_task(&moved, Column::Backlog, false).unwrap();
+        let back = board.find("001").unwrap();
+        assert_eq!((back.column, back.epic.as_deref()), (Column::Backlog, None));
+    }
+
+    #[test]
+    fn tickets_move_one_column_at_a_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        backlog_ticket(&board, "001-a.md");
+        let err = board
+            .move_task(&board.find("001").unwrap(), Column::Done, false)
+            .unwrap_err();
+        assert!(err.to_string().contains("one column at a time"), "{err}");
+        assert_eq!(board.find("001").unwrap().column, Column::Backlog);
+        walk(&board, "001", Column::Done);
+        let err = board
+            .move_task(&board.find("001").unwrap(), Column::Todo, false)
+            .unwrap_err();
+        assert!(err.to_string().contains("one column at a time"), "{err}");
+        walk(&board, "001", Column::Backlog);
+    }
+
+    #[test]
+    fn any_epic_feeds_todo_and_takes_its_ticket_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        fs::create_dir_all(board.dir(Column::Backlog).join("checkout")).unwrap();
+        backlog_ticket(&board, "001-a.md");
+        board
+            .set_epic(&board.find("001").unwrap(), Some("checkout"))
+            .unwrap();
+
+        // Straight from the epic to todo, keeping its label...
+        board
+            .move_task(&board.find("001").unwrap(), Column::Todo, false)
+            .unwrap();
+        let task = board.find("001").unwrap();
+        assert_eq!(task.column, Column::Todo);
+        assert_eq!(task.epic_meta().as_deref(), Some("checkout"));
+
+        // ...and back into the epic, not the loose backlog.
+        board.move_task(&task, Column::Backlog, false).unwrap();
+        let back = board.find("001").unwrap();
+        assert_eq!(back.epic.as_deref(), Some("checkout"));
         assert!(
-            err.to_string().contains("before archiving"),
-            "unexpected: {err}"
+            back.path
+                .starts_with(board.dir(Column::Backlog).join("checkout"))
         );
 
-        // Out of the sprint first, and then it may go.
-        let out = board.find("002").unwrap();
-        board.set_epic(&out, None).unwrap();
-        let out = board.find("002").unwrap();
+        // With the epic gone, the loose backlog is home.
+        board.move_task(&back, Column::Todo, false).unwrap();
+        fs::remove_dir_all(board.dir(Column::Backlog).join("checkout")).unwrap();
         board
-            .archive(&out)
-            .expect("archivable once out of the sprint");
+            .move_task(&board.find("001").unwrap(), Column::Backlog, false)
+            .unwrap();
+        assert_eq!(board.find("001").unwrap().epic, None);
     }
 
     #[test]
@@ -1110,8 +1284,7 @@ mod tests {
         board.set_epic(&task, Some("sprint-1")).unwrap();
         assert_eq!(board.tasks_in_group("sprint-1").unwrap().len(), 1);
 
-        let task = board.find("001").unwrap();
-        board.move_task(&task, Column::Doing, false).unwrap();
+        walk(&board, "001", Column::Doing);
         assert_eq!(
             board.tasks_in_group("sprint-1").unwrap().len(),
             1,
@@ -1129,8 +1302,7 @@ mod tests {
         let board = board_at(dir.path());
         fs::create_dir_all(board.dir(Column::Backlog).join("checkout")).unwrap();
         backlog_ticket(&board, "001-a.md");
-        let task = board.find("001").unwrap();
-        board.move_task(&task, Column::Doing, false).unwrap();
+        walk(&board, "001", Column::Doing);
         let path_before = board.find("001").unwrap().path;
 
         let task = board.find("001").unwrap();
@@ -1285,59 +1457,144 @@ mod tests {
     }
 
     #[test]
-    fn move_task_refuses_when_the_destination_is_already_at_its_limit() {
+    fn move_task_refuses_when_doing_is_already_at_its_limit() {
         let dir = tempfile::tempdir().unwrap();
         let board = board_at(dir.path());
-        backlog_ticket(&board, "001-a.md");
-        backlog_ticket(&board, "002-b.md");
-        touch(&board, "existing.md"); // one ticket already in todo/
-        set_wip_limit(&board, "wip-todo", 1);
-        let task = board.find("001").unwrap();
+        for name in ["001-a.md", "002-b.md", "003-c.md"] {
+            touch(&board, name); // all in todo/
+        }
+        // Two fit in doing by default; the third is refused.
+        for id in ["001", "002"] {
+            board
+                .move_task(&board.find(id).unwrap(), Column::Doing, false)
+                .unwrap();
+        }
         let err = board
-            .move_task(&task, Column::Todo, false)
+            .move_task(&board.find("003").unwrap(), Column::Doing, false)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("todo") && err.contains('1'), "{err}");
-        assert_eq!(board.find("001").unwrap().column, Column::Backlog);
+        assert!(err.contains("doing") && err.contains('2'), "{err}");
+        assert_eq!(board.find("003").unwrap().column, Column::Todo);
     }
 
     #[test]
     fn move_task_force_overrides_the_limit() {
         let dir = tempfile::tempdir().unwrap();
         let board = board_at(dir.path());
-        backlog_ticket(&board, "001-a.md");
-        touch(&board, "existing.md");
-        set_wip_limit(&board, "wip-todo", 1);
-        let task = board.find("001").unwrap();
-        board.move_task(&task, Column::Todo, true).unwrap();
-        assert_eq!(board.find("001").unwrap().column, Column::Todo);
+        touch(&board, "001-a.md");
+        set_wip_limit(&board, "wip-limit", 0);
+        board
+            .move_task(&board.find("001").unwrap(), Column::Doing, false)
+            .unwrap();
+        set_wip_limit(&board, "wip-limit", 1);
+        touch(&board, "002-b.md");
+        let task = board.find("002").unwrap();
+        assert!(board.move_task(&task, Column::Doing, false).is_err());
+        board.move_task(&task, Column::Doing, true).unwrap();
+        assert_eq!(board.find("002").unwrap().column, Column::Doing);
     }
 
     #[test]
     fn moving_out_of_an_over_limit_column_is_never_blocked() {
         let dir = tempfile::tempdir().unwrap();
         let board = board_at(dir.path());
-        // Two tickets already in todo/, then the limit is lowered to one —
-        // the column is now over its limit by hand, the exact case the
-        // ticket's own notes call out. Moving one back OUT must still work.
-        touch(&board, "001-a.md");
-        touch(&board, "002-b.md");
-        set_wip_limit(&board, "wip-todo", 1);
+        // Three tickets in doing/, then the limit is lowered to one — the
+        // column is over its limit by hand. Moving one back OUT must work.
+        for name in ["001-a.md", "002-b.md", "003-c.md"] {
+            fs::write(board.dir(Column::Doing).join(name), "").unwrap();
+        }
+        set_wip_limit(&board, "wip-limit", 1);
         let task = board.find("001").unwrap();
-        board.move_task(&task, Column::Doing, false).unwrap();
-        assert_eq!(board.find("001").unwrap().column, Column::Doing);
+        board.move_task(&task, Column::Done, false).unwrap();
+        assert_eq!(board.find("001").unwrap().column, Column::Done);
     }
 
     #[test]
-    fn a_limit_on_todo_does_not_apply_to_doing() {
+    fn todo_is_never_limited() {
         let dir = tempfile::tempdir().unwrap();
         let board = board_at(dir.path());
-        backlog_ticket(&board, "001-a.md");
-        touch(&board, "existing.md");
         set_wip_limit(&board, "wip-todo", 1);
-        let task = board.find("001").unwrap();
-        board.move_task(&task, Column::Doing, false).unwrap();
-        assert_eq!(board.find("001").unwrap().column, Column::Doing);
+        for name in ["001-a.md", "002-b.md", "003-c.md"] {
+            backlog_ticket(&board, name);
+        }
+        for id in ["001", "002", "003"] {
+            board
+                .move_task(&board.find(id).unwrap(), Column::Todo, false)
+                .unwrap();
+        }
+        assert_eq!(board.tasks_in(Column::Todo).unwrap().len(), 3);
+    }
+
+    // -- Renaming a group ----------------------------------------------
+
+    #[test]
+    fn renaming_a_group_relabels_its_tickets_everywhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        board
+            .create_group(&Group {
+                dir: board.dir(Column::Backlog).join("ui"),
+                name: "ui".into(),
+                kind: crate::group::Kind::Epic,
+                description: "Screens".into(),
+                days: crate::group::DEFAULT_DAYS,
+                state: crate::group::State::Pending,
+            })
+            .unwrap();
+        backlog_ticket(&board, "001-a.md");
+        backlog_ticket(&board, "002-b.md");
+        for id in ["001", "002"] {
+            board
+                .set_epic(&board.find(id).unwrap(), Some("ui"))
+                .unwrap();
+        }
+        walk(&board, "002", Column::Doing);
+
+        board.rename_group("ui", "Interface").unwrap();
+        let group = board.group("Interface").unwrap();
+        assert_eq!(
+            (group.name.as_str(), group.description.as_str()),
+            ("Interface", "Screens")
+        );
+        assert!(board.group("ui").is_err());
+        let inside = board.find("001").unwrap();
+        assert_eq!(inside.epic.as_deref(), Some("Interface"));
+        assert_eq!(inside.epic_meta().as_deref(), Some("Interface"));
+        let moved_on = board.find("002").unwrap();
+        assert_eq!(moved_on.epic_meta().as_deref(), Some("Interface"));
+        assert_eq!(board.tasks_in_group("Interface").unwrap().len(), 2);
+
+        // Refused: a column's name, another group's, or nothing.
+        board
+            .create_group(&Group {
+                dir: board.dir(Column::Backlog).join("api"),
+                name: "api".into(),
+                kind: crate::group::Kind::Epic,
+                description: String::new(),
+                days: crate::group::DEFAULT_DAYS,
+                state: crate::group::State::Pending,
+            })
+            .unwrap();
+        for bad in ["todo", "api", " ", "a/b"] {
+            assert!(board.rename_group("Interface", bad).is_err(), "{bad}");
+        }
+        assert!(board.rename_group("nope", "x").is_err());
+    }
+
+    #[test]
+    fn renaming_a_group_with_someone_elses_ticket_leased_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        fs::create_dir_all(board.dir(Column::Backlog).join("ui")).unwrap();
+        leased_backlog_ticket(&board, "001-a.md", "other@example.com", &future());
+        fs::rename(
+            board.dir(Column::Backlog).join("001-a.md"),
+            board.dir(Column::Backlog).join("ui").join("001-a.md"),
+        )
+        .unwrap();
+        let err = board.rename_group("ui", "Interface").unwrap_err();
+        assert!(err.to_string().contains("other@example.com"), "{err}");
+        assert!(board.group("ui").is_ok(), "nothing changed");
     }
 
     // -- Emptying a group ------------------------------------------------
@@ -1418,8 +1675,7 @@ mod tests {
         let task = board.find("001").unwrap();
         task.set_points(task.hash().unwrap(), "3").unwrap();
         board.set_epic(&task, Some("sprint-1")).unwrap();
-        let task = board.find("001").unwrap();
-        board.move_task(&task, Column::Doing, false).unwrap();
+        walk(&board, "001", Column::Doing);
 
         let err = board.delete_group("sprint-1").unwrap_err();
         assert!(err.to_string().contains("1 ticket"), "{err}");

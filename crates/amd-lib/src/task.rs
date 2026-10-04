@@ -374,6 +374,22 @@ impl Task {
         })
     }
 
+    /// How urgent the ticket is: one of [`PRIORITIES`], `low` when unset.
+    pub fn priority(&self) -> String {
+        self.meta("priority")
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| DEFAULT_PRIORITY.to_string())
+    }
+
+    /// Set the ticket's priority; anything but `low`, `medium` or `high` is
+    /// refused.
+    pub fn set_priority(&self, expected: ContentHash, priority: &str) -> Result<()> {
+        validate_priority(priority)?;
+        self.write_checked(expected, |text| {
+            set_meta(text, "priority", &format!("{priority:?}"))
+        })
+    }
+
     /// The epic recorded in the frontmatter. `Task::epic` — set from the
     /// folder — is the authority; this is what a reader outside the board
     /// sees, and the two are kept in step when a ticket is filed.
@@ -579,6 +595,40 @@ pub fn parse_list(raw: &str) -> Vec<String> {
 /// pick its own scale, and a fixed list is what makes the GUI's points
 /// field a dropdown rather than free text in the first place.
 pub const VALID_POINTS: [&str; 6] = ["1", "2", "3", "5", "8", "13"];
+
+/// A ticket's priority, lowest first (ticket 083). Every ticket has one;
+/// a ticket without the field reads as [`DEFAULT_PRIORITY`].
+pub const PRIORITIES: [&str; 3] = ["low", "medium", "high"];
+
+/// The priority of a new ticket, and of one that doesn't say.
+pub const DEFAULT_PRIORITY: &str = "low";
+
+fn validate_priority(priority: &str) -> Result<()> {
+    if PRIORITIES.contains(&priority) {
+        return Ok(());
+    }
+    bail!(
+        "invalid priority '{priority}' — must be one of {}",
+        PRIORITIES.join(", ")
+    );
+}
+
+/// `text` with a priority: a missing or empty one becomes
+/// [`DEFAULT_PRIORITY`]; an invalid one is refused, so a ticket can never be
+/// written with a priority nobody can sort by. Text with no frontmatter is
+/// returned as it is.
+pub fn ensure_priority(text: &str) -> Result<String> {
+    if !text.starts_with("---") {
+        return Ok(text.to_string());
+    }
+    match meta_in(text, "priority").filter(|p| !p.is_empty()) {
+        Some(priority) => {
+            validate_priority(priority)?;
+            Ok(text.to_string())
+        }
+        None => set_meta(text, "priority", &format!("{DEFAULT_PRIORITY:?}")),
+    }
+}
 
 /// Empty (unsized) or one of `VALID_POINTS` — checked here so every write
 /// path (`set_points`, `apply_edit`) enforces it the same way, rather than
@@ -1150,6 +1200,32 @@ mod tests {
         assert!(err.contains("invalid points '4'"), "{err}");
         assert!(err.contains("1, 2, 3, 5, 8, 13"), "{err}");
         assert_eq!(task.points(), None, "the rejected write must not land");
+    }
+
+    #[test]
+    fn priority_defaults_to_low_and_only_takes_the_three_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let task = ranked(dir.path(), "001-a.md", "---\nid: \"001\"\n---\n\nb\n");
+        assert_eq!(task.priority(), "low");
+        task.set_priority(task.hash().unwrap(), "high").unwrap();
+        assert_eq!(task.priority(), "high");
+        let err = task
+            .set_priority(task.hash().unwrap(), "urgent")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("invalid priority 'urgent'"), "{err}");
+        assert!(err.contains("low, medium, high"), "{err}");
+        assert_eq!(task.priority(), "high", "the rejected write must not land");
+    }
+
+    #[test]
+    fn ensure_priority_fills_a_missing_one_and_refuses_a_bad_one() {
+        let filled = ensure_priority("---\nid: \"001\"\n---\n\nb\n").unwrap();
+        assert_eq!(filled, "---\nid: \"001\"\npriority: \"low\"\n---\n\nb\n");
+        let kept = "---\npriority: \"medium\"\n---\n";
+        assert_eq!(ensure_priority(kept).unwrap(), kept);
+        assert!(ensure_priority("---\npriority: \"soon\"\n---\n").is_err());
+        assert_eq!(ensure_priority("no frontmatter").unwrap(), "no frontmatter");
     }
 
     #[test]

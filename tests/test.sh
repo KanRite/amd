@@ -175,6 +175,11 @@ git add -A; git commit -qm seed
 assert "creates tasks/backlog/001-first-task.md (new work starts in the backlog)" test -f tasks/backlog/001-first-task.md
 assert "title in frontmatter" grep -q '^title: "First task"$' tasks/backlog/001-first-task.md
 assert "tags in frontmatter" grep -q '^tags: \[x,y\]$' tasks/backlog/002-second-task.md
+assert "a new ticket has priority low" grep -q '^priority: "low"$' tasks/backlog/002-second-task.md
+assert "amd set priority changes it" \
+  bash -c "'${AMD}' set 2 priority high | grep -q 'priority high' && grep -q '^priority: \"high\"\$' tasks/backlog/002-second-task.md"
+assert "an invalid priority is refused" \
+  bash -c "'${AMD}' set 2 priority urgent 2>&1 | grep -q 'low, medium, high' && grep -q '^priority: \"high\"\$' tasks/backlog/002-second-task.md"
 assert "a new ticket has no branch type by default" \
   grep -q '^branch-type: ""$' tasks/backlog/001-first-task.md
 assert "and so has no branch name" grep -q '^branch-name: ""$' tasks/backlog/001-first-task.md
@@ -253,7 +258,9 @@ assert "done: doing -> done" test -f tasks/done/001-first-task.md
 assert "moved via git (rename tracked)" bash -c 'git status --porcelain | grep -q "^R"'
 # The move message comes from the CLI now, not from the library (ADR-0004).
 assert "a move reports where the ticket went" \
-  bash -c "'${AMD}' done 2 | grep -q 'moved 002-second-task.md -> done/'"
+  bash -c "'${AMD}' todo 2 --no-branch | grep -q 'moved 002-second-task.md -> todo/'"
+assert "a ticket can't skip a column" \
+  bash -c "'${AMD}' done 2 2>&1 | grep -q 'one column at a time' && test -f tasks/todo/002-second-task.md"
 assert "moving into the same column fails" bash -c "! '${AMD}' done 1"
 assert "amd start no longer exists" bash -c "! '${AMD}' start 1 2>/dev/null"
 
@@ -262,8 +269,8 @@ assert "amd todo <ref> moves it to todo/" \
   bash -c "'${AMD}' todo 4 >/dev/null && test -f tasks/todo/004-address-form.md"
 assert "amd doing <ref> moves it to doing/" \
   bash -c "'${AMD}' doing 4 >/dev/null && test -f tasks/doing/004-address-form.md"
-assert "amd backlog <ref> moves it back to backlog/" \
-  bash -c "'${AMD}' backlog 4 >/dev/null && test -f tasks/backlog/004-address-form.md"
+assert "amd backlog <ref> moves it back to backlog/, a column at a time" \
+  bash -c "'${AMD}' todo 4 --no-branch >/dev/null && '${AMD}' backlog 4 >/dev/null && test -f tasks/backlog/004-address-form.md"
 assert "amd todo with no ref lists todo/, same as amd ls todo" \
   bash -c "diff <('${AMD}' todo) <('${AMD}' ls todo) >/dev/null"
 assert "amd done with no ref lists done/, same as amd ls done" \
@@ -507,27 +514,29 @@ assert "group list totals tickets and points" \
   bash -c "cd '${work}' && '${AMD}' group list | grep -qE 'sprint-1 +sprint +10d +pending +1 ticket\(s\), 5 point\(s\)'"
 assert "starting a sprint says so" \
   bash -c "cd '${work}' && '${AMD}' group start sprint-1 | grep -q 'started'"
-# A started sprint takes tickets in and lets them out (ADR-0009). It happens in
-# real teams, it skews the charts, and refusing only pushes people into editing
-# frontmatter by hand — which skews them and loses the record.
-assert "a started sprint lets a ticket out" \
-  bash -c "cd '${work}' && '${AMD}' set 001 epic checkout | grep -q 'filed under checkout'"
-assert "a started sprint takes a sized ticket in" \
-  bash -c "cd '${work}' && '${AMD}' set 002 points 3 >/dev/null && '${AMD}' set 002 epic sprint-1 | grep -q 'filed under sprint-1'"
-assert "a started sprint still refuses an unsized ticket" \
-  bash -c "cd '${work}' && '${AMD}' new 'Unsized' >/dev/null && '${AMD}' set 003 epic sprint-1 2>&1 | grep -q 'needs points'"
-# Archiving is the one thing it refuses: a move out is a git mv and stays in
-# the history, an archive is gitignored and does not.
+# A started sprint is a commitment (ticket 083): it takes nothing more and
+# gives nothing back — its tickets only move on, to todo.
+assert "a started sprint gives nothing back" \
+  bash -c "cd '${work}' && '${AMD}' set 001 epic checkout 2>&1 | grep -q 'only move on to todo'"
+assert "a started sprint takes nothing more, even sized" \
+  bash -c "cd '${work}' && '${AMD}' set 002 points 3 >/dev/null && '${AMD}' set 002 epic sprint-1 2>&1 | grep -q 'no more tickets'"
+assert "a started sprint refuses an unsized ticket too" \
+  bash -c "cd '${work}' && '${AMD}' new 'Unsized' >/dev/null && ! '${AMD}' set 003 epic sprint-1 >/dev/null 2>&1"
 assert "archiving straight out of a started sprint is refused" \
-  bash -c "cd '${work}' && '${AMD}' abandon 002 2>&1 | grep -q 'move it out of the sprint before archiving'"
-assert "out of the sprint first, then archived" \
-  bash -c "cd '${work}' && '${AMD}' set 002 epic '' >/dev/null && '${AMD}' abandon 002 | grep -q 'archived'"
+  bash -c "cd '${work}' && '${AMD}' abandon 001 2>&1 | grep -q 'move it on to todo before archiving'"
+assert "a ticket outside the sprint is archived" \
+  bash -c "cd '${work}' && '${AMD}' abandon 002 | grep -q 'archived'"
 assert "amd abandon with no ref lists the archive" \
   bash -c "cd '${work}' && '${AMD}' abandon | grep -q Second"
 # The bug this guards: a sprint's points fell as work progressed, because the
 # count scanned backlog/ only and a ticket in doing/ has no epic directory.
 assert "a sprint keeps its points when work starts" \
-  bash -c "cd '${work}' && '${AMD}' set 001 epic sprint-1 >/dev/null && before=\$('${AMD}' group list | grep sprint-1) && '${AMD}' doing 001 >/dev/null && after=\$('${AMD}' group list | grep sprint-1) && [ \"\${before}\" = \"\${after}\" ]"
+  bash -c "cd '${work}' && before=\$('${AMD}' group list | grep sprint-1) && '${AMD}' todo 001 --no-branch >/dev/null && '${AMD}' doing 001 >/dev/null && after=\$('${AMD}' group list | grep sprint-1) && [ \"\${before}\" = \"\${after}\" ]"
+assert "amd group rename renames a group and relabels its tickets" \
+  bash -c "cd '${work}' && '${AMD}' group rename checkout payments | grep -q 'renamed checkout -> payments' \
+    && test -d tasks/backlog/payments && ! test -d tasks/backlog/checkout \
+    && ! grep -rq --exclude-dir=archive '^epic: \"checkout\"' tasks && '${AMD}' group list | grep -q payments \
+    && '${AMD}' group rename payments checkout >/dev/null"
 assert "starting an unknown group fails" \
   bash -c "cd '${work}' && ! '${AMD}' group start nope"
 assert "amd <epic> <ref> files a ticket, same as set epic" \
@@ -602,52 +611,38 @@ assert "amd log renders a transition with a real sha" \
   bash -c "cd '${commit_repo}' && '${AMD}' log | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}  add .*[0-9a-f]{7,}\$'"
 rm -rf "${commit_repo}"
 
-echo "WIP limits:"
+echo "WIP limits (doing only, ticket 083):"
 wip_repo="$(mktemp -d)"
 ( cd "${wip_repo}" && git init -q && git config user.email t@t.co && git config user.name t \
   && AMD_YES=1 "${AMD}" init wiptest --local-only >/dev/null \
-  && "${AMD}" new "Existing in todo" --no-edit >/dev/null \
-  && "${AMD}" todo 1 --no-branch >/dev/null \
-  && "${AMD}" new "Second ticket" --no-edit >/dev/null )
-assert "amd todo refuses when todo/ is already at its configured WIP limit" \
-  bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 '${AMD}' todo 2 2>&1 | grep -q 'todo/ already has 1 of 1 allowed'"
+  && for t in First Second Third Fourth Fifth; do "${AMD}" new "${t}" --no-edit >/dev/null; done \
+  && for n in 1 2 3; do "${AMD}" todo "${n}" --no-branch >/dev/null; done \
+  && "${AMD}" doing 1 >/dev/null && "${AMD}" doing 2 >/dev/null )
+assert "todo/ is never limited, whatever the settings say" \
+  bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 '${AMD}' todo 4 --no-branch >/dev/null && test -f tasks/todo/004-fourth.md"
+assert "doing/ defaults to a WIP limit of 2 with nothing configured at all" \
+  bash -c "cd '${wip_repo}' && '${AMD}' doing 3 2>&1 | grep -q 'doing/ already has 2 of 2 allowed'"
 assert "the refused move never happened" \
-  bash -c "cd '${wip_repo}' && test -f tasks/backlog/002-second-ticket.md"
-assert "amd todo --force overrides the WIP limit" \
-  bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 '${AMD}' todo 2 --force --no-branch >/dev/null \
-    && test -f tasks/todo/002-second-ticket.md"
+  bash -c "cd '${wip_repo}' && test -f tasks/todo/003-third.md"
+assert "amd doing --force overrides the WIP limit" \
+  bash -c "cd '${wip_repo}' && '${AMD}' doing 3 --force >/dev/null && test -f tasks/doing/003-third.md"
 assert "moving something out of an over-limit column is never blocked" \
-  bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 '${AMD}' doing 1 >/dev/null && test -f tasks/doing/001-existing-in-todo.md"
-assert "a limit on todo does not apply to doing (doing's own default limit turned off here to isolate the claim)" \
-  bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 AMD_WIP_LIMIT=0 '${AMD}' doing 2 >/dev/null && test -f tasks/doing/002-second-ticket.md"
-rm -rf "${wip_repo}"
-
-echo "doing/'s own default WIP limit:"
-doing_wip_repo="$(mktemp -d)"
-( cd "${doing_wip_repo}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init doingwiptest --local-only >/dev/null \
-  && "${AMD}" new "First" --no-edit >/dev/null \
-  && "${AMD}" new "Second" --no-edit >/dev/null \
-  && "${AMD}" doing 1 >/dev/null )
-assert "doing/ defaults to a WIP limit of 1 with nothing configured at all" \
-  bash -c "cd '${doing_wip_repo}' && '${AMD}' doing 2 2>&1 | grep -q 'doing/ already has 1 of 1 allowed'"
-assert "the refused move never happened" \
-  bash -c "cd '${doing_wip_repo}' && test -f tasks/backlog/002-second.md"
+  bash -c "cd '${wip_repo}' && '${AMD}' done 3 >/dev/null && test -f tasks/done/003-third.md"
 assert "amd wip-limit sets an explicit limit, persisted in .settings" \
-  bash -c "cd '${doing_wip_repo}' && '${AMD}' wip-limit 2 >/dev/null && grep -q '^wip-limit = 2\$' .settings"
+  bash -c "cd '${wip_repo}' && '${AMD}' wip-limit 3 >/dev/null && grep -q '^wip-limit = 3\$' .settings"
 assert "the new limit takes effect immediately" \
-  bash -c "cd '${doing_wip_repo}' && '${AMD}' doing 2 >/dev/null && test -f tasks/doing/002-second.md"
+  bash -c "cd '${wip_repo}' && '${AMD}' doing 4 >/dev/null && test -f tasks/doing/004-fourth.md"
 assert "amd wip-limit 0 turns doing/'s limit off" \
-  bash -c "cd '${doing_wip_repo}' && '${AMD}' wip-limit 0 >/dev/null \
-    && '${AMD}' new \"Third\" --no-edit >/dev/null && '${AMD}' doing 3 >/dev/null \
-    && test -f tasks/doing/003-third.md"
+  bash -c "cd '${wip_repo}' && '${AMD}' wip-limit 0 >/dev/null \
+    && '${AMD}' todo 5 --no-branch >/dev/null && '${AMD}' doing 5 >/dev/null \
+    && test -f tasks/doing/005-fifth.md"
 assert "amd wip-limit rejects a non-numeric value" \
-  bash -c "cd '${doing_wip_repo}' && ! '${AMD}' wip-limit nope >/dev/null 2>&1"
-assert "a garbled wip-limit value in .settings resets to the default of 1, not unlimited" \
-  bash -c "cd '${doing_wip_repo}' && sed -i 's/^wip-limit = 0\$/wip-limit = nope/' .settings \
-    && '${AMD}' new \"Fourth\" --no-edit >/dev/null \
-    && '${AMD}' doing 4 2>&1 | grep -q 'doing/ already has 3 of 1 allowed'"
-rm -rf "${doing_wip_repo}"
+  bash -c "cd '${wip_repo}' && ! '${AMD}' wip-limit nope >/dev/null 2>&1"
+assert "a garbled wip-limit value in .settings resets to the default of 2, not unlimited" \
+  bash -c "cd '${wip_repo}' && sed -i 's/^wip-limit = 0\$/wip-limit = nope/' .settings \
+    && '${AMD}' new \"Sixth\" --no-edit >/dev/null && '${AMD}' todo 6 --no-branch >/dev/null \
+    && '${AMD}' doing 6 2>&1 | grep -q 'doing/ already has 4 of 2 allowed'"
+rm -rf "${wip_repo}"
 
 echo "import and tag filtering:"
 import_src="$(mktemp -d)"
@@ -731,7 +726,7 @@ assert "amd lock records the holder in the ticket's own frontmatter" \
 assert "a different git identity is refused editing a leased ticket" \
   bash -c "cd '${lock_repo}' && git config user.email other@example.com && '${AMD}' set 1 points 3 2>&1 | grep -q 'leased by t@t.co'"
 assert "a different git identity is refused moving a leased ticket" \
-  bash -c "cd '${lock_repo}' && git config user.email other@example.com && '${AMD}' doing 1 2>&1 | grep -q 'leased by t@t.co'"
+  bash -c "cd '${lock_repo}' && git config user.email other@example.com && '${AMD}' todo 1 --no-branch 2>&1 | grep -q 'leased by t@t.co'"
 assert "the holder's own identity can still edit the leased ticket" \
   bash -c "cd '${lock_repo}' && git config user.email t@t.co && '${AMD}' set 1 points 3 | grep -q 'sized 3'"
 assert "a different identity cannot plain-unlock someone else's lease" \
@@ -825,6 +820,9 @@ dir_repo="$(mktemp -d)"
 ( cd "${dir_repo}" && git init -q && git config user.email t@t.co && git config user.name t )
 assert "AMD_DIR relocates the board" \
   bash -c "cd '${dir_repo}' && AMD_DIR=work AMD_YES=1 '${AMD}' new 'Elsewhere' >/dev/null && test -f work/backlog/001-elsewhere.md"
+# Left behind, this repo becomes the one board next to the next run's fresh
+# repo in /tmp, and Board::discover() rightly finds it.
+rm -rf "${dir_repo}"
 
 echo "auto-create when no board exists:"
 fresh="$(mktemp -d)"; ( cd "${fresh}" && git init -q )

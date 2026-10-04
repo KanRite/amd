@@ -318,22 +318,20 @@ redundant. Their history is in git if it is ever wanted again.
   (the branch types on offer), `AMD_YES` (force-create), `AMD_NO_INPUT` (never
   prompt), `AMD_NO_BRANCH` (never touch branches), `NO_COLOR`/`--plain`
   (plain board), `EDITOR` (for `amd edit`), `AMD_LEASE_HOURS` (lease
-  duration, default 8), `AMD_WIP_TODO` (todo's WIP limit, unset = unlimited),
-  `AMD_WIP_LIMIT` (doing's WIP limit — unset or unparsable defaults to **1**,
-  not unlimited; `0` turns it off), `AMD_COMMIT` (auto-commit-and-push,
+  duration, default 8), `AMD_WIP_LIMIT` (doing's WIP limit — unset or
+  unparsable defaults to **2**, not unlimited; `0` turns it off; todo is
+  never limited, so `AMD_WIP_TODO` is ignored since ticket 083), `AMD_COMMIT` (auto-commit-and-push,
   unset = **on**; `0`/`off`/`false` turns it off). **`AMD_TYPES` is dead** —
   it was in `--help` long after nothing read it. **`AMD_NO_REGISTER` is also
   gone** (2026-09-26) — registration is a deliberate act (`amd register`)
   again, not something running in the background to opt out of.
   `AMD_BRANCH_TYPES` and `EDITOR` also fall back to the settings file
   (`branch-types`/`editor`) when unset — the env var wins when both are set
-  (`settings::resolved()`). `AMD_LEASE_HOURS`/`AMD_WIP_TODO`/`AMD_WIP_LIMIT`/
+  (`settings::resolved()`). `AMD_LEASE_HOURS`/`AMD_WIP_LIMIT`/
   `AMD_COMMIT` follow the same precedence against the *board-local*
-  `.settings`'s `lease-hours`/`wip-todo`/`wip-limit`/`commit` keys instead —
-  team decisions, not personal ones. `wip-limit` (2026-09-27) replaced an
-  earlier `wip-doing` key entirely — see `board_settings::wip_limit`'s doc
-  comment for why todo/doing are deliberately asymmetric now, not a naming
-  tidy-up.
+  `.settings`'s `lease-hours`/`wip-limit`/`commit` keys instead — team
+  decisions, not personal ones. `wip-limit` (2026-09-27) replaced an
+  earlier `wip-doing` key entirely.
 - **Auto-commit-and-push** (ticket 012, `board_settings::auto_commit`,
   `main.rs`'s `with_auto_commit`) — every ticket-mutating command commits
   (and pushes) its own change, the audit trail a dedicated, board-only
@@ -415,6 +413,11 @@ redundant. Their history is in git if it is ever wanted again.
   `release`, `chore`), matching mrdoodles/conventional-validator's branch check
   directly — there's no longer a commit-type-to-branch-prefix mapping to keep in
   step. `AMD_BRANCH_TYPES` overrides the list.
+- **`priority`** is `low`, `medium` or `high` (`task::PRIORITIES`), `low`
+  by default — the built-in template writes it, and `Draft::write` fills it
+  in for a custom template that doesn't (`task::ensure_priority`), and
+  refuses an invalid one. `Task::priority()` reads a missing one as `low`;
+  `amd set <ref> priority <value>` sets it (ticket 083).
 - `assignee` says who's doing it, empty by default: tickets are created now and
   assigned later. There is deliberately **no second person field** — who created
   a ticket is already in `git log --follow`, so a `reporter` would duplicate
@@ -645,10 +648,23 @@ changes):
 - A sprint's scope is a query over **every column**, not a directory listing. A
   ticket in `doing/` still belongs to the sprint it was committed to. Counting
   `backlog/` alone made a sprint's points fall as work progressed.
-- **A started sprint takes tickets in and lets them out.** It refuses two
-  things: an unsized ticket (it would make the total a lie) and an *archive*
-  straight out of the sprint (a move out is a dated `git mv`; an archive is
-  gitignored and is not). `State::Started` marks a moment, not a lock.
+- **A started sprint takes nothing more and gives nothing back** (ticket
+  083, replacing ADR-0009's "in and out" rule — the desktop board's rules
+  were adopted in amd-lib). `Board::set_epic` refuses filing a ticket into
+  a started sprint and taking one out of it, in any column; its tickets
+  only move on, to todo (`move_task`), and archiving straight out of one is
+  refused too. Any group refuses an unsized ticket if it is a sprint.
+- **The loose backlog is the default epic.** A ticket in any epic or sprint
+  moves straight on to todo (`move_task` from its folder) and keeps its
+  `epic` there. Sent back from todo, `Board::home_group` puts it back in the
+  group its `epic` names — unless that group is gone, is a started sprint,
+  or is a sprint it no longer has points for; then the loose backlog.
+- **Moves go one column at a time** (`Column::next_to`, checked first in
+  `move_task`): backlog → todo → doing → done and back, never a jump.
+- **`Board::rename_group`/`amd group rename <old> <new>`** moves the folder
+  (`git mv` when tracked), rewrites `_group.md`'s `name`, and relabels the
+  `epic` of every ticket in it, in any column — refused up front, changing
+  nothing, if any of them is leased by someone else.
 - **Both epics and sprints are optional**, and both stay in scope —
   ticket 032's 2026-09-22 note that dropped sprints (this board was
   human-plus-AI only) was itself reversed 2026-09-25: tickets now live in a
@@ -661,8 +677,9 @@ changes):
   lease/hash checks that setter already has, and skips (rather than
   aborts on) a ticket it can't move. `amd group empty <name>` in the CLI,
   an "empty" button next to a group's "edit" button in `amdui`.
-- **WIP limits** (`board_settings::wip_limit`) gate entry into `todo`/
-  `doing` only — `Board::move_task` checks the destination column's count
+- **The WIP limit** (`board_settings::wip_limit`) gates entry into
+  `doing` only (ticket 083: a limit on todo as well could leave work stuck,
+  so `wip-todo`/`AMD_WIP_TODO` are ignored) — `Board::move_task` checks the destination column's count
   against the configured limit (env, then `.settings`, same precedence as
   `lease_hours`) before the existing lease check, refusing with
   `WipLimitExceeded` unless `force` is set. Moving a ticket *out* of an
@@ -675,17 +692,11 @@ changes):
   `board_settings::set_wip_limit(column, limit)` is the programmatic
   setter (`amdui`'s Settings modal, and `amd wip-limit <n>` for doing,
   both use it).
-  **Todo and doing are deliberately asymmetric (2026-09-27).** Todo:
-  absent, unparsable or `0` all mean unlimited, unchanged from when this
-  was built. Doing: absent or unparsable now defaults to **1**, not
-  unlimited — a queue of more than one "in progress" ticket is treated as
-  the thing worth naming a default against — and `0` is stored *literally*
-  by `set_wip_limit` rather than collapsed into clearing, specifically so
-  "nobody set it" (→ 1) and "somebody set it to 0" (→ off) stay two
-  different states on disk. `wip-doing` doesn't exist any more; the key is
-  `wip-limit`, and `AMD_WIP_DOING` is `AMD_WIP_LIMIT` — a rename with a
-  behaviour change riding along, not a tidy-up, so don't "fix" doing back
-  to matching todo's symmetry without re-reading why.
+  Doing: absent or unparsable defaults to **2** (`DEFAULT_WIP_LIMIT`; it
+  was 1 until ticket 083), not unlimited, and `0` is stored *literally* by
+  `set_wip_limit` rather than collapsed into clearing, specifically so
+  "nobody set it" (→ 2) and "somebody set it to 0" (→ off) stay two
+  different states on disk. `set_wip_limit(Column::Todo, …)` is refused.
 - **`Board::set_epic` only moves the file inside `backlog/`.** Filing a
   `todo`/`doing`/`done` ticket into a group (or clearing it) tags
   `set_epic_meta` in place and leaves the file exactly where it is — column

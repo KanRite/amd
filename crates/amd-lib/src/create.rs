@@ -169,6 +169,9 @@ impl Draft {
         if body.trim().is_empty() {
             bail!("the ticket is empty; nothing created");
         }
+        // Every ticket has a priority — a custom template without the field
+        // gets the default; an invalid one typed in the editor is refused.
+        let body = crate::task::ensure_priority(&body)?;
         let dir = self
             .path
             .parent()

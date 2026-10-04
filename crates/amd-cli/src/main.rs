@@ -42,22 +42,25 @@ chore — is what gives it a branch, so `amd todo` on a bugfix titled
 todo/. Leave the type out and there is nothing to check out: the ticket
 still moves, the working tree is left alone.
 
-New tickets land in backlog/. `amd set` sizes and files them; `amd group`
-divides the backlog into epics and sprints — both optional, and a ticket
-moves in or out of either one at a time with `amd set <ref> epic <name>`,
-or all at once with `amd group empty <name>`, no precondition. `amd tag
+New tickets land in backlog/, priority low. `amd set` sizes, prioritises
+(low, medium, high) and files them; `amd group` divides the backlog into
+epics and sprints — both optional, and a ticket moves in or out of either
+one at a time with `amd set <ref> epic <name>`, or all at once with `amd
+group empty <name>`; `amd group rename` renames one and relabels its
+tickets. The loose backlog is just the default epic: a ticket in any epic
+or sprint can move on to todo, and sent back from todo it returns to its
+epic. A sprint takes only sized tickets, and once started it takes nothing
+more and gives nothing back — its tickets only move on, to todo. `amd tag
 <tag>` lists every ticket carrying it, across every column. Any listing
 form — `board`, `ls`, a bare destination verb, an epic by name — takes
 `--tag <tag>` to narrow it to tickets carrying that tag instead.
 
-`todo/` can carry a WIP limit (`AMD_WIP_TODO`, or the board's own
-`.settings`) — unset means unlimited. `doing/` always carries one
-(`AMD_WIP_LIMIT`, or `wip-limit` in `.settings`; `amd wip-limit <n>` sets
-it) — unset or unparsable defaults to 1, and 0 turns it off. Either way, a
-move into an already-full column is refused, naming the limit and the
+`doing/` carries a WIP limit (`AMD_WIP_LIMIT`, or `wip-limit` in
+`.settings`; `amd wip-limit <n>` sets it) — unset or unparsable defaults to
+2, and 0 turns it off. Only doing is limited, so work can't get stuck in
+todo. A move into a full doing/ is refused, naming the limit and the
 current count; `--force` overrides it. The limit only ever gates entry:
-moving a ticket *out* of a column that's already over its limit is never
-blocked.
+moving a ticket *out* of doing/ is never blocked.
 
 Tickets nest: `--parent <ref>` puts one under another, and the board shows
 the tree. Nesting is the parent/child relationship; an epic or sprint is a
@@ -72,8 +75,9 @@ claims a free lease automatically — a lease is advisory, not a guarantee:
 it only stops local tools from writing, and a concurrent edit on another
 clone still surfaces as a normal git merge conflict.
 
-`amd todo`/`doing`/`done`/`backlog`/`abandon <ref>` move a ticket there;
-leave off <ref> and it lists that destination instead of moving anything.
+`amd todo`/`doing`/`done`/`backlog`/`abandon <ref>` move a ticket there,
+one column at a time — a ticket can't jump from backlog/ to done/; leave
+off <ref> and it lists that destination instead of moving anything.
 The same works for any epic by name: `amd checkout 7` files ticket 7 under
 the checkout epic, `amd checkout` lists what's in it. Entering `todo` is the
 one with a side effect: it creates or switches to the ticket's branch, the
@@ -272,13 +276,13 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
-    /// Set a field on a ticket: points, epic, order or title
+    /// Set a field on a ticket: points, epic, order, title or priority
     Set {
         #[arg(value_name = "REF")]
         task: String,
         #[arg(
             value_name = "FIELD",
-            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title"]),
+            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title", "priority"]),
         )]
         field: String,
         /// The new value; empty clears the field
@@ -427,7 +431,7 @@ enum GroupCmd {
         days: u32,
     },
     /// Start a sprint. There is no way back: a started sprint takes nothing
-    /// more and gives nothing back
+    /// more and gives nothing back — its tickets only move on, to todo
     Start {
         #[arg(value_name = "NAME")]
         name: String,
@@ -443,6 +447,13 @@ enum GroupCmd {
     Delete {
         #[arg(value_name = "NAME")]
         name: String,
+    },
+    /// Rename an epic or sprint: its folder, and every ticket filed in it
+    Rename {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(value_name = "NEW_NAME")]
+        to: String,
     },
 }
 
@@ -631,6 +642,10 @@ fn run() -> Result<()> {
                     "title" => {
                         task.set_title(task.hash()?, &value)?;
                         println!("{} retitled", task.id_display());
+                    }
+                    "priority" => {
+                        task.set_priority(task.hash()?, &value)?;
+                        println!("{} priority {value}", task.id_display());
                     }
                     other => bail!("unknown field {other}"),
                 }
@@ -970,6 +985,13 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
             println!("deleted {name}");
             Ok(())
         }),
+        GroupCmd::Rename { name, to } => {
+            with_auto_commit(board, "group-rename", &name, &to, || {
+                board.rename_group(&name, &to)?;
+                println!("renamed {name} -> {}", to.trim());
+                Ok(())
+            })
+        }
     }
 }
 
