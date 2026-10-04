@@ -1,11 +1,11 @@
-# A workspace of four crates: one library, three interfaces (docs/adr/0004).
+# A workspace of three crates: one library, two interfaces (docs/adr/0004).
 #
 # The boundary is enforced here rather than by review — amd-lib does not list
 # clap, inquire or egui, so a front-end dependency reaching into the library
 # fails to compile rather than passing review.
 [workspace]
 resolver = "3"
-members = ["crates/amd-lib", "crates/amd-cli", "crates/amd-ui", "crates/amd-tui"]
+members = ["crates/amd-lib", "crates/amd-cli", "crates/amd-ui"]
 
 [workspace.package]
 version = "4.0.0"
@@ -31,7 +31,6 @@ egui_kittest = "0.36"
 inquire = "0.9"
 libc = "0.2.189"
 minijinja = "2"
-ratatui = "0.30"
 richrs = "0.2"
 serde = { version = "1", features = ["derive"] }
 tempfile = "3"

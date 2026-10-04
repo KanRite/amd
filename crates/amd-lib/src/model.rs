@@ -1,7 +1,7 @@
 //! The board's data model, free of any front end: tickets as cards in lanes,
 //! the repositories a project spans, and the filters and ordering over them.
 //!
-//! Lifted out of the desktop board (`gui/`) so the terminal board reads and
+//! Lifted out of the desktop board (`gui/`) so any front end reads and
 //! orders tickets exactly as it does. Nothing here draws or prints; every
 //! write still goes through `Board`/`Task`, never a file.
 
