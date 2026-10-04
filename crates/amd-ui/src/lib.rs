@@ -742,6 +742,16 @@ mod tests {
         assert_eq!(board.repos[0].wip.doing, 2);
         assert_eq!(board.repos[0].lease_hours, 8);
         assert!(!board.repos[1].available, "a declared repo not cloned here");
+        // No declared project: the repository's name.
+        assert_eq!(board.project, "demo-tickets");
+    }
+
+    #[test]
+    fn the_header_shows_the_projects_own_name() {
+        let (_dir, project) = project();
+        let settings = agile_md::board_settings::path(project.board("").unwrap());
+        std::fs::write(&settings, "commit = off\nproject = grimartz\n").unwrap();
+        assert_eq!(project.summary().unwrap().project, "grimartz");
     }
 
     #[test]

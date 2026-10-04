@@ -131,7 +131,14 @@ impl Project {
         for epic in &mut epics {
             epic.tickets.sort_by(ui::ticket::default_order);
         }
+        let (own_name, own_board) = &self.repos[0];
+        let project = board_settings::load(own_board)
+            .project()
+            .map(str::to_string)
+            .filter(|p| !p.trim().is_empty())
+            .unwrap_or_else(|| own_name.clone());
         Ok(ui::Board {
+            project,
             tasks_dir: self.repos[0].1.root.display().to_string(),
             repos,
             columns,

@@ -151,6 +151,10 @@ pub struct BoardColumn {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Board {
+    /// The project's name (`project` in its `.settings`), shown in the
+    /// header; the repository's name when the board doesn't declare one.
+    #[serde(default)]
+    pub project: String,
     /// Absolute path of the `tasks/` directory being shown.
     pub tasks_dir: String,
     /// Every repository the project spans, the board's own first. Tickets
@@ -552,6 +556,7 @@ mod assigned_tests {
     #[test]
     fn assignees_are_listed_once_in_order() {
         let mut board = Board {
+            project: String::new(),
             tasks_dir: String::new(),
             repos: Vec::new(),
             columns: vec![BoardColumn {
