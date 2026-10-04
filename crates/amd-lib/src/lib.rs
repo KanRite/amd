@@ -25,6 +25,3 @@ pub mod settings;
 pub mod task;
 pub mod templates;
 pub mod transition;
-
-#[cfg(feature = "gui")]
-pub mod gui;

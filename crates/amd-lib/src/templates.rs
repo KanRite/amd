@@ -194,6 +194,16 @@ impl Templates {
         }
     }
 
+    /// These templates with `source` standing in for `name` — how an editor
+    /// previews a change to a template before saving it. A source that
+    /// doesn't parse is refused here, with the parser's reason.
+    pub fn with_source(mut self, name: &str, source: &str) -> Result<Self> {
+        self.env
+            .add_template_owned(name.to_string(), source.to_string())
+            .map_err(|err| render_error(name, err))?;
+        Ok(self)
+    }
+
     pub fn render<S: Serialize>(&self, name: &str, ctx: S) -> Result<String> {
         let template = self
             .env
@@ -320,6 +330,33 @@ pub fn template_name(path: &Path) -> Option<String> {
         }
     }
     None
+}
+
+/// A made-up ticket to render a template against, for a preview: every
+/// field filled in, so a template that uses any of them shows something.
+pub fn example_context(board: &Board) -> TaskContext {
+    let (created, timestamp) = today();
+    TaskContext {
+        id: "042".to_string(),
+        number: 42,
+        title: "An example ticket".to_string(),
+        slug: "an-example-ticket".to_string(),
+        branch_type: "feature".to_string(),
+        branch_name: "feature/an-example-ticket".to_string(),
+        assignee: String::new(),
+        parent: String::new(),
+        parent_link: String::new(),
+        related: Vec::new(),
+        tags: Vec::new(),
+        created,
+        timestamp,
+        column: "backlog".to_string(),
+        author: "you".to_string(),
+        email: String::new(),
+        board: board.name(),
+        template: DEFAULT_TEMPLATE.to_string(),
+        extra: BTreeMap::new(),
+    }
 }
 
 /// Local date (`YYYY-MM-DD`) and RFC 3339 timestamp, falling back to UTC when

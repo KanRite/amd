@@ -30,10 +30,17 @@ into `/usr/local/bin` when it's writable, otherwise `~/bin`. Override with
 `--from-source` (needs [Rust](https://rustup.rs)). From a clone:
 
 ```bash
+(cd crates/amd-ui-web && trunk build --release)   # the board's pages, first
 cargo build --release        # target/release/{amd,amdui}
-# a workspace: crates/amd-lib (the library), crates/amd-cli, crates/amd-ui
+# a workspace: crates/amd-lib (the library), crates/amd-cli, and the desktop
+# board — crates/amd-ui (Tauri), crates/amd-ui-web (Leptos), crates/amd-ui-model
 ./install.sh                 # builds and installs
 ```
+
+The desktop board needs [Trunk](https://trunkrs.dev) and the
+`wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`)
+to build its pages, and WebKitGTK on Linux (`libwebkit2gtk-4.1-dev`). For the
+command line alone, `cargo build --release -p amd-cli` needs none of them.
 
 Two commands: **`amd`** is the command line and **`amdui`** is the desktop
 board. `amd gui` opens the same window as `amdui`.
@@ -192,26 +199,26 @@ board as `@sam`, so it moves with the file and is visible in the diff.
 `amdui` opens the board in a window, across every registered repository at
 once. It's the front end as its own command — launch it from a dock or a
 runner, no subcommand to remember — and `amd gui` opens the same window if
-you're already in a terminal:
+you're already in a terminal. Launched from outside a project, it opens the
+board it showed last. It is a Tauri window over a Leptos page, and every
+change it makes goes through the same library as `amd`, so the two never
+disagree.
 
-```
-BACKLOG (4)      TODO (3)         DOING (1)        DONE (7)
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│ [017] 2pt    │ │ [001]   @sam │ │ [004]        │ │ [006]        │
-│ Add repo…    │ │ Checkout…    │ │ Fix the…     │ │ Completions  │
-└──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘
-```
-
-- **Drag a card** up or down to reorder it, across to change its status. Both
-  are written straight to disk — the move is a `git mv`, the order is an
-  `order` key in the ticket.
-- **Double click** a ticket to edit it: title, assignee, points and body. The
-  body is rich text with an **MD/RT** toggle, click any line to type into it,
-  checkboxes tick in place, and Enter continues a list.
-- **Board / Backlog** switches views. The backlog groups tickets by epic and
-  sprint, with **Add epic** and **Add sprint**.
-- **Settings** holds the text size (standard, medium, large) and the colour
-  scheme, both remembered in `~/.config/agile-md/config`.
+- **A Backlogs column** of sprints, then epics, beside the four columns. Drag
+  a card to the next column, or into and out of an epic or sprint; the move is
+  a `git mv`, committed and pushed like `amd`'s. Moving into todo or doing
+  locks the ticket for you.
+- **Click a ticket** to edit it: its fields as a form (title, assignee, branch
+  type, tags, points, priority) and its body as rich text, with a switch to
+  the raw markdown. Lock, renew, unlock — or break someone else's lock, after
+  a confirmation — from the same window.
+- **Filters** across the top: repository, person, a search, the sort order,
+  and Reset.
+- **New ticket**, **+ Sprint**, **+ Epic**; start a sprint from its box.
+- **Admin**: auto-commit, the WIP limit on doing, how long a lock lasts, the
+  ticket template (with a preview), renaming epics and sprints, and your
+  colour scheme — light, dark or the system's, with an accent colour —
+  remembered in `~/.config/agile-md/config`.
 
 A **sprint** takes only sized tickets — an unsized one would make its point
 total a lie. Once **started** it is a commitment: it takes nothing more and
@@ -221,9 +228,8 @@ backlog is just the default epic — a ticket in any epic or sprint can move on
 to todo, keeping its epic, and sent back from todo it returns to it (unless
 that is a sprint that has started).
 
-A plain `cargo build` gives you both binaries. For the command line alone —
-no windowing stack, which is what CI and scripts want —
-`cargo build -p amd-cli --no-default-features`.
+`cargo build -p amd-cli` gives you the command line alone — no window or web
+stack, which is what CI and scripts want.
 
 ## Driving it from the command line
 
@@ -254,8 +260,8 @@ never limited, so work can't get stuck there. A move into a full doing is
 refused, naming the limit; `--force` overrides it. The limit only ever
 gates entry — moving a ticket *out* of doing always works.
 
-`cargo build -p amd-cli --no-default-features` builds this without the desktop
-board — the whole API, no windowing stack, which is what CI and scripts want.
+`cargo build -p amd-cli` builds this without the desktop board — the whole
+API, no window or web stack, which is what CI and scripts want.
 
 ## Shell completion
 
@@ -301,11 +307,17 @@ independently movable, while the folders give an unambiguous board.
 ## Development
 
 ```bash
-cargo test                    # unit tests (slugify, frontmatter, templates)
+(cd crates/amd-ui-web && trunk build --release)   # needed before anything builds amd-ui
+cargo test                    # unit tests (slugify, frontmatter, templates, the board)
 bash tests/test.sh            # end-to-end CLI spec against throwaway git repos
 cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy -p amd-ui-web -p amd-ui-model --target wasm32-unknown-unknown -- -D warnings
 cargo fmt --all --check
 ```
+
+To work on the board with live reload: `cargo tauri dev -- --no-default-features`
+in `crates/amd-ui` (it runs `trunk serve` for you; `--no-default-features`
+serves the pages live instead of the ones built into the binary).
 
 `amd` was pure bash through v3; v4 is the same tool in Rust, which is what
 buys the templating. The CLI, the board layout and the file format are

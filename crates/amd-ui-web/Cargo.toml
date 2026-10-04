@@ -1,0 +1,24 @@
+# The desktop board's front end: Leptos, compiled to WebAssembly by Trunk
+# (`trunk build` in this directory) and shown in amdui's Tauri window. It
+# never touches a file: every change is a call to the backend (crates/amd-ui),
+# which makes it through amd-lib.
+[package]
+name = "amd-ui-web"
+description = "The agile-md desktop board's Leptos front end"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+amd-ui-model.workspace = true
+serde.workspace = true
+leptos.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+serde-wasm-bindgen.workspace = true
+js-sys.workspace = true
+web-sys = { workspace = true, features = ["ClipboardEvent", "DataTransfer", "DragEvent", "DomTokenList", "Element", "HtmlDocument", "HtmlInputElement", "KeyboardEvent", "MediaQueryList", "Node", "NodeList", "Range", "Selection"] }
+console_error_panic_hook.workspace = true

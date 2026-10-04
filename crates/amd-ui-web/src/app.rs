@@ -1,0 +1,554 @@
+//! Top-level state and layout.
+
+use std::collections::BTreeSet;
+
+use amd_ui_model::appearance::Appearance;
+use amd_ui_model::epic::Place;
+use amd_ui_model::ticket::SortOrder;
+use amd_ui_model::{Assigned, Board, Column, SyncReport, TicketDocument, TicketSummary};
+use leptos::prelude::*;
+use leptos::task::spawn_local;
+use wasm_bindgen::JsCast;
+
+use crate::admin::AdminPanel;
+use crate::api;
+use crate::board::BoardView;
+use crate::dialog::{NewEpicDialog, NewSprintDialog, NewTicketDialog, OverLimitDialog};
+use crate::editor::Editor;
+
+/// Which overlay, if any, is open over the board.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Overlay {
+    Editor(TicketDocument),
+    NewTicket,
+    NewEpic,
+    NewSprint,
+    Admin,
+    /// A ticket dropped on a column at its WIP limit: move it anyway?
+    OverLimit {
+        file: String,
+        from: Place,
+        to: Place,
+        reason: String,
+    },
+}
+
+/// State shared by every component, provided as context. All fields are
+/// arena signals, so the struct is `Copy` and closures capture it freely.
+#[derive(Clone, Copy)]
+pub struct Ctx {
+    pub board: RwSignal<Option<Board>>,
+    pub error: RwSignal<Option<String>>,
+    pub overlay: RwSignal<Option<Overlay>>,
+    pub collapsed: RwSignal<BTreeSet<Column>>,
+    /// The Epics column folds away on its own, separately from the backlog.
+    pub epics_collapsed: RwSignal<bool>,
+    /// The ticket being dragged: its file name and where it came from.
+    pub dragging: RwSignal<Option<(String, Place)>>,
+    /// How every column and epic is ordered (the Sort dropdown).
+    pub sort: RwSignal<SortOrder>,
+    /// The search box: only matching cards are shown while it has text.
+    pub search: RwSignal<String>,
+    /// The repository filter: one repository's tickets, or all (`None`).
+    pub repo: RwSignal<Option<String>>,
+    /// The user filter: whose tickets to show.
+    pub user: RwSignal<Assigned>,
+    /// The user's colour scheme (Admin → Appearance).
+    pub appearance: RwSignal<Appearance>,
+    /// Whether the desktop is in dark mode, for "follow the system".
+    pub system_dark: RwSignal<bool>,
+    /// What git did with the last ticket change.
+    pub sync: RwSignal<Option<SyncReport>>,
+}
+
+impl Ctx {
+    pub fn get() -> Ctx {
+        expect_context::<Ctx>()
+    }
+
+    /// Re-reads the board from disk.
+    pub fn reload(self) {
+        spawn_local(async move {
+            match api::load_board().await {
+                Ok(board) => self.board.set(Some(board)),
+                Err(e) => self.error.set(Some(e)),
+            }
+        });
+    }
+
+    /// Opens a ticket in the editor.
+    pub fn open_ticket(self, place: Place, file: String) {
+        spawn_local(async move {
+            match api::open_ticket(&place, &file).await {
+                Ok(doc) => self.overlay.set(Some(Overlay::Editor(doc))),
+                Err(e) => self.error.set(Some(e)),
+            }
+        });
+    }
+
+    /// The cards to show from a list: those matching the search, in the
+    /// order chosen in the Sort dropdown.
+    pub fn shown(self, mut list: Vec<TicketSummary>) -> Vec<TicketSummary> {
+        list.retain(|t| self.in_view(t));
+        let order = self.sort.get();
+        list.sort_by(|a, b| order.compare(a, b));
+        list
+    }
+
+    /// Whether a card passes the repository and user filters and the search.
+    pub fn in_view(self, t: &TicketSummary) -> bool {
+        let repo_ok = self.repo.with(|r| r.as_ref().is_none_or(|r| *r == t.repo));
+        repo_ok && self.user.with(|u| u.matches(t)) && self.search.with(|q| t.matches(q))
+    }
+
+    /// Whether any filter differs from its default: repository, user, sort
+    /// or search.
+    pub fn filters_changed(self) -> bool {
+        self.repo.with(Option::is_some)
+            || self.user.with(|u| *u != Assigned::Anyone)
+            || self.sort.get() != SortOrder::default()
+            || self.searching()
+    }
+
+    /// Puts every filter back to its default: all repositories, all users,
+    /// the default order, and no search.
+    pub fn reset_filters(self) {
+        self.repo.set(None);
+        self.user.set(Assigned::Anyone);
+        self.sort.set(SortOrder::default());
+        self.search.set(String::new());
+    }
+
+    /// Whether a search or the user filter is hiding some tickets, so epics
+    /// left with nothing to show can step aside.
+    pub fn narrowed(self) -> bool {
+        self.searching() || self.user.with(|u| *u != Assigned::Anyone)
+    }
+
+    /// Whether the board spans more than one available repository.
+    pub fn multi_repo(self) -> bool {
+        self.board.with(|b| {
+            b.as_ref()
+                .is_some_and(|b| b.repos.iter().filter(|r| r.available).count() > 1)
+        })
+    }
+
+    /// Whether a search is narrowing the board.
+    pub fn searching(self) -> bool {
+        self.search.with(|q| !q.trim().is_empty())
+    }
+
+    /// Shows what happened when a change was committed and pushed.
+    pub fn report(self, report: SyncReport) {
+        self.sync.set(Some(report));
+    }
+
+    pub fn close_overlay(self) {
+        self.overlay.set(None);
+    }
+}
+
+#[component]
+pub fn App() -> impl IntoView {
+    let ctx = Ctx {
+        board: RwSignal::new(None),
+        error: RwSignal::new(None),
+        overlay: RwSignal::new(None),
+        collapsed: RwSignal::new(BTreeSet::new()),
+        epics_collapsed: RwSignal::new(false),
+        dragging: RwSignal::new(None),
+        sort: RwSignal::new(SortOrder::default()),
+        search: RwSignal::new(String::new()),
+        repo: RwSignal::new(None),
+        user: RwSignal::new(Assigned::Anyone),
+        sync: RwSignal::new(None),
+        appearance: RwSignal::new(Appearance::default()),
+        system_dark: RwSignal::new(false),
+    };
+    provide_context(ctx);
+    ctx.reload();
+    use_colour_scheme(ctx);
+
+    let tasks_dir = move || ctx.board.with(|b| b.as_ref().map(|b| b.tasks_dir.clone()));
+
+    view! {
+        <div class="flex h-screen flex-col bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
+            <header class="flex items-center gap-4 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-800">
+                <h1 class="shrink-0 whitespace-nowrap text-lg font-semibold">"agile-md"</h1>
+                <span class="min-w-0 flex-1 truncate text-xs text-slate-500" title=tasks_dir>
+                    {move || tasks_dir().unwrap_or_else(|| "No tasks directory open".into())}
+                </span>
+                <SyncStatus />
+                <button
+                    class="whitespace-nowrap rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
+                    disabled=move || ctx.board.with(Option::is_none)
+                    on:click=move |_| ctx.overlay.set(Some(Overlay::NewTicket))
+                >
+                    "New ticket"
+                </button>
+                <button
+                    class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                    on:click=move |_| ctx.overlay.set(Some(Overlay::Admin))
+                >
+                    "Admin"
+                </button>
+            </header>
+
+            <FilterBar />
+
+            <Show when=move || ctx.error.with(Option::is_some)>
+                <div
+                    role="alert"
+                    class="flex items-center gap-3 bg-red-100 px-4 py-2 text-sm text-red-800 dark:bg-red-950 dark:text-red-200"
+                >
+                    <span class="flex-1">{move || ctx.error.get().unwrap_or_default()}</span>
+                    <button class="underline" on:click=move |_| ctx.error.set(None)>
+                        "Dismiss"
+                    </button>
+                </div>
+            </Show>
+
+            <Show when=move || ctx.sync.with(|s| s.as_ref().is_some_and(|s| s.warning.is_some()))>
+                <div
+                    role="alert"
+                    class="flex items-center gap-3 bg-amber-100 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+                >
+                    <span class="flex-1">
+                        {move || ctx.sync.with(|s| s.as_ref().and_then(|s| s.warning.clone()).unwrap_or_default())}
+                    </span>
+                    <button class="underline" on:click=move |_| ctx.sync.set(None)>
+                        "Dismiss"
+                    </button>
+                </div>
+            </Show>
+
+            <main class="min-h-0 flex-1">
+                <BoardView />
+            </main>
+
+            {move || match ctx.overlay.get() {
+                Some(Overlay::Editor(doc)) => view! { <Editor doc /> }.into_any(),
+                Some(Overlay::NewTicket) => view! { <NewTicketDialog /> }.into_any(),
+                Some(Overlay::NewEpic) => view! { <NewEpicDialog /> }.into_any(),
+                Some(Overlay::NewSprint) => view! { <NewSprintDialog /> }.into_any(),
+                Some(Overlay::Admin) => view! { <AdminPanel /> }.into_any(),
+                Some(Overlay::OverLimit { file, from, to, reason }) => {
+                    view! { <OverLimitDialog file from to reason /> }.into_any()
+                }
+                None => ().into_any(),
+            }}
+        </div>
+    }
+}
+
+/// A centred modal over a dimmed board. Escape closes it; a click on the
+/// backdrop deliberately does not, so a stray click cannot discard an edit.
+#[component]
+pub fn Modal(
+    title: String,
+    #[prop(default = "max-w-3xl")] width: &'static str,
+    children: Children,
+) -> impl IntoView {
+    let ctx = Ctx::get();
+    let label = title.clone();
+    // Listen on the window: focus is not reliably inside the dialog (a newly
+    // inserted `autofocus` field is not focused by WebKit), so a handler on
+    // the dialog itself would miss the key.
+    let escape = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" {
+            ctx.close_overlay();
+        }
+    });
+    on_cleanup(move || escape.remove());
+    view! {
+        <div class="fixed inset-0 z-10 flex items-center justify-center bg-black/40 p-6">
+            <section
+                role="dialog"
+                aria-modal="true"
+                aria-label=label
+                class=format!(
+                    "flex max-h-full w-full {width} flex-col gap-3 rounded-lg bg-white p-4 shadow-xl dark:bg-slate-800",
+                )
+            >
+                <h2 class="text-base font-semibold">{title}</h2>
+                {children()}
+            </section>
+        </div>
+    }
+}
+
+/// The last commit the board made, in the header: "Pushed …" once it is on
+/// origin, "Committed …" if it only got as far as the local repository.
+#[component]
+fn SyncStatus() -> impl IntoView {
+    let ctx = Ctx::get();
+    move || {
+        ctx.sync.with(|s| {
+            s.as_ref().filter(|s| s.committed).map(|s| {
+                let (icon, tone, verb) = if s.pushed {
+                    ("✓", "text-emerald-700 dark:text-emerald-300", "Pushed")
+                } else {
+                    ("!", "text-amber-700 dark:text-amber-300", "Committed")
+                };
+                view! {
+                    <span role="status" class=format!("max-w-md truncate text-xs {tone}") title=s.message.clone()>
+                        {format!("{icon} {verb} {}", s.message)}
+                    </span>
+                }
+            })
+        })
+    }
+}
+
+/// Searches the tickets on the board (archived ones are not loaded). Escape
+/// or the × clears it.
+#[component]
+fn SearchBox() -> impl IntoView {
+    let ctx = Ctx::get();
+    view! {
+        <div class="relative flex items-center">
+            <span aria-hidden="true" class="pointer-events-none absolute left-2.5 text-sm text-slate-400">
+                "⌕"
+            </span>
+            <input
+                type="search"
+                placeholder="Search tickets"
+                aria-label="Search tickets"
+                class="w-56 rounded border border-slate-300 bg-white py-1.5 pr-7 pl-7 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-2 focus:outline-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 [&::-webkit-search-cancel-button]:hidden"
+                prop:value=move || ctx.search.get()
+                on:input=move |ev| ctx.search.set(event_target_value(&ev))
+                on:keydown=move |ev| {
+                    if ev.key() == "Escape" {
+                        ctx.search.set(String::new());
+                    }
+                }
+            />
+            <Show when=move || ctx.searching()>
+                <button
+                    type="button"
+                    title="Clear the search"
+                    aria-label="Clear the search"
+                    class="absolute right-1.5 rounded px-1 text-sm text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                    on:click=move |_| ctx.search.set(String::new())
+                >
+                    "×"
+                </button>
+            </Show>
+        </div>
+    }
+}
+
+/// The repository filter, at the far left: all repositories the project
+/// spans, or one. Same indigo pill as Sort (and, like it, painted itself:
+/// WebKit's native select box would hide white text).
+#[component]
+fn RepoFilter() -> impl IntoView {
+    let ctx = Ctx::get();
+    let repos = move || {
+        ctx.board
+            .with(|b| b.as_ref().map(|b| b.repos.clone()).unwrap_or_default())
+    };
+    view! {
+        <label
+            class="group relative flex cursor-pointer items-center gap-1 whitespace-nowrap rounded bg-accent-600 py-1.5 pr-2 pl-3 text-sm font-medium text-white hover:bg-accent-500 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent-500"
+            title="Show the tickets of one repository, or all of them"
+        >
+            "Repository:"
+            <select
+                class="cursor-pointer appearance-none border-0 bg-accent-600 pr-5 font-medium text-white group-hover:bg-accent-500 focus:outline-none"
+                prop:value=move || ctx.repo.get().unwrap_or_default()
+                on:change=move |ev| {
+                    let value = event_target_value(&ev);
+                    ctx.repo.set((!value.is_empty()).then_some(value));
+                }
+            >
+                <option class="bg-accent-600 text-white" value="">
+                    "All"
+                </option>
+                {move || {
+                    repos()
+                        .into_iter()
+                        .map(|r| {
+                            let label = if r.available {
+                                r.name.clone()
+                            } else {
+                                format!("{} (not cloned)", r.name)
+                            };
+                            view! {
+                                <option class="bg-accent-600 text-white" value=r.name.clone() disabled=!r.available>
+                                    {label}
+                                </option>
+                            }
+                        })
+                        .collect_view()
+                }}
+            </select>
+            <span aria-hidden="true" class="pointer-events-none absolute right-2.5 text-xs text-white">
+                "▾"
+            </span>
+        </label>
+    }
+}
+
+/// The user filter, right of the repository filter: everyone's tickets, one
+/// user's, or the unassigned ones. Users are whoever has tickets assigned.
+#[component]
+fn UserFilter() -> impl IntoView {
+    let ctx = Ctx::get();
+    let users = move || {
+        ctx.board
+            .with(|b| b.as_ref().map(Board::assignees).unwrap_or_default())
+    };
+    view! {
+        <label
+            class="group relative flex cursor-pointer items-center gap-1 whitespace-nowrap rounded bg-accent-600 py-1.5 pr-2 pl-3 text-sm font-medium text-white hover:bg-accent-500 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent-500"
+            title="Show the tickets assigned to one user, or everyone's"
+        >
+            "User:"
+            <select
+                class="cursor-pointer appearance-none border-0 bg-accent-600 pr-5 font-medium text-white group-hover:bg-accent-500 focus:outline-none"
+                prop:value=move || ctx.user.with(Assigned::key)
+                on:change=move |ev| ctx.user.set(Assigned::from_key(&event_target_value(&ev)))
+            >
+                <option class="bg-accent-600 text-white" value=Assigned::Anyone.key()>
+                    "All"
+                </option>
+                {move || {
+                    users()
+                        .into_iter()
+                        .map(|name| {
+                            view! {
+                                <option class="bg-accent-600 text-white" value=name.clone()>
+                                    {name.clone()}
+                                </option>
+                            }
+                        })
+                        .collect_view()
+                }}
+                <option class="bg-accent-600 text-white" value=Assigned::Nobody.key()>
+                    "Unassigned"
+                </option>
+            </select>
+            <span aria-hidden="true" class="pointer-events-none absolute right-2.5 text-xs text-white">
+                "▾"
+            </span>
+        </label>
+    }
+}
+
+/// The row of filters across the top of the board: which repository and
+/// whose work, a search, the order, and a reset back to the defaults.
+#[component]
+fn FilterBar() -> impl IntoView {
+    let ctx = Ctx::get();
+    view! {
+        <nav
+            aria-label="Filters"
+            class="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2 dark:border-slate-700 dark:bg-slate-800/60"
+        >
+            <Marked active=Signal::derive(move || ctx.repo.with(Option::is_some))>
+                <RepoFilter />
+            </Marked>
+            <Marked active=Signal::derive(move || ctx.user.with(|u| *u != Assigned::Anyone))>
+                <UserFilter />
+            </Marked>
+            <Marked active=Signal::derive(move || ctx.searching())>
+                <SearchBox />
+            </Marked>
+            <Marked active=Signal::derive(move || ctx.sort.get() != SortOrder::default())>
+            // WebKit draws a native (white) box for a <select> unless its
+            // appearance is turned off, so the select is unstyled and
+            // painted indigo itself, with its own arrow.
+            <label
+                class="group relative flex cursor-pointer items-center gap-1 whitespace-nowrap rounded bg-accent-600 py-1.5 pr-2 pl-3 text-sm font-medium text-white hover:bg-accent-500 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent-500"
+                title="Order of the tickets in every column"
+            >
+                "Sort:"
+                <select
+                    class="cursor-pointer appearance-none border-0 bg-accent-600 pr-5 font-medium text-white group-hover:bg-accent-500 focus:outline-none"
+                    prop:value=move || ctx.sort.get().key()
+                    on:change=move |ev| ctx.sort.set(SortOrder::from_key(&event_target_value(&ev)))
+                >
+                    // The open list is indigo too, with white text.
+                    {SortOrder::ALL
+                        .map(|o| {
+                            view! {
+                                <option class="bg-accent-600 text-white" value=o.key()>
+                                    {o.label()}
+                                </option>
+                            }
+                        })
+                        .collect_view()}
+                </select>
+                <span aria-hidden="true" class="pointer-events-none absolute right-2.5 text-xs text-white">
+                    "▾"
+                </span>
+            </label>
+            </Marked>
+            <button
+                class="mt-2 whitespace-nowrap rounded border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-900 dark:hover:bg-slate-700"
+                title="Put Repository, User, Sort and the search back to their defaults"
+                disabled=move || !ctx.filters_changed()
+                on:click=move |_| ctx.reset_filters()
+            >
+                "Reset filters"
+            </button>
+        </nav>
+    }
+}
+
+/// A filter in the filter row, with a coloured line above it while the
+/// filter is active (differs from its default). The line's space is always
+/// kept, so controls do not shift as filters change.
+#[component]
+fn Marked(active: Signal<bool>, children: Children) -> impl IntoView {
+    view! {
+        <div class="flex flex-col gap-1" data-active=move || active.get().to_string()>
+            <span
+                aria-hidden="true"
+                class=move || {
+                    format!(
+                        "h-1 rounded-full transition-colors {}",
+                        if active.get() { "bg-amber-400" } else { "bg-transparent" },
+                    )
+                }
+            ></span>
+            {children()}
+            <span class="sr-only">{move || if active.get() { "Filter active" } else { "" }}</span>
+        </div>
+    }
+}
+
+/// Applies the user's colour scheme to the page: their saved choice is
+/// loaded once, the desktop's light/dark setting is watched for "follow the
+/// system", and `<html>` gets `class="dark"` and `data-accent` to match.
+fn use_colour_scheme(ctx: Ctx) {
+    spawn_local(async move {
+        if let Ok(saved) = api::appearance().await {
+            ctx.appearance.set(saved);
+        }
+    });
+    if let Some(query) =
+        web_sys::window().and_then(|w| w.match_media("(prefers-color-scheme: dark)").ok().flatten())
+    {
+        ctx.system_dark.set(query.matches());
+        let watch = wasm_bindgen::closure::Closure::<dyn Fn()>::new({
+            let query = query.clone();
+            move || ctx.system_dark.set(query.matches())
+        });
+        let _ = query.add_event_listener_with_callback("change", watch.as_ref().unchecked_ref());
+        // The listener lives as long as the page does.
+        watch.forget();
+    }
+    Effect::new(move |_| {
+        let Appearance { theme, accent } = ctx.appearance.get();
+        let dark = theme.is_dark(ctx.system_dark.get());
+        if let Some(root) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.document_element())
+        {
+            let _ = root.class_list().toggle_with_force("dark", dark);
+            let _ = root.set_attribute("data-accent", accent.key());
+        }
+    });
+}

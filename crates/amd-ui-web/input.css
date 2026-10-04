@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+@source "./src";
+
+@theme {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Dark mode is the board's choice (ticket 013): the app puts `dark` on
+   <html> for Dark, or for "follow the system" when the system is dark. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+
+/* The accent colour of buttons, filters and highlights: `accent-*`
+   utilities read these variables, and <html data-accent="…"> picks the
+   palette they point at. */
+@theme inline {
+  --color-accent-50: var(--accent-50);
+  --color-accent-100: var(--accent-100);
+  --color-accent-200: var(--accent-200);
+  --color-accent-400: var(--accent-400);
+  --color-accent-500: var(--accent-500);
+  --color-accent-600: var(--accent-600);
+  --color-accent-800: var(--accent-800);
+  --color-accent-900: var(--accent-900);
+  --color-accent-950: var(--accent-950);
+}
+
+:root,
+[data-accent="indigo"] {
+  --accent-50: var(--color-indigo-50);
+  --accent-100: var(--color-indigo-100);
+  --accent-200: var(--color-indigo-200);
+  --accent-400: var(--color-indigo-400);
+  --accent-500: var(--color-indigo-500);
+  --accent-600: var(--color-indigo-600);
+  --accent-800: var(--color-indigo-800);
+  --accent-900: var(--color-indigo-900);
+  --accent-950: var(--color-indigo-950);
+}
+
+[data-accent="teal"] {
+  --accent-50: var(--color-teal-50);
+  --accent-100: var(--color-teal-100);
+  --accent-200: var(--color-teal-200);
+  --accent-400: var(--color-teal-400);
+  --accent-500: var(--color-teal-500);
+  --accent-600: var(--color-teal-600);
+  --accent-800: var(--color-teal-800);
+  --accent-900: var(--color-teal-900);
+  --accent-950: var(--color-teal-950);
+}
+
+[data-accent="rose"] {
+  --accent-50: var(--color-rose-50);
+  --accent-100: var(--color-rose-100);
+  --accent-200: var(--color-rose-200);
+  --accent-400: var(--color-rose-400);
+  --accent-500: var(--color-rose-500);
+  --accent-600: var(--color-rose-600);
+  --accent-800: var(--color-rose-800);
+  --accent-900: var(--color-rose-900);
+  --accent-950: var(--color-rose-950);
+}
+
+[data-accent="amber"] {
+  --accent-50: var(--color-amber-50);
+  --accent-100: var(--color-amber-100);
+  --accent-200: var(--color-amber-200);
+  --accent-400: var(--color-amber-400);
+  --accent-500: var(--color-amber-500);
+  --accent-600: var(--color-amber-600);
+  --accent-800: var(--color-amber-800);
+  --accent-900: var(--color-amber-900);
+  --accent-950: var(--color-amber-950);
+}
+
+[data-accent="slate"] {
+  --accent-50: var(--color-slate-50);
+  --accent-100: var(--color-slate-100);
+  --accent-200: var(--color-slate-200);
+  --accent-400: var(--color-slate-400);
+  --accent-500: var(--color-slate-500);
+  --accent-600: var(--color-slate-600);
+  --accent-800: var(--color-slate-800);
+  --accent-900: var(--color-slate-900);
+  --accent-950: var(--color-slate-950);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+/* The rich ticket editor renders board_model::rich::to_html output. */
+@layer components {
+  .rich-editor > * + * { margin-top: 0.5rem; }
+  .rich-editor h1 { font-size: 1.375rem; font-weight: 700; }
+  .rich-editor h2 { font-size: 1.125rem; font-weight: 600; }
+  .rich-editor h3, .rich-editor h4, .rich-editor h5, .rich-editor h6 { font-weight: 600; }
+  .rich-editor ul { list-style: disc; padding-left: 1.5rem; }
+  .rich-editor ol { list-style: decimal; padding-left: 1.5rem; }
+  .rich-editor li[data-task="true"] { list-style: none; margin-left: -1.25rem; }
+  .rich-editor li[data-task="true"] > input { margin-right: 0.5rem; vertical-align: middle; }
+  .rich-editor blockquote { border-left: 3px solid var(--color-slate-400); padding-left: 0.75rem; color: var(--color-slate-500); }
+  .rich-editor pre, .rich-editor code { font-family: var(--font-mono); font-size: 0.85em; }
+  .rich-editor pre { background: var(--color-slate-200); padding: 0.5rem; border-radius: 0.25rem; white-space: pre-wrap; }
+  .rich-editor a { color: var(--accent-600); text-decoration: underline; }
+  .rich-editor hr { border-color: var(--color-slate-300); }
+}

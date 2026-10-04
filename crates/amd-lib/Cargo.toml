@@ -1,9 +1,9 @@
 # The library. Everything that touches the board lives here, and nothing that
 # knows about a terminal or a window does — see docs/adr/0004.
 #
-# The absence of clap, inquire and richrs from this manifest is the rule being
-# enforced: this crate cannot draw a board even if someone tried. `gui` is
-# still here pending phase 4 of docs/workspace-split.md.
+# The absence of clap, inquire, richrs and any window or web stack from this
+# manifest is the rule being enforced: this crate cannot draw a board even if
+# someone tried. The desktop board is crates/amd-ui (ticket 084).
 [package]
 name = "agile-md"
 description = "A tiny filesystem Kanban: markdown tasks in todo/, doing/ and done/"
@@ -29,14 +29,5 @@ minijinja.workspace = true
 serde.workspace = true
 time.workspace = true
 
-# Moves to amd-ui in phase 4; until then the board is behind this feature and
-# off by default, so amd-cli never pulls a windowing stack.
-eframe = { workspace = true, optional = true }
-egui = { workspace = true, optional = true }
-
-[features]
-gui = ["dep:eframe", "dep:egui"]
-
 [dev-dependencies]
 tempfile.workspace = true
-egui_kittest.workspace = true

@@ -778,7 +778,8 @@ rm -f comp.bash
 # The desktop board is a second binary, so the suite checks it was built and
 # that it answers without opening a window — a headless runner can't do more
 # than that, and this is what catches `amdui` disappearing from Cargo.toml.
-# A --no-default-features build has no amdui, and that's not a failure.
+# A CLI-only build (`cargo build -p amd-cli`) has no amdui, and that's not a
+# failure.
 echo "the desktop binary:"
 AMDUI="${AMDUI_BIN:-${ROOT}/target/debug/amdui}"
 if [ -x "${AMDUI}" ]; then

@@ -9,8 +9,10 @@
 # Run from a clone with cargo installed and it builds from source; otherwise it
 # downloads the prebuilt binary for your platform from the GitHub release.
 #
-# Installs two commands: `amd`, the command line interface, and `amdm`, the management interface
-# board. Both come from the release zip and from a source build.
+# Installs two commands: `amd`, the command line interface, and `amdui`, the
+# desktop board. Both come from the release zip and from a source build; the
+# board's source build needs Trunk and the wasm32-unknown-unknown target (and
+# WebKitGTK on Linux), and is skipped with a note when they're missing.
 #
 # Then, in any project directory:  amd init project-name will initialise your tasks board"
 #
@@ -64,16 +66,34 @@ target_triple() {
   esac
 }
 
+# Whether this machine can build the desktop board: its page is compiled to
+# WebAssembly by Trunk before amdui itself, which embeds it.
+can_build_board() {
+  command -v trunk >/dev/null 2>&1 \
+    && rustup target list --installed 2>/dev/null | grep -q '^wasm32-unknown-unknown$'
+}
+
 build_from_source() {
   command -v cargo >/dev/null 2>&1 || die "cargo not found — install Rust from https://rustup.rs"
   printf 'Building amd from source...\n'
-  ( cd "${SELF}" && cargo build --release --locked )
+  ( cd "${SELF}" && cargo build --release --locked -p amd-cli )
   mkdir -p "${DIR}"
   cp "${SELF}/target/release/amd" "${DIR}/amd"
-  # The desktop board is a default feature, but --no-default-features is a
-  # supported way to build, and then there is no amdui to copy.
-  if [ -f "${SELF}/target/release/amdui" ]; then
+  # The desktop board is optional: without its build tools, or without
+  # WebKitGTK on Linux, amd is still installed and this says what's missing.
+  if ! can_build_board; then
+    printf 'Skipping the desktop board (amdui): it needs Trunk and the wasm target —\n' >&2
+    printf '  cargo install --locked trunk && rustup target add wasm32-unknown-unknown\n' >&2
+    printf 'and on Linux WebKitGTK (libwebkit2gtk-4.1-dev). Then run install.sh again.\n' >&2
+    return 0
+  fi
+  printf 'Building the desktop board (amdui)...\n'
+  if ( cd "${SELF}/crates/amd-ui-web" && trunk build --release ) \
+    && ( cd "${SELF}" && cargo build --release --locked -p amd-ui ); then
     cp "${SELF}/target/release/amdui" "${DIR}/amdui"
+  else
+    printf 'The desktop board did not build (on Linux it needs libwebkit2gtk-4.1-dev);\n' >&2
+    printf 'amd is installed without it.\n' >&2
   fi
 }
 
@@ -126,4 +146,6 @@ case ":${PATH}:" in
      echo "      export PATH=\"${DIR}:\$PATH\"" ;;
 esac
 echo "Then, in any repo:  amd init  &&  amd new \"My first task\""
-echo "For the desktop board:  amdui   (or amd gui)"
+if [ -x "${DIR}/amdui" ]; then
+  echo "For the desktop board:  amdui   (or amd gui)"
+fi

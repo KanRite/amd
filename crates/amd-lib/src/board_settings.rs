@@ -278,6 +278,22 @@ impl BoardSettings {
             .unwrap_or(true)
     }
 
+    /// Sets how long a lease lasts, in hours. Refuses a non-positive value,
+    /// which [`lease_hours`](Self::lease_hours) would only read back as the
+    /// default anyway.
+    pub fn set_lease_hours(&mut self, hours: f64) -> Result<()> {
+        if !(hours > 0.0 && hours.is_finite()) {
+            bail!("a lease lasts a positive number of hours");
+        }
+        self.config.set(LEASE_HOURS, &hours.to_string());
+        Ok(())
+    }
+
+    /// Turns auto-commit-and-push on or off for this board (`commit`).
+    pub fn set_auto_commit(&mut self, on: bool) {
+        self.config.set(AUTO_COMMIT, if on { "on" } else { "off" });
+    }
+
     /// The declared repository names this project spans, in the order they
     /// were added. Whether any of them are actually cloned on this machine
     /// is `registry.rs`'s question, not this one.
