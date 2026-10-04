@@ -3,13 +3,13 @@
 //! path that the command line and every other front end share.
 //!
 //! This used to live in `amd-cli`'s `main.rs`, and the desktop board only
-//! reproduced half of it (a lease, but no branch and no commit). The terminal
-//! board is the reason it moved: a move from any front end has to leave the
-//! board, the git history and the working tree in the same state.
+//! reproduced half of it (a lease, but no branch and no commit). It moved so
+//! that a move from any front end leaves the board, the git history and the
+//! working tree in the same state.
 //!
-//! Nothing here prints. A front end that owns the terminal (the TUI) must not
-//! have a library writing over its screen, so what the CLI used to print is
-//! returned as ordered [`Event`]s and the caller decides how to show them.
+//! Nothing here prints. A front end that owns the screen must not have a
+//! library writing over it, so what the CLI used to print is returned as
+//! ordered [`Event`]s and the caller decides how to show them.
 
 use std::path::PathBuf;
 

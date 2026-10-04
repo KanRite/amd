@@ -3,7 +3,7 @@
 //! checkbox flips, and how inline formatting breaks into spans.
 //!
 //! Lifted out of the desktop board's editor (`gui/richtext.rs`, which still
-//! draws it) so the terminal board's body editor follows exactly the same
+//! draws it) so any other front end's body editor follows exactly the same
 //! rules. The markdown stays the document: every edit is a rewrite of one
 //! line of the source, so what is on disk is what was typed.
 

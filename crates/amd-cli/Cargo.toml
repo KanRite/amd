@@ -22,16 +22,11 @@ path = "src/main.rs"
 # Making `amd gui` exec the `amdui` binary instead would take egui out of this
 # crate entirely, but it would also mean a prebuilt install that ships only
 # `amd` loses the board — so that trade is packaging's to make, not phase 2's.
-#
-# `amd tui` is the same arrangement for the terminal board. It costs only
-# ratatui, so it is on by default too; `--no-default-features` drops both.
-default = ["gui", "tui"]
+default = ["gui"]
 gui = ["agile-md/gui"]
-tui = ["dep:amd-tui"]
 
 [dependencies]
 agile-md.workspace = true
-amd-tui = { path = "../amd-tui", optional = true }
 anyhow.workspace = true
 clap.workspace = true
 clap_complete.workspace = true

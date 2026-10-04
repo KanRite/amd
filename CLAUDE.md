@@ -4,9 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Scope
 
-`agile-md` is a tiny **filesystem Kanban**. It ships three binaries over one
-library — **`amd`**, the command line, **`amdui`**, the desktop board, and
-**`amd-tui`**, the terminal board —
+`agile-md` is a tiny **filesystem Kanban**. It ships two binaries over one
+library — **`amd`**, the command line, and **`amdui`**, the desktop board —
 which manage markdown task files moved between `backlog/`, `todo/`, `doing/`
 and `done/` directories. Board data lives in each *consuming* repo at `<repo-root>/tasks/`;
 they're installed globally and operate on whatever repo you're in. Rust +
@@ -17,7 +16,7 @@ MiniJinja templates**.
 
 ## Layout
 
-A **cargo workspace of four crates** (ADR-0004), so the command line and the
+A **cargo workspace of three crates** (ADR-0004), so the command line and the
 desktop board share one implementation of the board and the boundary is
 enforced by the dependency graph rather than by review:
 
@@ -25,23 +24,15 @@ enforced by the dependency graph rather than by review:
 crates/amd-lib/   the library (`agile_md`) — everything that touches the board
 crates/amd-cli/   → binary `amd`    (clap, inquire, the $EDITOR scratch file)
 crates/amd-ui/    → binary `amdui`  (egui/eframe)
-crates/amd-tui/   → binary `amd-tui` (ratatui) and the `amd_tui` lib `amd tui` calls
 ```
 
 The library keeps the crate name `agile_md`, so every `use` in the workspace is
 unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
 
-**`crates/amd-tauri/` is a fourth crate, deliberately not a workspace
-member** (ticket 078): a spike proving `amd-lib` drops into a Tauri
-backend with zero changes, not a shipped interface — read-only board view
-only, no drag-and-drop, no ticket editor, none of 068/069/071/074's
-rich-text/field work re-implemented. Its own `src-tauri/Cargo.toml`
-declares an empty `[workspace]` table on purpose, so it carries its own
-`Cargo.lock`/target dir rather than growing this workspace's dependency
-graph before there's an actual decision to keep it. The ticket has the
-real findings (binary size, idle memory, the Linux build-cost tradeoff)
-and the recommendation (keep exploring cautiously, not a switch) — read
-that before assuming this is either abandoned or committed to.
+The terminal board (`crates/amd-tui/`, tickets 080/081) and the Tauri spike
+(`crates/amd-tauri/`, ticket 078) were removed in ticket 082: the desktop
+board is being rebuilt on Tauri and Leptos (ticket 084), which makes both
+redundant. Their history is in git if it is ever wanted again.
 
 - `crates/amd-lib/src/lib.rs` — the library: `board`, `board_settings`,
   `branch`, `create`, `git`, `group`, `project_trust`, `registry`,
@@ -51,8 +42,8 @@ that before assuming this is either abandoned or committed to.
 - `crates/amd-lib/src/transition.rs` — moving a ticket the way `amd todo`/
   `doing`/`done` do: the move, the lease on entering `todo`/`doing`, the
   branch switch on entering `todo`, and the auto-commit (`with_auto_commit`).
-  Shared by the CLI and the terminal board so a move leaves the board, git
-  history and working tree in the same state from either. **Nothing here
+  Shared by every front end so a move leaves the board, git history and
+  working tree in the same state from any of them. **Nothing here
   prints** — a front end that owns the screen can't have the library writing
   over it — so it returns ordered `Event::Info`/`Event::Warn`s, which the CLI
   prints on stdout/stderr (`report()` in `main.rs`). The desktop board's
@@ -62,12 +53,12 @@ that before assuming this is either abandoned or committed to.
   which the desktop board's own save path still duplicates.
 - `crates/amd-lib/src/richtext.rs` — the line-oriented body rules with no
   drawing in them: `classify`, `continuation`, `toggle`, `spans`. `gui/richtext.rs`
-  draws them in egui; the terminal board's form follows the same rules.
+  draws them in egui; any other front end's editor follows the same rules.
 - `crates/amd-lib/src/model.rs` — the egui-free board model lifted out of
   `gui/`: `Card`, `RepoBoard`, `read_lanes`/`read_groups`, `card_visible`/
   `card_in_group`, `rank_between`, `splice_body`, and `load_repos()` (the
   current project's board plus every declared, registered repository). The
-  desktop board and the terminal board both read tickets through it.
+  desktop board reads tickets through it, as any other front end should.
 - `crates/amd-lib/src/create.rs` — making a ticket, split into `Draft::prepare` (resolve and
   render, touching nothing) and `Draft::write` (file, child link, backlinks).
   That gap is what lets the CLI put the rendered ticket in `$EDITOR` before
@@ -149,7 +140,6 @@ that before assuming this is either abandoned or committed to.
   the only thing that shells out to `gh api` rather than plain `gh repo`/
   `git`. Needs the branch to exist first (protection is set after the
   first commit is pushed, not before).
-- `crates/amd-tui/` — the terminal board; see "The terminal board" below.
 - `crates/amd-ui/src/main.rs` — the `amdui` binary: ~50 lines that call
   `agile_md::gui::run()`, so the board is something you launch rather than a
   subcommand you remember. `amd gui` stays — it's the same call, and it's what
@@ -999,73 +989,6 @@ changes):
   list and `repos` started life as "the current project first, then its
   own declared repos", the lookup itself became unnecessary; removed
   along with its tests rather than kept as a no-op.
-
-## The terminal board (`crates/amd-tui/`)
-
-- ratatui (0.30, which re-exports crossterm). Ticket 080. A third front end
-  over `agile_md`, like the desktop board: it never writes a ticket itself.
-  `amd tui` and the `amd-tui` binary are the same call, as `amd gui` and
-  `amdui` are — `amd-cli` has a `tui` feature (on by default) that depends on
-  the `amd_tui` lib, and `--no-default-features` drops it. The lib/bin split
-  exists because `amd-cli` can't depend on a bin-only crate.
-- `app.rs` is the state and the key handling and has no drawing and no
-  terminal in it; `ui.rs` only draws what `App` holds. That is what makes it
-  testable: `app::tests` drive keys against boards in a tempdir, `ui::tests`
-  render into ratatui's `TestBackend` and assert on the buffer. For anything
-  the buffer can't show, drive the real binary in a pty (a `pyte` screen
-  works) — that is how the git-output leak below was found.
-- **Four columns, one selection, keyboard first.** `h/l` column, `j/k`
-  ticket, `H/L` (or `<`/`>`) move the ticket a column, `Enter` opens it
-  read-only, `f` filters, `r` reloads, `?` help, `q` quits. Every visible
-  repository's tickets share a column, with the repository's name in front
-  once more than one is showing (ids restart in each).
-- **A move is `transition::enter_todo`/`move_to`, not a re-implementation** —
-  the lease, the branch switch on entering `todo`, the WIP limit and the
-  auto-commit all behave exactly as `amd todo`/`doing`/`done`. A refusal (WIP
-  limit, someone else's lease) lands on the status line and moves nothing.
-  After a move the selection follows the ticket into its new column.
-- **`z` folds a column** down to a title and a count (`DONE (31)`), so a long
-  Backlog or Done doesn't take the screen. Nothing in a folded column can be
-  selected, moved or opened, and moving a ticket into one opens it so the
-  ticket lands in view. Folding isn't remembered between runs.
-- **Filters are a screen of their own (`f`), not a toolbar** — three lists
-  (repositories, tags, epic/sprint) toggled with `Space`, `Tab` between them,
-  `c` clears everything. Tags are OR, a group is a single choice, and the
-  header names whatever is active so a filtered board never looks complete.
-- **`git::set_quiet(true)` is called at startup, and it matters.** The
-  library's git wrappers inherit stdout/stderr, so a commit summary or a push
-  error printed straight into the middle of the screen and garbled the board
-  (found by running the real binary, not by the buffer tests). Quiet mode
-  captures git's output instead and puts git's own reason into the error, so
-  the status line still says *why* a push failed. The CLI never turns it on.
-- `ratatui::init()` installs a panic hook that restores the terminal. It is
-  required, not tidy: release builds use `panic = "abort"`, so nothing
-  unwinds to restore it otherwise.
-- The scroll offset of each column's `ListState` is kept in `App.offsets`
-  (`Cell`, since the renderer only gets `&App`) and seeded back each frame —
-  a fresh `ListState` per frame resets the scroll. `ui::tests` has a test
-  that fails if it stops being kept.
-- **Creating and editing (`form.rs`, `n` and `e`).** One form for both: title,
-  assignee, points, branch type, tags, parent, related, epic/sprint, then the
-  body. Text fields have a real cursor (←/→/Home/End/Delete); points, branch
-  type and epic are a pick-one you cycle with ←/→. The body is edited a line at
-  a time with `agile_md::richtext`, the same rules as the desktop board: Enter
-  on a list item opens the next one, Enter on an *empty* list item ends the
-  list, `Ctrl-T` ticks a checkbox. `Ctrl-S` saves, `Esc` discards. The body
-  is saved as the lines typed — never re-rendered.
-  - Saving goes through `transition::create_ticket`/`edit_ticket`, the same
-    steps as `amd new`/a field edit, including the auto-commit, so the history
-    matches the CLI's. A refusal (an unknown parent, a title with nothing
-    sluggable, a ticket that changed on disk since the form opened — the edit
-    is checked against the fingerprint taken at open) **keeps the form open
-    with the reason in the footer**, so nothing typed is lost.
-  - Known limitation: editing a parent/related link only rewrites *this*
-    ticket, as in the desktop board; `amd link` still updates both sides.
-- **Not built yet:** mouse support, drag-and-drop, a free-flowing Notes
-  editor (ticket 075), managing epics/sprints and settings from the board.
-  `release.yml`'s `bin-name` does not list `amd-tui` yet — see the `bin-name`
-  note under Layout; a tagged release doesn't carry it until `rust-release`
-  takes a list and that file is updated.
 
 ## Conventions
 
