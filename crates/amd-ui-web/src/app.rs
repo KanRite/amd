@@ -170,11 +170,20 @@ pub fn App() -> impl IntoView {
     use_colour_scheme(ctx);
 
     let tasks_dir = move || ctx.board.with(|b| b.as_ref().map(|b| b.tasks_dir.clone()));
+    // The project's own name (ticket 087), until a board is open.
+    let project = move || {
+        ctx.board.with(|b| {
+            b.as_ref()
+                .map(|b| b.project.clone())
+                .filter(|p| !p.is_empty())
+                .unwrap_or_else(|| "agile-md".to_string())
+        })
+    };
 
     view! {
         <div class="flex h-screen flex-col bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
             <header class="flex items-center gap-4 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-800">
-                <h1 class="shrink-0 whitespace-nowrap text-lg font-semibold">"agile-md"</h1>
+                <h1 class="shrink-0 whitespace-nowrap text-lg font-semibold">{project}</h1>
                 <span class="min-w-0 flex-1 truncate text-xs text-slate-500" title=tasks_dir>
                     {move || tasks_dir().unwrap_or_else(|| "No tasks directory open".into())}
                 </span>
