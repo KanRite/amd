@@ -214,12 +214,12 @@ BACKLOG (4)      TODO (3)         DOING (1)        DONE (7)
   scheme, both remembered in `~/.config/agile-md/config`.
 
 A **sprint** takes only sized tickets — an unsized one would make its point
-total a lie. A started sprint still takes tickets in and lets them out, because
-teams do that and refusing only pushes it out of the tool's sight — but it will
-not let a ticket be **archived** out of it. Move it out of the sprint first, so
-the scope change is a `git mv` in the history rather than a disappearance.
-An **epic** takes anything: it is where work goes before anyone has estimated
-it.
+total a lie. Once **started** it is a commitment: it takes nothing more and
+gives nothing back, and its tickets only move on, to todo. An **epic** takes
+anything: it is where work goes before anyone has estimated it. The loose
+backlog is just the default epic — a ticket in any epic or sprint can move on
+to todo, keeping its epic, and sent back from todo it returns to it (unless
+that is a sprint that has started).
 
 A plain `cargo build` gives you both binaries. For the command line alone —
 no windowing stack, which is what CI and scripts want —
@@ -232,24 +232,27 @@ board without opening a window. `--no-input` makes it never prompt.
 
 ```bash
 amd new "Checkout revamp" --no-input   # lands in backlog/
-amd set 001 points 5                   # points, epic, order, title
+amd set 001 points 5                   # points, epic, order, title, priority
+amd set 001 priority high              # low (the default), medium or high
 amd group epic checkout --description "the checkout flow"
 amd group sprint sprint-1 --days 10
 amd set 001 epic sprint-1              # refused unless the ticket is sized
 amd group start sprint-1               # one way: no route back to pending
 amd group                              # tickets and points per epic and sprint
 amd group empty checkout               # every ticket in it, back to backlog/ at once
+amd group rename checkout payments     # the folder and every ticket's epic
 amd todo 001 --no-branch && amd doing 001 && amd done 001
 ```
 
 The rules live in the board, not the window, so the command line gets them
-too: a sprint refuses an unsized ticket, and refuses to have one archived
-straight out of a started sprint.
+too: tickets move one column at a time, a sprint refuses an unsized ticket,
+and a started sprint takes nothing more and gives nothing back.
 
-`todo`/`doing` can each carry a WIP limit (`AMD_WIP_TODO`/`AMD_WIP_DOING`,
-or the board's own `.settings`). A move into an already-full column is
+`doing` carries a WIP limit: 2 unless changed (`amd wip-limit <n>`,
+`AMD_WIP_LIMIT`, or the board's own `.settings`; 0 turns it off). Todo is
+never limited, so work can't get stuck there. A move into a full doing is
 refused, naming the limit; `--force` overrides it. The limit only ever
-gates entry — moving a ticket *out* of an over-limit column always works.
+gates entry — moving a ticket *out* of doing always works.
 
 `cargo build -p amd-cli --no-default-features` builds this without the desktop
 board — the whole API, no windowing stack, which is what CI and scripts want.

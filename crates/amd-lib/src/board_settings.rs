@@ -23,19 +23,18 @@
 //!   hand-edited, the same as `branch-types`/`editor` in the *global*
 //!   settings file, just board-local rather than per-machine
 //!   because a lease policy is a team decision, not a personal preference.
-//! - `wip-todo`: the most tickets `todo/` may hold at once. Absent,
-//!   unparsable or `0` all mean unlimited — board-local for the same reason
-//!   as `lease-hours` (a team decision, not a personal one), but unlike it
-//!   there is a programmatic setter (`set_wip_limit`) — `amdui`'s Settings
-//!   modal writes it, not just a hand edit.
-//! - `wip-limit`: `doing/`'s own WIP limit, deliberately asymmetric with
-//!   `wip-todo` rather than a `wip-doing` twin of it. Absent or unparsable
-//!   defaults to **1**, not unlimited — a queue of more than one ticket
+//! - `wip-todo`: **ignored** (ticket 083). Todo used to carry an optional
+//!   limit; a limit there as well as on doing could leave work stuck with
+//!   nowhere to go, so only doing is limited now. The key is still
+//!   recognised (it stays a documents-shaped key, below) so an old file
+//!   keeps loading, but nothing reads it.
+//! - `wip-limit`: `doing/`'s WIP limit — the only one. Absent or
+//!   unparsable defaults to **2**, not unlimited — a long queue of tickets
 //!   "in progress" at once is treated as the mistake, not the norm.
 //!   Explicit `0` is what turns it off, and is stored literally rather than
-//!   collapsed into "absent" the way `wip-todo`'s `0` is, precisely so the
-//!   two states (nobody set it; somebody deliberately disabled it) stay
-//!   distinguishable. `amd wip-limit <n>` is the CLI setter.
+//!   collapsed into "absent", precisely so the two states (nobody set it;
+//!   somebody deliberately disabled it) stay distinguishable. `amd
+//!   wip-limit <n>` is the CLI setter.
 //! - `commit`: whether a mutating command commits (and pushes) its own
 //!   change automatically — the audit trail for a dedicated, board-only
 //!   `{project}-tickets` repository, which has nothing else in it for a
@@ -86,6 +85,8 @@ const LEASE_HOURS: &str = "lease-hours";
 const DEFAULT_LEASE_HOURS: f64 = 8.0;
 const WIP_TODO: &str = "wip-todo";
 const WIP_LIMIT: &str = "wip-limit";
+/// Doing's WIP limit when nobody has set one.
+pub const DEFAULT_WIP_LIMIT: u32 = 2;
 const REPOS: &str = "repos";
 const AUTO_COMMIT: &str = "commit";
 
@@ -207,63 +208,45 @@ impl BoardSettings {
             .unwrap_or(DEFAULT_LEASE_HOURS)
     }
 
-    /// The most tickets `column` may hold at once — `AMD_WIP_TODO`/
-    /// `AMD_WIP_LIMIT`, then this board's own `.settings`, then a
-    /// column-specific default. Only `Column::Todo`/`Column::Doing` can
-    /// carry a limit; anything else always reads as unlimited, matching the
-    /// ticket's own scope.
-    ///
-    /// **Todo and Doing resolve an absent/unparsable value differently, on
-    /// purpose.** Todo falls back to unlimited, same as it always has.
-    /// Doing falls back to **1** — deliberately asymmetric, per the ticket
-    /// that added this: a queue of more than one "in progress" ticket is
-    /// the thing worth naming a default against, todo isn't. Explicit `0`
-    /// still means "off" for both, but only Doing needs to store it
-    /// literally to tell "somebody set it to 0" apart from "nobody set it" —
-    /// Todo's two absent-like states (missing, or `0`) mean the same thing
-    /// anyway, so they don't need to stay distinguishable.
+    /// The most tickets `column` may hold at once. Only doing is ever
+    /// limited (ticket 083): `AMD_WIP_LIMIT`, then this board's own
+    /// `.settings` `wip-limit`, then [`DEFAULT_WIP_LIMIT`]. Explicit `0`
+    /// means "off". Todo, backlog and done always read as unlimited — a
+    /// limit on todo as well could leave work stuck with nowhere to go, so
+    /// `wip-todo`/`AMD_WIP_TODO` are ignored.
     pub fn wip_limit(&self, column: Column) -> Option<u32> {
         match column {
-            Column::Todo => crate::settings::resolved("AMD_WIP_TODO", &self.config, WIP_TODO)
-                .and_then(|value| value.trim().parse::<u32>().ok())
-                .filter(|limit| *limit > 0),
             Column::Doing => {
                 let parsed = crate::settings::resolved("AMD_WIP_LIMIT", &self.config, WIP_LIMIT)
                     .and_then(|value| value.trim().parse::<u32>().ok());
                 match parsed {
                     Some(0) => None,
                     Some(limit) => Some(limit),
-                    None => Some(1),
+                    None => Some(DEFAULT_WIP_LIMIT),
                 }
             }
-            Column::Backlog | Column::Done => None,
+            Column::Backlog | Column::Todo | Column::Done => None,
         }
     }
 
-    /// Sets or clears `column`'s WIP limit in this board's own `.settings`.
-    /// This never touches `AMD_WIP_TODO`/`AMD_WIP_LIMIT` — an env var set at
-    /// all still wins over whatever this writes, same precedence
-    /// `wip_limit` already documents.
+    /// Sets or clears doing's WIP limit in this board's own `.settings`.
+    /// This never touches `AMD_WIP_LIMIT` — an env var set at all still
+    /// wins over whatever this writes, same precedence `wip_limit` already
+    /// documents.
     ///
-    /// For **Todo**, `None` or a limit of `0` both clear the key back to an
-    /// empty string, which `wip_limit`'s own parse chain already reads as
-    /// absent (unlimited) — no separate "unset" mechanism needed.
-    ///
-    /// For **Doing**, `0` is stored *literally* rather than collapsed into
-    /// clearing: `wip_limit` now treats an absent/unparsable value as `1`,
+    /// `0` is stored *literally* rather than collapsed into clearing:
+    /// `wip_limit` treats an absent/unparsable value as the default of 2,
     /// not unlimited, so `Some(0)` and `None` have to reach the file as
     /// different states for the read side to tell them apart.
     pub fn set_wip_limit(&mut self, column: Column, limit: Option<u32>) -> Result<()> {
         match column {
-            Column::Todo => {
-                let value = limit.filter(|l| *l > 0).map(|l| l.to_string());
-                self.config.set(WIP_TODO, value.as_deref().unwrap_or(""));
-                Ok(())
-            }
             Column::Doing => {
                 let value = limit.map(|l| l.to_string());
                 self.config.set(WIP_LIMIT, value.as_deref().unwrap_or(""));
                 Ok(())
+            }
+            Column::Todo => {
+                bail!("todo has no WIP limit: only doing is limited, so work can't get stuck")
             }
             Column::Backlog | Column::Done => {
                 bail!("{} has no WIP limit", column.as_str())
@@ -524,24 +507,24 @@ mod tests {
     }
 
     #[test]
-    fn wip_limit_defaults_to_unlimited_for_todo_and_one_for_doing() {
+    fn wip_limit_defaults_to_two_for_doing_and_never_limits_todo() {
         let dir = tempfile::tempdir().unwrap();
         let settings = load(&board(dir.path()));
         assert_eq!(settings.wip_limit(Column::Todo), None);
-        assert_eq!(settings.wip_limit(Column::Doing), Some(1));
+        assert_eq!(settings.wip_limit(Column::Doing), Some(2));
     }
 
     #[test]
-    fn wip_limit_reads_the_board_setting_per_column() {
+    fn a_todo_limit_left_in_the_settings_is_ignored() {
         let dir = tempfile::tempdir().unwrap();
         let board = board(dir.path());
         let mut settings = load(&board);
         settings.config.set(WIP_TODO, "3");
         settings.save(&board).unwrap();
-        assert_eq!(load(&board).wip_limit(Column::Todo), Some(3));
+        assert_eq!(load(&board).wip_limit(Column::Todo), None);
         assert_eq!(
             load(&board).wip_limit(Column::Doing),
-            Some(1),
+            Some(2),
             "still defaults"
         );
     }
@@ -561,23 +544,12 @@ mod tests {
     }
 
     #[test]
-    fn wip_limit_ignores_zero_and_unparsable_values_for_todo() {
-        let dir = tempfile::tempdir().unwrap();
-        let board = board(dir.path());
-        let mut settings = load(&board);
-        settings.config.set(WIP_TODO, "0");
-        assert_eq!(settings.wip_limit(Column::Todo), None);
-        settings.config.set(WIP_TODO, "not a number");
-        assert_eq!(settings.wip_limit(Column::Todo), None);
-    }
-
-    #[test]
-    fn wip_limit_for_doing_treats_unparsable_as_absent_defaulting_to_one() {
+    fn wip_limit_for_doing_treats_unparsable_as_absent_defaulting_to_two() {
         let dir = tempfile::tempdir().unwrap();
         let board = board(dir.path());
         let mut settings = load(&board);
         settings.config.set(WIP_LIMIT, "not a number");
-        assert_eq!(settings.wip_limit(Column::Doing), Some(1));
+        assert_eq!(settings.wip_limit(Column::Doing), Some(2));
     }
 
     #[test]
@@ -619,30 +591,17 @@ mod tests {
         settings.save(&board).unwrap();
         assert_eq!(
             load(&board).wip_limit(Column::Doing),
-            Some(1),
+            Some(2),
             "clearing falls back to the default, not unlimited"
         );
     }
 
     #[test]
-    fn set_wip_limit_none_clears_it_back_to_unlimited() {
-        let dir = tempfile::tempdir().unwrap();
-        let board = board(dir.path());
-        let mut settings = load(&board);
-        settings.set_wip_limit(Column::Todo, Some(2)).unwrap();
-        settings.save(&board).unwrap();
-        assert_eq!(load(&board).wip_limit(Column::Todo), Some(2));
-
-        let mut settings = load(&board);
-        settings.set_wip_limit(Column::Todo, None).unwrap();
-        settings.save(&board).unwrap();
-        assert_eq!(load(&board).wip_limit(Column::Todo), None);
-    }
-
-    #[test]
-    fn set_wip_limit_refuses_backlog_and_done() {
+    fn set_wip_limit_refuses_every_column_but_doing() {
         let dir = tempfile::tempdir().unwrap();
         let mut settings = load(&board(dir.path()));
+        let err = settings.set_wip_limit(Column::Todo, Some(2)).unwrap_err();
+        assert!(err.to_string().contains("only doing is limited"), "{err}");
         assert!(settings.set_wip_limit(Column::Backlog, Some(1)).is_err());
         assert!(settings.set_wip_limit(Column::Done, Some(1)).is_err());
     }

@@ -845,11 +845,11 @@ impl BoardApp {
     fn save_wip_limits(&mut self) {
         let board = &self.repos[self.backlog_repo].board;
         let mut settings = crate::board_settings::load(board);
-        let todo = self.wip_todo_input.trim().parse().ok();
         let doing = self.wip_doing_input.trim().parse().ok();
+        // Only doing is limited now (ticket 083); the todo field is
+        // ignored until this board is replaced (ticket 084).
         let outcome = settings
-            .set_wip_limit(Column::Todo, todo)
-            .and_then(|()| settings.set_wip_limit(Column::Doing, doing))
+            .set_wip_limit(Column::Doing, doing)
             .and_then(|()| settings.save(board));
         if let Err(err) = outcome {
             self.status = Some(format!("{err}"));
