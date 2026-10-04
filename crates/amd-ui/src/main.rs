@@ -1,12 +1,9 @@
 //! amdui — the agile-md desktop board.
 //!
 //! The same window `amd gui` opens, with a name of its own so it can be
-//! launched the way an app is launched: from a dock, a runner, a shortcut, or
-//! just by typing `amdui`. Everything it does goes through the library, so the
-//! command line and the board remain one implementation.
-//!
-//! This binary exists only when the `gui` feature is on (see `required-features`
-//! in Cargo.toml), which is why nothing here is behind a `cfg`.
+//! launched the way an app is launched: from a dock, a runner, a shortcut,
+//! or just by typing `amdui`. Everything it does goes through the library,
+//! so the command line and the board remain one implementation.
 
 use std::process::ExitCode;
 
@@ -22,7 +19,8 @@ Options:
 The board resolves the current project from where it's launched (a plain
 directory holding a project's sibling repos, or a repo inside one), plus
 whatever else that project has registered — `amd register`/`amd deregister`
-manage that. `amd` is the command line, `amd gui` opens this same window.";
+manage that. Launched from anywhere else, it opens the board it showed last.
+`amd` is the command line, `amd gui` opens this same window.";
 
 fn main() -> ExitCode {
     // Deliberately no clap: a window takes no arguments, and the two flags
@@ -44,14 +42,6 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-
-    match agile_md::gui::run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            // Matches `amd`'s `amd: {err:#}`, so a failure reads the same
-            // whichever front end hit it.
-            eprintln!("amdui: {err:#}");
-            ExitCode::FAILURE
-        }
-    }
+    amd_ui::run();
+    ExitCode::SUCCESS
 }

@@ -12,6 +12,7 @@ mod render;
 mod value;
 
 use std::collections::BTreeMap;
+use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Write};
@@ -777,14 +778,24 @@ fn cmd_link(board: &Board, reference: &str, to: &[String], one_way: bool) -> Res
     Ok(())
 }
 
-#[cfg(feature = "gui")]
+/// Opens the desktop board: the `amdui` binary installed beside this one,
+/// or else the first on `PATH`. The board is its own program (Tauri), so
+/// `amd` carries no window stack (ticket 084).
 fn cmd_gui() -> Result<()> {
-    agile_md::gui::run()
-}
-
-#[cfg(not(feature = "gui"))]
-fn cmd_gui() -> Result<()> {
-    bail!("this build has no desktop board — rebuild with --features gui")
+    let beside = env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("amdui")))
+        .filter(|path| path.is_file());
+    let program = beside.unwrap_or_else(|| PathBuf::from("amdui"));
+    match Command::new(&program).status() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => bail!("amdui exited with {status}"),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => bail!(
+            "the desktop board isn't installed: amdui ships with amd — \
+             run install.sh again, or build it from a clone (see the README)"
+        ),
+        Err(err) => Err(err).context("starting amdui"),
+    }
 }
 
 /// Move a ticket and say so. The wording is the CLI's, not the library's —

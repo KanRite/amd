@@ -14,16 +14,8 @@ license.workspace = true
 name = "amd"
 path = "src/main.rs"
 
-[features]
-# `amd gui` opens the board from the terminal, so the CLI binary carries it —
-# as it did before the split, because phase 2 preserves behaviour. Build with
-# `-p amd-cli --no-default-features` for a CLI with no windowing stack.
-#
-# Making `amd gui` exec the `amdui` binary instead would take egui out of this
-# crate entirely, but it would also mean a prebuilt install that ships only
-# `amd` loses the board — so that trade is packaging's to make, not phase 2's.
-default = ["gui"]
-gui = ["agile-md/gui"]
+# No window stack here: `amd gui` launches the `amdui` binary (ticket 084),
+# which install.sh and the release ship beside `amd`.
 
 [dependencies]
 agile-md.workspace = true

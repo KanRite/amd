@@ -1,0 +1,291 @@
+//! Epics: named containers hanging off the backlog.
+//!
+//! The layout is `amd`'s, so `amd group list` and the board see the same
+//! epics: an epic is a directory `tasks/backlog/<name>/` described by a
+//! `_group.md` inside it, and each ticket filed under it lives in that
+//! directory with `epic: "<name>"` in its frontmatter.
+
+use crate::Column;
+
+/// Where a ticket sits: which repository's board, a column, and for the
+/// backlog optionally an epic. An empty `repo` means the board's own
+/// (primary) repository.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct Place {
+    #[serde(default)]
+    pub repo: String,
+    pub column: Column,
+    pub epic: Option<String>,
+}
+
+impl Place {
+    pub fn column(column: Column) -> Place {
+        Place {
+            repo: String::new(),
+            column,
+            epic: None,
+        }
+    }
+
+    pub fn epic(name: &str) -> Place {
+        Place {
+            repo: String::new(),
+            column: Column::Backlog,
+            epic: Some(name.to_string()),
+        }
+    }
+
+    /// The same place on another repository's board.
+    pub fn in_repo(mut self, repo: &str) -> Place {
+        self.repo = repo.to_string();
+        self
+    }
+}
+
+/// Whether a ticket may be dragged from `from` to `to`.
+///
+/// The backlog is the default container, and each epic is another container
+/// at the same level, so every one of them feeds todo:
+///
+/// - between columns, one step at a time;
+/// - from the loose backlog into an epic, and from an epic back out to it;
+/// - from an epic straight on to todo, and from todo back into an epic;
+/// - never from one repository's board to another's (as in `amd`).
+///
+/// An epic's ticket cannot skip ahead to doing or done, nor go straight into
+/// another epic.
+pub fn can_move(from: &Place, to: &Place) -> bool {
+    if from.repo != to.repo {
+        return false;
+    }
+    let backlog_level = |c: Column| matches!(c, Column::Backlog | Column::Todo);
+    match (&from.epic, &to.epic) {
+        (None, None) => from.column.can_move_to(to.column),
+        (None, Some(_)) => backlog_level(from.column),
+        (Some(_), None) => backlog_level(to.column),
+        (Some(_), Some(_)) => false,
+    }
+}
+
+/// The two kinds of container `amd` keeps in the backlog: an epic is a body
+/// of work, a sprint a slice of time.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum GroupKind {
+    #[default]
+    Epic,
+    Sprint,
+}
+
+/// A sprint's length when nobody says otherwise (`amd`'s default).
+pub const DEFAULT_SPRINT_DAYS: u32 = 14;
+
+/// What the sprint rules need to know about a container.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupState {
+    pub kind: GroupKind,
+    pub started: bool,
+}
+
+impl GroupState {
+    fn started_sprint(self) -> bool {
+        self.kind == GroupKind::Sprint && self.started
+    }
+}
+
+/// The sprint rules, on top of [`can_move`]:
+///
+/// - a ticket needs points before it can go into a sprint (as `amd` says,
+///   an unsized ticket makes a sprint's total a lie);
+/// - a started sprint is a commitment: no ticket can be added to it, and
+///   none can go back from it to the backlog — moving on to todo is fine.
+///
+/// `from_group` and `to_group` describe the containers named by the places'
+/// `epic`, if any; `ticket` names the ticket in messages.
+pub fn sprint_rule(
+    from: &Place,
+    to: &Place,
+    from_group: Option<GroupState>,
+    to_group: Option<GroupState>,
+    has_points: bool,
+    ticket: &str,
+) -> Result<(), String> {
+    if let (Some(group), Some(name)) = (to_group, &to.epic)
+        && group.kind == GroupKind::Sprint
+    {
+        if group.started {
+            return Err(format!(
+                "{name} has started: no more tickets can be added to it."
+            ));
+        }
+        if !has_points {
+            return Err(format!("{ticket} needs points before it can go in {name}."));
+        }
+    }
+    if let (Some(group), Some(name)) = (from_group, &from.epic)
+        && group.started_sprint()
+        && to.column == Column::Backlog
+    {
+        return Err(format!(
+            "{name} has started: its tickets can only move on to todo."
+        ));
+    }
+    Ok(())
+}
+
+/// Whether a ticket's `points:` value is a usable size (a number, 0 or more).
+pub fn has_points(points: &str) -> bool {
+    points.trim().parse::<f64>().is_ok_and(|p| p >= 0.0)
+}
+
+/// Picks a colour (an index into a palette of `palette` colours) for each
+/// epic, in the order they are shown. Each epic's colour comes from its name,
+/// so it stays put as other epics come and go — except that an epic never
+/// shares a colour with the one directly above it: on a clash it takes the
+/// next colour along. Neighbouring epics therefore always differ.
+pub fn colours(names: &[String], palette: usize) -> Vec<usize> {
+    let mut out: Vec<usize> = Vec::with_capacity(names.len());
+    for name in names {
+        let mut colour = (fnv1a(&name.to_lowercase()) % palette.max(1) as u64) as usize;
+        if palette > 1 && out.last() == Some(&colour) {
+            colour = (colour + 1) % palette;
+        }
+        out.push(colour);
+    }
+    out
+}
+
+/// FNV-1a: a fixed hash, so a name maps to the same colour on every run and
+/// every Rust version (std's hasher makes no such promise).
+fn fnv1a(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn neighbouring_epics_never_share_a_colour() {
+        // Many epics, including ones whose names hash alike.
+        let many: Vec<String> = (0..200).map(|i| format!("Epic {i}")).collect();
+        for palette in [2, 3, 6] {
+            let c = colours(&many, palette);
+            assert!(
+                c.windows(2).all(|w| w[0] != w[1]),
+                "palette {palette}: {c:?}"
+            );
+            assert!(c.iter().all(|&i| i < palette));
+        }
+        // Same name twice in a row (case aside) still alternates.
+        let c = colours(&names(&["Same", "same", "SAME"]), 6);
+        assert!(c.windows(2).all(|w| w[0] != w[1]), "{c:?}");
+    }
+
+    #[test]
+    fn an_epic_keeps_its_colour_when_others_change() {
+        let before = colours(&names(&["UserInterface", "UserPreferences"]), 6);
+        let after = colours(&names(&["Backend", "UserInterface", "UserPreferences"]), 6);
+        // The first epic's colour depends only on its name.
+        assert_eq!(colours(&names(&["UserInterface"]), 6)[0], before[0]);
+        assert_eq!(colours(&names(&["Backend"]), 6)[0], after[0]);
+    }
+
+    #[test]
+    fn a_palette_of_one_is_not_a_panic() {
+        assert_eq!(colours(&names(&["A", "B"]), 1), [0, 0]);
+        assert_eq!(colours(&names(&["A"]), 0), [0]);
+    }
+
+    #[test]
+    fn sprints_need_points_and_lock_once_started() {
+        let backlog = Place::column(Column::Backlog);
+        let todo = Place::column(Column::Todo);
+        let sprint = Place::epic("Sprint 1");
+        let pending = Some(GroupState {
+            kind: GroupKind::Sprint,
+            started: false,
+        });
+        let started = Some(GroupState {
+            kind: GroupKind::Sprint,
+            started: true,
+        });
+        let epic = Some(GroupState {
+            kind: GroupKind::Epic,
+            started: false,
+        });
+
+        // Into a pending sprint: only with points.
+        assert!(sprint_rule(&backlog, &sprint, None, pending, true, "005").is_ok());
+        let err = sprint_rule(&backlog, &sprint, None, pending, false, "005").unwrap_err();
+        assert_eq!(err, "005 needs points before it can go in Sprint 1.");
+        // Epics need no points.
+        assert!(sprint_rule(&backlog, &Place::epic("UI"), None, epic, false, "005").is_ok());
+
+        // A started sprint takes nothing more, even sized tickets, from anywhere.
+        let err = sprint_rule(&backlog, &sprint, None, started, true, "005").unwrap_err();
+        assert!(
+            err.contains("has started: no more tickets can be added"),
+            "{err}"
+        );
+        assert!(sprint_rule(&todo, &sprint, None, started, true, "005").is_err());
+        // ...and gives nothing back to the backlog, but its tickets go on to todo.
+        let err = sprint_rule(&sprint, &backlog, started, None, true, "005").unwrap_err();
+        assert!(err.contains("can only move on to todo"), "{err}");
+        assert!(sprint_rule(&sprint, &todo, started, None, true, "005").is_ok());
+        // A pending sprint lets tickets back out.
+        assert!(sprint_rule(&sprint, &backlog, pending, None, true, "005").is_ok());
+    }
+
+    #[test]
+    fn points_are_checked() {
+        assert!(has_points("3") && has_points(" 0.5 ") && has_points("0"));
+        assert!(!has_points("") && !has_points("lots") && !has_points("-1"));
+    }
+
+    #[test]
+    fn moves_in_and_out_of_epics() {
+        let backlog = Place::column(Column::Backlog);
+        let todo = Place::column(Column::Todo);
+        let e1 = Place::epic("One");
+        let e2 = Place::epic("Two");
+        assert!(can_move(&backlog, &e1));
+        assert!(can_move(&e1, &backlog));
+        assert!(
+            can_move(&e1, &todo),
+            "an epic feeds todo like the backlog does"
+        );
+        assert!(
+            can_move(&todo, &e1),
+            "and todo can send a ticket back into it"
+        );
+        assert!(
+            !can_move(&e1, &Place::column(Column::Doing)),
+            "no skipping ahead"
+        );
+        assert!(!can_move(&e1, &Place::column(Column::Done)));
+        assert!(!can_move(&Place::column(Column::Doing), &e1));
+        assert!(!can_move(&e1, &e2));
+        assert!(can_move(&backlog, &todo) && !can_move(&backlog, &Place::column(Column::Doing)));
+    }
+
+    #[test]
+    fn never_between_repositories() {
+        let here = Place::column(Column::Backlog).in_repo("amd-tickets");
+        let there = Place::column(Column::Todo).in_repo("amd-site");
+        assert!(!can_move(&here, &there));
+        assert!(!can_move(&here, &Place::epic("UI").in_repo("amd-site")));
+        assert!(can_move(
+            &here,
+            &Place::column(Column::Todo).in_repo("amd-tickets")
+        ));
+    }
+}

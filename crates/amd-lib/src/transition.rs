@@ -325,6 +325,29 @@ pub fn edit_ticket(
     Ok(outcome)
 }
 
+/// Save a ticket's whole text, as an editor showing the raw file does —
+/// hash-checked against `expected` (taken when the editor opened) and
+/// auto-committed like `amd edit`. See [`Task::set_text`] for the checks.
+pub fn save_text(
+    board: &Board,
+    task: &Task,
+    expected: crate::task::ContentHash,
+    text: &str,
+) -> Result<Outcome> {
+    let (id_display, title) = (task.id_display(), task.title());
+    let ((), warning) = with_auto_commit(board, "edit", &id_display, &title, || {
+        task.set_text(expected, text)
+    })?;
+    let mut outcome = Outcome::default();
+    outcome
+        .events
+        .push(Event::Info(format!("saved {id_display}")));
+    if let Some(warning) = warning {
+        outcome.events.push(Event::Warn(warning));
+    }
+    Ok(outcome)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

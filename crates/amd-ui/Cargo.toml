@@ -1,5 +1,9 @@
-# The desktop board: `amdui`. Today it is a few lines over agile_md::gui;
-# phase 4 moves the board itself here and amd-lib loses egui entirely.
+# The desktop board: `amdui`. A Tauri window over the Leptos front end in
+# crates/amd-ui-web; every change it makes goes through amd-lib, so the board
+# and the command line are one implementation (ticket 084, docs/adr/0004).
+#
+# Building it needs the front end built first (`trunk build --release` in
+# crates/amd-ui-web), since the window's pages are embedded at compile time.
 [package]
 name = "amd-ui"
 description = "The agile-md desktop board"
@@ -8,11 +12,34 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
+publish = false
+
+[lib]
+name = "amd_ui"
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
 name = "amdui"
 path = "src/main.rs"
 
+[features]
+# The window's pages are the ones built into the binary, so a plain `cargo
+# build` (install.sh, the release) makes a working board. `cargo tauri dev`
+# turns this off to serve them live from `trunk serve` instead.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
 [dependencies]
-agile-md = { workspace = true, features = ["gui"] }
+agile-md.workspace = true
+amd-ui-model.workspace = true
 anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

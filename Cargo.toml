@@ -1,11 +1,20 @@
-# A workspace of three crates: one library, two interfaces (docs/adr/0004).
+# One library, two interfaces (docs/adr/0004): amd-lib, the `amd` command
+# line, and the `amdui` desktop board — a Tauri backend (amd-ui) with a
+# Leptos front end compiled to WebAssembly (amd-ui-web) and the types the two
+# share (amd-ui-model).
 #
 # The boundary is enforced here rather than by review — amd-lib does not list
-# clap, inquire or egui, so a front-end dependency reaching into the library
-# fails to compile rather than passing review.
+# clap, inquire, Tauri or Leptos, so a front-end dependency reaching into the
+# library fails to compile rather than passing review.
 [workspace]
 resolver = "3"
-members = ["crates/amd-lib", "crates/amd-cli", "crates/amd-ui"]
+members = [
+    "crates/amd-lib",
+    "crates/amd-cli",
+    "crates/amd-ui",
+    "crates/amd-ui-model",
+    "crates/amd-ui-web",
+]
 
 [workspace.package]
 version = "4.0.0"
@@ -16,25 +25,31 @@ license = "MIT"
 
 [workspace.dependencies]
 agile-md = { path = "crates/amd-lib" }
+amd-ui-model = { path = "crates/amd-ui-model" }
 anyhow = "1"
 clap = { version = "4", features = ["derive", "string"] }
 clap_complete = "4"
 deunicode = "1.6.2"
-egui = "0.36"
-eframe = { version = "0.36", default-features = false, features = [
-    "default_fonts",
-    "wgpu",
-    "wayland",
-    "x11",
-] }
-egui_kittest = "0.36"
 inquire = "0.9"
 libc = "0.2.189"
 minijinja = "2"
 richrs = "0.2"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tempfile = "3"
 time = { version = "0.3", features = ["formatting", "parsing", "local-offset", "macros"] }
+
+# The desktop board (crates/amd-ui*).
+tauri = "2.12"
+tauri-build = "2.7"
+pulldown-cmark = { version = "0.13", default-features = false }
+leptos = { version = "0.8", features = ["csr"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+web-sys = "0.3"
+console_error_panic_hook = "0.1"
 
 [profile.release]
 lto = "thin"

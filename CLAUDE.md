@@ -16,18 +16,20 @@ MiniJinja templates**.
 
 ## Layout
 
-A **cargo workspace of three crates** (ADR-0004), so the command line and the
-desktop board share one implementation of the board and the boundary is
-enforced by the dependency graph rather than by review:
+A **cargo workspace: one library, two interfaces** (ADR-0004), so the command
+line and the desktop board share one implementation of the board and the
+boundary is enforced by the dependency graph rather than by review:
 
 ```
-crates/amd-lib/   the library (`agile_md`) — everything that touches the board
-crates/amd-cli/   → binary `amd`    (clap, inquire, the $EDITOR scratch file)
-crates/amd-ui/    → binary `amdui`  (egui/eframe)
+crates/amd-lib/       the library (`agile_md`) — everything that touches the board
+crates/amd-cli/       → binary `amd`    (clap, inquire, the $EDITOR scratch file)
+crates/amd-ui/        → binary `amdui`  (Tauri 2: the window and its commands)
+crates/amd-ui-web/    the board's page  (Leptos 0.8, CSR, built to wasm by Trunk)
+crates/amd-ui-model/  types and pure rules amd-ui and amd-ui-web share (wasm-safe)
 ```
 
 The library keeps the crate name `agile_md`, so every `use` in the workspace is
-unchanged. Still to move (docs/workspace-split.md): `gui/` belongs in amd-ui.
+unchanged. The desktop board is described under "The desktop board" below.
 
 The terminal board (`crates/amd-tui/`, tickets 080/081) and the Tauri spike
 (`crates/amd-tauri/`, ticket 078) were removed in ticket 082: the desktop
@@ -47,15 +49,16 @@ redundant. Their history is in git if it is ever wanted again.
   prints** — a front end that owns the screen can't have the library writing
   over it — so it returns ordered `Event::Info`/`Event::Warn`s, which the CLI
   prints on stdout/stderr (`report()` in `main.rs`). The desktop board's
-  `apply()` does *not* use it yet (it takes a lease but neither branches nor
-  commits) — a known gap, not a design choice. It also holds `create_ticket`/
-  `edit_ticket` (what `amd new` and a field edit do, with the auto-commit),
-  which the desktop board's own save path still duplicates.
+  `move_ticket` uses `move_to` (lease and commit) but not `enter_todo`: the
+  board never switches branches, because `enter_todo` would switch the
+  *tickets* repository's branch (ticket 053). It also holds `create_ticket`/
+  `edit_ticket`/`save_text` (what `amd new`, a field edit and the board's
+  editor do, with the auto-commit).
 - `crates/amd-lib/src/richtext.rs` — the line-oriented body rules with no
-  drawing in them: `classify`, `continuation`, `toggle`, `spans`. `gui/richtext.rs`
-  draws them in egui; any other front end's editor follows the same rules.
-- `crates/amd-lib/src/model.rs` — the egui-free board model lifted out of
-  `gui/`: `Card`, `RepoBoard`, `read_lanes`/`read_groups`, `card_visible`/
+  drawing in them: `classify`, `continuation`, `toggle`, `spans`. Any front
+  end's line editor follows them (the desktop board edits rich text in the
+  page instead, through `amd-ui-model::rich`).
+- `crates/amd-lib/src/model.rs` — the front-end-free board model: `Card`, `RepoBoard`, `read_lanes`/`read_groups`, `card_visible`/
   `card_in_group`, `rank_between`, `splice_body`, and `load_repos()` (the
   current project's board plus every declared, registered repository). The
   desktop board reads tickets through it, as any other front end should.
@@ -63,9 +66,6 @@ redundant. Their history is in git if it is ever wanted again.
   render, touching nothing) and `Draft::write` (file, child link, backlinks).
   That gap is what lets the CLI put the rendered ticket in `$EDITOR` before
   anything is written, while the desktop board writes what it already has.
-- `crates/amd-lib/src/gui/` — the desktop board (feature `gui`, on by default): egui/eframe,
-  the same stack as rustmark. `richtext.rs` edits a body line by line;
-  `settings.rs` holds the text size and colour scheme.
 - `crates/amd-lib/src/group.rs` — epics and sprints: the folders a backlog is divided into.
 - `crates/amd-lib/src/settings.rs` — the shared config file, which keeps keys it does not
   recognise so one writer cannot delete another's.
@@ -140,11 +140,9 @@ redundant. Their history is in git if it is ever wanted again.
   the only thing that shells out to `gh api` rather than plain `gh repo`/
   `git`. Needs the branch to exist first (protection is set after the
   first commit is pushed, not before).
-- `crates/amd-ui/src/main.rs` — the `amdui` binary: ~50 lines that call
-  `agile_md::gui::run()`, so the board is something you launch rather than a
-  subcommand you remember. `amd gui` stays — it's the same call, and it's what
-  a prebuilt install has (see below), which is why `amd-cli` keeps a `gui`
-  feature (on by default) rather than shedding egui entirely.
+- `crates/amd-ui/` — the `amdui` binary; see "The desktop board" below.
+  `amd gui` launches it (`cmd_gui`: the `amdui` beside `amd`, else on
+  `PATH`), so `amd` carries no window or web stack at all.
 - `crates/amd-lib/src/board.rs` — board discovery (`<repo-root>/${AMD_DIR:-tasks}`), the
   `Column` enum, task lookup, moves, `create` (scaffolding — the interactive
   "create one?" prompt itself is `ensure_board()`, CLI-owned).
@@ -154,11 +152,12 @@ redundant. Their history is in git if it is ever wanted again.
   doesn't become a word). `points` is fixed sprint-planning Fibonacci
   (`VALID_POINTS`: `1 2 3 5 8 13`), enforced once, in `validate_points`,
   called from both write paths (`set_points`, the CLI's `amd set points`;
-  `apply_edit`, the GUI editor's combined save) so neither can produce an
-  invalid value — empty always allowed, clears the field. Not
-  configurable: nobody asked for a board to pick its own scale, and a
-  fixed list is what makes the GUI's points field a dropdown
-  (`points_combo`, `gui/mod.rs`) rather than free text.
+  `apply_edit`, the combined field save; `set_text`, the desktop board's
+  whole-ticket save) so none can produce an invalid value — empty always
+  allowed, clears the field. Not configurable: nobody asked for a board to
+  pick its own scale, and a fixed list is what makes the board's points
+  field a dropdown (`amd_ui_model::ticket::VALID_POINTS`) rather than free
+  text.
 - `crates/amd-lib/src/templates.rs` — the MiniJinja `Environment`, built-in templates, board
   overrides, `TaskContext`, `required_extras`.
 - `crates/amd-cli/src/form.rs` — every interactive prompt, built on `inquire` (text, select,
@@ -210,7 +209,7 @@ redundant. Their history is in git if it is ever wanted again.
   too, like any other ordinary command — it's only the *path* `amd
   register` defaults to when none is given that still resolves via
   `git::repo_root()`, unchanged, since that specifically means "the repo
-  I'm standing in") and the GUI's `BoardApp::load()`. Not used by `amd init
+  I'm standing in") and the desktop board's `model::load_repos()`. Not used by `amd init
   --local-only`, for the same "repo I'm standing in" reason.
   - **Outside any git repository at all**: looks at the current
     directory's own immediate children for exactly one that's both a git
@@ -456,7 +455,7 @@ redundant. Their history is in git if it is ever wanted again.
   escape sequences have no business in a pipe. Note this is why the board moved
   off `richrs::Table` — a table measures cell widths and would count the escape
   bytes, misaligning every border. (`richrs` draws the one-shot `amd board`
-  printout only; the interactive board is egui.)
+  printout only; the interactive board is `amdui`.)
 - A rendering failure falls back to plain output rather than erroring: never
   let cosmetics stop someone seeing the board.
 
@@ -551,10 +550,10 @@ project, into one `amdui` window:
   real name — an alias and a real name must never be ambiguous with each
   other. **Narrower surface than it might sound**: the only two places that
   ever take a repository name as free-typed input are `amd deregister` and
-  `amd alias` itself — `BoardApp::load()`'s own repo-resolution loop
-  (`gui/mod.rs`) only ever sees a project's *declared* names (git-tracked,
-  never an alias), so it needs no resolution step at all.
-- **`BoardApp::load()` (`gui/mod.rs`) cross-references the two.** `Board::discover()`
+  `amd alias` itself — `model::load_repos()`'s own repo-resolution loop
+  only ever sees a project's *declared* names (git-tracked, never an
+  alias), so it needs no resolution step at all.
+- **`model::load_repos()` cross-references the two.** `Board::discover()`
   finds the current project (a hard error now if none is found — `amdui`
   operates on exactly one project, never a cross-project stack); its own
   board is always `repos[0]`. Each declared name with a registered,
@@ -592,10 +591,12 @@ project, into one `amdui` window:
 ## Commands
 
 ```bash
+(cd crates/amd-ui-web && trunk build --release)   # the board's page, before anything builds amd-ui
 cargo test                          # the whole workspace
-cargo build -p amd-cli --no-default-features   # the CLI with no windowing or terminal-UI stack
+cargo build -p amd-cli              # the CLI alone: no window or web stack
 bash tests/test.sh
 cargo clippy --all-targets --all-features -- -D warnings
+cargo clippy -p amd-ui-web -p amd-ui-model --target wasm32-unknown-unknown -- -D warnings
 cargo fmt --all --check
 bash install.sh [--dir DIR] [--version vX.Y.Z] [--from-source]
 ```
@@ -720,286 +721,57 @@ changes):
   `todo` is a gate on the existing column or a nested one). Nothing below
   describes any of that; it isn't shipped.
 
-## The desktop board (`crates/amd-lib/src/gui/`)
+## The desktop board (`crates/amd-ui*`, ticket 084)
 
-- egui/eframe, the same stack as rustmark, so the two look alike and a ticket
-  body could be handed to it. `App::ui` takes a `&mut Ui`, not a context —
-  0.36 moved panels onto `Ui`.
-- **`egui_kittest` (dev-dependency, pinned to the same `0.36` line as
-  `egui`/`eframe` — a version mismatch pulls in two copies of egui and fails
-  to compile) drives the real widget tree headless, through its
-  accessibility tree — no display, no compositor, no `xdotool`.** Added after
-  the GNOME screenshot workflow's `xdotool`/window-manager instability (first
-  logged against tickets 068/070, then blocking verification again for 069)
-  turned out to be a compositor input-guard window swallowing every
-  synthetic pointer event this session — not fixable from here, and not
-  something to keep working around by hand. `richtext.rs::interaction_tests`
-  and `gui::tests::the_default_draft_body_has_exactly_one_empty_hint_per_section`
-  are the first tests written against it; more GUI interaction bugs should
-  get a kittest test before (or instead of) a live click-through, the same
-  way a Rust bug gets a unit test before a manual repro.
-  - **`Harness::builder().build_ui_state(|ui, state| .., state)`** is the
-    shape used here — a plain `fn(ui, body, editing)` like `richtext::ui`
-    has no outside `eframe::App`, so `build_eframe` isn't needed.
-  - **Widget lookup walks the AccessKit tree**, the same one a screen reader
-    uses — which is what caught a *second* bug in ticket 071's own fix: the
-    first attempt painted the "click to write…" hint with `ui.painter()`
-    directly, which draws pixels and registers no accessibility node at all.
-    Invisible to a screen reader, and, for exactly the same reason,
-    invisible to `get_by_label_contains`. `Response::widget_info(|| ..)` is
-    what a custom (non-widget-macro) click target needs to attach a label by
-    hand — the fix, not a workaround for the test.
-  - **A query panics on more than one match** (`get_by_label_contains`,
-    `get_by_label`) — deliberately, so an ambiguous query is a test bug,
-    caught immediately, not a silent "clicked *something*". Test bodies pass
-    to `richtext::ui` are kept minimal and precise for exactly this reason:
-    the real New-ticket template has several blank lines, so asserting
-    against a copy of the *real* template needs `get_all_by_*` or a
-    deliberately trimmed fixture, not a single `get_by_*`.
-- **A blank (or otherwise empty) line in `richtext::ui` needs its own click
-  target, `empty_line_ui`, not a bare `Label::new(" ")` (ticket 071).** An
-  empty/near-empty `Label`'s own content defines its hit-box, so there was
-  effectively nothing to click — harmless while the "MD" raw-markdown
-  fallback existed (stuck on a blank line, switch modes and type there
-  instead), a hard block on writing a ticket body through the GUI at all
-  once ticket 069 removed that fallback. `empty_line_ui` claims a real,
-  full-width strip via `ui.allocate_exact_size` and paints a "click to
-  write…" hint so it reads as an entry point — see the `egui_kittest` bullet
-  above for the accessibility-label half of this fix. Shared by
-  `line_ui`'s empty-text case, `Kind::Blank`, and the fenced-content branch
-  (which calls it directly, never through `line_ui`/`spans()` — code must
-  never be interpreted as markdown).
-- **`DEFAULT_DRAFT_BODY` (`gui/mod.rs`) has exactly one empty click target
-  per section, not two stacked ones (ticket 072).** Once blank lines became
-  properly clickable (071), the New-ticket dialog's original body — two
-  blank lines under "## Notes", a blank line *and* the empty checklist item
-  under "## Acceptance criteria" — turned into two visually-identical
-  "click to write…" hints sitting back to back, found live by the user
-  through the (now-working) rich-text editor itself. Trimmed to one blank
-  line under Notes and the checklist item alone under Acceptance criteria,
-  with no leading or trailing blank line either (each was a third, isolated
-  stray hint). `gui::tests::the_default_draft_body_has_exactly_one_empty_hint_per_section`
-  counts the real rendered hints via `egui_kittest` rather than trusting the
-  literal by eye. The CLI's own `templates/ticket.md.jinja` keeps its extra
-  blank lines deliberately — opened in a real `$EDITOR`, they're free
-  spacing, not a stray clickable hint, so there's nothing there to fix.
-- **`continuation` treats plain prose as continuable too, not just lists
-  (ticket 074).** A checklist item could already run to several lines —
-  Enter opens the next `- [ ] ` — but `Kind::Text` fell through to
-  `continuation`'s `_ => None` arm, same as a heading or an empty line,
-  which stops editing rather than opening a new line. Pressing Enter after
-  a line of Notes prose now opens a blank line the same way a fresh Notes
-  section already does (`Kind::Text => Some(String::new())`); an empty line
-  still stops the chain, since `classify` only ever returns `Text` for a
-  non-blank one, so there's no separate emptiness guard to write. Headings
-  are deliberately unchanged. This is a stopgap, not the end state — see
-  `[[075-a-free-flowing-auto-expanding-text-area-for-notes]]` for the real
-  shape wanted (an actual auto-expanding multi-line text area for a
-  paragraph, not one `TextEdit::singleline` row per line with Enter
-  standing in for a line break), and why that's real design work, not a
-  toggle, against `richtext.rs`'s one-row-at-a-time editing model.
-- **There is no raw-markdown fallback any more (ticket 069) — `richtext::ui`
-  is the only way to edit a ticket body in `amdui`.** The "MD"/"RT" toggle
-  and the `TextEdit::multiline().code_editor()` branch are both gone from
-  `draft_ui`/`editor_ui`. That was only safe to do once `richtext::Kind`
-  actually covered what this board's own tickets use — confirmed directly,
-  not assumed, before the toggle came out:
-  - **Fenced code blocks and markdown tables span more than one line, which
-    a per-line, context-free `classify` can't see on its own** — see
-    `richtext.rs`'s own module doc for the reasoning. A fence's *content*
-    lines are tracked with a running `in_fence` flag inside `ui`'s own loop
-    (not `classify`, which stays pure and one-line), so a `- [ ]`-shaped
-    line typed inside a code block still renders as code, never as a
-    checkbox. Table rows classify and render individually
-    (`Kind::Table`, one bordered `egui::Frame::group` row each) rather than
-    being accumulated into one aligned grid across rows — a real grid needs
-    the same cross-line grouping a fence does, and a bordered row per line
-    already clears the actual bar ("rendered, not raw `Kind::Text`"),
-    without a second stateful-loop mechanism to get equally right.
-  - **Numbered lists** (`Kind::Numbered`) parse and continue like bullets do
-    — Enter after `"1. foo"` opens `"2. "`, not a repeat `"1. "`.
-  - **Inline spans** (`richtext::spans`, private to the module) — code
-    spans, `[[wikilinks]]`, `[text](url)` links, `**bold**`, `*italic*`/
-    `_italic_` — are parsed for *display only* and never fed back into the
-    source; an edited line is still a straight rewrite of that one line, so
-    nothing about this is lossy the way a real parse-and-regenerate editor
-    would be. A real `[text](url)` opens via `ui.hyperlink_to`; a
-    `[[wikilink]]` renders distinctly (hyperlink-coloured) but — since
-    nothing in `amdui` resolves a wikilink to another ticket, and nothing
-    did before this ticket either — clicking it does the same thing
-    clicking anywhere else on the line does: opens it for editing. Not a
-    dead link pretending to work, just not cross-ticket navigation this
-    pass didn't build.
-  - **Visual verification did not happen.** Eleven unit tests cover
-    `classify`/`continuation`/`spans` directly, including this project's
-    own real inline-markdown shapes (a table row copied from
-    `[[068-cli-markdown-template-and-gui-rich-text-ticket-edi]]`'s own
-    body), but nobody has looked at the rendered result in a live `amdui`
-    window — the `xdotool`/window-manager instability already logged
-    against tickets 068 and 070 recurred again this session, across
-    several freshly-launched windows, not just a one-off. Left for a real
-    eyes-on check once that workflow is behaving normally; until then,
-    treat the *rendering* (as opposed to the parsing, which is tested) as
-    unverified.
-- Two ways in, one `gui::run()`: the `amdui` binary and `amd gui`. Neither
-  needs a board — both resolve repositories through the registry, so the
-  window opens from anywhere.
-- Drops are collected during the frame and applied after it, so the UI never
-  mutates files mid-draw, and every one goes through `Board::move_task` or
-  `Board::set_epic` — the same calls the CLI makes. The GUI must never write a
-  task file itself.
-- `dnd_drag_source` senses drag only, so opening a ticket needs its own click
-  interaction over the card's rect.
-- Ordering is an `order` key, ranked fractionally: a card dropped between two
-  others takes the midpoint, so one drag rewrites one file. **It is read by the
-  board only** — `amd ls` still sorts by id, which is a real inconsistency.
-- Errors from a save go to the status line *behind* the modal, so a failure
-  reads as "the button does nothing". See ticket 025.
-- `BoardApp.identity` (`git::config`, resolved **once** at `load()`) is who
-  the badge on a leased card compares against — not re-resolved per frame or
-  per card, since egui redraws continuously and `git::config` shells out.
-  Dragging a card into Todo or Doing auto-takes a free lease the same way
-  `move_and_report` does on the CLI side; column moves and the editor's save
-  (`apply_edit`) inherit the actual refusal for free from
-  `Task::write_checked`/`Board::move_task` — the GUI only adds the
-  auto-take and the badge, not a second enforcement path.
-- **`Accent`** (`gui/settings.rs`) is a global colour, not a per-element
-  palette editor: an inventory of every `Color32`/`.visuals()` call in
-  `gui/mod.rs` found only two genuinely hardcoded colours (status-error
-  red, the lease-badge amber, both semantic — left untouched by design);
-  everything else already derives from `ui.visuals()`, so overriding
-  `Visuals::selection.bg_fill`/`hyperlink_color` via `ctx.all_styles_mut()`
-  (both light and dark styles, since `ThemePreference::System` can pick
-  either) reaches every one of them for free. `Accent::Default` applies no
-  override at all, leaving pre-ticket-039 behaviour exactly as it was.
-- **The Settings modal mixes personal and board-level state, on purpose.**
-  Text size/theme/accent are `GuiSettings` — personal, local, saved on
-  change. The WIP-limit fields below them are board-level
-  (`board_settings::set_wip_limit`, `backlog_repo`'s own `.settings`,
-  git-tracked and shared) — loaded fresh into
-  `wip_todo_input`/`wip_doing_input` each time the modal opens (same
-  load-on-open lifecycle `GroupDraft` uses), saved via a separate
-  before/after snapshot comparison from `GuiSettings`'s own, since they
-  write to a different file entirely. An empty or unparsable field parses
-  to `None`, which both fields tolerate with nothing further to validate —
-  but the two no longer *mean* the same thing left blank: `wip_todo_input`
-  blank still reads back as unlimited, `wip_doing_input` blank now reads
-  back as doing's own default of 1 (see the WIP-limits bullet above).
-- **The epic/sprint selector: a toggle, a dropdown, New/Delete — replaces
-  the old "Add epic"/"Add sprint" buttons and the old one-lane-per-group
-  Backlog layout.** `RepoBoard.selected_kind`/`selected_group` are per-repo
-  (each registered repo has its own independent groups, same reason
-  `groups` itself is per-repo); switching the Epic/Sprint toggle clears
-  `selected_group`, since a name from the other kind's list means nothing
-  once the dropdown stops listing it. "New" opens the existing
-  `GroupDraft` modal with `kind` taken from the toggle; "Delete" (disabled
-  when nothing's selected) calls `delete_group_now`, which — like
-  `empty_group_now` beside it — reports an `Err` to the status line rather
-  than a dialog. Visible on both views, not just Backlog, and not scoped
-  to `View::Backlog` the way the old buttons briefly were by mistake — see
-  the still-true reasoning in the next bullet.
-- **Selecting a group is a board-wide *soft* filter, not a hard hide, and
-  every card gets a membership checkbox.** With a group selected, every
-  card in every column — Backlog's now-single flat lane
-  (`column_ui(..., Column::Backlog, ...)`, not a per-group lane any more)
-  and the Board tab's `todo`/`doing`/`done` — renders a checkbox: checked
-  and full-opacity for a current member (`card_in_group`, which reads
-  `task.epic` in `backlog/` and `task.epic_meta()` elsewhere, mirroring
-  `Board::tasks_in_group`'s own split), unchecked and dimmed
-  (`ui.set_opacity(0.5)`) otherwise. Dimmed rather than hidden specifically
-  so a `doing`/`done` ticket can still be *added* to the selected group
-  from wherever it already sits — a hard hide would leave no checkbox left
-  to tick. Toggling calls `Board::set_epic` (safe from any column, per the
-  non-backlog branch above) via `BoardApp::toggle_membership`, which
-  replaced the old drag-a-card-onto-a-lane `refile` — that mechanism doesn't
-  exist any more now that groups don't get their own drop-target lane.
-  `group_header_ui` renders the selected group's own name/description/
-  points/edit/start/empty controls once, above the list, replacing what
-  used to be each lane's own header.
-- **The checkbox has to be a sibling of `dnd_drag_source`, not nested
-  inside it, and it needs a real label — both confirmed the hard way, live.**
-  A checkbox nested inside `dnd_drag_source`'s content closure never got a
-  clean click: `dnd_drag_source` senses `Sense::drag()` over its whole
-  rect, and the slightest pointer movement during a real click reads as a
-  drag starting. Moving the checkbox to a sibling position in the same
-  `ui.horizontal` fixed that. A *second*, independent issue surfaced after:
-  an empty-label checkbox's native hit box is small and is **not** enlarged
-  by wrapping it in `ui.add_sized` — egui sizes a `Checkbox` off
-  `ui.spacing().interact_size`, not off an external wrapper, so the extra
-  allocated space becomes dead space a click can miss into, hitting
-  neither the checkbox nor the card. A short label (`"in"`) fixed it for
-  real: the label is part of the same clickable atom as the box, which is
-  what actually gives a forgiving, unambiguous target — not a cosmetic
-  choice.
-- **The New-ticket and edit-ticket dialogs cover every standard field
-  (ticket 068)** — `tags`, `branch-type` (+ the `branch-name` it derives),
-  `parent`, `related` are now editable on both `Draft` (creation) and
-  `Editor` (existing tickets); `epic` is now editable on `Editor` too, not
-  just at creation; `assignee` is now editable on `Draft` too. Two
-  different write paths stayed different on purpose:
-  - **`Draft` → `create::Draft::prepare`/`NewTicket`** — unchanged
-    plumbing, just no longer hardcoding `branch_type`/`assignee`/
-    `parent`/`related`/`tags` to empty. Validation (unknown branch type,
-    unresolved parent/related ref) was already there for free.
-  - **`Editor` → `Task::apply_edit`/`EditFields`** — extended from
-    title/assignee/points/body to also take tags/branch-type/parent/
-    related, still **one write**: `parent`/`related` refs are resolved
-    against `board.find` (bailing before anything is written, same as
-    creation) and `branch-type` is validated and re-derives `branch-name`
-    from itself + the current title, all *before* `write_checked` runs —
-    the sequential-writes-against-one-stale-hash bug `apply_edit` exists to
-    prevent (see its own doc comment) would otherwise bite the moment a
-    second field setter tried to reuse the same captured hash.
-    Deliberately **not** reciprocal the way `amd link` is: unlike creation
-    (which calls `add_child_link`/`add_related` on the other tickets too),
-    editing `parent`/`related` from the GUI only rewrites *this* ticket's
-    frontmatter. Doing the reciprocal write safely would mean hash-checking
-    several files as one transaction, which nothing in this codebase does
-    today — a known, deliberate gap, not a half-built feature. `amd link`
-    remains the one path that updates both sides.
-  - **`epic` is on `Editor` now too, but it's not part of `apply_edit` at
-    all** — it goes through `Board::set_epic` (which can move the file
-    inside `backlog/`), the same call the membership checkbox already
-    makes, run as a second step in `save()` *after* `apply_edit` succeeds
-    (against the task's current state post-edit, not the stale captured
-    hash — `set_epic` re-reads its own hash internally, same as the
-    membership checkbox's `toggle_membership` already relies on). The two
-    mechanisms can't drift apart since they're the same function call; this
-    is why the ticket's own acceptance criteria asked to confirm there's no
-    collision.
-  - Both dialogs' `tags`/`related` fields are one `TextEdit`, comma
-    separated, parsed with `task::parse_list` (already tolerant of
-    brackets/quotes/spaces, so it doubles as a plain comma-splitter) rather
-    than inventing a second format.
-  - Visual verification was only partial: a screenshot confirmed the New
-    ticket dialog renders every new field correctly, but a full
-    create-and-inspect round trip through the GUI, and opening the Editor
-    dialog at all, hit the same `xdotool`/window-manager instability
-    documented against ticket 070 (window geometry drifting between calls,
-    clicks not landing) — not a code defect, left honestly unverified
-    rather than claimed. The write paths are covered directly instead:
-    `task::tests::apply_edit_writes_every_field_in_one_pass` and its two
-    "refuses before writing anything" siblings.
-- **`GroupDraft.repo` and `New ticket` both resolve to `self.backlog_repo`
-  regardless of which view is showing** — Board has no repo selector of
-  its own, so it targets the same repo Backlog would.
-- **`backlog_repo` is always `0` — and as of the declared/registered
-  registration split (2026-09-26), that's no longer a lookup, it's a fact
-  by construction.** `repos[0]` is the current project's own board,
-  pushed first in `load()` before anything from the declared list; nothing
-  after it can end up ahead of it. This is actually the *second* fix to
-  this value, worth knowing if `git blame` turns up the first: it used to
-  be hardcoded `0` against `Registry::add()`'s alphabetically-sorted,
-  cross-project entry list (the normal case, since both binaries
-  auto-registered every repo ever touched), which meant `amdui` launched
-  from `oberi-kitchen-tickets` could open showing `agile-md-tickets`
-  purely because "a" sorts before "o". That got a real fix,
-  `home_repo_index()`, matching `Board::discover()`'s root by position —
-  correct, but still a lookup against a list `0` had no natural
-  relationship to. Once registration stopped being a single cross-project
-  list and `repos` started life as "the current project first, then its
-  own declared repos", the lookup itself became unnecessary; removed
-  along with its tests rather than kept as a no-op.
+- **Tauri 2 + Leptos 0.8 (CSR), built from the grimartz board** that settled
+  the rules ticket 083 put into amd-lib. Three crates: `amd-ui` (the Tauri
+  app, binary `amdui`), `amd-ui-web` (the page, compiled to wasm by Trunk:
+  `trunk build --release` in `crates/amd-ui-web`) and `amd-ui-model` (the
+  types and pure rules both sides share; it compiles to wasm, so it has no
+  file, git or settings logic).
+- **Every change goes through amd-lib.** `amd-ui/src/lib.rs` holds the
+  commands; each opens the project as `amd` does (`boards::Project::open`,
+  over `model::load_repos()`) and calls amd-lib: `transition::move_to`
+  (lease + commit), `Board::set_epic`/`rename_group`/`create_group`/
+  `archive`, `Group::start`, `Task::take_lease`/`release_lease`/
+  `break_lease`, `transition::create_ticket`/`save_text`, `board_settings`
+  for the WIP limit, lease hours and `commit`, and `Templates` for the
+  template editor (`with_source` + `example_context` render a preview).
+  Changes are serialised by one mutex. Don't add ticket logic to `amd-ui`;
+  add it to amd-lib and call it.
+- **The editor saves the whole text** (`transition::save_text` →
+  `Task::set_text`): hash-checked against the `version` the editor was
+  opened with (`ContentHash` as 16 hex digits, since a page can't hold a
+  `u64`), priority/points validated, the lease fields always kept as on
+  disk. The page derives `branch-name` from the title with
+  `amd_ui_model::slugify`, which must match `agile_md::task::slugify` —
+  `amd-ui`'s tests check they agree.
+- **Drags map onto amd-lib's moves** (`move_in`): onto an epic or sprint is
+  `set_epic` (from todo, `move_task` back to the backlog first); out of one
+  to the loose backlog is `set_epic(None)`; anything else is `move_to`. The
+  page previews the same rules (`amd_ui_model::epic::{can_move,
+  sprint_rule}`, `wip::WipLimits::admit`) so a refused drop is shown while
+  dragging; amd-lib is still the authority. A drop on a full doing asks,
+  then moves with `force`.
+- **The page is embedded at compile time** (`tauri.conf.json`'s
+  `frontendDist` is `../amd-ui-web/dist`), so `trunk build` must run before
+  anything compiles `amd-ui` — CI does it first. The `custom-protocol`
+  feature is on by default so a plain `cargo build` makes a working board;
+  `cargo tauri dev -- --no-default-features` in `crates/amd-ui` serves the
+  page live from `trunk serve` instead.
+- **Where it opens**: `Board::discover()` from the launch directory; from
+  outside any project (a desktop launcher starts in `$HOME`) it goes to the
+  directory remembered as `ui.board` in `~/.config/agile-md/config`, which
+  Admin's "Tasks directory" sets. The colour scheme is `ui.theme`/
+  `ui.accent` in the same file.
+- **Not done here**: the release workflow still can't build `amdui` (it
+  needs Trunk, the wasm target and WebKitGTK before `cargo build`, which
+  `lite-actions/rust-release` doesn't do), and `install.sh`'s source build
+  needs the same.
+- WebKitGTK quirks met building it: the CSP needs `'wasm-unsafe-eval'` and
+  `connect-src 'self' ipc: http://ipc.localhost`; native `<select>`s draw a
+  white box (styled with `appearance-none`); `dragDropEnabled: false` so
+  HTML5 drag and drop reaches the page.
 
 ## Conventions
 

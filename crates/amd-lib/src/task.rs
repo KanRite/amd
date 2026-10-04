@@ -27,6 +27,22 @@ const CHILDREN_HEADING: &str = "## Children";
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ContentHash(u64);
 
+impl std::fmt::Display for ContentHash {
+    /// Sixteen hex digits — how a front end that can't hold a `u64` (a web
+    /// page) carries the fingerprint between opening a ticket and saving it.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:016x}", self.0)
+    }
+}
+
+impl std::str::FromStr for ContentHash {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        u64::from_str_radix(s, 16).map(ContentHash)
+    }
+}
+
 fn hash_of(text: &str) -> ContentHash {
     let mut hasher = DefaultHasher::new();
     text.hash(&mut hasher);
@@ -371,6 +387,29 @@ impl Task {
         validate_points(points)?;
         self.write_checked(expected, |text| {
             set_meta(text, "points", &format!("{points:?}"))
+        })
+    }
+
+    /// Replace the whole ticket with `text` — what an editor that shows the
+    /// raw file saves. Hash-checked like every write, and checked like
+    /// every other write path: a missing priority becomes `low`, an invalid
+    /// one or invalid points are refused. The lease (`locked-by`/
+    /// `locked-until`) is kept as it is on disk: a lease changes only by
+    /// locking and unlocking, never as a side effect of saving an edit.
+    pub fn set_text(&self, expected: ContentHash, text: &str) -> Result<()> {
+        let text = ensure_priority(text)?;
+        if let Some(points) = meta_in(&text, "points") {
+            validate_points(points)?;
+        }
+        self.write_checked(expected, |current| {
+            let mut out = text.clone();
+            for key in ["locked-by", "locked-until"] {
+                let disk = meta_in(current, key).unwrap_or_default();
+                if meta_in(&out, key).unwrap_or_default() != disk {
+                    out = set_meta(&out, key, &format!("{disk:?}"))?;
+                }
+            }
+            Ok(out)
         })
     }
 
