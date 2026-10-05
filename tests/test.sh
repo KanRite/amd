@@ -107,6 +107,86 @@ assert "nothing was created by the refused attempt" \
   test ! -e "${guard_test}/gadgets-tickets" -a ! -e "${guard_test}/code_repo/gadgets-tickets" \
   -a ! -e "${guard_test}/gadgets-documents" -a ! -e "${guard_test}/code_repo/gadgets-documents"
 
+echo "join:"
+# `amd join` clones over plain git, so local bare repositories stand in for
+# GitHub: AMD_GIT_BASE points it at "${origin}/", and the URL it builds is
+# "${origin}/<owner>/<project>-tickets.git". Every simulated person gets
+# their own global git config (their identity) and their own config
+# directory (their registry), the way two machines would — and so none of
+# this touches the suite's own registry, which "registration:" below checks
+# exactly.
+origin="$(mktemp -d)"
+people="$(mktemp -d)"
+person() { # name email -> prints the env assignments for that person
+  local home="${people}/$1"
+  mkdir -p "${home}/config" "${home}/work"
+  printf '[user]\n\tname = %s\n\temail = %s\n[commit]\n\tgpgsign = false\n' "$1" "$2" >"${home}/gitconfig"
+  echo "GIT_CONFIG_GLOBAL=${home}/gitconfig XDG_CONFIG_HOME=${home}/config AMD_GIT_BASE=${origin}/"
+}
+seed_bare() { # project kind -> a bare repo on main, seeded from the current directory
+  git init -q --bare -b main "${origin}/$1/$1-$2.git"
+  git push -q "${origin}/$1/$1-$2.git" HEAD:main
+}
+(
+  set -e
+  export GIT_CONFIG_GLOBAL="${people}/seed.gitconfig" XDG_CONFIG_HOME="${people}/seed-config"
+  printf '[user]\n\tname = seed\n\temail = seed@t.co\n' >"${GIT_CONFIG_GLOBAL}"
+  seed="$(mktemp -d)"
+  cd "${seed}" && git init -q -b main acme-tickets && cd acme-tickets
+  "${AMD}" init acme --local-only >/dev/null
+  git add -A && git commit -q -m seed && seed_bare acme tickets
+  cd "${seed}" && git init -q -b main acme-documents && cd acme-documents
+  git commit -q --allow-empty -m seed && seed_bare acme documents
+  # A project whose tickets repository has no board in it at all.
+  cd "${seed}" && git init -q -b main blank && cd blank
+  git commit -q --allow-empty -m seed && seed_bare blank tickets && seed_bare blank documents
+  rm -rf "${seed}"
+)
+remote_settings() { git --git-dir="${origin}/acme/acme-tickets.git" show main:.settings; }
+
+ada="$(person ada ada@t.co)"
+assert "amd join clones both repositories side by side" \
+  bash -c "cd '${people}/ada/work' && env ${ada} '${AMD}' join acme >/dev/null \
+    && test -d acme-tickets/tasks/backlog && test -d acme-documents/.git"
+assert "the joining user is added to the remote's users" \
+  bash -c "$(declare -f remote_settings); origin='${origin}'; remote_settings | grep -qx 'users = ada <ada@t.co>'"
+assert "both repositories are registered and aliased for the joining user" \
+  bash -c "cd '${people}/ada/work' && env ${ada} '${AMD}' deregister tickets | grep -q 'deregistered acme-tickets' \
+    && env ${ada} '${AMD}' deregister documents | grep -q 'deregistered acme-documents'"
+assert "joining again (fresh directory) doesn't list the user twice" \
+  bash -c "mkdir -p '${people}/ada/again' && cd '${people}/ada/again' \
+    && env ${ada} '${AMD}' join acme | grep -q 'already one of its users' \
+    && [ \"\$(git --git-dir='${origin}/acme/acme-tickets.git' show main:.settings | grep -o 'ada@t.co' | wc -l)\" -eq 1 ]"
+assert "join refuses when the tickets directory is already there, touching nothing" \
+  bash -c "cd '${people}/ada/work' && before=\"\$(git -C acme-tickets rev-parse HEAD)\" \
+    && ! env ${ada} '${AMD}' join acme >/dev/null 2>&1 \
+    && env ${ada} '${AMD}' join acme 2>&1 | grep -q 'acme-tickets already exists' \
+    && git -C acme-tickets diff --quiet && [ \"\$(git -C acme-tickets rev-parse HEAD)\" = \"\${before}\" ]"
+assert "join refuses when only the documents directory is there" \
+  bash -c "mkdir -p '${people}/ada/docs-only/acme-documents' && cd '${people}/ada/docs-only' \
+    && env ${ada} '${AMD}' join acme 2>&1 | grep -q 'acme-documents already exists' \
+    && test ! -e acme-tickets"
+assert "join refuses inside a git repository" \
+  bash -c "cd '${people}/ada/work/acme-tickets' && env ${ada} '${AMD}' join acme 2>&1 | grep -q 'must not be run inside a git repository'"
+assert "join refuses a project with no board, leaving no partial clones" \
+  bash -c "mkdir -p '${people}/ada/blank' && cd '${people}/ada/blank' \
+    && env ${ada} '${AMD}' join blank 2>&1 | grep -q \"isn't an amd project\" \
+    && test -z \"\$(ls -A)\""
+assert "join refuses a repository that doesn't exist, leaving nothing behind" \
+  bash -c "mkdir -p '${people}/ada/missing' && cd '${people}/ada/missing' \
+    && ! env ${ada} '${AMD}' join nosuch >/dev/null 2>&1 && test -z \"\$(ls -A)\""
+# Four people joining at once: most pushes are rejected the first time and
+# must be re-applied on top of whoever won, not dropped with a warning.
+for who in bo cy di ed; do
+  env_for_who="$(person "${who}" "${who}@t.co")"
+  ( cd "${people}/${who}/work" && env ${env_for_who} "${AMD}" join acme >/dev/null 2>&1 ) &
+done
+wait
+assert "four simultaneous joins all end up in the remote's users" \
+  bash -c "settings=\"\$(git --git-dir='${origin}/acme/acme-tickets.git' show main:.settings)\" \
+    && for who in ada bo cy di ed; do grep -q \"\${who}@t.co\" <<<\"\${settings}\" || exit 1; done"
+rm -rf "${origin}" "${people}"
+
 echo "discovery from a subdirectory:"
 mkdir -p deep/nested
 assert "runs from a subdir (finds repo-root board)" \

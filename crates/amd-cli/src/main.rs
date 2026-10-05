@@ -8,6 +8,7 @@ mod completions;
 mod form;
 mod github;
 mod init;
+mod join;
 mod render;
 mod value;
 
@@ -98,6 +99,16 @@ repository it's about using this name, and changing it later means finding
 and updating every ticket by hand, on every clone, with no way to do it
 atomically. Choose the name you'd want a stranger to see in a year.
 
+`amd join <project>` is how everyone else gets the project: run from a
+plain directory, it clones `<project>-tickets` and `<project>-documents`
+side by side over plain git (your SSH key is all it needs, no gh token;
+--org as for init, AMD_GIT_BASE to clone from somewhere other than
+git@github.com:), registers both, and adds you — git's user.name and
+user.email — to the project's `users`, pushed straight to the tickets
+repository. It refuses if either directory is already there. Unlike
+`amd register`, which records a repository already on this machine, join
+is the one-off step that puts the project here in the first place.
+
 Environment:
   AMD_DIR           board directory name under the repository root (default: tasks)
   AMD_BRANCH_TYPES  comma-separated branch types (default: feature, bugfix,
@@ -150,6 +161,17 @@ enum Cmd {
         #[arg(long)]
         local_only: bool,
         /// GitHub org/user to create the tickets repository under
+        /// (default: the project name itself)
+        #[arg(long, value_name = "ORG")]
+        org: Option<String>,
+    },
+    /// Join an existing project: clone its tickets and documents
+    /// repositories here over plain git and add you to its users
+    Join {
+        /// The project to join, as `amd init` named it
+        #[arg(value_name = "PROJECT")]
+        project: String,
+        /// GitHub org/user the repositories live under
         /// (default: the project name itself)
         #[arg(long, value_name = "ORG")]
         org: Option<String>,
@@ -523,13 +545,16 @@ fn run() -> Result<()> {
     {
         return init::run(project, local_only, org);
     }
+    if let Cmd::Join { project, org } = command {
+        return join::run(project, org);
+    }
 
     let board = ensure_board()?;
     // Notices if this board's declared project identity has silently
     // changed since amd last saw it — see project_trust.rs.
     agile_md::project_trust::check(&board)?;
     match command {
-        Cmd::Init { .. } | Cmd::Completions { .. } | Cmd::Gui => {
+        Cmd::Init { .. } | Cmd::Join { .. } | Cmd::Completions { .. } | Cmd::Gui => {
             unreachable!("handled above")
         }
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
