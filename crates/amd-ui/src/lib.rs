@@ -6,7 +6,7 @@
 
 mod boards;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use agile_md::board::{Board, Column};
@@ -15,7 +15,7 @@ use agile_md::settings::Config;
 use agile_md::task::{ContentHash, Task};
 use agile_md::templates::{DEFAULT_TEMPLATE, TEMPLATE_SUFFIX, Templates, example_context};
 use agile_md::transition::{self, Event, Outcome, TicketFields};
-use agile_md::{board_settings, settings};
+use agile_md::{board_settings, current_project, settings};
 use amd_ui_model::appearance::Appearance;
 use amd_ui_model::epic::Place;
 use amd_ui_model::wip::WipLimits;
@@ -607,26 +607,70 @@ async fn set_tasks_dir(state: Tauri<'_, AppState>, path: String) -> Result<amd_u
         let _guard = writing
             .lock()
             .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
-        let previous = std::env::current_dir().ok();
-        std::env::set_current_dir(path.trim()).map_err(|e| format!("{}: {e}", path.trim()))?;
-        match Project::open().and_then(|p| p.summary()) {
-            Ok(board) => {
-                let mut config = Config::load();
-                if let Ok(here) = std::env::current_dir() {
-                    config.set(LAST_BOARD, &here.display().to_string());
-                    config.save().map_err(err)?;
-                }
-                Ok(board)
-            }
-            Err(e) => {
-                if let Some(previous) = previous {
-                    let _ = std::env::set_current_dir(previous);
-                }
-                Err(e)
-            }
-        }
+        show_from(Path::new(path.trim()))
     })
     .await
+}
+
+/// Switches to another project in the same folder (ticket 093): records
+/// it in that folder's `.current-project` — the same file `amd project use`
+/// writes — and shows it. The window then runs from the folder itself, so
+/// the file is what decides, not whichever tickets repository it was
+/// launched inside.
+#[tauri::command]
+async fn use_project(state: Tauri<'_, AppState>, name: String) -> Result<amd_ui_model::Board> {
+    let writing = Arc::clone(&state.writing);
+    blocking(move || {
+        let _guard = writing
+            .lock()
+            .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
+        let open = Project::open()?;
+        let dir = open.repos[0]
+            .1
+            .repo_root()
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| "this board isn't inside a folder of projects".to_string())?;
+        if !current_project::projects(&dir)
+            .iter()
+            .any(|p| p.name == name)
+        {
+            return Err(format!("no project '{name}' in {}", dir.display()));
+        }
+        let before = current_project::read(&dir);
+        current_project::write(&dir, &name).map_err(err)?;
+        show_from(&dir).inspect_err(|_| {
+            let _ = match &before {
+                Some(before) => current_project::write(&dir, before),
+                None => std::fs::remove_file(dir.join(current_project::FILE)).map_err(Into::into),
+            };
+        })
+    })
+    .await
+}
+
+/// Moves the process to `path`, opens the project found from there, and
+/// remembers it for a launch from outside any project. Changes nothing if
+/// no project opens.
+fn show_from(path: &Path) -> Result<amd_ui_model::Board> {
+    let previous = std::env::current_dir().ok();
+    std::env::set_current_dir(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    match Project::open().and_then(|p| p.summary()) {
+        Ok(board) => {
+            let mut config = Config::load();
+            if let Ok(here) = std::env::current_dir() {
+                config.set(LAST_BOARD, &here.display().to_string());
+                config.save().map_err(err)?;
+            }
+            Ok(board)
+        }
+        Err(e) => {
+            if let Some(previous) = previous {
+                let _ = std::env::set_current_dir(previous);
+            }
+            Err(e)
+        }
+    }
 }
 
 /// Starts the board. Launched from outside any project (a desktop launcher
@@ -665,6 +709,7 @@ pub fn run() {
             reset_template,
             tasks_dir,
             set_tasks_dir,
+            use_project,
         ])
         .run(tauri::generate_context!())
         .expect("error while running amdui");

@@ -91,7 +91,7 @@ pub fn run(project: String, org: Option<String>) -> Result<()> {
     if !added {
         println!("(you were already one of its users)");
     }
-    Ok(())
+    crate::project::keep_existing(&base, &project)
 }
 
 /// The fallible middle of `run`: both clones, the check that this really is

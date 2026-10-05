@@ -194,27 +194,35 @@ impl Board {
     /// yet" behaviour, not a wall of unrelated names. So: found none, or
     /// found more than one, both fall back to `locate()`'s own answer
     /// silently, and only a genuinely unambiguous single sibling redirects.
+    ///
+    /// **Several projects in one folder** (ticket 093) refine both cases,
+    /// through `current_project::pick`: a `.current-project` file in the
+    /// folder names the one meant, and wins whenever it's there. Without
+    /// it, the in-a-repo case's silent fallback above no longer applies to
+    /// a folder holding two or more `*-tickets` repositories — that's the
+    /// layout `amd init`/`amd join` make, so several of them is a folder of
+    /// projects, not a temp directory, and a silent "no board" there hid
+    /// the problem. It errors instead, naming `amd project use`.
     pub fn discover() -> Result<Board> {
         if let Ok(board) = Board::locate() {
             if board.root.is_dir() {
                 return Ok(board);
             }
             if let Some(parent) = board.repo_root().parent()
-                && let [only] = project_siblings(parent).as_slice()
+                && let Some(only) = crate::current_project::pick(parent, false)?
             {
-                return Ok(Board::in_repo(only));
+                return Ok(Board::in_repo(&only));
             }
             return Ok(board);
         }
         let cwd = env::current_dir().context("reading the current directory")?;
-        match project_siblings(&cwd).as_slice() {
-            [only] => Ok(Board::in_repo(only)),
-            [] => bail!(
+        match crate::current_project::pick(&cwd, true)? {
+            Some(only) => Ok(Board::in_repo(&only)),
+            None => bail!(
                 "not inside a git repository, and no project board among this directory's own \
                  subdirectories either (agile-md boards live at <repo>/{})",
                 dir_name()
             ),
-            many => Err(ambiguous_siblings(many)),
         }
     }
 
@@ -913,7 +921,7 @@ fn dir_name() -> String {
 /// same reason). A directory that can't be read (removed mid-scan, no
 /// permission) contributes no candidates rather than failing the whole
 /// scan — the same "best effort" stance the registry takes elsewhere.
-fn project_siblings(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn project_siblings(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -924,21 +932,6 @@ fn project_siblings(dir: &Path) -> Vec<PathBuf> {
         .collect();
     found.sort();
     found
-}
-
-/// More than one qualifying sibling was found — named, never guessed at,
-/// the same principle `find` already applies to an ambiguous ticket
-/// reference. Shared by both call sites in `discover()`.
-fn ambiguous_siblings(paths: &[PathBuf]) -> anyhow::Error {
-    let names: Vec<String> = paths
-        .iter()
-        .filter_map(|path| path.file_name())
-        .map(|name| name.to_string_lossy().into_owned())
-        .collect();
-    anyhow!(
-        "more than one project board here ({}); cd into one directly",
-        names.join(", ")
-    )
 }
 
 #[cfg(test)]

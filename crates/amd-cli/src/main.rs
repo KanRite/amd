@@ -9,6 +9,7 @@ mod form;
 mod github;
 mod init;
 mod join;
+mod project;
 mod render;
 mod value;
 
@@ -109,6 +110,16 @@ repository. It refuses if either directory is already there. Unlike
 `amd register`, which records a repository already on this machine, join
 is the one-off step that puts the project here in the first place.
 
+Several projects can share one folder (agile-md-tickets beside
+multi-user-test-tickets). `amd project` lists them and marks the one amd
+uses; `amd project use <name>` switches, by writing .current-project in
+that folder (this machine only, never committed). From the folder itself,
+or a code repository beside the projects, amd follows that file; inside a
+tickets repository, that repository's own board always wins. With several
+projects and no choice made, amd says so rather than guessing. `amd init`
+and `amd join` never switch you: adding a second project keeps the first
+one current.
+
 Environment:
   AMD_DIR           board directory name under the repository root (default: tasks)
   AMD_BRANCH_TYPES  comma-separated branch types (default: feature, bugfix,
@@ -175,6 +186,12 @@ enum Cmd {
         /// (default: the project name itself)
         #[arg(long, value_name = "ORG")]
         org: Option<String>,
+    },
+    /// List the projects in this folder and which one amd uses, or switch
+    /// with `amd project use <name>`
+    Project {
+        #[command(subcommand)]
+        action: Option<ProjectAction>,
     },
     /// Create a task in backlog/ from a template
     New(NewArgs),
@@ -518,6 +535,16 @@ fn main() -> ExitCode {
     }
 }
 
+#[derive(Subcommand, Debug)]
+enum ProjectAction {
+    /// Make a project current for this folder (writes .current-project);
+    /// with no name, pick one in a terminal
+    Use {
+        #[arg(value_name = "NAME")]
+        name: Option<String>,
+    },
+}
+
 fn run() -> Result<()> {
     let cli = Cli::parse();
     form::set_no_input(cli.no_input);
@@ -548,13 +575,23 @@ fn run() -> Result<()> {
     if let Cmd::Join { project, org } = command {
         return join::run(project, org);
     }
+    if let Cmd::Project { action } = command {
+        return match action {
+            None => project::list(),
+            Some(ProjectAction::Use { name }) => project::use_project(name),
+        };
+    }
 
     let board = ensure_board()?;
     // Notices if this board's declared project identity has silently
     // changed since amd last saw it — see project_trust.rs.
     agile_md::project_trust::check(&board)?;
     match command {
-        Cmd::Init { .. } | Cmd::Join { .. } | Cmd::Completions { .. } | Cmd::Gui => {
+        Cmd::Init { .. }
+        | Cmd::Join { .. }
+        | Cmd::Project { .. }
+        | Cmd::Completions { .. }
+        | Cmd::Gui => {
             unreachable!("handled above")
         }
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),

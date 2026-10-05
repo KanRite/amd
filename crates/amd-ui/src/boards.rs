@@ -9,6 +9,7 @@ use std::sync::OnceLock;
 
 use agile_md::board::{Board, Column};
 use agile_md::board_settings;
+use agile_md::current_project;
 use agile_md::group::{GROUP_FILE, State};
 use agile_md::model::load_repos;
 use agile_md::task::Task;
@@ -52,6 +53,22 @@ impl Project {
             unregistered: found.unregistered,
             identity: found.identity,
         })
+    }
+
+    /// The projects in the folder this one's tickets repository sits in,
+    /// marking the one on screen (ticket 093).
+    pub fn projects(&self) -> Vec<ui::ProjectChoice> {
+        let shown = self.repos[0].1.repo_root();
+        let Some(dir) = shown.parent() else {
+            return Vec::new();
+        };
+        current_project::projects(dir)
+            .into_iter()
+            .map(|project| ui::ProjectChoice {
+                current: project.tickets == shown,
+                name: project.name,
+            })
+            .collect()
     }
 
     /// The board of the repository called `repo`; empty means the project's
@@ -143,6 +160,7 @@ impl Project {
             repos,
             columns,
             epics,
+            projects: self.projects(),
         })
     }
 

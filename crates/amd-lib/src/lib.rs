@@ -14,6 +14,7 @@ pub mod board;
 pub mod board_settings;
 pub mod branch;
 pub mod create;
+pub mod current_project;
 pub mod git;
 pub mod group;
 pub mod import;

@@ -99,6 +99,19 @@ redundant. Their history is in git if it is ever wanted again.
   commits or pushes it there (`cmd_register`/`amd wip-limit` print where
   the file landed and that it needs a PR) — documents is PR-reviewed,
   same `adr/0006` boundary as `{project}-documents` always was.
+- `crates/amd-lib/src/current_project.rs` — several projects in one folder
+  (ticket 093). The *project directory* is the folder holding a project's
+  repositories (a repo's parent, or the current directory outside any repo);
+  `.current-project` there (one line, machine-local, never committed) names
+  the project `amd` uses. A candidate's project name is its directory minus
+  `-tickets`, else its board's declared `project`, else its directory name.
+  `pick()` is what `Board::discover()` calls at both sibling-scan sites;
+  `keep_existing()` is what `init`/`join` call so adding a second project
+  never switches you (it records the one already there as current). The
+  CLI side is `crates/amd-cli/src/project.rs` (`amd project`, `amd project
+  use [name]`); `amdui` reads `Board.projects` and calls `use_project`, which
+  writes the same file and moves the process to the folder so the file —
+  not whichever tickets repo it was launched in — decides.
 - `crates/amd-lib/src/project_trust.rs` — a per-machine, trust-on-first-use
   check that a board's declared `project` hasn't changed unexpectedly since
   `amd` last saw it.
@@ -244,6 +257,8 @@ redundant. Their history is in git if it is ever wanted again.
     deeper. Two or more qualifying children **errors**, naming all of
     them, never a guess, same as `find` on an ambiguous ticket reference —
     there's no sane fallback here, `locate()` already failed outright.
+    `.current-project` (ticket 093) resolves it when set, and the error
+    names `amd project use`.
   - **Inside a git repository that has no board of its own** (ticket 061 —
     `locate()` alone "succeeds" here regardless, since it never checks
     `tasks/` actually exists, which is exactly what stopped this from ever
@@ -260,6 +275,13 @@ redundant. Their history is in git if it is ever wanted again.
     unconditional ambiguity error here break unrelated, pre-existing tests
     that create a fresh repo and expect today's plain "no board yet"
     behaviour. Only a genuinely unambiguous single sibling redirects.
+    **Except** (ticket 093): `.current-project` decides when it's set, and
+    two or more `*-tickets` siblings with no choice made is the
+    plain-directory case's error after all — that's the `init`/`join`
+    layout, a folder of projects, where a silent "no board" hid the problem
+    (it silently lost the agile-md board from inside `amd/` as soon as a
+    second project was initialised beside it). Unrelated scratch boards
+    still fall back quietly.
 - Tasks are `NNN-slug.md`. `Board::next_id()` takes whichever is higher of the
   counter (the board-local settings file's `next-id` key, `<repo-root>/.settings`
   — a board that predates the move still has the legacy `<board>/.next-id`

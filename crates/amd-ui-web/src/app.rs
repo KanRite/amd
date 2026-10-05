@@ -183,7 +183,7 @@ pub fn App() -> impl IntoView {
     view! {
         <div class="flex h-screen flex-col bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
             <header class="flex items-center gap-4 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-800">
-                <h1 class="shrink-0 whitespace-nowrap text-lg font-semibold">{project}</h1>
+                <ProjectSwitcher project=project />
                 <span class="min-w-0 flex-1 truncate text-xs text-slate-500" title=tasks_dir>
                     {move || tasks_dir().unwrap_or_else(|| "No tasks directory open".into())}
                 </span>
@@ -560,4 +560,66 @@ fn use_colour_scheme(ctx: Ctx) {
             let _ = root.set_attribute("data-accent", accent.key());
         }
     });
+}
+
+/// The project's name, at the left of the header; a select when the folder
+/// it lives in holds more than one project (ticket 093), switching to the
+/// one picked.
+#[component]
+fn ProjectSwitcher(project: impl Fn() -> String + Send + Sync + Copy + 'static) -> impl IntoView {
+    let ctx = Ctx::get();
+    let choices = move || {
+        ctx.board
+            .with(|b| b.as_ref().map(|b| b.projects.clone()).unwrap_or_default())
+    };
+    let switch = move |name: String| {
+        spawn_local(async move {
+            match api::use_project(&name).await {
+                Ok(board) => {
+                    ctx.board.set(Some(board));
+                    ctx.error.set(None);
+                }
+                Err(e) => ctx.error.set(Some(e)),
+            }
+        });
+    };
+    view! {
+        <Show
+            when=move || { choices().len() > 1 }
+            fallback=move || {
+                view! { <h1 class="shrink-0 whitespace-nowrap text-lg font-semibold">{project}</h1> }
+            }
+        >
+            <label
+                class="relative flex shrink-0 cursor-pointer items-center rounded border border-slate-300 hover:bg-slate-100 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent-500 dark:border-slate-600 dark:hover:bg-slate-700"
+                title="Switch to another project in this folder"
+            >
+                <select
+                    aria-label="Project"
+                    class="cursor-pointer appearance-none border-0 bg-transparent py-1 pr-7 pl-2 text-lg font-semibold focus:outline-none"
+                    on:change=move |ev| switch(event_target_value(&ev))
+                >
+                    {move || {
+                        choices()
+                            .into_iter()
+                            .map(|choice| {
+                                view! {
+                                    <option
+                                        class="bg-white text-slate-900 dark:bg-slate-800 dark:text-slate-100"
+                                        value=choice.name.clone()
+                                        selected=choice.current
+                                    >
+                                        {choice.name.clone()}
+                                    </option>
+                                }
+                            })
+                            .collect_view()
+                    }}
+                </select>
+                <span aria-hidden="true" class="pointer-events-none absolute right-2.5 text-xs text-slate-500">
+                    "▾"
+                </span>
+            </label>
+        </Show>
+    }
 }
