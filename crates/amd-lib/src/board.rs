@@ -764,6 +764,10 @@ impl Board {
         if dest.exists() {
             bail!("{} already exists", dest.display());
         }
+        // Off the board means off your hands: give the lease back (ticket
+        // 092). Best-effort — a ticket that can't be rewritten is still
+        // archived, and the archive is local and untracked anyway.
+        let _ = task.release_if_mine();
         // Read before the move, not after: once the file lands in dest, it no
         // longer exists at task.path for task.branch() to read.
         let branch = task.branch();
