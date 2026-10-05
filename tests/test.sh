@@ -230,16 +230,13 @@ assert "...and from a subdirectory of the code repo, not just its top level" \
   bash -c "cd '${sibling_parent}/code/deep/nested' && '${AMD}' board --plain | grep -q TODO"
 mkdir -p "${sibling_parent}/second-tickets/tasks"
 ( cd "${sibling_parent}/second-tickets" && git init -q && git config user.email t@t.co && git config user.name t )
-# Deliberately *not* a hard error, unlike the plain-directory case above:
-# a repository's own parent is far more likely to hold unrelated other
-# repositories (this test suite's own scratch boards, a developer's flat
-# ~/projects/ layout) than a directory purpose-built by `amd init` is, so
-# ambiguity here falls back to today's plain "no board yet" behaviour
-# rather than erroring — confirmed the hard way, this exact scenario broke
-# unrelated pre-existing tests further down this file before that fallback
-# was added.
-assert "two tickets siblings from inside the code repo falls back, doesn't error" \
-  bash -c "cd '${sibling_parent}/code' && '${AMD}' board --no-input 2>&1 | grep -q 'no board at'"
+# Two *-tickets* siblings is the `amd init`/`amd join` layout — a folder of
+# projects — so from a code repository it's an error naming the fix (ticket
+# 093), no longer the silent "no board" that used to hide it. Unrelated
+# boards that merely share a parent (this suite's own scratch repos in
+# /tmp) still fall back quietly; the 093 section below checks that.
+assert "two tickets siblings from inside the code repo is an error naming amd project use" \
+  bash -c "cd '${sibling_parent}/code' && '${AMD}' board --no-input 2>&1 | grep -q 'amd project use'"
 rm -rf "${sibling_parent}"
 
 lonely_parent="$(mktemp -d)"
@@ -247,6 +244,69 @@ lonely_parent="$(mktemp -d)"
   && git config user.email t@t.co && git config user.name t )
 assert "a code repo with no tickets sibling at all still falls back to today's behaviour" \
   bash -c "cd '${lonely_parent}/lonely-code' && '${AMD}' board --no-input 2>&1 | grep -q 'no board at'"
+
+echo "several projects in one folder (ticket 093):"
+# acme and beta side by side, each a tickets + documents pair, plus a code
+# repository with no board of its own — the layout two `amd init`s make.
+projects="$(mktemp -d)"
+(
+  set -e
+  cd "${projects}"
+  for name in acme beta; do
+    git init -q "${name}-tickets" && git init -q "${name}-documents"
+    ( cd "${name}-tickets" && git config user.email t@t.co && git config user.name t \
+      && "${AMD}" init "${name}" --local-only >/dev/null \
+      && AMD_COMMIT=0 "${AMD}" new "${name} work" >/dev/null )
+  done
+  git init -q app
+)
+assert "from the folder, two projects and no choice is an error naming amd project use" \
+  bash -c "cd '${projects}' && ! '${AMD}' board --plain 2>/dev/null && '${AMD}' board 2>&1 | grep -q 'amd project use'"
+assert "from a code repository beside them, the same error — not a silent empty board" \
+  bash -c "cd '${projects}/app' && '${AMD}' board --no-input 2>&1 | grep -q 'amd project use'"
+assert "amd project lists both, none current yet" \
+  bash -c "cd '${projects}' && out=\"\$('${AMD}' project)\" && grep -q '^  acme ' <<<\"\${out}\" \
+    && grep -q '^  beta ' <<<\"\${out}\" && grep -q 'no current project' <<<\"\${out}\""
+assert "amd project use beta makes it current" \
+  bash -c "cd '${projects}' && '${AMD}' project use beta | grep -q 'current project: beta' \
+    && grep -qx beta .current-project && '${AMD}' project | grep -q '^\* beta '"
+assert "the folder then shows beta's board" \
+  bash -c "cd '${projects}' && '${AMD}' board --plain | grep -q 'beta work'"
+assert "so does the code repository beside it" \
+  bash -c "cd '${projects}/app' && '${AMD}' board --plain | grep -q 'beta work'"
+assert "inside acme-tickets, acme's own board still wins" \
+  bash -c "cd '${projects}/acme-tickets' && '${AMD}' board --plain | grep -q 'acme work'"
+assert "amd project use works from inside a tickets repository too" \
+  bash -c "cd '${projects}/acme-tickets' && '${AMD}' project use acme >/dev/null && grep -qx acme '${projects}/.current-project'"
+assert "amd project use refuses a project that isn't here, changing nothing" \
+  bash -c "cd '${projects}' && '${AMD}' project use nosuch 2>&1 | grep -q \"no project 'nosuch'\" && grep -qx acme .current-project"
+assert "amd project use with no name and no terminal is a usage error" \
+  bash -c "cd '${projects}' && '${AMD}' project use 2>&1 | grep -q 'usage: amd project use'"
+assert ".current-project naming a project that's gone is a clear error" \
+  bash -c "cd '${projects}' && echo gone >.current-project && '${AMD}' board 2>&1 | grep -q \"current project 'gone'\""
+rm -f "${projects}/.current-project"
+# A second `amd init` into a folder that already holds one project keeps the
+# first one current, so adding a project never changes what amd shows.
+second="$(mktemp -d)"
+(
+  set -e
+  cd "${second}"
+  for repo in first-tickets first-documents later-tickets later-documents; do
+    git init -q "${repo}"
+    git -C "${repo}" config user.email t@t.co && git -C "${repo}" config user.name t
+  done
+  "${AMD}" init first >/dev/null 2>&1
+)
+assert "init of a second project keeps the first current, and says how to switch" \
+  bash -c "cd '${second}' && '${AMD}' init later 2>/dev/null | grep -q 'current is still first; .amd project use later. to switch' \
+    && grep -qx first .current-project"
+assert "init with a choice already made leaves it alone" \
+  bash -c "cd '${second}' && echo later >.current-project && '${AMD}' init first >/dev/null 2>&1 && grep -qx later .current-project"
+"${AMD}" deregister tickets >/dev/null 2>&1; "${AMD}" deregister documents >/dev/null 2>&1
+for repo in first-tickets first-documents later-tickets later-documents; do
+  "${AMD}" deregister "${repo}" >/dev/null 2>&1
+done
+rm -rf "${projects}" "${second}"
 
 echo "create:"
 "${AMD}" new "First task" >/dev/null

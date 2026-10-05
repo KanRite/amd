@@ -166,6 +166,18 @@ pub struct Board {
     /// The backlog's epics, by name.
     #[serde(default)]
     pub epics: Vec<Epic>,
+    /// Every project in the folder this one sits in (ticket 093), for the
+    /// header's switcher. Just this one when it's alone there.
+    #[serde(default)]
+    pub projects: Vec<ProjectChoice>,
+}
+
+/// A project the header can switch to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectChoice {
+    pub name: String,
+    /// Whether it's the one on screen.
+    pub current: bool,
 }
 
 /// The user filter: whose work to show.
@@ -569,6 +581,7 @@ mod assigned_tests {
                 ],
             }],
             epics: Vec::new(),
+            projects: Vec::new(),
         };
         board.epics.push(Epic {
             repo: String::new(),

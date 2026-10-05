@@ -61,7 +61,7 @@ pub fn run(project: String, local_only: bool, org: Option<String>) -> Result<()>
     if let Some(url) = git::remote_url(&documents) {
         println!("              {url}");
     }
-    Ok(())
+    crate::project::keep_existing(&base, &project)
 }
 
 /// Creates or connects `{project}-tickets`, scaffolds the board, registers

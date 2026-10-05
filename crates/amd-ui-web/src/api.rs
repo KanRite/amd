@@ -81,6 +81,16 @@ pub async fn set_tasks_dir(path: &str) -> Result<Board, String> {
 }
 
 #[derive(Serialize)]
+struct ProjectArgs<'a> {
+    name: &'a str,
+}
+
+/// Switches to another project in the same folder (ticket 093).
+pub async fn use_project(name: &str) -> Result<Board, String> {
+    call("use_project", &ProjectArgs { name }).await
+}
+
+#[derive(Serialize)]
 struct MoveArgs<'a> {
     file: &'a str,
     from: &'a Place,
