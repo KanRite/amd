@@ -155,6 +155,16 @@ redundant. Their history is in git if it is ever wanted again.
   command for "inside a repo" — it skips all of the above (tickets board
   only, no documents sibling, no protection) and just scaffolds here, the
   way bare `amd init` always has.
+  **Both forms record whoever ran it as a user** (ticket 090,
+  `add_first_user`): git's `user.name <user.email>` (`User::from_git`) into
+  the tickets `.settings`'s `users`. A brand-new repository's initial
+  commit carries it; an existing one (re-running `init` is how a project
+  made before 090 gets its first user) gets its own `.settings`-only commit,
+  pushed when there's an `origin` (`git::commit_paths` vs
+  `commit_paths_locally`). A rejected push only warns — never `join`'s
+  reset-and-retry, which is safe only in a seconds-old clone, and this may
+  be someone's real working copy. No git email warns too; `init` still
+  succeeds. `--local-only` records it without committing.
 - `crates/amd-cli/src/join.rs` — `amd join <project> [--org]` (ticket 088):
   everyone but the project's creator. Clones `<project>-tickets` and
   `<project>-documents` as siblings with **plain `git clone`**, never `gh`

@@ -95,6 +95,9 @@ from a plain directory, never from inside an existing git repository —
 `amd init <project> --local-only` scaffolds the board in the repository
 you're standing in instead, with no network and nothing created remotely,
 the project name still recorded, just without a dedicated tickets repo.
+Either way, init records you — git's user.name and user.email — as the
+project's first user. Running it again on an existing project adds you if
+you're missing, so a project made before that gets its first user too.
 <project> cannot be changed once set — every ticket records which
 repository it's about using this name, and changing it later means finding
 and updating every ticket by hand, on every clone, with no way to do it
@@ -162,7 +165,8 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Cmd {
     /// Create or connect this project's dedicated tickets and documents
-    /// repositories ({project}-tickets, {project}-documents)
+    /// repositories ({project}-tickets, {project}-documents), recording you
+    /// as one of its users
     Init {
         /// The project's declared identity — cannot be changed once set
         #[arg(value_name = "PROJECT")]

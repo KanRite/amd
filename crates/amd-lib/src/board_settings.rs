@@ -104,6 +104,15 @@ pub struct User {
 }
 
 impl User {
+    /// Who git says you are in `repo`: `user.name <user.email>`, the
+    /// identity your commits carry and leases record. `None` without an
+    /// email (the identity key); a missing name falls back to the email.
+    pub fn from_git(repo: &std::path::Path) -> Option<User> {
+        let email = crate::git::config(repo, "user.email")?;
+        let name = crate::git::config(repo, "user.name").unwrap_or_else(|| email.clone());
+        Some(User { name, email })
+    }
+
     /// Whether this is the same person as `other` — by email, ignoring case,
     /// the way leases identify people. A changed display name is still them.
     pub fn same_person(&self, other: &User) -> bool {
@@ -937,6 +946,36 @@ mod tests {
                 user("Old Dippy", "dippy@example.com"),
                 user("Oberi Joe", "joe@example.com")
             ]
+        );
+    }
+
+    fn git_repo(identity: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .status()
+                .unwrap()
+        };
+        git(&["init", "-q"]);
+        for (key, value) in identity {
+            git(&["config", key, value]);
+        }
+        dir
+    }
+
+    // Repo-local values, so the machine's own global identity can't leak in
+    // (a repo's config overrides the global one).
+    #[test]
+    fn the_git_identity_is_the_user() {
+        let repo = git_repo(&[("user.name", "Ada"), ("user.email", "a@example.com")]);
+        assert_eq!(
+            User::from_git(repo.path()),
+            Some(user("Ada", "a@example.com"))
         );
     }
 
