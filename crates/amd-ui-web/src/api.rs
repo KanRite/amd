@@ -154,6 +154,18 @@ pub async fn open_ticket(place: &Place, file: &str) -> Result<TicketDocument, St
     call("open_ticket", &TicketRef { place, file }).await
 }
 
+/// A summary of what's on disk; it changes whenever the board's files do
+/// (ticket 091).
+pub async fn board_fingerprint() -> Result<String, String> {
+    call("board_fingerprint", &NoArgs {}).await
+}
+
+/// The ticket's current version on disk, or `None` once it has moved or
+/// gone.
+pub async fn ticket_version(place: &Place, file: &str) -> Result<Option<String>, String> {
+    call("ticket_version", &TicketRef { place, file }).await
+}
+
 /// Saves a ticket's text; `version` is the fingerprint it was opened with,
 /// so a ticket changed since is refused rather than overwritten.
 pub async fn save_ticket(

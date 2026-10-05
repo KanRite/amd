@@ -20,6 +20,14 @@ use crate::api;
 use crate::app::{Ctx, Modal};
 use crate::rich_dom;
 
+/// Why the editor's banner is showing: its ticket changed on disk under
+/// unsaved edits, or isn't where it was opened from any more.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DiskNotice {
+    Changed,
+    Gone,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
     Rich,
@@ -187,6 +195,33 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
         }
     };
 
+    // The ticket changing on disk while it's open here (ticket 091): the
+    // board's poll bumps `disk_tick`, and the editor checks its own ticket.
+    // Nothing unsaved: reopen it from disk. Unsaved edits: say so, and let
+    // the user choose — never overwrite either side silently (saving still
+    // goes through the version check).
+    let disk_notice = RwSignal::new(None::<DiskNotice>);
+    Effect::new(move |seen: Option<u64>| {
+        let tick = ctx.disk_tick.get();
+        if seen.is_some_and(|seen| seen != tick) {
+            spawn_local(async move {
+                let (place, file) = (place.get_value(), lock_file.get_value());
+                match api::ticket_version(&place, &file).await {
+                    Ok(Some(now)) if now == version.get_untracked() => {}
+                    Ok(Some(_)) if !dirty.get_untracked() => ctx.open_ticket(place, file),
+                    Ok(Some(_)) => disk_notice.set(Some(DiskNotice::Changed)),
+                    Ok(None) => disk_notice.set(Some(DiskNotice::Gone)),
+                    Err(_) => {}
+                }
+            });
+        }
+        tick
+    });
+    let reload_from_disk = move |_| {
+        disk_notice.set(None);
+        ctx.open_ticket(place.get_value(), lock_file.get_value());
+    };
+
     let is_rich = move || mode.get() == Mode::Rich;
     let input = "rounded border border-slate-300 bg-slate-50 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900";
     let label = "flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300";
@@ -194,6 +229,37 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
     view! {
         <Modal title=format!("Edit {path}") width="max-w-4xl">
             <LockBar lock version place file=lock_file />
+            {move || {
+                disk_notice
+                    .get()
+                    .map(|notice| {
+                        view! {
+                            <div
+                                role="alert"
+                                class="flex items-center gap-3 rounded bg-amber-100 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                            >
+                                <span class="flex-1">
+                                    {match notice {
+                                        DiskNotice::Changed => {
+                                            "This ticket changed on disk while you were editing it."
+                                        }
+                                        DiskNotice::Gone => {
+                                            "This ticket was moved or removed on disk; saving here will be refused."
+                                        }
+                                    }}
+                                </span>
+                                <Show when=move || notice == DiskNotice::Changed>
+                                    <button class="underline" on:click=reload_from_disk>
+                                        "Reload (discard mine)"
+                                    </button>
+                                </Show>
+                                <button class="underline" on:click=move |_| disk_notice.set(None)>
+                                    "Keep editing"
+                                </button>
+                            </div>
+                        }
+                    })
+            }}
             // Everything above the buttons scrolls as one, so a short window
             // scrolls the dialog instead of squeezing the editor to nothing.
             <div class="-mx-1 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-1">
