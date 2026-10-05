@@ -140,11 +140,9 @@ fn repo_url(base: &str, owner: &str, project: &str, kind: &str) -> String {
 /// Who's joining: git's own identity, the same `user.name`/`user.email` that
 /// signs their commits and that leases record.
 fn identity(repo: &Path) -> Result<User> {
-    let email = git::config(repo, "user.email").ok_or_else(|| {
+    User::from_git(repo).ok_or_else(|| {
         anyhow::anyhow!("git has no user.email — set it (git config --global user.email ...) first")
-    })?;
-    let name = git::config(repo, "user.name").unwrap_or_else(|| email.clone());
-    Ok(User { name, email })
+    })
 }
 
 /// Adds `user` to the board's `users`, commits and pushes. A rejected push

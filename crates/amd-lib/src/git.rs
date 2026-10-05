@@ -439,6 +439,16 @@ pub fn commit_paths(repo: &Path, message: &str, paths: &BTreeSet<PathBuf>) -> Re
     if paths.is_empty() {
         return Ok(());
     }
+    commit_paths_locally(repo, message, paths)?;
+    push(repo)
+}
+
+/// [`commit_paths`] without the push — for a repository with nowhere to
+/// push to, or a caller that decides about pushing itself.
+pub fn commit_paths_locally(repo: &Path, message: &str, paths: &BTreeSet<PathBuf>) -> Result<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
     // Only `add` paths that still exist on disk. A path that's gone — the
     // old side of a `git mv`-based rename, or a `git rm --cached`'d
     // archived ticket — is already fully staged by whatever produced that
@@ -473,7 +483,7 @@ pub fn commit_paths(repo: &Path, message: &str, paths: &BTreeSet<PathBuf>) -> Re
     if !ok {
         bail!(failed("git commit", &detail));
     }
-    push(repo)
+    Ok(())
 }
 
 /// A `git config` value (used to fill `author` in task templates, and to

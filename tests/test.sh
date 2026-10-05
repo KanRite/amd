@@ -51,6 +51,8 @@ assert "init writes the repository README, not inside tasks/" \
   bash -c "test -f README.md -a ! -f tasks/README.md"
 assert "init records the declared project in the repository, not inside tasks/" \
   bash -c "grep -q '^project = acme\$' .settings && test ! -f tasks/.settings"
+assert "init records whoever ran it as the project's first user (ticket 090)" \
+  grep -qx 'users = t <t@t.co>' .settings
 assert "a second init with the same project is a silent no-op" \
   "${AMD}" init acme --local-only
 assert "init with a different project is refused, naming both" \
@@ -88,6 +90,15 @@ assert "the found-locally documents repo is scaffolded, not a board" \
   bash -c "test -d '${plain_dir}/widgets-documents/adr' \
     && test ! -d '${plain_dir}/widgets-documents/tasks' \
     && grep -q '^widgets\$' '${plain_dir}/widgets-documents/.settings/project'"
+assert "init records you as the first user of a found-locally project" \
+  grep -qx 'users = t <t@t.co>' "${plain_dir}/widgets-tickets/.settings"
+assert "...in a commit of its own, since the repository already existed" \
+  bash -c "[ \"\$(git -C '${plain_dir}/widgets-tickets' log -1 --format=%s)\" = 'init: add t <t@t.co> to users' ]"
+assert "running init again doesn't list you twice or commit again" \
+  bash -c "cd '${plain_dir}' && before=\"\$(git -C widgets-tickets rev-parse HEAD)\" \
+    && '${AMD}' init widgets >/dev/null 2>&1 \
+    && [ \"\$(git -C widgets-tickets rev-parse HEAD)\" = \"\${before}\" ] \
+    && [ \"\$(grep -c '^users = ' widgets-tickets/.settings)\" -eq 1 ]"
 # Deregistering by alias both proves resolution actually works and cleans
 # up the registry ahead of the dedicated "registration:"/"aliases:" tests
 # below, which check that file's exact contents.
@@ -95,6 +106,38 @@ assert "amd init aliased the tickets repo 'tickets'" \
   bash -c "'${AMD}' deregister tickets | grep -q 'deregistered widgets-tickets'"
 assert "amd init aliased the documents repo 'documents'" \
   bash -c "'${AMD}' deregister documents | grep -q 'deregistered widgets-documents'"
+
+echo "init: an existing project made before ticket 090 gets its first user:"
+# A project whose remote has no users yet, cloned locally the way its
+# creator already has it; re-running init adds them and pushes.
+backfill="$(mktemp -d)"
+maker="GIT_CONFIG_GLOBAL=${backfill}/gitconfig GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME=${backfill}/config"
+printf '[user]\n\tname = maker\n\temail = maker@t.co\n[commit]\n\tgpgsign = false\n' >"${backfill}/gitconfig"
+(
+  set -e
+  export GIT_CONFIG_GLOBAL="${backfill}/gitconfig" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="${backfill}/config"
+  cd "${backfill}" && git init -q -b main seed && cd seed
+  "${AMD}" init old --local-only >/dev/null
+  sed -i '/^users = /d' .settings
+  git add -A && git commit -q -m "seed for ticket 090"
+  git init -q --bare -b main "${backfill}/origin/old-tickets.git"
+  git push -q "${backfill}/origin/old-tickets.git" HEAD:main
+  mkdir -p "${backfill}/work" && cd "${backfill}/work"
+  git clone -q "${backfill}/origin/old-tickets.git" old-tickets
+  git init -q old-documents
+)
+assert "re-running init on it adds you and says so" \
+  bash -c "cd '${backfill}/work' && out=\"\$(env ${maker} '${AMD}' init old 2>/dev/null)\" \
+    && grep -q 'added you (maker <maker@t.co>)' <<<\"\${out}\""
+assert "...pushed, so the remote lists you" \
+  bash -c "git --git-dir='${backfill}/origin/old-tickets.git' show main:.settings | grep -qx 'users = maker <maker@t.co>'"
+nobody="$(mktemp -d)"
+( cd "${nobody}" && git init -q )
+assert "init with no git email still succeeds, and warns that you weren't added" \
+  bash -c "cd '${nobody}' && env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME='${nobody}/config' \
+    '${AMD}' init lonely --local-only 2>&1 >/dev/null | grep -q \"weren't added to lonely's users\" \
+    && grep -qx 'project = lonely' .settings && ! grep -q '^users' .settings"
+rm -rf "${backfill}" "${nobody}"
 
 echo "init: refuses to run inside an existing git repository:"
 guard_test="$(mktemp -d)"
@@ -149,7 +192,7 @@ assert "amd join clones both repositories side by side" \
   bash -c "cd '${people}/ada/work' && env ${ada} '${AMD}' join acme >/dev/null \
     && test -d acme-tickets/tasks/backlog && test -d acme-documents/.git"
 assert "the joining user is added to the remote's users" \
-  bash -c "$(declare -f remote_settings); origin='${origin}'; remote_settings | grep -qx 'users = ada <ada@t.co>'"
+  bash -c "$(declare -f remote_settings); origin='${origin}'; remote_settings | grep -q '^users = .*ada <ada@t.co>'"
 assert "both repositories are registered and aliased for the joining user" \
   bash -c "cd '${people}/ada/work' && env ${ada} '${AMD}' deregister tickets | grep -q 'deregistered acme-tickets' \
     && env ${ada} '${AMD}' deregister documents | grep -q 'deregistered acme-documents'"

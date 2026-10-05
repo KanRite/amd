@@ -10,12 +10,14 @@
 //! carry both policies at once, since GitHub branch protection is
 //! repository-wide, not path-scoped.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
 use agile_md::board::Board;
+use agile_md::board_settings::User;
 use agile_md::{alias, board_settings, git, registry::Registry};
 
 use crate::github;
@@ -89,6 +91,9 @@ fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf
     let board = Board::in_repo(&target);
     board.create()?;
     set_project(&board, project)?;
+    // A new repository's initial commit below carries the entry; an existing
+    // one gets a commit of its own.
+    add_first_user(&board, project, !created_new)?;
 
     if created_new {
         git::commit_all(&target, &format!("Initialise {project} tickets board"))?;
@@ -221,6 +226,8 @@ fn init_here(project: &str) -> Result<()> {
     let board = Board::locate()?;
     board.create()?;
     set_project(&board, project)?;
+    // `--local-only` never commits; the entry is there for the next one.
+    add_first_user(&board, project, false)?;
     // Best-effort, same as the non-local-only path above: registering this
     // machine's own copy of the board it was just created in, so it's
     // findable without a separate `amd register` immediately afterward.
@@ -229,6 +236,52 @@ fn init_here(project: &str) -> Result<()> {
         let _ = registry.save();
     }
     println!("Initialised agile-md board at {}", board.root.display());
+    Ok(())
+}
+
+/// Records whoever is running `init` — git's `user.name <user.email>` — in
+/// the project's `users` (ticket 090), so a project never starts with
+/// nobody on it. Re-running `init` on an existing project is how one made
+/// before this existed gets its first user; already being listed is a
+/// no-op. With `commit`, the change is committed on its own and pushed
+/// when there's an `origin`.
+///
+/// Deliberately *not* `join`'s reset-and-retry when the push is rejected:
+/// that is safe only in a clone seconds old, and this may be someone's real
+/// working copy. The commit stays, with a warning to pull and push.
+///
+/// No git email is a warning, not a failure: the project itself was made,
+/// and failing now would misreport that.
+fn add_first_user(board: &Board, project: &str, commit: bool) -> Result<()> {
+    let repo = board.repo_root();
+    let Some(user) = User::from_git(repo) else {
+        eprintln!(
+            "warning: git has no user.email, so you weren't added to {project}'s users — set it \
+             (git config --global user.email ...) and run amd init {project} again"
+        );
+        return Ok(());
+    };
+    let mut settings = board_settings::load(board);
+    if !settings.add_user(&user)? {
+        return Ok(());
+    }
+    settings.save(board)?;
+    println!("added you ({user}) to {project}'s users");
+    if !commit {
+        return Ok(());
+    }
+    let paths: BTreeSet<PathBuf> = [PathBuf::from(".settings")].into();
+    let message = format!("init: add {user} to users");
+    let result = match git::remote_url(repo) {
+        Some(_) => git::commit_paths(repo, &message, &paths),
+        None => git::commit_paths_locally(repo, &message, &paths),
+    };
+    if let Err(err) = result {
+        eprintln!(
+            "warning: added you to {project}'s users locally, but couldn't commit and push it: \
+             {err:#} — pull, then push, to share it"
+        );
+    }
     Ok(())
 }
 
