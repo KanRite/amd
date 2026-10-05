@@ -55,6 +55,11 @@
 //!   where — is `registry.rs`'s job, per-machine and never shared. A name
 //!   declared here with no matching local registry entry is what `amdui`
 //!   shows greyed out.
+//! - `users`: the people on this project (ticket 088), in git's own
+//!   identity shape — `Name <email>, Name <email>`. `amd join` adds the
+//!   joining user. Deliberately **not** a documents key: joining has to take
+//!   effect on the direct-push path, not wait for a documents PR. The email
+//!   is the identity (leases use `user.email`); the name is for display.
 //!
 //! One repository, one settings file — a repository with more than one
 //! board (two different `AMD_DIR` trees) shares this file and its counter
@@ -89,6 +94,46 @@ const WIP_LIMIT: &str = "wip-limit";
 pub const DEFAULT_WIP_LIMIT: u32 = 2;
 const REPOS: &str = "repos";
 const AUTO_COMMIT: &str = "commit";
+const USERS: &str = "users";
+
+/// One person on the project: git's own `Name <email>` identity.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct User {
+    pub name: String,
+    pub email: String,
+}
+
+impl User {
+    /// Whether this is the same person as `other` — by email, ignoring case,
+    /// the way leases identify people. A changed display name is still them.
+    pub fn same_person(&self, other: &User) -> bool {
+        self.email.eq_ignore_ascii_case(&other.email)
+    }
+}
+
+impl std::fmt::Display for User {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} <{}>", self.name, self.email)
+    }
+}
+
+/// Parses a `users` value. Split on `>` rather than `,`, so a name with a
+/// comma in it ("Preece, Tim <t@example.com>") still parses; anything that
+/// isn't a `Name <email>` entry is skipped rather than failing the load.
+fn parse_users(value: &str) -> Vec<User> {
+    value
+        .split('>')
+        .filter_map(|chunk| {
+            let chunk = chunk.trim_start_matches(|c: char| c == ',' || c.is_whitespace());
+            let (name, email) = chunk.split_once('<')?;
+            let (name, email) = (name.trim(), email.trim());
+            (!email.is_empty()).then(|| User {
+                name: name.to_string(),
+                email: email.to_string(),
+            })
+        })
+        .collect()
+}
 
 /// Keys that move to `{project}-documents`'s `.settings/` directory once
 /// one is locatable. Everything else this module knows about (`next-id`,
@@ -323,6 +368,35 @@ impl BoardSettings {
         Ok(())
     }
 
+    /// The project's users, in the order they joined.
+    pub fn users(&self) -> Vec<User> {
+        self.config.get(USERS).map(parse_users).unwrap_or_default()
+    }
+
+    /// Adds `user` unless they're already listed (by email). Returns whether
+    /// anything changed, so a caller knows whether there's a commit to make —
+    /// joining twice is not an error, the same as declaring a repo twice.
+    pub fn add_user(&mut self, user: &User) -> Result<bool> {
+        if user.email.is_empty() || user.email.contains(['<', '>', ',']) {
+            bail!("'{}' isn't a usable email address", user.email);
+        }
+        if user.name.contains(['<', '>']) {
+            bail!("a user's name can't contain '<' or '>'");
+        }
+        let mut users = self.users();
+        if users.iter().any(|existing| existing.same_person(user)) {
+            return Ok(false);
+        }
+        users.push(user.clone());
+        let value = users
+            .iter()
+            .map(User::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.config.set(USERS, &value);
+        Ok(true)
+    }
+
     /// Persists whatever's in memory to wherever each key actually belongs.
     /// With no locatable documents repository, this is unchanged from
     /// before ticket 057 — everything goes in this board's own file.
@@ -337,7 +411,7 @@ impl BoardSettings {
         // rather than actively deleted, since migration is a deliberate,
         // separate step, not something a save should do as a side effect.
         let mut local = Config::load_from(&path(board));
-        for key in [NEXT_ID, AUTO_COMMIT] {
+        for key in [NEXT_ID, AUTO_COMMIT, USERS] {
             if let Some(value) = self.config.get(key) {
                 local.set(key, value);
             }
@@ -831,5 +905,94 @@ mod tests {
             Some("leftover-repo"),
             "migration is a deliberate step, not a side effect of an unrelated save"
         );
+    }
+
+    fn user(name: &str, email: &str) -> User {
+        User {
+            name: name.to_string(),
+            email: email.to_string(),
+        }
+    }
+
+    #[test]
+    fn users_survive_a_round_trip_in_join_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        assert!(
+            settings
+                .add_user(&user("Old Dippy", "dippy@example.com"))
+                .unwrap()
+        );
+        assert!(
+            settings
+                .add_user(&user("Oberi Joe", "joe@example.com"))
+                .unwrap()
+        );
+        settings.save(&board).unwrap();
+
+        assert_eq!(
+            load(&board).users(),
+            vec![
+                user("Old Dippy", "dippy@example.com"),
+                user("Oberi Joe", "joe@example.com")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_name_with_a_comma_still_parses() {
+        assert_eq!(
+            parse_users("Preece, Tim <t@example.com>, Ada <a@example.com>"),
+            vec![
+                user("Preece, Tim", "t@example.com"),
+                user("Ada", "a@example.com")
+            ]
+        );
+    }
+
+    #[test]
+    fn adding_the_same_email_again_changes_nothing_whatever_its_case_or_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = load(&board(dir.path()));
+        assert!(settings.add_user(&user("Ada", "Ada@Example.com")).unwrap());
+        assert!(
+            !settings
+                .add_user(&user("Ada L", "ada@example.com"))
+                .unwrap()
+        );
+        assert_eq!(settings.users(), vec![user("Ada", "Ada@Example.com")]);
+    }
+
+    #[test]
+    fn an_unusable_identity_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = load(&board(dir.path()));
+        assert!(settings.add_user(&user("Ada", "")).is_err());
+        assert!(
+            settings
+                .add_user(&user("Ada <x>", "a@example.com"))
+                .is_err()
+        );
+        assert!(settings.users().is_empty());
+    }
+
+    #[test]
+    fn users_stay_in_the_tickets_file_with_a_documents_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = tickets_board(dir.path());
+        std::fs::create_dir_all(board.repo_root()).unwrap();
+        documents_settings_dir(dir.path());
+
+        let mut settings = load(&board);
+        settings.add_user(&user("Ada", "a@example.com")).unwrap();
+        settings.save(&board).unwrap();
+
+        assert_eq!(load(&board).users(), vec![user("Ada", "a@example.com")]);
+        assert_eq!(
+            Config::load_from(&path(&board)).get(USERS),
+            Some("Ada <a@example.com>")
+        );
+        assert!(!dir.path().join("proj-documents/.settings/users").exists());
     }
 }

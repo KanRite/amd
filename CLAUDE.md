@@ -71,8 +71,14 @@ redundant. Their history is in git if it is ever wanted again.
   recognise so one writer cannot delete another's.
 - `crates/amd-lib/src/board_settings.rs` — the board-local settings file
   (`<repo-root>/.settings`, git-tracked, hidden to match the legacy
-  `.next-id` file it partly replaces): the `next-id` ticket counter and the
-  `commit` auto-commit toggle stay here. `project`/`repos`/`wip-todo`/
+  `.next-id` file it partly replaces): the `next-id` ticket counter, the
+  `commit` auto-commit toggle and the project's `users` (ticket 088 —
+  `Name <email>, …`, git's own identity shape, parsed on `>` so a comma in
+  a name survives; email is the identity) stay here. `users` must stay on
+  the direct-push path because `amd join` adds to it; `save()` copies it
+  back to the local file explicitly, alongside `next-id`/`commit`, since a
+  key missing from that list is silently dropped once a documents sibling
+  exists. `project`/`repos`/`wip-todo`/
   `wip-limit`/`lease-hours` move to `{project}-documents`'s own
   `.settings/` **directory** once one is locatable (ticket 057) — one small
   file per key, so each reviews as its own legible diff in a repository
@@ -136,6 +142,23 @@ redundant. Their history is in git if it is ever wanted again.
   command for "inside a repo" — it skips all of the above (tickets board
   only, no documents sibling, no protection) and just scaffolds here, the
   way bare `amd init` always has.
+- `crates/amd-cli/src/join.rs` — `amd join <project> [--org]` (ticket 088):
+  everyone but the project's creator. Clones `<project>-tickets` and
+  `<project>-documents` as siblings with **plain `git clone`**, never `gh`
+  — the user's SSH key is the only credential; nothing is created and no
+  protection is touched. URL is `{AMD_GIT_BASE}{owner}/{project}-{kind}.git`,
+  `AMD_GIT_BASE` defaulting to `git@github.com:` (the test suite points it
+  at local bare repos). Refuses inside a git repo, and if either directory
+  already exists in any form. Checks the tickets clone has a board and a
+  matching `project`, adds git's `user.name`/`user.email` to `users`,
+  commits `join: Name <email>` and pushes — **always**, regardless of
+  `AMD_COMMIT`. A rejected push is retried (up to 5 attempts, jittered
+  backoff) by `fetch` + `reset --hard origin/<branch>` + re-applying the
+  change: safe only because the clone is seconds old and its one local
+  commit is ours — don't reuse that pattern on a clone with real work in
+  it. Any failure before the push lands removes the directories that run
+  created, so a retry starts clean. Reuses `init`'s `owner_for` and
+  `register_and_alias`.
 - `crates/amd-cli/src/github.rs` — `protect_main(full_name, require_review)`:
   the only thing that shells out to `gh api` rather than plain `gh repo`/
   `git`. Needs the branch to exist first (protection is set after the
@@ -177,7 +200,8 @@ redundant. Their history is in git if it is ever wanted again.
   branches (`current_branch`, `branch_exists`, `switch_branch`,
   `commits_ahead`, `branch_pushed`, `delete_branch`, `set_head_branch`), and
   a small set for `amd init`'s tickets-repo bootstrap (`remote_url`,
-  `commit_all`, `push`).
+  `commit_all`, `push`) and `amd join`'s clone-and-retry (`clone`, `fetch`,
+  `reset_hard`).
 - `crates/amd-lib/templates/*.md.jinja` — the built-in templates, `include_str!`'d into the
   binary.
 - `install.sh` — downloads the prebuilt `amd-<target>.zip` from the GitHub
@@ -320,7 +344,8 @@ redundant. Their history is in git if it is ever wanted again.
   duration, default 8), `AMD_WIP_LIMIT` (doing's WIP limit — unset or
   unparsable defaults to **2**, not unlimited; `0` turns it off; todo is
   never limited, so `AMD_WIP_TODO` is ignored since ticket 083), `AMD_COMMIT` (auto-commit-and-push,
-  unset = **on**; `0`/`off`/`false` turns it off). **`AMD_TYPES` is dead** —
+  unset = **on**; `0`/`off`/`false` turns it off), `AMD_GIT_BASE` (where
+  `amd join` clones from, default `git@github.com:`). **`AMD_TYPES` is dead** —
   it was in `--help` long after nothing read it. **`AMD_NO_REGISTER` is also
   gone** (2026-09-26) — registration is a deliberate act (`amd register`)
   again, not something running in the background to opt out of.

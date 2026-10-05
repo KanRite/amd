@@ -297,6 +297,47 @@ pub fn push(repo: &Path) -> Result<()> {
     Ok(())
 }
 
+/// `git clone <url> <target>` — plain git, so the user's own SSH key (or
+/// whatever credential helper they have) is the only thing it needs.
+pub fn clone(url: &str, target: &Path) -> Result<()> {
+    let (ok, detail) = run(Command::new("git")
+        .args(["clone", "--quiet", url])
+        .arg(target))
+    .context("running git clone")?;
+    if !ok {
+        bail!(failed(&format!("git clone {url}"), &detail));
+    }
+    Ok(())
+}
+
+/// `git fetch origin`.
+pub fn fetch(repo: &Path) -> Result<()> {
+    let (ok, detail) = run(Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["fetch", "--quiet", "origin"]))
+    .context("running git fetch")?;
+    if !ok {
+        bail!(failed("git fetch", &detail));
+    }
+    Ok(())
+}
+
+/// `git reset --hard <rev>` — throws away local commits and changes. Only
+/// for a clone whose local state is known to be disposable (`amd join`
+/// re-applying its one change on top of a remote that moved).
+pub fn reset_hard(repo: &Path, rev: &str) -> Result<()> {
+    let (ok, detail) = run(Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["reset", "--quiet", "--hard", rev]))
+    .context("running git reset")?;
+    if !ok {
+        bail!(failed(&format!("git reset --hard {rev}"), &detail));
+    }
+    Ok(())
+}
+
 /// Every path git currently considers changed, mapped to a cheap signature
 /// of its current on-disk state (`None` if nothing is there — a rename's
 /// old side, or a path that was deleted). `git status --porcelain=v1

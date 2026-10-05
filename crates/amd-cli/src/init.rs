@@ -136,7 +136,7 @@ fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<PathB
 /// Registers `target` locally and assigns it `alias`, warning (not
 /// failing `init`) if the alias is already someone else's — 048's own
 /// "must not silently overwrite an existing alias assignment".
-fn register_and_alias(target: &Path, alias_name: &str) -> Result<()> {
+pub(crate) fn register_and_alias(target: &Path, alias_name: &str) -> Result<()> {
     let mut registry = Registry::load();
     registry.add(target)?;
     registry.save()?;
@@ -244,7 +244,7 @@ fn set_project(board: &Board, project: &str) -> Result<()> {
 /// and the project name is expected to name one of those directly — not
 /// `gh`'s own default (the CLI's authenticated account), which has no
 /// reason to match the project at all.
-fn owner_for<'a>(project: &'a str, org: Option<&'a str>) -> &'a str {
+pub(crate) fn owner_for<'a>(project: &'a str, org: Option<&'a str>) -> &'a str {
     org.unwrap_or(project)
 }
 
