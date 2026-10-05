@@ -87,8 +87,8 @@ redundant. Their history is in git if it is ever wanted again.
   (`{project}-tickets` next to `{project}-documents`, the standing
   `rfc/0003` layout) first, falling back to a **project-scoped** registry
   lookup (`{project}-documents`, using this board's own possibly-stale
-  `project` value) — deliberately never the machine-wide `documents`
-  alias (`crates/amd-lib/src/alias.rs`), which would silently leak a
+  `project` value) — deliberately never a machine-wide "documents"
+  name (there used to be an alias; removed in ticket 097), which would silently leak a
   *different* project's settings into this one on any machine juggling
   more than one project — confirmed live, the hard way, as a real
   `project_trust` violation while building this. A board with no
@@ -129,10 +129,8 @@ redundant. Their history is in git if it is ever wanted again.
 - `crates/amd-cli/src/init.rs` — `amd init <project>`: finds or creates
   **two** private GitHub repositories, `<project>-tickets` and
   `<project>-documents` (via `gh`, as siblings under the current
-  directory), clones each, scaffolds them, registers both locally, and
-  aliases them `tickets`/`documents` (`crates/amd-lib/src/alias.rs`,
-  ticket 026) — warning rather than failing if either alias is already
-  taken by something else on this machine. Tickets gets the board;
+  directory), clones each, scaffolds them and registers both locally.
+  Tickets gets the board;
   documents gets `adr/`, `rfc/`, `docs/`, `README.md`, `CHANGELOG.md`, and
   a `.settings/` **directory** (ticket 057 — one small file per key, so a
   changed setting reviews as its own small diff; `.settings/project` is
@@ -181,7 +179,7 @@ redundant. Their history is in git if it is ever wanted again.
   commit is ours — don't reuse that pattern on a clone with real work in
   it. Any failure before the push lands removes the directories that run
   created, so a retry starts clean. Reuses `init`'s `owner_for` and
-  `register_and_alias`.
+  `register`.
 - `crates/amd-cli/src/github.rs` — `protect_main(full_name, require_review)`:
   the only thing that shells out to `gh api` rather than plain `gh repo`/
   `git`. Needs the branch to exist first (protection is set after the
@@ -595,21 +593,12 @@ project, into one `amdui` window:
   cloned right now shouldn't silently un-declare it for the rest of the
   team. It goes back to showing greyed out for you, the same state a
   teammate who's never registered it at all would see.
-- **A third, purely local layer sits on top: aliases** (`crates/amd-lib/src/alias.rs`,
-  `$XDG_CONFIG_HOME/agile-md/aliases`, ticket 026). A short name — `tickets`
-  instead of `agile-md-tickets` — that resolves to a registered repository's
-  real declared name, set with `amd alias <name> <alias>`. Deliberately a
-  third file, not a second column on the registry's own one-path-per-line
-  format (that file's doc comment is explicit it's "a list of paths and
-  nothing more") — reuses `settings::Config`'s existing `key = value`
-  parser rather than inventing a new one. Refused if the target isn't
-  registered, or if the alias is already a *different* repository's own
-  real name — an alias and a real name must never be ambiguous with each
-  other. **Narrower surface than it might sound**: the only two places that
-  ever take a repository name as free-typed input are `amd deregister` and
-  `amd alias` itself — `model::load_repos()`'s own repo-resolution loop
-  only ever sees a project's *declared* names (git-tracked, never an
-  alias), so it needs no resolution step at all.
+- **There are no repository aliases** (removed in ticket 097). The
+  machine-wide `tickets`/`documents` short names ticket 026 added only ever
+  pointed at whichever project last ran `init`/`join`, so with several
+  projects on one machine they misled. Repositories go by their real
+  `{project}-tickets`/`-documents` names; `amd deregister` takes the real
+  name. A leftover `$XDG_CONFIG_HOME/agile-md/aliases` file is ignored.
 - **`model::load_repos()` cross-references the two.** `Board::discover()`
   finds the current project (a hard error now if none is found — `amdui`
   operates on exactly one project, never a cross-project stack); its own

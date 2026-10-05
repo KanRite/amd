@@ -161,10 +161,10 @@ pub fn path(board: &Board) -> std::path::PathBuf {
 /// so this works even on a machine that's never run `amd register`. Falls
 /// back to a **project-scoped** registry lookup, `{project}-documents`,
 /// using this board's own (possibly stale, pre-migration) locally recorded
-/// `project` value — deliberately *not* the machine-wide `documents`
-/// alias: a machine can have more than one project registered at once, and
-/// resolving to "whichever repo happens to be aliased documents right
-/// now" would silently leak a *different* project's settings into this
+/// `project` value — deliberately *not* a machine-wide `documents` alias
+/// (aliases were removed in ticket 097): a machine can have more than one
+/// project registered at once, and resolving to "whichever repo happens to
+/// be aliased documents right now" would silently leak a *different* project's settings into this
 /// one — confirmed live, the hard way, as a real `project_trust` violation
 /// during this ticket's own testing. `None` means no documents repository
 /// is locatable at all — not an error, just "keep using the local file",

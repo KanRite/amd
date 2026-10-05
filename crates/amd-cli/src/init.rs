@@ -18,7 +18,7 @@ use anyhow::{Context, Result, bail};
 
 use agile_md::board::Board;
 use agile_md::board_settings::User;
-use agile_md::{alias, board_settings, git, registry::Registry};
+use agile_md::{board_settings, git, registry::Registry};
 
 use crate::github;
 
@@ -67,7 +67,7 @@ pub fn run(project: String, local_only: bool, org: Option<String>) -> Result<()>
 }
 
 /// Creates or connects `{project}-tickets`, scaffolds the board, registers
-/// it, aliases it `tickets`, and — for a freshly created repository — sets
+/// it, and — for a freshly created repository — sets
 /// its (lighter) branch protection tier. Unchanged in behaviour from
 /// before this repository had a documents sibling; only pulled out of
 /// `run()` so both repositories share the same creation path.
@@ -101,7 +101,7 @@ fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf
         warn_if_protection_unavailable(&full_name, github::protect_main(&full_name, false)?);
     }
 
-    register_and_alias(&target, "tickets")?;
+    register(&target)?;
     Ok(target)
 }
 
@@ -110,8 +110,8 @@ fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf
 /// 057's shape — one small file per key, so each setting reviews as its
 /// own legible diff) holding just `project` for now. `repos`/`wip-limit`/
 /// `lease-hours` (057) stay unset here — a team sets them later via a PR,
-/// same as any other documents change. Registered and aliased
-/// `documents`, same as tickets, since ticket 057's settings-reader needs
+/// same as any other documents change. Registered, same as tickets,
+/// since ticket 057's settings-reader needs
 /// this repository to be locatable on disk the same way.
 fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf> {
     let target = base.join(format!("{project}-documents"));
@@ -134,28 +134,15 @@ fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<PathB
         warn_if_protection_unavailable(&full_name, github::protect_main(&full_name, true)?);
     }
 
-    register_and_alias(&target, "documents")?;
+    register(&target)?;
     Ok(target)
 }
 
-/// Registers `target` locally and assigns it `alias`, warning (not
-/// failing `init`) if the alias is already someone else's — 048's own
-/// "must not silently overwrite an existing alias assignment".
-pub(crate) fn register_and_alias(target: &Path, alias_name: &str) -> Result<()> {
+/// Registers `target` on this machine, so `amd`/`amdui` can find it.
+pub(crate) fn register(target: &Path) -> Result<()> {
     let mut registry = Registry::load();
     registry.add(target)?;
-    registry.save()?;
-
-    let name = target
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let mut aliases = alias::Aliases::load();
-    match aliases.set(&registry, &name, alias_name) {
-        Ok(()) => aliases.save()?,
-        Err(err) => eprintln!("warning: could not assign alias '{alias_name}': {err:#}"),
-    }
-    Ok(())
+    registry.save()
 }
 
 fn warn_if_already_present(target: &Path) -> Result<()> {

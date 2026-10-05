@@ -99,13 +99,13 @@ assert "running init again doesn't list you twice or commit again" \
     && '${AMD}' init widgets >/dev/null 2>&1 \
     && [ \"\$(git -C widgets-tickets rev-parse HEAD)\" = \"\${before}\" ] \
     && [ \"\$(grep -c '^users = ' widgets-tickets/.settings)\" -eq 1 ]"
-# Deregistering by alias both proves resolution actually works and cleans
-# up the registry ahead of the dedicated "registration:"/"aliases:" tests
-# below, which check that file's exact contents.
-assert "amd init aliased the tickets repo 'tickets'" \
-  bash -c "'${AMD}' deregister tickets | grep -q 'deregistered widgets-tickets'"
-assert "amd init aliased the documents repo 'documents'" \
-  bash -c "'${AMD}' deregister documents | grep -q 'deregistered widgets-documents'"
+# Deregistering both proves init registered them and cleans up the registry
+# ahead of the dedicated "registration:" tests below, which check that
+# file's exact contents.
+assert "amd init registered the tickets repo" \
+  bash -c "'${AMD}' deregister widgets-tickets | grep -q 'deregistered widgets-tickets'"
+assert "amd init registered the documents repo" \
+  bash -c "'${AMD}' deregister widgets-documents | grep -q 'deregistered widgets-documents'"
 
 echo "init: an existing project made before ticket 090 gets its first user:"
 # A project whose remote has no users yet, cloned locally the way its
@@ -193,9 +193,9 @@ assert "amd join clones both repositories side by side" \
     && test -d acme-tickets/tasks/backlog && test -d acme-documents/.git"
 assert "the joining user is added to the remote's users" \
   bash -c "$(declare -f remote_settings); origin='${origin}'; remote_settings | grep -q '^users = .*ada <ada@t.co>'"
-assert "both repositories are registered and aliased for the joining user" \
-  bash -c "cd '${people}/ada/work' && env ${ada} '${AMD}' deregister tickets | grep -q 'deregistered acme-tickets' \
-    && env ${ada} '${AMD}' deregister documents | grep -q 'deregistered acme-documents'"
+assert "both repositories are registered for the joining user" \
+  bash -c "cd '${people}/ada/work' && env ${ada} '${AMD}' deregister acme-tickets | grep -q 'deregistered acme-tickets' \
+    && env ${ada} '${AMD}' deregister acme-documents | grep -q 'deregistered acme-documents'"
 assert "joining again (fresh directory) doesn't list the user twice" \
   bash -c "mkdir -p '${people}/ada/again' && cd '${people}/ada/again' \
     && env ${ada} '${AMD}' join acme | grep -q 'already one of its users' \
@@ -345,7 +345,6 @@ assert "init of a second project keeps the first current, and says how to switch
     && grep -qx first .current-project"
 assert "init with a choice already made leaves it alone" \
   bash -c "cd '${second}' && echo later >.current-project && '${AMD}' init first >/dev/null 2>&1 && grep -qx later .current-project"
-"${AMD}" deregister tickets >/dev/null 2>&1; "${AMD}" deregister documents >/dev/null 2>&1
 for repo in first-tickets first-documents later-tickets later-documents; do
   "${AMD}" deregister "${repo}" >/dev/null 2>&1
 done
@@ -610,22 +609,9 @@ assert "the project-wide declaration survives deregistering locally" \
 assert "deregistering something not registered locally fails" \
   bash -c "! '${AMD}' deregister nope"
 
-echo "aliases:"
-pu_name="$(basename "${periods_and_underscores}")"
-alias_other="$(mktemp -d)"
-(cd "${alias_other}" && git init -q)
-other_name="$(basename "${alias_other}")"
-"${AMD}" register "${periods_and_underscores}" >/dev/null
-"${AMD}" register "${alias_other}" >/dev/null
-assert "amd alias assigns a short name to a registered repository" \
-  bash -c "'${AMD}' alias \"${pu_name}\" pnick | grep -q '^pnick -> '"
-assert "aliasing an unregistered repository is refused" \
-  bash -c "! '${AMD}' alias not-a-real-repo somealias"
-assert "an alias cannot collide with a different repo's real registered name" \
-  bash -c "! '${AMD}' alias \"${pu_name}\" \"${other_name}\""
-assert "amd deregister resolves an alias to its real name" \
-  bash -c "'${AMD}' deregister pnick | grep -q \"deregistered ${pu_name}\""
-rm -rf "${alias_other}"
+echo "aliases (removed, ticket 097):"
+assert "amd alias is no longer a command" \
+  bash -c "! '${AMD}' alias somerepo somename >/dev/null 2>&1"
 
 echo "related tickets:"
 assert "related is empty by default" \
