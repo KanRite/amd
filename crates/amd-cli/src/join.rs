@@ -18,7 +18,7 @@ use agile_md::board::Board;
 use agile_md::board_settings::{self, User};
 use agile_md::git;
 
-use crate::init::{owner_for, register_and_alias};
+use crate::init::{owner_for, register};
 
 /// Where the repositories are cloned from unless `AMD_GIT_BASE` says
 /// otherwise — GitHub over SSH. The override is what lets the test suite
@@ -82,8 +82,8 @@ pub fn run(project: String, org: Option<String>) -> Result<()> {
         }
     };
 
-    register_and_alias(&tickets, "tickets")?;
-    register_and_alias(&documents, "documents")?;
+    register(&tickets)?;
+    register(&documents)?;
 
     println!("Joined project '{project}' as {user}:");
     println!("  tickets:   {}", tickets.display());
