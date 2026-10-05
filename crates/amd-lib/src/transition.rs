@@ -134,6 +134,17 @@ pub fn move_to(board: &Board, task: &Task, to: Column, force: bool) -> Result<Ou
         {
             outcome.events.push(Event::Warn(warning));
         }
+        // Leaving active work — finished, or handed back to the backlog —
+        // gives the lease back, in the same commit as the move (ticket 092).
+        // doing → todo keeps it: that's still yours.
+        if matches!(to, Column::Done | Column::Backlog)
+            && let Some(moved) = Task::from_path(&dest, to)
+            && let Err(err) = moved.release_if_mine()
+        {
+            outcome.events.push(Event::Warn(format!(
+                "could not release the lease automatically: {err:#}"
+            )));
+        }
         outcome.dest = Some(dest);
         Ok(outcome)
     })?;

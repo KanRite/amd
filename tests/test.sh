@@ -912,6 +912,29 @@ assert "the lease is gone after being broken" \
 assert "amd todo auto-takes a now-free lease on entry" \
   bash -c "cd '${lock_repo}' && git config user.email t@t.co && '${AMD}' todo 1 --no-branch >/dev/null \
     && '${AMD}' show 1 | grep -q 'locked-by: \"t@t.co\"'"
+# Leaving active work gives the lease back (ticket 092): done, backlog and
+# abandon release your own; doing -> todo keeps it; nobody else's is touched.
+assert "doing -> todo keeps your lease" \
+  bash -c "cd '${lock_repo}' && '${AMD}' doing 1 >/dev/null 2>&1 && '${AMD}' todo 1 --no-branch >/dev/null 2>&1 \
+    && '${AMD}' show 1 | grep -q 'locked-by: \"t@t.co\"'"
+assert "amd done releases your lease" \
+  bash -c "cd '${lock_repo}' && '${AMD}' doing 1 >/dev/null 2>&1 && '${AMD}' done 1 >/dev/null 2>&1 \
+    && '${AMD}' show 1 | grep -q 'locked-by: \"\"' && '${AMD}' show 1 | grep -q 'locked-until: \"\"'"
+assert "...in the same commit as the move" \
+  bash -c "cd '${lock_repo}' && git show HEAD --name-status | grep -q 'done/001-lockable-ticket.md' \
+    && git show HEAD:tasks/done/001-lockable-ticket.md | grep -q 'locked-by: \"\"'"
+( cd "${lock_repo}" && "${AMD}" new "Handed back" --no-edit >/dev/null 2>&1 && "${AMD}" new "Dropped" --no-edit >/dev/null 2>&1 \
+  && "${AMD}" todo 2 --no-branch >/dev/null 2>&1 && "${AMD}" todo 3 --no-branch >/dev/null 2>&1 )
+assert "moving back to the backlog releases your lease" \
+  bash -c "cd '${lock_repo}' && '${AMD}' show 2 | grep -q 'locked-by: \"t@t.co\"' \
+    && '${AMD}' backlog 2 >/dev/null 2>&1 && '${AMD}' show 2 | grep -q 'locked-by: \"\"'"
+assert "abandoning releases your lease" \
+  bash -c "cd '${lock_repo}' && '${AMD}' abandon 3 >/dev/null 2>&1 \
+    && grep -q 'locked-by: \"\"' tasks/archive/003-dropped.md"
+assert "a move to done never clears someone else's (lapsed) lease" \
+  bash -c "cd '${lock_repo}' && '${AMD}' todo 2 --no-branch >/dev/null 2>&1 && '${AMD}' doing 2 >/dev/null 2>&1 \
+    && sed -i 's/^locked-by: .*/locked-by: \"other@example.com\"/; s/^locked-until: .*/locked-until: \"2000-01-01T00:00:00Z\"/' tasks/doing/002-handed-back.md \
+    && '${AMD}' done 2 >/dev/null 2>&1 && '${AMD}' show 2 | grep -q 'locked-by: \"other@example.com\"'"
 
 echo "pipes:"
 assert "the board survives a closed pipe" \

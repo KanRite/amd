@@ -351,6 +351,13 @@ redundant. Their history is in git if it is ever wanted again.
   (blocked if someone else holds it; blocked unless *you're* the holder).
   Only `break_lease` (`amd unlock --force`) bypasses that gate — the one
   deliberate act ADR-0007 wants kept separate from an ordinary write.
+  **Leaving active work gives it back** (ticket 092): `transition::move_to`
+  calls `Task::release_if_mine` when a ticket lands in `done` or `backlog`,
+  inside the same `with_auto_commit` closure, so the move and the release
+  are one commit. `Board::archive` does the same before archiving
+  (best-effort; the archive is untracked). `doing → todo` keeps the lease.
+  `release_if_mine` only ever clears the current identity's own lease,
+  lapsed or not; someone else's, even lapsed, stays for `unlock --force`.
   `board_settings::lease_hours()` resolves the duration (`AMD_LEASE_HOURS`,
   then the board's own `.settings`, then 8 hours) the same
   `settings::resolved()` precedence every other setting uses.

@@ -216,6 +216,22 @@ impl Task {
         fs::write(&self.path, updated).with_context(|| format!("writing {}", self.path.display()))
     }
 
+    /// Releases the lease if the current git identity holds it — lapsed or
+    /// not — and leaves anyone else's alone (ticket 092: a ticket leaving
+    /// active work gives back the lease its move into todo/doing took).
+    /// Returns whether it released anything. Someone else's lease, even a
+    /// lapsed one, is never this function's to clear; `break_lease` is.
+    pub fn release_if_mine(&self) -> Result<bool> {
+        let Some(holder) = self.locked_by() else {
+            return Ok(false);
+        };
+        if self.git_identity().as_deref() != Some(holder.as_str()) {
+            return Ok(false);
+        }
+        self.release_lease(self.hash()?)?;
+        Ok(true)
+    }
+
     /// `git config user.email`, resolved from this ticket's own directory
     /// rather than the process's current one — a desktop board open across
     /// several registered repositories isn't standing in any one of them.
@@ -1414,6 +1430,56 @@ mod tests {
         );
         task.set_title(task.hash().unwrap(), "New").unwrap();
         assert_eq!(task.title(), "New");
+    }
+
+    fn leased(dir: &Path, holder: &str, until: &str) -> Task {
+        ranked(
+            dir,
+            "001-a.md",
+            &format!(
+                "---\nid: \"001\"\ntitle: \"A\"\nlocked-by: \"{holder}\"\nlocked-until: \"{until}\"\n---\n\nbody\n"
+            ),
+        )
+    }
+
+    #[test]
+    fn release_if_mine_releases_your_own_lease() {
+        let dir = tempfile::tempdir().unwrap();
+        identity(dir.path(), "me@example.com");
+        let task = leased(dir.path(), "me@example.com", &future());
+        assert!(task.release_if_mine().unwrap());
+        assert_eq!(task.locked_by(), None);
+        assert_eq!(task.locked_until(), None);
+    }
+
+    #[test]
+    fn release_if_mine_clears_your_own_lapsed_lease_too() {
+        let dir = tempfile::tempdir().unwrap();
+        identity(dir.path(), "me@example.com");
+        let task = leased(dir.path(), "me@example.com", &past());
+        assert!(task.release_if_mine().unwrap());
+        assert_eq!(task.locked_by(), None);
+    }
+
+    #[test]
+    fn release_if_mine_never_touches_someone_elses_lease_active_or_lapsed() {
+        for until in [future(), past()] {
+            let dir = tempfile::tempdir().unwrap();
+            identity(dir.path(), "me@example.com");
+            let task = leased(dir.path(), "other@example.com", &until);
+            assert!(!task.release_if_mine().unwrap());
+            assert_eq!(task.locked_by(), Some("other@example.com".to_string()));
+        }
+    }
+
+    #[test]
+    fn release_if_mine_with_no_lease_does_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        identity(dir.path(), "me@example.com");
+        let task = leased(dir.path(), "", "");
+        let before = task.hash().unwrap();
+        assert!(!task.release_if_mine().unwrap());
+        assert_eq!(task.hash().unwrap(), before, "nothing was rewritten");
     }
 
     #[test]
