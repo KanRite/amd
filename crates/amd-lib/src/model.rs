@@ -6,7 +6,9 @@
 //! write still goes through `Board`/`Task`, never a file.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
 
@@ -221,9 +223,110 @@ pub fn load_repos() -> Result<Repos> {
     })
 }
 
+/// A cheap summary of what's on disk for `board` (ticket 091): every file
+/// under the board directory (columns, epic and sprint folders) and the
+/// repository's `.settings`, by relative path, size and modification time.
+/// Equal fingerprints mean nothing a front end shows has changed, so a
+/// window can ask for this every second and reload only when it differs —
+/// whatever changed the files: `amd` in a terminal, an editor, a pull or a
+/// checkout. `archive/` is left out: nothing on the board shows it.
+///
+/// Only meaningful within one process (it uses the standard hasher), which
+/// is all a poll needs.
+pub fn fingerprint(board: &Board) -> u64 {
+    let mut entries = Vec::new();
+    collect(&board.root, &board.root, &board.archive_dir(), &mut entries);
+    let settings = crate::board_settings::path(board);
+    entries.push(entry(Path::new(".settings"), &settings));
+    entries.sort();
+    let mut hasher = DefaultHasher::new();
+    entries.hash(&mut hasher);
+    hasher.finish()
+}
+
+type Entry = (PathBuf, u64, u128);
+
+fn collect(root: &Path, dir: &Path, skip: &Path, out: &mut Vec<Entry>) {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for item in read.flatten() {
+        let path = item.path();
+        if path == skip {
+            continue;
+        }
+        if path.is_dir() {
+            collect(root, &path, skip, out);
+        } else {
+            out.push(entry(path.strip_prefix(root).unwrap_or(&path), &path));
+        }
+    }
+}
+
+/// `(relative path, size, mtime in ns)`; a file that can't be read
+/// fingerprints as size and time zero, so its disappearing still counts.
+fn entry(relative: &Path, path: &Path) -> Entry {
+    let meta = std::fs::metadata(path).ok();
+    let size = meta.as_ref().map_or(0, std::fs::Metadata::len);
+    let modified = meta
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_nanos());
+    (relative.to_path_buf(), size, modified)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch_board() -> (tempfile::TempDir, Board) {
+        let dir = tempfile::tempdir().unwrap();
+        let board = Board::at(dir.path().join("tasks"));
+        for column in ["backlog", "todo", "doing", "done", "archive"] {
+            std::fs::create_dir_all(board.root.join(column)).unwrap();
+        }
+        std::fs::write(board.root.join("backlog/001-a.md"), "a").unwrap();
+        (dir, board)
+    }
+
+    #[test]
+    fn the_fingerprint_is_stable_when_nothing_changes() {
+        let (_dir, board) = scratch_board();
+        assert_eq!(fingerprint(&board), fingerprint(&board));
+    }
+
+    #[test]
+    fn the_fingerprint_changes_with_the_board() {
+        let (dir, board) = scratch_board();
+        let mut seen = vec![fingerprint(&board)];
+        let mut changed = |f: &dyn Fn()| {
+            f();
+            let now = fingerprint(&board);
+            assert!(!seen.contains(&now), "fingerprint didn't change");
+            seen.push(now);
+        };
+        changed(&|| std::fs::write(board.root.join("backlog/002-b.md"), "b").unwrap());
+        changed(&|| std::fs::write(board.root.join("backlog/001-a.md"), "edited").unwrap());
+        changed(&|| {
+            std::fs::rename(
+                board.root.join("backlog/001-a.md"),
+                board.root.join("todo/001-a.md"),
+            )
+            .unwrap()
+        });
+        // An empty folder isn't a group (no `_group.md`), and only files count.
+        std::fs::create_dir_all(board.root.join("backlog/epic")).unwrap();
+        changed(&|| std::fs::write(board.root.join("backlog/epic/_group.md"), "g").unwrap());
+        changed(&|| std::fs::write(dir.path().join(".settings"), "wip-limit = 3\n").unwrap());
+    }
+
+    #[test]
+    fn the_archive_doesnt_count() {
+        let (_dir, board) = scratch_board();
+        let before = fingerprint(&board);
+        std::fs::write(board.root.join("archive/009-gone.md"), "x").unwrap();
+        assert_eq!(fingerprint(&board), before);
+    }
 
     #[test]
     fn rank_between_takes_the_midpoint_of_its_neighbours() {

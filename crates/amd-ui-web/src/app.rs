@@ -59,6 +59,9 @@ pub struct Ctx {
     pub system_dark: RwSignal<bool>,
     /// What git did with the last ticket change.
     pub sync: RwSignal<Option<SyncReport>>,
+    /// Bumped whenever the board is refreshed because the files changed (or
+    /// the user asked): an open editor checks its ticket then (ticket 091).
+    pub disk_tick: RwSignal<u64>,
 }
 
 impl Ctx {
@@ -138,6 +141,13 @@ impl Ctx {
         self.search.with(|q| !q.trim().is_empty())
     }
 
+    /// Re-reads the board because something outside the page may have
+    /// changed it, and lets an open editor check its own ticket.
+    pub fn refresh(self) {
+        self.reload();
+        self.disk_tick.update(|tick| *tick += 1);
+    }
+
     /// Shows what happened when a change was committed and pushed.
     pub fn report(self, report: SyncReport) {
         self.sync.set(Some(report));
@@ -164,10 +174,13 @@ pub fn App() -> impl IntoView {
         sync: RwSignal::new(None),
         appearance: RwSignal::new(Appearance::default()),
         system_dark: RwSignal::new(false),
+        disk_tick: RwSignal::new(0),
     };
     provide_context(ctx);
     ctx.reload();
     use_colour_scheme(ctx);
+    watch_disk(ctx);
+    refresh_keys(ctx);
 
     let tasks_dir = move || ctx.board.with(|b| b.as_ref().map(|b| b.tasks_dir.clone()));
     // The project's own name (ticket 087), until a board is open.
@@ -188,6 +201,14 @@ pub fn App() -> impl IntoView {
                     {move || tasks_dir().unwrap_or_else(|| "No tasks directory open".into())}
                 </span>
                 <SyncStatus />
+                <button
+                    class="rounded border border-slate-300 px-2.5 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                    title="Refresh the board from disk (F5)"
+                    aria-label="Refresh"
+                    on:click=move |_| ctx.refresh()
+                >
+                    "↻"
+                </button>
                 <button
                     class="whitespace-nowrap rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
                     disabled=move || ctx.board.with(Option::is_none)
@@ -252,6 +273,48 @@ pub fn App() -> impl IntoView {
 
 /// A centred modal over a dimmed board. Escape closes it; a click on the
 /// backdrop deliberately does not, so a stray click cannot discard an edit.
+/// Follows the files (ticket 091): asks for the board's fingerprint every
+/// second and refreshes when it changes, so changes made anywhere else — a
+/// terminal, an editor, a pull or a checkout — show up without a click. A
+/// change seen mid-drag waits for the drop. The first answer, and the first
+/// after switching project, is just the new baseline.
+fn watch_disk(ctx: Ctx) {
+    let last = StoredValue::new(None::<String>);
+    let pending = StoredValue::new(false);
+    let poll = move || {
+        spawn_local(async move {
+            if let Ok(now) = api::board_fingerprint().await {
+                let before = last.get_value();
+                if before.as_ref().is_some_and(|before| *before != now) {
+                    pending.set_value(true);
+                }
+                last.set_value(Some(now));
+            }
+            if pending.get_value() && ctx.dragging.with_untracked(Option::is_none) {
+                pending.set_value(false);
+                ctx.refresh();
+            }
+        });
+    };
+    if let Err(e) = set_interval_with_handle(poll, std::time::Duration::from_secs(1)) {
+        ctx.error
+            .set(Some(format!("can't watch the board for changes: {e:?}")));
+    }
+}
+
+/// F5 and Ctrl+R refresh the board rather than reloading the whole page,
+/// which would throw away the filters, the sort and anything being typed.
+fn refresh_keys(ctx: Ctx) {
+    let _keys = window_event_listener(leptos::ev::keydown, move |ev| {
+        let reload_key = ev.key() == "F5"
+            || ((ev.ctrl_key() || ev.meta_key()) && ev.key().eq_ignore_ascii_case("r"));
+        if reload_key {
+            ev.prevent_default();
+            ctx.refresh();
+        }
+    });
+}
+
 #[component]
 pub fn Modal(
     title: String,

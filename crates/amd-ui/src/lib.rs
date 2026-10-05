@@ -112,6 +112,38 @@ async fn load_board() -> Result<amd_ui_model::Board> {
     blocking(|| Project::open()?.summary()).await
 }
 
+/// What's on disk for the project on screen, summarised (ticket 091): the
+/// page asks every second and reloads only when this changes, so the board
+/// follows changes made anywhere — a terminal, an editor, a pull.
+#[tauri::command]
+async fn board_fingerprint() -> Result<String> {
+    blocking(|| {
+        let project = Project::open()?;
+        let mut hasher = std::hash::DefaultHasher::new();
+        for (name, board) in &project.repos {
+            std::hash::Hash::hash(&(name, agile_md::model::fingerprint(board)), &mut hasher);
+        }
+        Ok(format!("{:016x}", std::hash::Hasher::finish(&hasher)))
+    })
+    .await
+}
+
+/// The ticket's current version on disk, as `open_ticket` reports it, or
+/// `None` once it's no longer at `place` (moved or removed) — how an open
+/// editor learns its ticket changed underneath it.
+#[tauri::command]
+async fn ticket_version(place: Place, file: String) -> Result<Option<String>> {
+    blocking(move || {
+        let project = Project::open()?;
+        let board = project.board(&place.repo)?;
+        Ok(task_at(board, &place, &file)
+            .ok()
+            .and_then(|task| task.hash().ok())
+            .map(|hash| hash.to_string()))
+    })
+    .await
+}
+
 #[tauri::command]
 async fn open_ticket(place: Place, file: String) -> Result<TicketDocument> {
     blocking(move || {
@@ -686,6 +718,8 @@ pub fn run() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             load_board,
+            board_fingerprint,
+            ticket_version,
             open_ticket,
             save_ticket,
             move_ticket,

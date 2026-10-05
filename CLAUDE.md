@@ -812,6 +812,21 @@ changes):
   feature is on by default so a plain `cargo build` makes a working board;
   `cargo tauri dev -- --no-default-features` in `crates/amd-ui` serves the
   page live from `trunk serve` instead.
+- **It follows the files** (ticket 091). The page asks `board_fingerprint`
+  every second: `model::fingerprint` hashes each board file's relative
+  path, size and mtime (columns, epic and sprint folders, `.settings`; not
+  `archive/`) across every loaded repo. When the fingerprint changes, the
+  page calls `ctx.refresh()`: a reload, plus a bump of `ctx.disk_tick`. So
+  `amd` in a terminal, an editor, a pull or a checkout all show up within
+  about a second, with no watcher thread or dependency. A change seen
+  mid-drag waits for the drop. amdui's own writes cause one harmless extra
+  reload. An open editor checks its own ticket on each tick
+  (`ticket_version`): if it has no unsaved edits it reopens from disk;
+  with unsaved edits it shows a "changed on disk" banner (Reload / Keep
+  editing); moved or removed gets its own banner. The save's hash check
+  still refuses a stale write. The header's ↻, F5 and Ctrl+R all call
+  `refresh()`. F5/Ctrl+R are intercepted, because a webview reload would
+  throw away filters and sort.
 - **Where it opens**: `Board::discover()` from the launch directory; from
   outside any project (a desktop launcher starts in `$HOME`) it goes to the
   directory remembered as `ui.board` in `~/.config/agile-md/config`, which
