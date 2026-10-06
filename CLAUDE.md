@@ -222,7 +222,10 @@ redundant. Their history is in git if it is ever wanted again.
   release, or builds from source in a clone (`--from-source`, `--dir`,
   `--version`). Keep the two paths in sync. Both paths install `amdui` as well,
   guarded by `if [ -f ... ]` — `--version` can pin a release made before the
-  zip carried both.
+  zip carried both. Every binary goes in through `replace_bin` (ticket 098): copy beside
+  it, then `mv` over it, never `cp` onto it — Linux refuses to write into a
+  running executable ("Text file busy"), which left an install half done. A
+  running one (found via `/proc/*/exe`) gets a "restart it" note.
 - `tests/test.sh` — assert-based end-to-end suite; builds with cargo and spins
   up temp git repos. Unit tests live next to the code in `#[cfg(test)] mod tests`.
 - `.github/workflows/ci.yml` — fmt + clippy + cargo test + tests/test.sh, and

@@ -48,6 +48,38 @@ TMP=""
 cleanup() { if [ -n "${TMP}" ]; then rm -rf "${TMP}"; fi; }
 trap cleanup EXIT
 
+# Puts SRC in place as DIR/NAME without writing into the installed file:
+# Linux refuses to ("Text file busy") while that binary is running, which
+# left an install half done (ticket 098). A copy beside it, then a rename,
+# replaces the directory entry in one step; a running process keeps the old
+# file until it exits, and the next launch gets the new one. Same directory,
+# so the rename never crosses a filesystem.
+replace_bin() {
+  local src="$1" name="$2" dest="${DIR}/$2" new
+  new="${DIR}/.${name}.new.$$"
+  if [ -n "$(running "${dest}")" ]; then
+    RESTART="${RESTART} ${name}"
+  fi
+  cp "${src}" "${new}" || { rm -f "${new}"; die "couldn't copy ${name} into ${DIR}"; }
+  chmod +x "${new}"
+  mv -f "${new}" "${dest}" || { rm -f "${new}"; die "couldn't replace ${dest}"; }
+}
+
+# The ids of processes running the binary at PATH, where that can be told
+# (Linux's /proc). Empty elsewhere, and when nothing is.
+running() {
+  local exe pid target
+  [ -d /proc/self ] && [ -e "$1" ] || return 0
+  target="$(readlink -f "$1")"
+  for exe in /proc/[0-9]*/exe; do
+    [ "$(readlink "${exe}" 2>/dev/null)" = "${target}" ] || continue
+    pid="${exe#/proc/}"
+    printf '%s ' "${pid%/exe}"
+  done
+}
+
+RESTART=""
+
 # Rust target triple for this machine — matches the assets published by
 # mrdoodles/rust-release (amd-<target>.zip).
 target_triple() {
@@ -78,7 +110,7 @@ build_from_source() {
   printf 'Building amd from source...\n'
   ( cd "${SELF}" && cargo build --release --locked -p amd-cli )
   mkdir -p "${DIR}"
-  cp "${SELF}/target/release/amd" "${DIR}/amd"
+  replace_bin "${SELF}/target/release/amd" amd
   # The desktop board is optional: without its build tools, or without
   # WebKitGTK on Linux, amd is still installed and this says what's missing.
   if ! can_build_board; then
@@ -90,7 +122,7 @@ build_from_source() {
   printf 'Building the desktop board (amdui)...\n'
   if ( cd "${SELF}/crates/amd-ui-web" && trunk build --release ) \
     && ( cd "${SELF}" && cargo build --release --locked -p amd-ui ); then
-    cp "${SELF}/target/release/amdui" "${DIR}/amdui"
+    replace_bin "${SELF}/target/release/amdui" amdui
   else
     printf 'The desktop board did not build (on Linux it needs libwebkit2gtk-4.1-dev);\n' >&2
     printf 'amd is installed without it.\n' >&2
@@ -115,11 +147,11 @@ download_release() {
   unzip -q -o "${TMP}/amd.zip" -d "${TMP}" || return 1
   [ -f "${TMP}/amd" ] || return 1
   mkdir -p "${DIR}"
-  cp "${TMP}/amd" "${DIR}/amd"
+  replace_bin "${TMP}/amd" amd
   # Guarded rather than assumed: `--version` can pin a release made before the
   # zip carried both binaries, and `amd gui` is the way in to the board there.
   if [ -f "${TMP}/amdui" ]; then
-    cp "${TMP}/amdui" "${DIR}/amdui"
+    replace_bin "${TMP}/amdui" amdui
   fi
 }
 
@@ -149,3 +181,6 @@ echo "Then, in any repo:  amd init  &&  amd new \"My first task\""
 if [ -x "${DIR}/amdui" ]; then
   echo "For the desktop board:  amdui   (or amd gui)"
 fi
+for name in ${RESTART}; do
+  echo "Note: ${name} was running while it was replaced; restart it to use the new build."
+done
