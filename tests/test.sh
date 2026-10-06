@@ -928,6 +928,30 @@ assert "amd assign with no name clears it" \
 assert "@me resolves to the git user" \
   bash -c "'${AMD}' assign 1 @me >/dev/null && grep -q '^assignee: \"t\"$' tasks/*/001-first-task.md"
 assert "the board shows the assignee" bash -c "'${AMD}' board --plain | grep -q '@t'"
+# Ticket 089: the users list is what assignees are picked from; anyone
+# else is allowed, with a warning, and a board with no list never warns.
+as_list="$(mktemp -d)"
+( cd "${as_list}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_COMMIT=0 "${AMD}" init listed --local-only >/dev/null 2>&1 \
+  && AMD_COMMIT=0 "${AMD}" new "Who does it" --no-edit >/dev/null 2>&1 )
+in_list() { (cd "${as_list}" && AMD_COMMIT=0 "${AMD}" "$@"); }
+assert "assigning one of the project's users doesn't warn" \
+  bash -c "$(declare -f in_list); as_list='${as_list}'; AMD='${AMD}'; [ -z \"\$(in_list assign 1 t 2>&1 >/dev/null)\" ] \
+    && grep -q '^assignee: \"t\"$' '${as_list}'/tasks/backlog/001-who-does-it.md"
+assert "assigning someone else works, and warns they aren't a user" \
+  bash -c "$(declare -f in_list); as_list='${as_list}'; AMD='${AMD}'; in_list assign 1 stranger 2>&1 >/dev/null \
+    | grep -q \"warning: stranger isn't one of this project's users — .amd join. adds them\" \
+    && grep -q '^assignee: \"stranger\"$' '${as_list}'/tasks/backlog/001-who-does-it.md"
+assert "...and so does amd new --assignee" \
+  bash -c "$(declare -f in_list); as_list='${as_list}'; AMD='${AMD}'; in_list new 'For a stranger' --assignee stranger --no-edit 2>&1 >/dev/null \
+    | grep -q \"stranger isn't one of this project's users\""
+assert "amd assign --clear unassigns" \
+  bash -c "$(declare -f in_list); as_list='${as_list}'; AMD='${AMD}'; in_list assign 1 --clear | grep -q '001 unassigned' \
+    && grep -q '^assignee: \"\"$' '${as_list}'/tasks/backlog/001-who-does-it.md"
+assert "a board with no users list never warns" \
+  bash -c "sed -i '/^users = /d' '${as_list}/.settings' \
+    && [ -z \"\$(cd '${as_list}' && AMD_COMMIT=0 '${AMD}' assign 1 anyone 2>&1 >/dev/null)\" ]"
+rm -rf "${as_list}"
 
 echo "registration:"
 tmp_name="$(basename "${tmp}")"

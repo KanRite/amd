@@ -316,13 +316,17 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: Option<String>,
     },
-    /// Assign a ticket, or clear it with no name
+    /// Assign a ticket: no name picks from the project's users in a
+    /// terminal (and unassigns elsewhere)
     Assign {
         #[arg(value_name = "REF")]
         task: String,
         /// Who it belongs to; `@me` is your git user name, empty unassigns
-        #[arg(value_name = "WHO")]
+        #[arg(value_name = "WHO", conflicts_with = "clear")]
         who: Option<String>,
+        /// Unassign it
+        #[arg(long)]
+        clear: bool,
     },
     /// Claim a ticket's lease so nobody else's writes land on it
     Lock {
@@ -788,10 +792,19 @@ fn run() -> Result<()> {
             })
         }
         Cmd::Group { command } => cmd_group(&board, command.unwrap_or(GroupCmd::List)),
-        Cmd::Assign { task, who } => {
+        Cmd::Assign { task, who, clear } => {
             let task = resolve(&board, Some(task), "assign", &Column::ALL)?;
             let (id_display, title) = (task.id_display(), task.title());
-            let who = resolve_assignee(&board.root, who.as_deref());
+            // No name: the picker in a terminal (ticket 089); anywhere else
+            // it unassigns, as it always has, so scripts are unchanged.
+            let who = match who {
+                None if !clear && form::available() => form::assignee(
+                    board_settings::load(&board).user_names(),
+                    git::config(&board.root, "user.name"),
+                    &task.assignee().unwrap_or_default(),
+                )?,
+                who => resolve_assignee(&board.root, who.as_deref()),
+            };
             with_auto_commit(&board, "assign", &id_display, &title, || {
                 task.assign(task.hash()?, &who)?;
                 match who.is_empty() {
@@ -799,7 +812,11 @@ fn run() -> Result<()> {
                     false => println!("{} assigned to {who}", task.id_display()),
                 }
                 Ok(())
-            })
+            })?;
+            if let Some(warning) = board_settings::unknown_assignee(&board, &who) {
+                eprintln!("warning: {warning}");
+            }
+            Ok(())
         }
         Cmd::Lock { task } => cmd_lock(&board, &task),
         Cmd::Unlock { task, force } => cmd_unlock(&board, &task, force),
@@ -1571,15 +1588,11 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
 
     let assignee = match args.assignee {
         Some(who) => resolve_assignee(&board.root, Some(&who)),
-        None if full_form => resolve_assignee(
-            &board.root,
-            Some(&form::label(
-                "Assignee:",
-                "",
-                board.assignees()?,
-                "who's doing it; blank for nobody, @me for you",
-            )?),
-        ),
+        None if full_form => form::assignee(
+            board_settings::load(board).user_names(),
+            git::config(&board.root, "user.name"),
+            "",
+        )?,
         None => String::new(),
     };
 
@@ -1679,6 +1692,13 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         println!("{id} now links to {}", created.task.id_display());
     }
     println!("created {}/{name}{note}", Column::Backlog);
+    if let Some(warning) = created
+        .task
+        .assignee()
+        .and_then(|who| board_settings::unknown_assignee(board, &who))
+    {
+        eprintln!("warning: {warning}");
+    }
     Ok(())
 }
 

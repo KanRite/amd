@@ -183,6 +183,12 @@ pub struct Board {
     /// already names, sorted.
     #[serde(default)]
     pub ticket_repos: Vec<RepoChoice>,
+    /// The project's users' names, for the assignee picker (ticket 089).
+    #[serde(default)]
+    pub users: Vec<String>,
+    /// Who's using the board, by git `user.name`: the picker's "Me".
+    #[serde(default)]
+    pub me: Option<String>,
 }
 
 /// A repository tickets can be about.
@@ -626,6 +632,8 @@ mod assigned_tests {
             epics: Vec::new(),
             projects: Vec::new(),
             ticket_repos: Vec::new(),
+            users: Vec::new(),
+            me: None,
         };
         board.epics.push(Epic {
             repo: String::new(),
