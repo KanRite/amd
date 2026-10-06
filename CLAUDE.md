@@ -121,10 +121,8 @@ redundant. Their history is in git if it is ever wanted again.
   `<project>-documents` (via `gh`, as siblings under the current
   directory), clones each, scaffolds them and registers both locally.
   Tickets gets the board;
-  documents gets `adr/`, `rfc/`, `docs/`, `README.md`, `CHANGELOG.md`, and
-  a `.settings/` **directory** (ticket 057 — one small file per key, so a
-  changed setting reviews as its own small diff; `.settings/project` is
-  the only file `init` writes today). Each repository gets its own branch
+  documents gets `adr/`, `rfc/`, `docs/`, `README.md` and `CHANGELOG.md`
+  — no settings (ticket 111: they all live in the tickets `.settings`). Each repository gets its own branch
   protection tier via `github.rs`'s `protect_main()` — tickets: blocks
   force-push/deletion only; documents: additionally requires one approving
   review — both `enforce_admins: true` so the owner can't silently bypass
@@ -149,7 +147,12 @@ redundant. Their history is in git if it is ever wanted again.
   commit carries it; an existing one (re-running `init` is how a project
   made before 090 gets its first user) gets its own `.settings`-only commit,
   pushed when there's an `origin` (`git::commit_paths` vs
-  `commit_paths_locally`). A rejected push only warns — never `join`'s
+  `commit_paths_locally`). **Before writing, an existing clone is caught
+  up** (ticket 094, `ready_to_record`): one with uncommitted edits to
+  tracked files is left alone, otherwise `sync::catch_up(Write)`
+  fast-forwards it (or pushes its own earlier commits); a diverged clone
+  is refused. Either way it's skipped with a warning to fix it and re-run,
+  never reset or stashed. A rejected push only warns — never `join`'s
   reset-and-retry, which is safe only in a seconds-old clone, and this may
   be someone's real working copy. No git email warns too; `init` still
   succeeds. `--local-only` records it without committing.

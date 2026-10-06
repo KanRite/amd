@@ -139,6 +139,61 @@ assert "init with no git email still succeeds, and warns that you weren't added"
     && grep -qx 'project = lonely' .settings && ! grep -q '^users' .settings"
 rm -rf "${backfill}" "${nobody}"
 
+echo "init: catches up an existing clone before recording you (ticket 094):"
+# A remote with no users; three clones of it made while it was like that.
+# Then someone else joins (the remote's users line changes), so each clone
+# is behind on the very line init writes.
+catchup="$(mktemp -d)"
+as_maker="GIT_CONFIG_GLOBAL=${catchup}/gitconfig GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME=${catchup}/config"
+printf '[user]\n\tname = maker\n\temail = maker@t.co\n[commit]\n\tgpgsign = false\n' >"${catchup}/gitconfig"
+(
+  set -e
+  export GIT_CONFIG_GLOBAL="${catchup}/gitconfig" GIT_CONFIG_NOSYSTEM=1 XDG_CONFIG_HOME="${catchup}/config"
+  cd "${catchup}" && git init -q -b main seed && cd seed
+  "${AMD}" init late --local-only >/dev/null
+  sed -i '/^users = /d' .settings
+  git add -A && git commit -q -m "seed for ticket 094"
+  git init -q --bare -b main "${catchup}/origin.git"
+  git push -q "${catchup}/origin.git" HEAD:main
+  for kind in behind dirty diverged; do
+    mkdir -p "${catchup}/${kind}" && cd "${catchup}/${kind}"
+    git clone -q "${catchup}/origin.git" late-tickets
+    git init -q late-documents
+  done
+  cd "${catchup}/seed"
+  printf 'users = other <other@t.co>\n' >>.settings
+  git commit -q -am "join: other <other@t.co> (ticket 094 seed)"
+  git push -q "${catchup}/origin.git" HEAD:main
+  cd "${catchup}/dirty/late-tickets" && echo "half-done" >>README.md
+  cd "${catchup}/diverged/late-tickets" && echo "mine" >>README.md \
+    && git commit -q -am "local work (ticket 094 seed)"
+)
+remote_users() { git --git-dir="${catchup}/origin.git" show main:.settings | grep '^users = '; }
+assert "a clean clone that's behind is fast-forwarded, then you're added and pushed" \
+  bash -c "cd '${catchup}/behind' && out=\"\$(env ${as_maker} '${AMD}' init late 2>&1)\" \
+    && grep -q 'caught up: 1 new change' <<<\"\${out}\" \
+    && grep -q 'added you (maker <maker@t.co>)' <<<\"\${out}\" \
+    && [ -z \"\$(git -C late-tickets rev-list @{u}..HEAD)\" ]"
+assert "...so the remote lists both of you" \
+  bash -c "[ \"\$(git --git-dir='${catchup}/origin.git' show main:.settings | grep '^users = ')\" \
+    = 'users = other <other@t.co>, maker <maker@t.co>' ]"
+before_users="$(remote_users)"
+dirty_head="$(git -C "${catchup}/dirty/late-tickets" rev-parse HEAD)"
+assert "a clone with uncommitted edits is left alone, with a warning" \
+  bash -c "cd '${catchup}/dirty' && env ${as_maker} '${AMD}' init late 2>&1 >/dev/null \
+    | grep -q \"has uncommitted changes — commit or stash them first, so you weren't added to late's users\""
+assert "...untouched: same commit, the edit still there, nobody added" \
+  bash -c "cd '${catchup}/dirty/late-tickets' && [ \"\$(git rev-parse HEAD)\" = '${dirty_head}' ] \
+    && grep -q half-done README.md && ! grep -q '^users' .settings"
+diverged_head="$(git -C "${catchup}/diverged/late-tickets" rev-parse HEAD)"
+assert "a clone that has diverged is left alone, with how to fix it" \
+  bash -c "cd '${catchup}/diverged' && env ${as_maker} '${AMD}' init late 2>&1 >/dev/null \
+    | grep -q 'run \`git pull --rebase\` there'"
+assert "...untouched, and the remote's users unchanged" \
+  bash -c "[ \"\$(git -C '${catchup}/diverged/late-tickets' rev-parse HEAD)\" = '${diverged_head}' ] \
+    && [ \"\$(git --git-dir='${catchup}/origin.git' show main:.settings | grep '^users = ')\" = '${before_users}' ]"
+rm -rf "${catchup}"
+
 echo "init: refuses to run inside an existing git repository:"
 guard_test="$(mktemp -d)"
 ( cd "${guard_test}" && git init -q code_repo \
