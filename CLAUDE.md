@@ -354,6 +354,12 @@ redundant. Their history is in git if it is ever wanted again.
   (best-effort; the archive is untracked). `doing → todo` keeps the lease.
   `release_if_mine` only ever clears the current identity's own lease,
   lapsed or not; someone else's, even lapsed, stays for `unlock --force`.
+  **A lapsed lease is said as such** (ticket 110): still recorded, it
+  holds nothing, but amdui's `TicketSummary`/`TicketDocument` carry it as
+  `lapsed` beside `lock` (which stays "in force" only, so no write check
+  changed). The editor says "Your lock lapsed at …" / "Locked by X until
+  … (lapsed)", the card badge is dashed, and `amd show` prints the same on
+  stderr (`lock_note`), leaving stdout exactly the file.
   `board_settings::lease_hours()` resolves the duration (`AMD_LEASE_HOURS`,
   then the board's own `.settings`, then 8 hours) the same
   `settings::resolved()` precedence every other setting uses.

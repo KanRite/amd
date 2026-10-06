@@ -103,6 +103,10 @@ pub struct TicketSummary {
     /// Its lock, while one is in force.
     #[serde(default)]
     pub lock: Option<Lock>,
+    /// A lease still recorded but past its time (ticket 110). It blocks
+    /// nothing; it's shown so a lapsed lock isn't mistaken for no lock.
+    #[serde(default)]
+    pub lapsed: Option<Lock>,
 }
 
 /// A lock (lease) on a ticket that is in force: who holds it and until when.
@@ -323,6 +327,10 @@ pub struct TicketDocument {
     /// Its lock, while one is in force.
     #[serde(default)]
     pub lock: Option<Lock>,
+    /// A lease still recorded but past its time (ticket 110). It blocks
+    /// nothing; it's shown so a lapsed lock isn't mistaken for no lock.
+    #[serde(default)]
+    pub lapsed: Option<Lock>,
     /// A fingerprint of `content` as it was opened. Saving hands it back,
     /// and the save is refused if the ticket has changed since.
     #[serde(default)]
@@ -570,6 +578,7 @@ mod assigned_tests {
             points: String::new(),
             repository: String::new(),
             lock: None,
+            lapsed: None,
         }
     }
 

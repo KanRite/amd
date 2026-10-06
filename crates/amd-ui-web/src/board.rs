@@ -631,6 +631,7 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
         epic_label,
         points,
         lock,
+        lapsed,
         ..
     } = ticket;
     // Someone else's lock: the card can be opened to read, but not dragged.
@@ -706,7 +707,11 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                     }
                 })}
             <div class="mt-1.5 flex flex-wrap items-center gap-1 text-xs">
-                {lock.map(|l| view! { <LockBadge lock=l /> })}
+                {match (lock, lapsed) {
+                    (Some(l), _) => Some(view! { <LockBadge lock=l lapsed=false /> }),
+                    (None, Some(l)) => Some(view! { <LockBadge lock=l lapsed=true /> }),
+                    (None, None) => None,
+                }}
                 {epic_tag
                     .map(|(name, tone)| {
                         view! {
@@ -760,20 +765,33 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
 }
 
 /// A lock on a card: whose, and until when on hover. Someone else's stands
-/// out; your own is quieter.
+/// out; your own is quieter. A lapsed one (ticket 110) is outlined and faint:
+/// still recorded, but it holds nothing.
 #[component]
-pub fn LockBadge(lock: amd_ui_model::Lock) -> impl IntoView {
+pub fn LockBadge(lock: amd_ui_model::Lock, lapsed: bool) -> impl IntoView {
     let who = if lock.mine {
         "you".to_string()
     } else {
         lock.by.split('@').next().unwrap_or(&lock.by).to_string()
     };
-    let tone = if lock.mine {
+    let tone = if lapsed {
+        "border border-dashed border-slate-400 text-slate-500 dark:border-slate-500 dark:text-slate-400"
+    } else if lock.mine {
         "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
     } else {
         "bg-amber-200 text-amber-900 dark:bg-amber-900 dark:text-amber-100"
     };
-    let title = if lock.mine {
+    let title = if lapsed && lock.mine {
+        format!(
+            "Your lock lapsed at {}: lock it again to keep working",
+            lock.until_local
+        )
+    } else if lapsed {
+        format!(
+            "Locked by {} until {} (lapsed): anyone can change it now",
+            lock.by, lock.until_local
+        )
+    } else if lock.mine {
         format!("Locked by you until {}", lock.until_local)
     } else {
         format!(

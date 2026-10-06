@@ -1281,6 +1281,23 @@ assert "a move to done never clears someone else's (lapsed) lease" \
     && sed -i 's/^locked-by: .*/locked-by: \"other@example.com\"/; s/^locked-until: .*/locked-until: \"2000-01-01T00:00:00Z\"/' tasks/doing/002-handed-back.md \
     && '${AMD}' done 2 >/dev/null 2>&1 && '${AMD}' show 2 | grep -q 'locked-by: \"other@example.com\"'"
 
+# Ticket 110: show says what a recorded lease means, on stderr, so the
+# ticket on stdout is untouched. 002 now carries someone else's lapsed lease.
+assert "show calls someone else's lapsed lease lapsed, not held" \
+  bash -c "cd '${lock_repo}' && '${AMD}' show 2 2>&1 >/dev/null \
+    | grep -qx 'locked by other@example.com until 2000-01-01T00:00:00Z (lapsed): anyone can change it now'"
+assert "...and a lapsed lease never blocks a write" \
+  bash -c "cd '${lock_repo}' && '${AMD}' set 2 points 5 | grep -q 'sized 5'"
+assert "show says when your own lock has lapsed, and how to take it again" \
+  bash -c "cd '${lock_repo}' && sed -i 's/^locked-by: .*/locked-by: \"t@t.co\"/' tasks/done/002-handed-back.md \
+    && '${AMD}' show 2 2>&1 >/dev/null | grep -q 'your lock lapsed at 2000-01-01T00:00:00Z — .amd lock 002. to keep working'"
+assert "show says a lock in force is yours" \
+  bash -c "cd '${lock_repo}' && '${AMD}' new 'Held now' --no-edit >/dev/null 2>&1 && '${AMD}' lock 4 >/dev/null \
+    && '${AMD}' show 4 2>&1 >/dev/null | grep -q '^locked by you until '"
+assert "show adds nothing for a ticket with no lease, and stdout is just the file" \
+  bash -c "cd '${lock_repo}' && [ -z \"\$('${AMD}' show 1 2>&1 >/dev/null)\" ] \
+    && '${AMD}' show 4 2>/dev/null | cmp -s - tasks/backlog/004-held-now.md"
+
 echo "pipes:"
 assert "the board survives a closed pipe" \
   bash -c "'${AMD}' board --plain | head -2 >/dev/null 2>/tmp/amd-pipe.err; ! grep -q 'panicked' /tmp/amd-pipe.err"

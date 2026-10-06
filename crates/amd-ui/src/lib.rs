@@ -195,6 +195,7 @@ async fn open_ticket(place: Place, file: String) -> Result<TicketDocument> {
             column: place.column,
             epic: place.epic.clone(),
             lock: project.lock_of(&task),
+            lapsed: project.lapsed_of(&task),
             version: task.hash().map_err(err)?.to_string(),
             content,
         })
@@ -333,6 +334,7 @@ async fn create_ticket(
                 column: amd_ui_model::Column::Backlog,
                 epic: None,
                 lock: None,
+                lapsed: None,
                 version: task.hash().map_err(err)?.to_string(),
                 content: std::fs::read_to_string(&task.path).map_err(|e| e.to_string())?,
             },
@@ -903,6 +905,26 @@ mod tests {
         let settings = agile_md::board_settings::path(project.board("").unwrap());
         std::fs::write(&settings, "commit = off\nproject = grimartz\n").unwrap();
         assert_eq!(project.summary().unwrap().project, "grimartz");
+    }
+
+    #[test]
+    fn a_lapsed_lease_is_shown_as_lapsed_not_as_a_lock() {
+        let (_dir, project) = project();
+        let file = new_ticket(&project, "Lapsed");
+        let path = project.board("").unwrap().root.join("backlog").join(&file);
+        let text = std::fs::read_to_string(&path).unwrap();
+        let text = text
+            .replace("locked-by: \"\"", "locked-by: \"t@t.co\"")
+            .replace(
+                "locked-until: \"\"",
+                "locked-until: \"2000-01-01T00:00:00Z\"",
+            );
+        std::fs::write(&path, text).unwrap();
+
+        let ticket = project.summary().unwrap().columns[0].tickets[0].clone();
+        assert!(ticket.lock.is_none(), "a lapsed lease holds nothing");
+        let lapsed = ticket.lapsed.unwrap();
+        assert!(lapsed.mine && lapsed.by == "t@t.co", "{lapsed:?}");
     }
 
     #[test]

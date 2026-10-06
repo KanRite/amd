@@ -219,14 +219,25 @@ impl Project {
             epic_label: task.epic_meta().unwrap_or_default(),
             points: task.points().unwrap_or_default(),
             lock: self.lock_of(task),
+            lapsed: self.lapsed_of(task),
         }
     }
 
     /// The lock on a ticket, while one is in force.
     pub fn lock_of(&self, task: &Task) -> Option<Lock> {
-        if !task.lease_active() {
-            return None;
-        }
+        task.lease_active().then(|| self.lease_of(task)).flatten()
+    }
+
+    /// A lease recorded on the ticket but past its time (ticket 110): no
+    /// lock at all for every check, but worth saying so.
+    pub fn lapsed_of(&self, task: &Task) -> Option<Lock> {
+        (!task.lease_active())
+            .then(|| self.lease_of(task))
+            .flatten()
+    }
+
+    /// Whatever lease the ticket records, in force or not.
+    fn lease_of(&self, task: &Task) -> Option<Lock> {
         let by = task.locked_by()?;
         let until = task.locked_until()?;
         Some(Lock {

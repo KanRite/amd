@@ -461,6 +461,7 @@ mod tests {
             points: String::new(),
             repository: String::new(),
             lock: None,
+            lapsed: None,
         }
     }
 

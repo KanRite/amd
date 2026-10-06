@@ -44,6 +44,7 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
         epic,
         content,
         lock,
+        lapsed,
         version,
     } = doc;
     let path = match &epic {
@@ -54,6 +55,8 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
     let lock_file = StoredValue::new(file.clone());
     // The ticket's lock, kept current as it is locked and unlocked here.
     let lock = RwSignal::new(lock);
+    // A lease that's still recorded but has run out (ticket 110).
+    let lapsed = RwSignal::new(lapsed);
     // The fingerprint of the ticket as it was opened (or last locked or
     // unlocked here); saving hands it back.
     let version = RwSignal::new(version);
@@ -228,7 +231,7 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
 
     view! {
         <Modal title=format!("Edit {path}") width="max-w-4xl">
-            <LockBar lock version place file=lock_file />
+            <LockBar lock lapsed version place file=lock_file />
             {move || {
                 disk_notice
                     .get()
@@ -552,10 +555,13 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
 }
 
 /// The ticket's lock, above the editor: lock it, renew or release your own,
-/// or — a separate, confirmed step — break someone else's.
+/// or — a separate, confirmed step — break someone else's. A lapsed lease
+/// is said as such (ticket 110), not as "Not locked.", which reads as if
+/// something unlocked it.
 #[component]
 fn LockBar(
     lock: RwSignal<Option<amd_ui_model::Lock>>,
+    lapsed: RwSignal<Option<amd_ui_model::Lock>>,
     version: RwSignal<String>,
     place: StoredValue<Place>,
     file: StoredValue<String>,
@@ -590,6 +596,7 @@ fn LockBar(
                     ctx.report(report);
                     if let Ok(doc) = api::open_ticket(&p, &f).await {
                         lock.set(doc.lock);
+                        lapsed.set(doc.lapsed);
                         version.set(doc.version);
                     }
                     ctx.reload();
@@ -611,7 +618,19 @@ fn LockBar(
         }>
             <span class="flex-1">
                 {move || match lock.get() {
-                    None => "Not locked.".to_string(),
+                    None => match lapsed.get() {
+                        None => "Not locked.".to_string(),
+                        Some(l) if l.mine => {
+                            format!("Your lock lapsed at {}. Lock it again to keep working.", l.until_local)
+                        }
+                        Some(l) => {
+                            format!(
+                                "Locked by {} until {} (lapsed), so anyone can change it now.",
+                                l.by,
+                                l.until_local,
+                            )
+                        }
+                    },
                     Some(l) if l.mine => format!("Locked by you until {}.", l.until_local),
                     Some(l) => {
                         format!(

@@ -725,6 +725,9 @@ fn run() -> Result<()> {
             let body =
                 fs::read(&task.path).with_context(|| format!("reading {}", task.path.display()))?;
             io::stdout().write_all(&body)?;
+            if let Some(line) = lock_note(&board, &task) {
+                eprintln!("{line}");
+            }
             Ok(())
         }
         Cmd::Edit { task } => {
@@ -804,6 +807,28 @@ fn run() -> Result<()> {
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
         Cmd::Log => cmd_log(&board),
     }
+}
+
+/// What `amd show` says about a ticket's lease, on stderr so the ticket on
+/// stdout stays exactly the file: the same four cases as amdui's editor
+/// (ticket 110). A lapsed lease is said as such, never as unlocked.
+fn lock_note(board: &Board, task: &agile_md::task::Task) -> Option<String> {
+    let by = task.locked_by()?;
+    let until = task.locked_until()?.format(&Rfc3339).ok()?;
+    let mine = git::config(board.repo_root(), "user.email").as_deref() == Some(by.as_str());
+    Some(match (task.lease_active(), mine) {
+        (true, true) => format!("locked by you until {until}"),
+        (true, false) => format!("locked by {by} until {until}: only they can change it"),
+        (false, true) => {
+            format!(
+                "your lock lapsed at {until} — `amd lock {}` to keep working",
+                task.id_display()
+            )
+        }
+        (false, false) => {
+            format!("locked by {by} until {until} (lapsed): anyone can change it now")
+        }
+    })
 }
 
 /// Claim a ticket's lease for the current git identity. Refuses if someone
