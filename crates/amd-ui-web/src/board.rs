@@ -16,6 +16,12 @@ pub fn BoardView() -> impl IntoView {
     view! {
         <div class="flex h-full gap-3 overflow-x-auto p-3">
             <EpicsColumn />
+            {move || {
+                Ctx::get()
+                    .open_epic
+                    .get()
+                    .map(|(repo, name)| view! { <OpenEpicColumn repo name /> })
+            }}
             {Column::ALL.map(|column| view! { <ColumnView column /> }).collect_view()}
         </div>
     }
@@ -450,52 +456,32 @@ fn EpicsColumn() -> impl IntoView {
     }
 }
 
-/// A sprint or an epic in the Backlogs column: a drop target for backlog
-/// tickets and a list of its own. A sprint also shows its length, state and
-/// total points, and can be started; while a ticket it cannot take is
-/// dragged over it, it says why.
-#[component]
-fn EpicBox(repo: String, name: String, colour: usize) -> impl IntoView {
-    let (tone, badge) = EPIC_COLOURS[colour % EPIC_COLOURS.len()];
-    let ctx = Ctx::get();
-    let here = StoredValue::new(Place::epic(&name).in_repo(&repo));
-    // The container itself: kind, days, started, and every ticket in it.
-    let group = {
-        let (name, repo) = (name.clone(), repo.clone());
-        Memo::new(move |_| {
-            ctx.board.with(|b| {
-                b.as_ref()
-                    .and_then(|b| b.epics.iter().find(|e| e.name == name && e.repo == repo))
-                    .cloned()
-            })
+/// The sprint or epic called `name` in `repo`, as the board has it now.
+fn group_memo(ctx: Ctx, repo: String, name: String) -> Memo<Option<amd_ui_model::Epic>> {
+    Memo::new(move |_| {
+        ctx.board.with(|b| {
+            b.as_ref()
+                .and_then(|b| b.epics.iter().find(|e| e.name == name && e.repo == repo))
+                .cloned()
         })
-    };
-    let is_sprint = move || group.with(|g| g.as_ref().is_some_and(|g| g.kind == GroupKind::Sprint));
-    let started = move || group.with(|g| g.as_ref().is_some_and(|g| g.started));
-    let tickets = Memo::new(move |_| {
-        let list = group.with(|g| g.as_ref().map(|g| g.tickets.clone()).unwrap_or_default());
-        ctx.shown(list)
-    });
-    let count = move || tickets.with(Vec::len);
-    let summary = move || {
-        group.with(|g| {
-            let g = g.as_ref()?;
-            (g.kind == GroupKind::Sprint).then(|| {
-                // + 0.0 turns the empty sum's -0 into 0.
-                let points: f64 = g
-                    .tickets
-                    .iter()
-                    .filter_map(|t| t.points.trim().parse::<f64>().ok())
-                    .sum::<f64>()
-                    + 0.0;
-                let state = if g.started { "started" } else { "pending" };
-                format!("{} days · {state} · {points} pts", g.days)
-            })
-        })
-    };
-    // While a ticket is dragged: why this box cannot take it, if it cannot.
-    let refusal = move || here.with_value(|to| refusal(ctx, to));
+    })
+}
 
+/// A sprint's total points. `+ 0.0` turns the empty sum's -0 into 0.
+fn total_points(group: &amd_ui_model::Epic) -> f64 {
+    group
+        .tickets
+        .iter()
+        .filter_map(|t| t.points.trim().parse::<f64>().ok())
+        .sum::<f64>()
+        + 0.0
+}
+
+/// Lets a box or column take a dragged ticket when the rules allow it.
+fn drop_target(
+    ctx: Ctx,
+    here: StoredValue<Place>,
+) -> (impl Fn(DragEvent) + Copy, impl Fn(DragEvent) + Copy) {
     let on_dragover = move |ev: DragEvent| {
         ev.stop_propagation();
         if here.with_value(|to| accepts(ctx, to)) {
@@ -510,8 +496,134 @@ fn EpicBox(repo: String, name: String, colour: usize) -> impl IntoView {
         ev.stop_propagation();
         drop_on(ctx, here.get_value());
     };
+    (on_dragover, on_drop)
+}
+
+/// A sprint or an epic in the Backlogs column (ticket 109): its name and
+/// how much is in it — an epic's ticket count, a sprint's total points —
+/// and nothing else. A click opens its tickets in a column of their own
+/// ([`OpenEpicColumn`]); a backlog ticket can still be dropped straight
+/// onto it, and while one it cannot take is dragged over it, it says why.
+#[component]
+fn EpicBox(repo: String, name: String, colour: usize) -> impl IntoView {
+    let (tone, badge) = EPIC_COLOURS[colour % EPIC_COLOURS.len()];
+    let ctx = Ctx::get();
+    let here = StoredValue::new(Place::epic(&name).in_repo(&repo));
+    let ids = StoredValue::new((repo.clone(), name.clone()));
+    let group = group_memo(ctx, repo, name.clone());
+    let is_sprint = move || group.with(|g| g.as_ref().is_some_and(|g| g.kind == GroupKind::Sprint));
+    let shown = Memo::new(move |_| {
+        let list = group.with(|g| g.as_ref().map(|g| g.tickets.clone()).unwrap_or_default());
+        ctx.shown(list).len()
+    });
+    let amount = move || {
+        group.with(|g| match g {
+            Some(g) if g.kind == GroupKind::Sprint => format!("{} pts", total_points(g)),
+            _ => shown.get().to_string(),
+        })
+    };
+    let is_open = move || ctx.open_epic.with(|o| o.as_ref() == Some(&ids.get_value()));
+    let refusal = move || here.with_value(|to| refusal(ctx, to));
+    let (on_dragover, on_drop) = drop_target(ctx, here);
     // Sprints have a solid border, epics a dashed one; an outline on top
-    // shows the box will take the drop.
+    // shows the box will take the drop, or that it's the one open.
+    let frame = move || {
+        let style = if is_sprint() {
+            "border-solid"
+        } else {
+            "border-dashed"
+        };
+        let ring = if here.with_value(|to| accepts(ctx, to)) || is_open() {
+            "ring-2 ring-accent-500 ring-offset-1 ring-offset-slate-200 dark:ring-offset-slate-800"
+        } else {
+            ""
+        };
+        format!("rounded-md border-2 transition {style} {tone} {ring}")
+    };
+
+    view! {
+        // While searching or filtering by user, a box with nothing to show
+        // steps aside.
+        <Show when=move || { !ctx.narrowed() || shown.get() > 0 }>
+            <section class=frame on:dragover=on_dragover on:drop=on_drop>
+                <button
+                    class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-slate-300/60 dark:hover:bg-slate-700/60"
+                    aria-label=move || {
+                        let kind = if is_sprint() { "sprint" } else { "epic" };
+                        ids.with_value(|(_, name)| format!("Open {kind} {name}"))
+                    }
+                    aria-pressed=move || is_open().to_string()
+                    title=move || {
+                        if is_open() { "Close it".to_string() } else { "Show its tickets".to_string() }
+                    }
+                    on:click=move |_| {
+                        let me = ids.get_value();
+                        ctx.open_epic.update(|o| *o = if o.as_ref() == Some(&me) { None } else { Some(me) });
+                    }
+                >
+                    <span class=format!(
+                        "rounded px-1.5 text-[10px] font-semibold uppercase tracking-wide text-white {badge}",
+                    )>{move || if is_sprint() { "Sprint" } else { "Epic" }}</span>
+                    <span class="min-w-0 flex-1 truncate text-sm font-semibold" title=name.clone()>
+                        {name.clone()}
+                    </span>
+                    <span class="whitespace-nowrap rounded-full bg-slate-300 px-2 text-xs dark:bg-slate-700">{amount}</span>
+                </button>
+                {move || {
+                    refusal()
+                        .map(|why| {
+                            view! {
+                                <p role="status" class="px-2 pb-1.5 text-xs font-medium text-red-700 dark:text-red-300">
+                                    {why}
+                                </p>
+                            }
+                        })
+                }}
+            </section>
+        </Show>
+    }
+}
+
+/// The epic or sprint opened from the Backlogs column, as a column beside
+/// it (ticket 109): its tickets, which drag out to the backlog (or on, to
+/// todo) like any card, and a drop target for backlog tickets. A sprint
+/// also shows its length, state and points, and can be started here. It
+/// closes with its × button, or by clicking its box again; it closes by
+/// itself if the group is gone.
+#[component]
+fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
+    let ctx = Ctx::get();
+    let colour = epics_in_view(ctx)
+        .into_iter()
+        .find(|(r, n, _)| *r == repo && *n == name)
+        .map_or(0, |(_, _, c)| c);
+    let (tone, badge) = EPIC_COLOURS[colour % EPIC_COLOURS.len()];
+    let here = StoredValue::new(Place::epic(&name).in_repo(&repo));
+    let ids = StoredValue::new((repo.clone(), name.clone()));
+    let group = group_memo(ctx, repo, name.clone());
+    Effect::new(move |_| {
+        if ctx.board.with(Option::is_some) && group.with(Option::is_none) {
+            ctx.open_epic.set(None);
+        }
+    });
+    let is_sprint = move || group.with(|g| g.as_ref().is_some_and(|g| g.kind == GroupKind::Sprint));
+    let started = move || group.with(|g| g.as_ref().is_some_and(|g| g.started));
+    let tickets = Memo::new(move |_| {
+        let list = group.with(|g| g.as_ref().map(|g| g.tickets.clone()).unwrap_or_default());
+        ctx.shown(list)
+    });
+    let count = move || tickets.with(Vec::len);
+    let summary = move || {
+        group.with(|g| {
+            let g = g.as_ref()?;
+            (g.kind == GroupKind::Sprint).then(|| {
+                let state = if g.started { "started" } else { "pending" };
+                format!("{} days · {state} · {} pts", g.days, total_points(g))
+            })
+        })
+    };
+    let refusal = move || here.with_value(|to| refusal(ctx, to));
+    let (on_dragover, on_drop) = drop_target(ctx, here);
     let frame = move || {
         let style = if is_sprint() {
             "border-solid"
@@ -523,12 +635,13 @@ fn EpicBox(repo: String, name: String, colour: usize) -> impl IntoView {
         } else {
             ""
         };
-        format!("rounded-md border-2 p-2 transition {style} {tone} {target}")
+        format!(
+            "flex min-h-0 min-w-48 flex-1 basis-0 flex-col rounded-lg border-2 bg-slate-200/70 transition dark:bg-slate-800/70 {style} {tone} {target}"
+        )
     };
 
     // Starting asks once more: there is no way back.
     let confirm_start = RwSignal::new(false);
-    let ids = StoredValue::new((repo.clone(), name.clone()));
     let start = move |_| {
         if !confirm_start.get_untracked() {
             confirm_start.set(true);
@@ -546,40 +659,41 @@ fn EpicBox(repo: String, name: String, colour: usize) -> impl IntoView {
     };
 
     view! {
-        // While searching or filtering by user, a box with nothing to show
-        // steps aside.
-        <Show when=move || { !ctx.narrowed() || count() > 0 }>
-            <section
-                aria-label=move || {
-                    let kind = if is_sprint() { "Sprint" } else { "Epic" };
-                    ids.with_value(|(_, name)| format!("{kind}: {name}"))
-                }
-                class=frame
-                on:dragover=on_dragover
-                on:drop=on_drop
-            >
-                <header class="mb-1 flex items-center gap-2 px-0.5">
-                    <span class=format!(
-                        "rounded px-1.5 text-[10px] font-semibold uppercase tracking-wide text-white {badge}",
-                    )>{move || if is_sprint() { "Sprint" } else { "Epic" }}</span>
-                    <h3 class="min-w-0 flex-1 truncate text-sm font-semibold" title=name.clone()>
-                        {name.clone()}
-                    </h3>
-                    <span class="rounded-full bg-slate-300 px-2 text-xs dark:bg-slate-700">{count}</span>
-                </header>
-                {move || {
-                    summary()
-                        .map(|text| {
-                            view! { <p class="mb-1.5 px-0.5 text-[11px] text-slate-500">{text}</p> }
-                        })
-                }}
+        <section
+            aria-label=move || {
+                let kind = if is_sprint() { "Sprint" } else { "Epic" };
+                ids.with_value(|(_, name)| format!("{kind}: {name}"))
+            }
+            class=frame
+            on:dragover=on_dragover
+            on:drop=on_drop
+        >
+            <header class="flex items-center gap-2 px-3 py-2">
+                <span class=format!(
+                    "rounded px-1.5 text-[10px] font-semibold uppercase tracking-wide text-white {badge}",
+                )>{move || if is_sprint() { "Sprint" } else { "Epic" }}</span>
+                <h2 class="min-w-0 flex-1 truncate text-sm font-semibold" title=name.clone()>
+                    {name.clone()}
+                </h2>
+                <span class="rounded-full bg-slate-300 px-2 text-xs dark:bg-slate-700">{count}</span>
+                <button
+                    class="rounded px-1.5 text-slate-500 hover:bg-slate-300 dark:hover:bg-slate-700"
+                    title="Close"
+                    aria-label=format!("Close {name}")
+                    on:click=move |_| ctx.open_epic.set(None)
+                >
+                    "×"
+                </button>
+            </header>
+            <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
+                {move || summary().map(|text| view! { <p class="px-1 text-[11px] text-slate-500">{text}</p> })}
                 <Show when=move || is_sprint() && !started()>
                     <button
                         class=move || {
                             if confirm_start.get() {
-                                "mb-1.5 w-full rounded bg-accent-600 px-2 py-1 text-xs font-medium text-white hover:bg-accent-500"
+                                "w-full rounded bg-accent-600 px-2 py-1 text-xs font-medium text-white hover:bg-accent-500"
                             } else {
-                                "mb-1.5 w-full rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                                "w-full rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
                             }
                         }
                         title="Once started, a sprint takes no more tickets and gives none back"
@@ -593,7 +707,7 @@ fn EpicBox(repo: String, name: String, colour: usize) -> impl IntoView {
                     refusal()
                         .map(|why| {
                             view! {
-                                <p role="status" class="mb-1.5 px-0.5 text-xs font-medium text-red-700 dark:text-red-300">
+                                <p role="status" class="px-1 text-xs font-medium text-red-700 dark:text-red-300">
                                     {why}
                                 </p>
                             }
@@ -609,8 +723,8 @@ fn EpicBox(repo: String, name: String, colour: usize) -> impl IntoView {
                         }}
                     </p>
                 </Show>
-            </section>
-        </Show>
+            </div>
+        </section>
     }
 }
 

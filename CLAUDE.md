@@ -863,6 +863,12 @@ changes):
   disk. The page derives `branch-name` from the title with
   `amd_ui_model::slugify`, which must match `agile_md::task::slugify` —
   `amd-ui`'s tests check they agree.
+- **The Backlogs column lists compact boxes** (ticket 109): each epic or
+  sprint shows only its name and an amount — an epic's ticket count, a
+  sprint's total points — and stays a drop target. A click opens it as a
+  column of its own beside Backlogs (`OpenEpicColumn`, `Ctx.open_epic`,
+  one at a time, × or a second click closes it), holding its cards, the
+  sprint's days/state/points line and its Start sprint button.
 - **Drags map onto amd-lib's moves** (`move_in`): onto an epic or sprint is
   `set_epic` (from todo, `move_task` back to the backlog first); out of one
   to the loose backlog is `set_epic(None)`; anything else is `move_to`. The

@@ -47,6 +47,10 @@ pub struct Ctx {
     pub collapsed: RwSignal<BTreeSet<Column>>,
     /// The Epics column folds away on its own, separately from the backlog.
     pub epics_collapsed: RwSignal<bool>,
+    /// The epic or sprint opened from the Backlogs column, as (repository,
+    /// name), shown as a column of its own beside it (ticket 109). One at
+    /// a time.
+    pub open_epic: RwSignal<Option<(String, String)>>,
     /// The ticket being dragged: its file name and where it came from.
     pub dragging: RwSignal<Option<(String, Place)>>,
     /// How every column and epic is ordered (the Sort dropdown).
@@ -176,6 +180,7 @@ pub fn App() -> impl IntoView {
         overlay: RwSignal::new(None),
         collapsed: RwSignal::new(BTreeSet::new()),
         epics_collapsed: RwSignal::new(false),
+        open_epic: RwSignal::new(None),
         dragging: RwSignal::new(None),
         sort: RwSignal::new(SortOrder::default()),
         search: RwSignal::new(String::new()),
