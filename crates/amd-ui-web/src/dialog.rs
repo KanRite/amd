@@ -312,3 +312,68 @@ pub fn OverLimitDialog(file: String, from: Place, to: Place, reason: String) -> 
         </Modal>
     }
 }
+
+/// A repository the project declares but this machine hasn't got, chosen in
+/// the Repository filter (ticket 108): clone it beside the tickets
+/// repository, as `amd clone <name>` does, then filter to it.
+#[component]
+pub fn CloneRepoDialog(name: String) -> impl IntoView {
+    let ctx = Ctx::get();
+    let busy = RwSignal::new(false);
+    let target = StoredValue::new(name.clone());
+    let clone = move |_| {
+        if busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        let name = target.get_value();
+        spawn_local(async move {
+            match api::clone_repository(&name).await {
+                Ok(warnings) => {
+                    if !warnings.is_empty() {
+                        ctx.report(amd_ui_model::SyncReport {
+                            message: format!("clone {name}"),
+                            committed: false,
+                            pushed: false,
+                            warning: Some(warnings.join("; ")),
+                        });
+                    }
+                    ctx.about.set(Some(name));
+                    ctx.close_overlay();
+                    ctx.reload();
+                }
+                Err(e) => {
+                    ctx.close_overlay();
+                    ctx.error.set(Some(e));
+                }
+            }
+        });
+    };
+    view! {
+        <Modal title=format!("Clone {name}?") width="max-w-lg">
+            <p class="text-sm">
+                {format!(
+                    "{name} is part of this project but isn't cloned on this machine. Clone it beside the \
+                     tickets repository, from the same place the tickets repository came from?"
+                )}
+            </p>
+            <div class="flex justify-end gap-2">
+                <button
+                    type="button"
+                    class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                    on:click=move |_| ctx.close_overlay()
+                >
+                    "Cancel"
+                </button>
+                <button
+                    type="button"
+                    class="rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
+                    disabled=move || busy.get()
+                    on:click=clone
+                >
+                    {move || if busy.get() { "Cloning…" } else { "Clone" }}
+                </button>
+            </div>
+        </Modal>
+    }
+}

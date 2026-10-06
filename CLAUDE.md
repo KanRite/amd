@@ -649,6 +649,15 @@ project, into one `amdui` window:
   cloned right now shouldn't silently un-declare it for the rest of the
   team. It goes back to showing greyed out for you, the same state a
   teammate who's never registered it at all would see.
+- **`amd clone [name | --all]`** (ticket 108, `crates/amd-lib/src/clone.rs`):
+  clones a declared repository this machine hasn't got into the project
+  directory, from the tickets repo's own `origin` with the last path part
+  swapped for the name (`sibling_url` — keeps an SSH host alias, works
+  with local bare repos), then registers it. No name lists the missing
+  ones. Refuses an undeclared name, one already cloned for this project,
+  and a directory in the way. amdui offers the same from the Repository
+  filter: a "(not cloned — clone…)" entry opens `CloneRepoDialog`
+  (`clone_repository` command); the editor's select stays disabled.
 - **There are no repository aliases** (removed in ticket 097). The
   machine-wide `tickets`/`documents` short names ticket 026 added only ever
   pointed at whichever project last ran `init`/`join`, so with several

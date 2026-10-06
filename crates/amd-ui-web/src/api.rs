@@ -90,6 +90,12 @@ pub async fn use_project(name: &str) -> Result<Board, String> {
     call("use_project", &ProjectArgs { name }).await
 }
 
+/// Clones a declared repository that isn't on this machine (ticket 108);
+/// returns any duplicate-clone warnings.
+pub async fn clone_repository(name: &str) -> Result<Vec<String>, String> {
+    call("clone_repository", &ProjectArgs { name }).await
+}
+
 #[derive(Serialize)]
 struct MoveArgs<'a> {
     file: &'a str,

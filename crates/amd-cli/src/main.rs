@@ -113,6 +113,12 @@ repository. It refuses if either directory is already there. Unlike
 `amd register`, which records a repository already on this machine, join
 is the one-off step that puts the project here in the first place.
 
+A project's repositories that aren't on this machine show as (not cloned)
+and can't be chosen for a ticket. `amd clone` lists them; `amd clone <name>`
+(or `--all`) clones them beside the tickets repository, from wherever the
+tickets repository came from (its origin, with the name swapped in), and
+registers them.
+
 Several projects can share one folder (agile-md-tickets beside
 multi-user-test-tickets). `amd project` lists them and marks the one amd
 uses; `amd project use <name>` switches, by writing .current-project in
@@ -369,6 +375,15 @@ enum Cmd {
         /// everyone (and off this machine's registry)
         #[arg(long, value_name = "NAME", conflicts_with = "path")]
         remove: Option<String>,
+    },
+    /// Clone a repository the project declares but this machine hasn't got,
+    /// beside the tickets repository, and register it. No name lists them
+    Clone {
+        #[arg(value_name = "NAME", conflicts_with = "all")]
+        name: Option<String>,
+        /// Clone every declared repository that's missing here
+        #[arg(long)]
+        all: bool,
     },
     /// Remove a repository's *local* registration only — the project-wide
     /// declaration is untouched, so it reappears greyed out, not gone
@@ -640,6 +655,7 @@ fn run() -> Result<()> {
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
         Cmd::Register { .. } => unreachable!("handled above"),
         Cmd::Deregister { name } => cmd_deregister(&name),
+        Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
         Cmd::New(args) => cmd_new(&board, args),
         Cmd::Board { tag } => cmd_ls(&board, "all", tag.as_deref()),
         Cmd::Ls { column, tag } => cmd_ls(&board, &column, tag.as_deref()),
@@ -1289,6 +1305,58 @@ fn register_board(path: Option<&str>, project: Option<&str>) -> Result<Board> {
     )
 }
 
+/// `amd clone [name | --all]` (ticket 108).
+fn cmd_clone(board: &Board, name: Option<&str>, all: bool) -> Result<()> {
+    let missing = agile_md::clone::missing(board);
+    let names: Vec<String> = match (name, all) {
+        (Some(name), _) => vec![name.to_string()],
+        (None, true) => missing,
+        (None, false) => {
+            if missing.is_empty() {
+                println!("every declared repository is cloned here");
+            } else {
+                println!("not cloned here (amd clone <name>, or --all):");
+                for name in &missing {
+                    println!("  {name}");
+                }
+            }
+            return Ok(());
+        }
+    };
+    if names.is_empty() {
+        println!("every declared repository is cloned here");
+        return Ok(());
+    }
+    let mut failed = Vec::new();
+    for name in &names {
+        match agile_md::clone::clone_repo(board, name) {
+            Ok(cloned) => {
+                println!(
+                    "cloned {name} into {} (from {})",
+                    cloned.path.display(),
+                    cloned.url
+                );
+                for other in cloned.also_at {
+                    eprintln!(
+                        "warning: {name} is also cloned at {} — two copies of one repository \
+                         drift apart; prefer one",
+                        other.display()
+                    );
+                }
+            }
+            Err(err) if names.len() == 1 => return Err(err),
+            Err(err) => {
+                eprintln!("amd: {name}: {err:#}");
+                failed.push(name.as_str());
+            }
+        }
+    }
+    if !failed.is_empty() {
+        bail!("couldn't clone {}", failed.join(", "));
+    }
+    Ok(())
+}
+
 /// Removes only the *local* registration — the project-wide declaration is
 /// untouched, so `name` goes back to showing greyed out in `amdui` rather
 /// than disappearing for the rest of the team.
@@ -1356,6 +1424,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::Templates { .. }
         | Cmd::Register { .. }
         | Cmd::Deregister { .. }
+        | Cmd::Clone { .. }
         | Cmd::WipLimit { .. }
         | Cmd::Group {
             command: None | Some(GroupCmd::List),

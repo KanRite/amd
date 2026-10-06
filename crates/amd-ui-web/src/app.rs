@@ -13,7 +13,9 @@ use wasm_bindgen::JsCast;
 use crate::admin::AdminPanel;
 use crate::api;
 use crate::board::BoardView;
-use crate::dialog::{NewEpicDialog, NewSprintDialog, NewTicketDialog, OverLimitDialog};
+use crate::dialog::{
+    CloneRepoDialog, NewEpicDialog, NewSprintDialog, NewTicketDialog, OverLimitDialog,
+};
 use crate::editor::Editor;
 
 /// Which overlay, if any, is open over the board.
@@ -24,6 +26,8 @@ pub enum Overlay {
     NewEpic,
     NewSprint,
     Admin,
+    /// A "(not cloned)" repository chosen in the filter: clone it? (108)
+    CloneRepo(String),
     /// A ticket dropped on a column at its WIP limit: move it anyway?
     OverLimit {
         file: String,
@@ -269,6 +273,7 @@ pub fn App() -> impl IntoView {
                 Some(Overlay::NewEpic) => view! { <NewEpicDialog /> }.into_any(),
                 Some(Overlay::NewSprint) => view! { <NewSprintDialog /> }.into_any(),
                 Some(Overlay::Admin) => view! { <AdminPanel /> }.into_any(),
+                Some(Overlay::CloneRepo(name)) => view! { <CloneRepoDialog name /> }.into_any(),
                 Some(Overlay::OverLimit { file, from, to, reason }) => {
                     view! { <OverLimitDialog file from to reason /> }.into_any()
                 }
@@ -454,7 +459,16 @@ fn RepoFilter() -> impl IntoView {
                 prop:value=move || ctx.about.get().unwrap_or_default()
                 on:change=move |ev| {
                     let value = event_target_value(&ev);
-                    ctx.about.set((!value.is_empty()).then_some(value));
+                    // One that isn't cloned here offers to clone it (ticket
+                    // 108); the filter stays as it was until that's done.
+                    let missing = repos().iter().any(|r| r.name == value && !r.available);
+                    if missing {
+                        let select: web_sys::HtmlSelectElement = event_target(&ev);
+                        select.set_value(&ctx.about.get_untracked().unwrap_or_default());
+                        ctx.overlay.set(Some(Overlay::CloneRepo(value)));
+                    } else {
+                        ctx.about.set((!value.is_empty()).then_some(value));
+                    }
                 }
             >
                 <option class="bg-accent-600 text-white" value="">
@@ -467,10 +481,10 @@ fn RepoFilter() -> impl IntoView {
                             let label = if r.available {
                                 r.name.clone()
                             } else {
-                                format!("{} (not cloned)", r.name)
+                                format!("{} (not cloned — clone…)", r.name)
                             };
                             view! {
-                                <option class="bg-accent-600 text-white" value=r.name.clone() disabled=!r.available>
+                                <option class="bg-accent-600 text-white" value=r.name.clone()>
                                     {label}
                                 </option>
                             }

@@ -318,8 +318,12 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                                         } else {
                                             format!("{} (not cloned)", r.name)
                                         };
+                                        // Cloning is offered in one place, the
+                                        // Repository filter (ticket 108).
+                                        let hint = (!r.available)
+                                            .then_some("Clone it from the Repository filter first");
                                         view! {
-                                            <option value=r.name.clone() disabled=!r.available>
+                                            <option value=r.name.clone() disabled=!r.available title=hint>
                                                 {label}
                                             </option>
                                         }
