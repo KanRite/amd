@@ -74,31 +74,21 @@ redundant. Their history is in git if it is ever wanted again.
   `.next-id` file it partly replaces): the `next-id` ticket counter, the
   `commit` auto-commit toggle and the project's `users` (ticket 088 —
   `Name <email>, …`, git's own identity shape, parsed on `>` so a comma in
-  a name survives; email is the identity) stay here. `users` must stay on
-  the direct-push path because `amd join` adds to it; `save()` copies it
-  back to the local file explicitly, alongside `next-id`/`commit`, since a
-  key missing from that list is silently dropped once a documents sibling
-  exists. `project`/`repos`/`wip-todo`/
-  `wip-limit`/`lease-hours` move to `{project}-documents`'s own
-  `.settings/` **directory** once one is locatable (ticket 057) — one small
-  file per key, so each reviews as its own legible diff in a repository
-  that's already PR-reviewed, rather than a bare commit to this one's own
-  `main`. `documents_root()` finds it by sibling-path derivation
-  (`{project}-tickets` next to `{project}-documents`, the standing
-  `rfc/0003` layout) first, falling back to a **project-scoped** registry
-  lookup (`{project}-documents`, using this board's own possibly-stale
-  `project` value) — deliberately never a machine-wide "documents"
-  name (there used to be an alias; removed in ticket 097), which would silently leak a
-  *different* project's settings into this one on any machine juggling
-  more than one project — confirmed live, the hard way, as a real
-  `project_trust` violation while building this. A board with no
-  locatable documents sibling (a single-repo board, or one that predates
-  the split) keeps storing the moved keys in its own file exactly as
-  before — every getter's own body is unchanged; only `load`/`save` know
-  where each key actually lives. Writing a documents-shaped key never
-  commits or pushes it there (`cmd_register`/`amd wip-limit` print where
-  the file landed and that it needs a PR) — documents is PR-reviewed,
-  same `adr/0006` boundary as `{project}-documents` always was.
+  a name survives; email is the identity) live here. **So does every other
+  board setting** (ticket 111): `project`, `repos`, `wip-limit`,
+  `lease-hours`, `ticket-numbering`, `sync`. Ticket 057 had moved some of
+  them into `{project}-documents/.settings/` so they'd be PR-reviewed, but
+  a change there only reached the team once a documents PR merged, and the
+  copies drifted (agile-md's registered repos sat uncommitted in documents
+  while its tickets copy was stale). Now `load`/`save` use only the
+  tickets file, and a setting change goes out like a ticket move:
+  `amd wip-limit`, `amd register`/`register --remove` and amdui's Settings
+  all run through the auto-commit path. `migrate_from_documents` (run by
+  the CLI after `catch_up`, and by amdui's `change()`) carries a documents
+  `.settings/` across once — `repos` unioned, other keys filling gaps,
+  tickets winning a clash — commits it, says so, and is silent after.
+  `documents_root()` survives only to find that old directory: sibling path
+  first, then a project-scoped registry lookup, never a machine-wide name.
 - `crates/amd-lib/src/current_project.rs` — several projects in one folder
   (ticket 093). The *project directory* is the folder holding a project's
   repositories (a repo's parent, or the current directory outside any repo);
@@ -488,7 +478,7 @@ redundant. Their history is in git if it is ever wanted again.
   - **Ticket numbering** (`crates/amd-lib/src/numbering.rs`): `local` (the
     counter + scan, unchanged, the default) or `cloud` — a stub for a future
     paid plan where a service hands out numbers; it refuses with "needs an
-    agile-md plan". `ticket-numbering` is a documents-shaped key;
+    agile-md plan". `ticket-numbering` lives in the tickets `.settings` like every setting;
     `AMD_TICKET_NUMBERING` overrides. `Board::next_id`/`record_id` dispatch
     through it, so no caller changed.
   - **`amd log`** (`cmd_log`) renders the board's transition history —

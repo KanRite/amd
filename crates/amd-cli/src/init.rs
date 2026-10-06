@@ -188,22 +188,15 @@ fn scaffold_documents(target: &Path, project: &str) -> Result<()> {
     if !readme.exists() {
         std::fs::write(
             &readme,
-            format!(
-                "# {project} documents\n\nADRs, RFCs, docs, and reviewed settings for {project}.\n"
-            ),
+            format!("# {project} documents\n\nADRs, RFCs and docs for {project}.\n"),
         )?;
     }
     let changelog = target.join("CHANGELOG.md");
     if !changelog.exists() {
         std::fs::write(&changelog, "# Changelog\n\n")?;
     }
-    let settings_dir = target.join(".settings");
-    std::fs::create_dir_all(&settings_dir)
-        .with_context(|| format!("creating {}", settings_dir.display()))?;
-    let project_file = settings_dir.join("project");
-    if !project_file.exists() {
-        std::fs::write(&project_file, format!("{project}\n"))?;
-    }
+    // No `.settings/` here any more: every board setting, `project`
+    // included, lives in the tickets repository's `.settings` (ticket 111).
     Ok(())
 }
 
@@ -354,9 +347,9 @@ mod tests {
         }
         assert!(target.join("README.md").exists());
         assert!(target.join("CHANGELOG.md").exists());
-        assert_eq!(
-            std::fs::read_to_string(target.join(".settings").join("project")).unwrap(),
-            "proj\n"
+        assert!(
+            !target.join(".settings").exists(),
+            "settings live in the tickets repository now (ticket 111)"
         );
     }
 
@@ -370,19 +363,6 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(target.join("README.md")).unwrap(),
             "hand-written\n"
-        );
-    }
-
-    #[test]
-    fn scaffold_documents_never_overwrites_an_existing_project_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let target = dir.path().join("proj-documents");
-        std::fs::create_dir_all(target.join(".settings")).unwrap();
-        std::fs::write(target.join(".settings").join("project"), "hand-edited\n").unwrap();
-        scaffold_documents(&target, "proj").unwrap();
-        assert_eq!(
-            std::fs::read_to_string(target.join(".settings").join("project")).unwrap(),
-            "hand-edited\n"
         );
     }
 }

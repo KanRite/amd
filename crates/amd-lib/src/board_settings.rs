@@ -26,7 +26,7 @@
 //! - `wip-todo`: **ignored** (ticket 083). Todo used to carry an optional
 //!   limit; a limit there as well as on doing could leave work stuck with
 //!   nowhere to go, so only doing is limited now. The key is still
-//!   recognised (it stays a documents-shaped key, below) so an old file
+//!   recognised so an old file
 //!   keeps loading, but nothing reads it.
 //! - `wip-limit`: `doing/`'s WIP limit — the only one. Absent or
 //!   unparsable defaults to **2**, not unlimited — a long queue of tickets
@@ -57,8 +57,8 @@
 //!   shows greyed out.
 //! - `users`: the people on this project (ticket 088), in git's own
 //!   identity shape — `Name <email>, Name <email>`. `amd join` adds the
-//!   joining user. Deliberately **not** a documents key: joining has to take
-//!   effect on the direct-push path, not wait for a documents PR. The email
+//!   joining user. Like every setting, it's on the direct-push path, so a
+//!   join takes effect at once. The email
 //!   is the identity (leases use `user.email`); the name is for display.
 //!
 //! One repository, one settings file — a repository with more than one
@@ -67,17 +67,14 @@
 //! `AMD_DIR` exists so a repository can pick a non-default location for its
 //! one board, not to run several boards side by side.
 //!
-//! **`project`/`repos`/`wip-todo`/`wip-limit`/`lease-hours` move to
-//! `{project}-documents` once one is locatable** (ticket 057) — a
-//! `.settings/` *directory* there, one small file per key, so a changed
-//! setting reviews as its own legible diff in a repository that's already
-//! PR-reviewed, rather than a bare commit straight to this repository's own
-//! `main`. `next-id`/`commit` stay here regardless: `next-id` is bumped on
-//! every `amd new` and must stay on the fast, direct-to-main path;
-//! `commit` is the auto-commit toggle itself. A board with no locatable
-//! documents sibling — a single-repo board, or one that predates the
-//! split — keeps storing the moved keys in this file exactly as it always
-//! has; nothing here requires the split to have happened.
+//! **Every setting lives here** (ticket 111). Ticket 057 once moved
+//! `project`/`repos`/`wip-limit`/`lease-hours` into `{project}-documents`'s
+//! `.settings/` directory so changes to them would be PR-reviewed, but a
+//! change there only reached the team once someone opened and merged a
+//! documents PR, and the two copies drifted. Here, a setting changes the way
+//! a ticket moves: committed and pushed, and synced (ticket 102).
+//! `migrate_from_documents` carries anything still in a documents
+//! `.settings/` across, once; that directory is never read otherwise.
 
 use anyhow::{Result, bail};
 
@@ -146,11 +143,13 @@ fn parse_users(value: &str) -> Vec<User> {
         .collect()
 }
 
-/// Keys that move to `{project}-documents`'s `.settings/` directory once
-/// one is locatable. Everything else this module knows about (`next-id`,
-/// `commit`) — and anything it doesn't recognise at all — stays in this
-/// board's own file.
-const DOCUMENTS_KEYS: &[&str] = &[
+/// Keys ticket 057 once kept in `{project}-documents/.settings/` (one file
+/// per key). Ticket 111 brought every setting back into the tickets
+/// repository's own `.settings` — the only place a change reaches the whole
+/// team reliably, through the same commit and push as a ticket move — and
+/// these are what `migrate_from_documents` carries over from a project that
+/// still has documents settings.
+const MIGRATED_KEYS: &[&str] = &[
     PROJECT,
     LEASE_HOURS,
     WIP_TODO,
@@ -164,8 +163,8 @@ pub fn path(board: &Board) -> std::path::PathBuf {
     board.repo_root().join(".settings")
 }
 
-/// Where `{project}-documents`'s `.settings/` directory can be found for
-/// this board, if at all. Sibling-path derivation first — the standing
+/// Where `{project}-documents`'s old `.settings/` directory can be found for
+/// this board, if at all — only ever read now, by `migrate_from_documents`. Sibling-path derivation first — the standing
 /// `rfc/0003` layout, `{project}-tickets` next to `{project}-documents` —
 /// so this works even on a machine that's never run `amd register`. Falls
 /// back to a **project-scoped** registry lookup, `{project}-documents`,
@@ -207,21 +206,10 @@ fn read_documents_key(documents_root: &std::path::Path, key: &str) -> Option<Str
     (!value.is_empty()).then(|| value.to_string())
 }
 
-fn write_documents_key(documents_root: &std::path::Path, key: &str, value: &str) -> Result<()> {
-    let dir = documents_root.join(".settings");
-    std::fs::create_dir_all(&dir)?;
-    std::fs::write(dir.join(key), format!("{value}\n"))?;
-    Ok(())
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct BoardSettings {
-    /// A merged, in-memory view — `DOCUMENTS_KEYS` from documents (when
-    /// locatable) layered over this board's own file, which every getter
-    /// below still just reads from directly. Only `save` needs to know
-    /// which key belongs in which place.
+    /// Every setting, as read from `<tickets-repo>/.settings` (ticket 111).
     config: Config,
-    documents_root: Option<std::path::PathBuf>,
 }
 
 impl BoardSettings {
@@ -315,14 +303,6 @@ impl BoardSettings {
                 bail!("{} has no WIP limit", column.as_str())
             }
         }
-    }
-
-    /// Where a documents-shaped setting just written by `save` actually
-    /// landed, if anywhere other than this board's own file — so a caller
-    /// can tell the user it needs a commit and a PR there, rather than
-    /// having already been pushed the way a tickets-repo change is.
-    pub fn documents_root(&self) -> Option<&std::path::Path> {
-        self.documents_root.as_deref()
     }
 
     /// Whether a mutating command should commit (and push) its own change
@@ -439,32 +419,22 @@ impl BoardSettings {
         Ok(true)
     }
 
-    /// Persists whatever's in memory to wherever each key actually belongs.
-    /// With no locatable documents repository, this is unchanged from
-    /// before ticket 057 — everything goes in this board's own file.
+    /// Takes a repository off the project's declared list (`amd register
+    /// --remove`). Returns whether it was there.
+    pub fn undeclare_repo(&mut self, name: &str) -> bool {
+        let mut names = self.repos();
+        let before = names.len();
+        names.retain(|existing| existing != name);
+        if names.len() == before {
+            return false;
+        }
+        self.config.set(REPOS, &names.join(","));
+        true
+    }
+
+    /// Writes every setting to `<tickets-repo>/.settings` (ticket 111).
     pub fn save(&self, board: &Board) -> Result<()> {
-        let Some(root) = &self.documents_root else {
-            return self.config.save_to(&path(board));
-        };
-        // A fresh read, not `self.config` verbatim: `self.config` also
-        // holds whatever documents keys were merged in at `load()` time,
-        // and those must not leak back into this board's own file — a
-        // legacy value already sitting here (pre-migration) is left alone
-        // rather than actively deleted, since migration is a deliberate,
-        // separate step, not something a save should do as a side effect.
-        let mut local = Config::load_from(&path(board));
-        for key in [NEXT_ID, AUTO_COMMIT, USERS] {
-            if let Some(value) = self.config.get(key) {
-                local.set(key, value);
-            }
-        }
-        local.save_to(&path(board))?;
-        for key in DOCUMENTS_KEYS {
-            if let Some(value) = self.config.get(key) {
-                write_documents_key(root, key, value)?;
-            }
-        }
-        Ok(())
+        self.config.save_to(&path(board))
     }
 }
 
@@ -497,19 +467,51 @@ pub fn validate_project_name(name: &str) -> Result<()> {
 }
 
 pub fn load(board: &Board) -> BoardSettings {
-    let mut config = Config::load_from(&path(board));
-    let documents_root = documents_root(board);
-    if let Some(root) = &documents_root {
-        for key in DOCUMENTS_KEYS {
-            if let Some(value) = read_documents_key(root, key) {
-                config.set(key, &value);
+    BoardSettings {
+        config: Config::load_from(&path(board)),
+    }
+}
+
+/// Carries any settings still kept in `{project}-documents/.settings/`
+/// (ticket 057's split) into the tickets `.settings` (ticket 111), so a
+/// project that had them loses nothing. `repos` is the union of both; any
+/// other key is taken from documents only where the tickets file doesn't
+/// set it. Saves only when something changed, and returns the keys it
+/// carried — empty once everything is across, so it's safe (and silent) to
+/// call before every command. The documents files are never written, only
+/// left behind to be deleted by a documents PR.
+pub fn migrate_from_documents(board: &Board) -> Result<Vec<String>> {
+    let Some(root) = documents_root(board) else {
+        return Ok(Vec::new());
+    };
+    let mut settings = load(board);
+    let mut moved = Vec::new();
+    for key in MIGRATED_KEYS {
+        let Some(value) = read_documents_key(&root, key) else {
+            continue;
+        };
+        if *key == REPOS {
+            let before = settings.repos();
+            for name in value.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+                settings.declare_repo(name)?;
             }
+            if settings.repos() != before {
+                moved.push(key.to_string());
+            }
+        } else if settings.config.get(key).is_none_or(|v| v.trim().is_empty()) {
+            settings.config.set(key, &value);
+            moved.push(key.to_string());
         }
     }
-    BoardSettings {
-        config,
-        documents_root,
+    if !moved.is_empty() {
+        settings.save(board)?;
     }
+    Ok(moved)
+}
+
+/// Where the old documents settings are, for a message after migrating.
+pub fn documents_settings_dir(board: &Board) -> Option<std::path::PathBuf> {
+    documents_root(board).map(|root| root.join(".settings"))
 }
 
 #[cfg(test)]
@@ -841,114 +843,6 @@ mod tests {
         settings
     }
 
-    #[test]
-    fn a_board_named_something_tickets_with_no_sibling_falls_back_to_local() {
-        let dir = tempfile::tempdir().unwrap();
-        let board = tickets_board(dir.path());
-        // No proj-documents directory created at all.
-        let mut settings = load(&board);
-        settings.set_project("proj").unwrap();
-        settings.save(&board).unwrap();
-
-        assert_eq!(load(&board).project(), Some("proj"));
-        let local = Config::load_from(&path(&board));
-        assert_eq!(
-            local.get(PROJECT),
-            Some("proj"),
-            "no sibling exists, so this is exactly the pre-057 behaviour"
-        );
-    }
-
-    #[test]
-    fn a_documents_sibling_is_found_by_the_tickets_suffix_convention() {
-        let dir = tempfile::tempdir().unwrap();
-        let board = tickets_board(dir.path());
-        let settings_dir = documents_settings_dir(dir.path());
-        std::fs::write(settings_dir.join("project"), "proj\n").unwrap();
-
-        assert_eq!(load(&board).project(), Some("proj"));
-    }
-
-    #[test]
-    fn documents_values_win_over_a_stale_local_copy() {
-        let dir = tempfile::tempdir().unwrap();
-        let board = tickets_board(dir.path());
-        std::fs::create_dir_all(board.repo_root()).unwrap();
-        std::fs::write(path(&board), "project = old-value\n").unwrap();
-        let settings_dir = documents_settings_dir(dir.path());
-        std::fs::write(settings_dir.join("project"), "new-value\n").unwrap();
-
-        assert_eq!(
-            load(&board).project(),
-            Some("new-value"),
-            "the documents repo's own copy takes precedence once one exists"
-        );
-    }
-
-    #[test]
-    fn saving_with_a_documents_sibling_writes_there_not_locally() {
-        let dir = tempfile::tempdir().unwrap();
-        let board = tickets_board(dir.path());
-        documents_settings_dir(dir.path());
-
-        let mut settings = load(&board);
-        settings.declare_repo("some-repo").unwrap();
-        settings.set_wip_limit(Column::Doing, Some(3)).unwrap();
-        settings.save(&board).unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("proj-documents/.settings/repos")).unwrap(),
-            "some-repo\n"
-        );
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("proj-documents/.settings/wip-limit")).unwrap(),
-            "3\n"
-        );
-        let local = Config::load_from(&path(&board));
-        assert_eq!(
-            local.get(REPOS),
-            None,
-            "documents-shaped keys must not also land in the local file"
-        );
-    }
-
-    #[test]
-    fn saving_next_id_with_a_documents_sibling_still_writes_locally() {
-        let dir = tempfile::tempdir().unwrap();
-        let board = tickets_board(dir.path());
-        documents_settings_dir(dir.path());
-
-        let mut settings = load(&board);
-        settings.set_next_id(42);
-        settings.save(&board).unwrap();
-
-        assert_eq!(load(&board).next_id(), Some(42));
-        assert!(
-            !dir.path().join("proj-documents/.settings/next-id").exists(),
-            "next-id is never the documents repo's concern"
-        );
-    }
-
-    #[test]
-    fn a_pre_migration_local_value_is_left_alone_not_deleted() {
-        let dir = tempfile::tempdir().unwrap();
-        let board = tickets_board(dir.path());
-        std::fs::create_dir_all(board.repo_root()).unwrap();
-        std::fs::write(path(&board), "repos = leftover-repo\n").unwrap();
-        documents_settings_dir(dir.path());
-
-        let mut settings = load(&board);
-        settings.set_next_id(1);
-        settings.save(&board).unwrap();
-
-        let local = Config::load_from(&path(&board));
-        assert_eq!(
-            local.get(REPOS),
-            Some("leftover-repo"),
-            "migration is a deliberate step, not a side effect of an unrelated save"
-        );
-    }
-
     fn user(name: &str, email: &str) -> User {
         User {
             name: name.to_string(),
@@ -1049,22 +943,76 @@ mod tests {
         assert!(settings.users().is_empty());
     }
 
+    fn documents_key(dir: &std::path::Path, key: &str, value: &str) {
+        std::fs::write(documents_settings_dir(dir).join(key), format!("{value}\n")).unwrap();
+    }
+
     #[test]
-    fn users_stay_in_the_tickets_file_with_a_documents_sibling() {
+    fn every_setting_lives_in_the_tickets_file_even_beside_documents() {
         let dir = tempfile::tempdir().unwrap();
         let board = tickets_board(dir.path());
         std::fs::create_dir_all(board.repo_root()).unwrap();
         documents_settings_dir(dir.path());
-
         let mut settings = load(&board);
-        settings.add_user(&user("Ada", "a@example.com")).unwrap();
+        settings.set_project("proj").unwrap();
+        settings.declare_repo("code").unwrap();
+        settings.set_wip_limit(Column::Doing, Some(4)).unwrap();
+        settings.set_lease_hours(2.0).unwrap();
         settings.save(&board).unwrap();
-
-        assert_eq!(load(&board).users(), vec![user("Ada", "a@example.com")]);
-        assert_eq!(
-            Config::load_from(&path(&board)).get(USERS),
-            Some("Ada <a@example.com>")
+        let local = Config::load_from(&path(&board));
+        assert_eq!(local.get(PROJECT), Some("proj"));
+        assert_eq!(local.get(REPOS), Some("code"));
+        assert_eq!(local.get(WIP_LIMIT), Some("4"));
+        assert!(
+            std::fs::read_dir(dir.path().join("proj-documents/.settings"))
+                .unwrap()
+                .next()
+                .is_none(),
+            "nothing is written to documents any more"
         );
-        assert!(!dir.path().join("proj-documents/.settings/users").exists());
+    }
+
+    #[test]
+    fn migrating_unions_repos_fills_gaps_and_lets_tickets_win() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = tickets_board(dir.path());
+        std::fs::create_dir_all(board.repo_root()).unwrap();
+        std::fs::write(path(&board), "repos = TestRepository\nwip-limit = 5\n").unwrap();
+        documents_settings_dir(dir.path());
+        documents_key(dir.path(), REPOS, "TestRepository,long-one,another");
+        documents_key(dir.path(), WIP_LIMIT, "3");
+        documents_key(dir.path(), LEASE_HOURS, "4");
+
+        let moved = migrate_from_documents(&board).unwrap();
+        assert_eq!(moved, vec!["lease-hours".to_string(), "repos".to_string()]);
+        let settings = load(&board);
+        assert_eq!(settings.repos(), ["TestRepository", "long-one", "another"]);
+        assert_eq!(settings.wip_limit(Column::Doing), Some(5), "tickets wins");
+        assert_eq!(settings.lease_hours(), 4.0, "documents fills a gap");
+
+        assert!(
+            migrate_from_documents(&board).unwrap().is_empty(),
+            "silent once across"
+        );
+    }
+
+    #[test]
+    fn no_documents_sibling_means_nothing_to_migrate() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = tickets_board(dir.path());
+        std::fs::create_dir_all(board.repo_root()).unwrap();
+        assert!(migrate_from_documents(&board).unwrap().is_empty());
+        assert!(!path(&board).exists(), "nothing written");
+    }
+
+    #[test]
+    fn a_repo_can_be_undeclared() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = load(&board(dir.path()));
+        settings.declare_repo("a").unwrap();
+        settings.declare_repo("b").unwrap();
+        assert!(settings.undeclare_repo("a"));
+        assert!(!settings.undeclare_repo("a"));
+        assert_eq!(settings.repos(), ["b"]);
     }
 }
