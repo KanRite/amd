@@ -773,15 +773,57 @@ pub fn run() {
             tasks_dir,
             set_tasks_dir,
             use_project,
+            clone_repository,
         ])
         .run(tauri::generate_context!())
         .expect("error while running amdui");
+}
+
+/// Clones a repository the project declares but this machine hasn't got
+/// (ticket 108), beside the tickets repository, and registers it — what
+/// `amd clone <name>` does. Returns a warning for each other clone of the
+/// same remote (ticket 095).
+#[tauri::command]
+async fn clone_repository(state: Tauri<'_, AppState>, name: String) -> Result<Vec<String>> {
+    let writing = Arc::clone(&state.writing);
+    blocking(move || {
+        let _guard = writing
+            .lock()
+            .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
+        clone_into(&Project::open()?, &name)
+    })
+    .await
+}
+
+fn clone_into(project: &Project, name: &str) -> Result<Vec<String>> {
+    let cloned =
+        agile_md::clone::clone_repo(&project.repos[0].1, name).map_err(|e| format!("{e:#}"))?;
+    Ok(cloned
+        .also_at
+        .iter()
+        .map(|other| {
+            format!(
+                "{name} is also cloned at {} — two copies of one repository drift apart; prefer one",
+                other.display()
+            )
+        })
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use amd_ui_model::Column as UiColumn;
+
+    /// The page's "clone…" goes through amd-lib's own checks (ticket 108).
+    /// A successful clone writes the machine's registry, so it's covered in
+    /// tests/test.sh, which points that at a temp directory.
+    #[test]
+    fn cloning_refuses_a_repository_the_project_doesnt_declare() {
+        let (_dir, project) = project();
+        let err = clone_into(&project, "nosuch").unwrap_err();
+        assert!(err.contains("isn't declared for this project"), "{err}");
+    }
 
     /// A project of one git repository with a board, auto-commit off.
     fn project() -> (tempfile::TempDir, Project) {

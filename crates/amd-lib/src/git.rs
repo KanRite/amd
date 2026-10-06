@@ -296,7 +296,7 @@ pub fn normalise_remote(url: &str, resolve: impl Fn(&str) -> Option<String>) -> 
 /// A remote that's a path on this machine rather than a URL: anything
 /// without a `scheme://`, and without an scp-style `host:` before its first
 /// `/`.
-fn is_local_path(url: &str) -> bool {
+pub(crate) fn is_local_path(url: &str) -> bool {
     if url.contains("://") {
         return false;
     }

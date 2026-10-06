@@ -600,6 +600,58 @@ assert "a registered clone that's gone is dropped from the registry" \
   bash -c "! grep -q 'clones/a' '${sc}/config/agile-md/repos' && grep -q 'clones/b/shared' '${sc}/config/agile-md/repos'"
 rm -rf "${sc}"
 
+echo "amd clone fetches a project's missing repositories (ticket 108):"
+# Remotes for p-tickets and three code repositories, side by side. The
+# maker declares all three; a teammate has only cloned the tickets repo.
+cl="$(mktemp -d)"
+(
+  set -e
+  export XDG_CONFIG_HOME="${cl}/maker-config" AMD_COMMIT=0
+  for r in p-tickets code extra more; do
+    git init -q --bare -b main "${cl}/remote/${r}.git"
+    git clone -q "${cl}/remote/${r}.git" "${cl}/maker/${r}" 2>/dev/null
+    cd "${cl}/maker/${r}"
+    git config user.email t@t.co && git config user.name t && git config commit.gpgsign false
+    if [ "${r}" = p-tickets ]; then
+      "${AMD}" init p --local-only >/dev/null 2>&1
+      printf 'repos = code,extra,more\n' >>.settings
+      git add -A
+    fi
+    git commit -q --allow-empty -m "seed for ticket 108"
+    git push -q origin HEAD:main 2>/dev/null
+  done
+  mkdir -p "${cl}/mate" && git clone -q "${cl}/remote/p-tickets.git" "${cl}/mate/p-tickets" 2>/dev/null
+  git -C "${cl}/mate/p-tickets" config user.email m@t.co && git -C "${cl}/mate/p-tickets" config user.name m
+)
+in_cl() { (cd "${cl}/mate/p-tickets" && env XDG_CONFIG_HOME="${cl}/mate-config" AMD_COMMIT=0 "${AMD}" "$@"); }
+assert "amd clone lists the declared repositories that aren't here" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; out=\"\$(in_cl clone 2>/dev/null)\" \
+    && grep -qx '  code' <<<\"\${out}\" && grep -qx '  extra' <<<\"\${out}\" && grep -qx '  more' <<<\"\${out}\""
+assert "amd clone <name> clones it beside the tickets repo, from the same place" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl clone code 2>/dev/null \
+    | grep -q \"cloned code into ${cl}/mate/code (from ${cl}/remote/code.git)\" \
+    && [ \"\$(git -C '${cl}/mate/code' log -1 --format=%s)\" = 'seed for ticket 108' ]"
+assert "...registers it, so a ticket can now name it" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; grep -q '/mate/code\$' '${cl}/mate-config/agile-md/repos' \
+    && in_cl new 'Work on code' --repository code --no-edit >/dev/null 2>&1"
+assert "...and isn't listed as missing any more" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; ! in_cl clone 2>/dev/null | grep -qx '  code'"
+assert "cloning it again is refused" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl clone code 2>&1 | grep -q 'code is already cloned here'"
+assert "a name the project doesn't declare is refused" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl clone nosuch 2>&1 | grep -q \"nosuch isn't declared for this project\" \
+    && test ! -e '${cl}/mate/nosuch'"
+mkdir "${cl}/mate/extra"
+assert "a directory already in the way is refused, and left alone" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl clone extra 2>&1 | grep -q 'already exists' \
+    && test -d '${cl}/mate/extra' && test ! -e '${cl}/mate/extra/.git'"
+rmdir "${cl}/mate/extra"
+assert "amd clone --all clones every one still missing" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl clone --all >/dev/null 2>&1 \
+    && test -d '${cl}/mate/extra/.git' && test -d '${cl}/mate/more/.git' \
+    && in_cl clone 2>/dev/null | grep -q 'every declared repository is cloned here'"
+rm -rf "${cl}"
+
 echo "board settings live in the tickets repository (ticket 111):"
 # A project whose documents repository still holds settings from before
 # 111: repos and wip-limit there, an older repos value in tickets.
