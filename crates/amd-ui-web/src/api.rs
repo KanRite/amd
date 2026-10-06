@@ -160,6 +160,12 @@ pub async fn board_fingerprint() -> Result<String, String> {
     call("board_fingerprint", &NoArgs {}).await
 }
 
+/// Brings the board up to date with its remote (ticket 102); returns any
+/// warnings.
+pub async fn sync_board() -> Result<Vec<String>, String> {
+    call("sync_board", &NoArgs {}).await
+}
+
 /// The ticket's current version on disk, or `None` once it has moved or
 /// gone.
 pub async fn ticket_version(place: &Place, file: &str) -> Result<Option<String>, String> {

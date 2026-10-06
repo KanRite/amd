@@ -350,6 +350,77 @@ for repo in first-tickets first-documents later-tickets later-documents; do
 done
 rm -rf "${projects}" "${second}"
 
+echo "two clones of one board (ticket 102):"
+# A and B clone one board from a local bare origin, each with its own git
+# identity — two people. amd keeps both in step: catching up before every
+# command, and replaying or undoing a change whose push lost a race.
+two="$(mktemp -d)"
+(
+  set -e
+  git init -q --bare -b main "${two}/origin.git"
+  git init -q -b main "${two}/a"
+  cd "${two}/a"
+  git config user.email a@t.co && git config user.name a && git config commit.gpgsign false
+  git remote add origin "${two}/origin.git"
+  "${AMD}" init twoclones --local-only >/dev/null 2>&1
+  git add -A && git commit -q -m "seed for ticket 102" && git push -q -u origin main 2>/dev/null
+  git clone -q "${two}/origin.git" "${two}/b"
+  cd "${two}/b" && git config user.email b@t.co && git config user.name b && git config commit.gpgsign false
+)
+in_a() { (cd "${two}/a" && "${AMD}" "$@"); }
+in_b() { (cd "${two}/b" && XDG_STATE_HOME="${two}/state" "${AMD}" "$@"); }
+in_a new "From A" --no-edit >/dev/null 2>&1
+assert "B sees A's new ticket without a manual pull" \
+  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; in_b board --plain 2>/dev/null | grep -q 'From A'"
+assert "B's next ticket is numbered after A's, not alongside it" \
+  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; in_b new 'From B' --no-edit 2>/dev/null | grep -q 'created backlog/002-from-b.md'"
+in_a todo 1 --no-branch >/dev/null 2>&1
+assert "B can't claim a ticket A holds, and says so with a non-zero exit" \
+  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; ! in_b doing 1 >/dev/null 2>&1 \
+    && in_b doing 1 2>&1 | grep -q 'leased by a@t.co'"
+in_a new "Third" --no-edit >/dev/null 2>&1
+in_b board --plain >/dev/null 2>&1
+# One-shot pre-push hook in B: just before B's push, A changes the board
+# (with git's per-repository environment cleared, or A's git would act on B).
+race() { # the amd arguments A runs at the last moment
+  local args
+  args="$(printf '%q ' "$@")"
+  cat >"${two}/b/.git/hooks/pre-push" <<HOOK
+#!/bin/sh
+[ -e "${two}/raced" ] && exit 0
+touch "${two}/raced"
+unset \$(git rev-parse --local-env-vars)
+cd "${two}/a" && "${AMD}" ${args} >/dev/null 2>&1
+exit 0
+HOOK
+  chmod +x "${two}/b/.git/hooks/pre-push"
+  rm -f "${two}/raced"
+}
+race backlog 1
+assert "a push that lost a race to an unrelated change is replayed on top, exit 0" \
+  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; in_b set 3 priority high 2>&1 | grep -q 'replayed on top'"
+assert "...and both changes are on the remote" \
+  bash -c "git -C '${two}/origin.git' show main:tasks/backlog/003-third.md | grep -q '^priority: \"high\"' \
+    && git -C '${two}/origin.git' ls-tree -r --name-only main | grep -q 'backlog/001-from-a.md'"
+race new "A at the same time" --no-edit
+assert "a push that clashed (both numbered a new ticket) is undone, with a non-zero exit" \
+  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; ! in_b new 'B at the same time' --no-edit >/dev/null 2>&1"
+assert "...saying why, and where what was written is kept" \
+  bash -c "ls '${two}'/state/agile-md/recovered/*/*b-at-the-same-time.md >/dev/null 2>&1"
+assert "...leaving B up to date with A's ticket, and not its own" \
+  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; out=\"\$(in_b board --plain 2>/dev/null)\" \
+    && grep -q 'A at the same time' <<<\"\${out}\" && ! grep -q 'B at the same time' <<<\"\${out}\""
+assert "...and no ticket id is on the remote twice" \
+  bash -c "[ -z \"\$(git -C '${two}/origin.git' ls-tree -r --name-only main | sed -n 's|.*/\([0-9]\{3\}\)-.*|\1|p' | sort | uniq -d)\" ]"
+rm -f "${two}/b/.git/hooks/pre-push"
+in_a new "Unseen" --no-edit >/dev/null 2>&1
+assert "AMD_SYNC=0 leaves the clone alone" \
+  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; ! AMD_SYNC=0 in_b board --plain 2>/dev/null | grep -q 'Unseen'"
+assert "cloud ticket numbering explains it needs a plan, and creates nothing" \
+  bash -c "$(declare -f in_a); two='${two}'; AMD='${AMD}'; AMD_TICKET_NUMBERING=cloud in_a new 'Cloudy' --no-edit 2>&1 | grep -q 'needs an agile-md plan' \
+    && ! ls '${two}'/a/tasks/backlog/*cloudy* >/dev/null 2>&1"
+rm -rf "${two}"
+
 echo "create:"
 "${AMD}" new "First task" >/dev/null
 "${AMD}" new "Second task" -t x -t y >/dev/null

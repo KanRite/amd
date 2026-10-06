@@ -300,6 +300,15 @@ fn watch_disk(ctx: Ctx) {
         ctx.error
             .set(Some(format!("can't watch the board for changes: {e:?}")));
     }
+    // Teammates' work (ticket 102): fetch and fast-forward every 30s; the
+    // fingerprint poll above then sees the files change. Warnings (offline)
+    // are left out of the way — every 30s would only nag.
+    let sync = move || {
+        spawn_local(async move {
+            let _ = api::sync_board().await;
+        });
+    };
+    let _ = set_interval_with_handle(sync, std::time::Duration::from_secs(30));
 }
 
 /// F5 and Ctrl+R refresh the board rather than reloading the whole page,
