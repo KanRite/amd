@@ -236,6 +236,101 @@ pub fn remote_url(repo: &Path) -> Option<String> {
     }
 }
 
+/// What `repo`'s `origin` points at, in a form two clones of one remote
+/// agree on (ticket 095): [`normalise_remote`], with SSH host aliases
+/// resolved by `ssh -G`. A local path (a bare repository on this machine)
+/// is canonicalised, relative to `repo` when it's relative. `None` with no
+/// `origin`.
+pub fn remote_identity(repo: &Path) -> Option<String> {
+    let url = remote_url(repo)?;
+    let local = url.strip_prefix("file://").unwrap_or(&url);
+    if is_local_path(local) {
+        let path = repo.join(local);
+        return Some(path.canonicalize().unwrap_or(path).display().to_string());
+    }
+    Some(normalise_remote(&url, ssh_hostname))
+}
+
+/// A remote URL as `host/owner/repo`: lowercased; scheme, user, port and a
+/// trailing `.git` or `/` dropped; the scp form `user@host:owner/repo`
+/// treated as SSH. An SSH host goes through `resolve` (an alias from
+/// `~/.ssh/config`, such as `github.com-oldippy`, becomes `github.com`);
+/// whatever it can't resolve is kept as written.
+pub fn normalise_remote(url: &str, resolve: impl Fn(&str) -> Option<String>) -> String {
+    let url = url.trim();
+    let lower = url.to_lowercase();
+    let schemes = [
+        ("ssh://", true),
+        ("git+ssh://", true),
+        ("https://", false),
+        ("http://", false),
+        ("git://", false),
+    ];
+    let (ssh, authority, path) = match schemes
+        .iter()
+        .find_map(|(scheme, ssh)| lower.strip_prefix(scheme).map(|rest| (*ssh, rest)))
+    {
+        Some((ssh, rest)) => {
+            let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
+            (ssh, authority, path)
+        }
+        None => {
+            let (authority, path) = lower.split_once(':').unwrap_or((&lower, ""));
+            (true, authority, path)
+        }
+    };
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = host.split_once(':').map_or(host, |(host, _)| host);
+    let host = if ssh {
+        resolve(host).map_or_else(|| host.to_string(), |real| real.to_lowercase())
+    } else {
+        host.to_string()
+    };
+    let path = path.trim_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    format!("{host}/{path}")
+}
+
+/// A remote that's a path on this machine rather than a URL: anything
+/// without a `scheme://`, and without an scp-style `host:` before its first
+/// `/`.
+fn is_local_path(url: &str) -> bool {
+    if url.contains("://") {
+        return false;
+    }
+    match (url.find(':'), url.find('/')) {
+        (Some(colon), Some(slash)) => slash < colon,
+        (Some(_), None) => false,
+        (None, _) => true,
+    }
+}
+
+/// The real host behind an SSH host alias: `ssh -G <alias>`'s `hostname`
+/// line. Reads config only; never connects.
+fn ssh_hostname(alias: &str) -> Option<String> {
+    let out = Command::new("ssh")
+        .args(["-G", alias])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("hostname ").map(|h| h.trim().to_string()))
+}
+
+/// The repository's first commit — what two clones of one history share
+/// even with no `origin` to compare. `None` before the first commit.
+pub fn root_commit(repo: &Path) -> Option<String> {
+    let roots = ask(repo, &["rev-list", "--max-parents=0", "HEAD"])?;
+    roots.lines().last().map(str::to_string)
+}
+
 /// Points HEAD at `refs/heads/<name>` without requiring the branch to exist
 /// yet — safe on a freshly cloned, still-empty repository, where HEAD is
 /// "unborn" and there's nothing to rename. Used to make a fresh clone's
@@ -993,5 +1088,48 @@ mod tests {
         commit_all(&repo, "seed").unwrap();
 
         assert_eq!(current_branch(&repo).as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn remotes_normalise_to_host_owner_repo() {
+        let none = |_: &str| None;
+        for url in [
+            "git@github.com:Agile-MD/amd.git",
+            "ssh://git@github.com/agile-md/amd",
+            "ssh://git@github.com:22/agile-md/amd.git/",
+            "https://github.com/agile-md/amd.git",
+            "https://user@GitHub.com/agile-md/amd/",
+            "git+ssh://github.com/agile-md/amd.git",
+        ] {
+            assert_eq!(
+                normalise_remote(url, none),
+                "github.com/agile-md/amd",
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ssh_host_alias_resolves_to_the_real_host() {
+        let sgs = |host: &str| (host == "github.com-oldippy").then(|| "GitHub.com".to_string());
+        assert_eq!(
+            normalise_remote("git@github.com-oldippy:agile-md/amd.git", sgs),
+            "github.com/agile-md/amd"
+        );
+        // Only SSH hosts are aliases; an https host is taken as written.
+        let everything = |_: &str| Some("elsewhere".to_string());
+        assert_eq!(
+            normalise_remote("https://github.com/agile-md/amd", everything),
+            "github.com/agile-md/amd"
+        );
+    }
+
+    #[test]
+    fn local_paths_are_told_apart_from_urls() {
+        assert!(is_local_path("/srv/git/board.git"));
+        assert!(is_local_path("../origin.git"));
+        assert!(is_local_path("./a:b/c"));
+        assert!(!is_local_path("git@github.com:o/r.git"));
+        assert!(!is_local_path("https://github.com/o/r"));
     }
 }

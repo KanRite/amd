@@ -209,7 +209,7 @@ pub fn enter_todo(board: &Board, task: &Task, options: &TodoOptions) -> Result<O
     }
     let target = match &repository {
         None => board.root.clone(),
-        Some(name) => match crate::registry::clone_of(name) {
+        Some(name) => match crate::registry::clone_of(&board.root, name) {
             Some(clone) => clone,
             None => {
                 outcome.events.push(Event::Info(format!(

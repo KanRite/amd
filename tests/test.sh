@@ -552,6 +552,54 @@ assert "from inside a tickets repository, register works as before" \
   bash -c "cd '${rg}/acme-tickets' && env ${rg_env} '${AMD}' register '${rg}/beta-app' | grep -q 'beta-app'"
 rm -rf "${rg}"
 
+echo "the registry is scoped by project directory (ticket 095):"
+# Two folders, each with a project called p: p-tickets and p-code. Both
+# p-codes are registered on this machine; each board must use its own.
+sc="$(mktemp -d)"
+(
+  set -e
+  export XDG_CONFIG_HOME="${sc}/config" AMD_COMMIT=0
+  for dir in one two; do
+    mkdir -p "${sc}/${dir}" && cd "${sc}/${dir}"
+    for r in p-tickets p-code; do
+      git init -q -b main "${r}"
+      git -C "${r}" config user.email t@t.co && git -C "${r}" config user.name t && git -C "${r}" config commit.gpgsign false
+    done
+    git -C p-code commit -q --allow-empty -m "seed for ticket 095 (${dir})"
+    ( cd p-tickets && "${AMD}" init p --local-only >/dev/null 2>&1 && "${AMD}" register ../p-code >/dev/null 2>&1 )
+  done
+)
+in_sc() { (cd "${sc}/$1/p-tickets" && shift && env XDG_CONFIG_HOME="${sc}/config" AMD_COMMIT=0 "${AMD}" "$@"); }
+assert "both folders' p-code are registered side by side" \
+  bash -c "[ \"\$(grep -c '/p-code\$' '${sc}/config/agile-md/repos')\" -eq 2 ]"
+assert "a ticket in folder one makes its branch in one's own p-code" \
+  bash -c "$(declare -f in_sc); sc='${sc}'; AMD='${AMD}'; in_sc one new 'From one' --repository p-code --branch-type feature --no-edit >/dev/null 2>&1 \
+    && in_sc one todo 1 >/dev/null 2>&1 \
+    && git -C '${sc}/one/p-code' rev-parse --verify -q feature/from-one >/dev/null \
+    && ! git -C '${sc}/two/p-code' rev-parse --verify -q feature/from-one >/dev/null"
+assert "...and one in folder two, in two's" \
+  bash -c "$(declare -f in_sc); sc='${sc}'; AMD='${AMD}'; in_sc two new 'From two' --repository p-code --branch-type feature --no-edit >/dev/null 2>&1 \
+    && in_sc two todo 1 >/dev/null 2>&1 \
+    && git -C '${sc}/two/p-code' rev-parse --verify -q feature/from-two >/dev/null \
+    && ! git -C '${sc}/one/p-code' rev-parse --verify -q feature/from-two >/dev/null"
+# One remote, cloned in two places.
+git init -q --bare -b main "${sc}/shared.git"
+mkdir -p "${sc}/clones/a" "${sc}/clones/b"
+git clone -q "${sc}/shared.git" "${sc}/clones/a/shared" 2>/dev/null
+git clone -q "${sc}/shared.git" "${sc}/clones/b/shared" 2>/dev/null
+in_sc one register "${sc}/clones/a/shared" >/dev/null 2>&1
+assert "registering a second clone of one remote warns, naming the first" \
+  bash -c "$(declare -f in_sc); sc='${sc}'; AMD='${AMD}'; out=\"\$(in_sc one register '${sc}/clones/b/shared' 2>&1)\" \
+    && grep -q \"shared is also cloned at ${sc}/clones/a/shared\" <<<\"\${out}\" \
+    && grep -q 'registered shared' <<<\"\${out}\""
+assert "a clone of a different remote doesn't" \
+  bash -c "$(declare -f in_sc); sc='${sc}'; AMD='${AMD}'; ! in_sc one register '${sc}/one/p-code' 2>&1 | grep -q 'also cloned'"
+rm -rf "${sc}/clones/a"
+in_sc one register "${sc}/clones/b/shared" >/dev/null 2>&1
+assert "a registered clone that's gone is dropped from the registry" \
+  bash -c "! grep -q 'clones/a' '${sc}/config/agile-md/repos' && grep -q 'clones/b/shared' '${sc}/config/agile-md/repos'"
+rm -rf "${sc}"
+
 echo "board settings live in the tickets repository (ticket 111):"
 # A project whose documents repository still holds settings from before
 # 111: repos and wip-limit there, an older repos value in tickets.

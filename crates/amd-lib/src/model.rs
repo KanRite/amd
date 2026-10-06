@@ -195,6 +195,7 @@ pub fn load_repos() -> Result<Repos> {
     let current_root = current.repo_root().to_path_buf();
     let declared = crate::board_settings::load(&current).repos();
     let registry = Registry::load();
+    let project_dir = crate::registry::project_dir_of(&current_root);
 
     let mut repos = vec![open_repo_board(current_root.clone(), current)?];
     // A name this project declares but that isn't registered locally
@@ -204,7 +205,7 @@ pub fn load_repos() -> Result<Repos> {
     // cloned it.
     let mut unregistered = Vec::new();
     for name in &declared {
-        match registry.find(name) {
+        match registry.find_near(name, &project_dir) {
             Some(entry) if entry.root == current_root => {} // already added, above
             Some(entry) if entry.has_board() => {
                 repos.push(open_repo_board(entry.root.clone(), entry.board())?);

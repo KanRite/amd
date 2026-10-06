@@ -806,7 +806,7 @@ impl Board {
         // that's cloned here (ticket 107); otherwise where it always did.
         let branch_repo = task
             .repository()
-            .and_then(|name| crate::registry::clone_of(&name))
+            .and_then(|name| crate::registry::clone_of(&self.root, &name))
             .unwrap_or_else(|| self.root.clone());
         if git::is_tracked(&self.root, &task.path) {
             git::untrack(&self.root, &task.path)?;

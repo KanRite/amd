@@ -27,6 +27,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use crate::board::Board;
+use crate::git;
 
 /// A repository on the list, and the board inside it.
 #[derive(Clone, Debug)]
@@ -83,7 +84,12 @@ impl Registry {
             .lines()
             .map(str::trim)
             .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .map(|line| Entry::new(PathBuf::from(line)))
+            .map(PathBuf::from)
+            // A clone that's gone (a temp directory after a reboot, a
+            // deleted or renamed repo) is nothing to keep (ticket 095): left
+            // out here, so the next save drops it too.
+            .filter(|root| root.is_dir())
+            .map(Entry::new)
             .collect();
         Registry { entries }
     }
@@ -140,17 +146,74 @@ impl Registry {
     pub fn find(&self, name: &str) -> Option<&Entry> {
         self.entries.iter().find(|entry| entry.name == name)
     }
+
+    /// The clone of `name` that belongs with the project in `project_dir`
+    /// (ticket 095): the one in that directory, else the only one there is
+    /// anywhere (a shared repository kept elsewhere). Several elsewhere and
+    /// none here is ambiguous — the same project name can live in two
+    /// project directories — so it's `None` rather than a guess.
+    pub fn find_near(&self, name: &str, project_dir: &Path) -> Option<&Entry> {
+        let named: Vec<&Entry> = self.entries.iter().filter(|e| e.name == name).collect();
+        let project_dir = project_dir
+            .canonicalize()
+            .unwrap_or_else(|_| project_dir.to_path_buf());
+        let here = named
+            .iter()
+            .find(|entry| entry.root.parent() == Some(project_dir.as_path()));
+        match (here, named.as_slice()) {
+            (Some(entry), _) => Some(entry),
+            (None, [only]) => Some(only),
+            (None, _) => None,
+        }
+    }
+
+    /// Other registered clones of the same repository as `root` (ticket
+    /// 095): the same `origin` once normalised, or — when `root` has no
+    /// `origin` — the same first commit as another clone without one (forks
+    /// share first commits, so that's no use when there's a remote).
+    pub fn same_remote(&self, root: &Path) -> Vec<PathBuf> {
+        let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let others = self.entries.iter().filter(|entry| entry.root != root);
+        match git::remote_identity(&root) {
+            Some(remote) => others
+                .filter(|entry| git::remote_identity(&entry.root).as_ref() == Some(&remote))
+                .map(|entry| entry.root.clone())
+                .collect(),
+            None => {
+                let Some(first) = git::root_commit(&root) else {
+                    return Vec::new();
+                };
+                others
+                    .filter(|entry| git::remote_url(&entry.root).is_none())
+                    .filter(|entry| git::root_commit(&entry.root).as_ref() == Some(&first))
+                    .map(|entry| entry.root.clone())
+                    .collect()
+            }
+        }
+    }
 }
 
-/// Where the repository called `name` is cloned on this machine — registered,
-/// and its directory still there — or `None`. A repository you haven't got
-/// can't be targeted (tickets 101/107): no ticket can be pointed at it, and
-/// no branch made for it, until it's cloned.
-pub fn clone_of(name: &str) -> Option<PathBuf> {
+/// Where `name` is cloned for the project that `from` (any path inside its
+/// tickets repository) belongs to — see [`Registry::find_near`] — or
+/// `None`. A repository you haven't got can't be targeted (tickets
+/// 101/107): no ticket can be pointed at it, and no branch made for it,
+/// until it's cloned.
+pub fn clone_of(from: &Path, name: &str) -> Option<PathBuf> {
     Registry::load()
-        .find(name)
+        .find_near(name, &project_dir_of(from))
         .map(|entry| entry.root.clone())
-        .filter(|root| root.is_dir())
+}
+
+/// The project directory `from` is in: the parent of the repository
+/// holding it, found by walking up to the `.git` — no git call. `from`
+/// itself when it isn't in a repository.
+pub fn project_dir_of(from: &Path) -> PathBuf {
+    let from = from.canonicalize().unwrap_or_else(|_| from.to_path_buf());
+    from.ancestors()
+        .find(|dir| dir.join(".git").exists())
+        .and_then(Path::parent)
+        .unwrap_or(&from)
+        .to_path_buf()
 }
 
 /// `$XDG_CONFIG_HOME/agile-md/repos`, else `~/.config/agile-md/repos`.
@@ -265,9 +328,127 @@ mod tests {
     fn comments_and_blank_lines_are_ignored() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("repos");
-        fs::write(&path, "# a comment\n\n/tmp/one\n  /tmp/two  \n").unwrap();
+        let one = repo(dir.path(), "one");
+        let two = repo(dir.path(), "two");
+        fs::write(
+            &path,
+            format!("# a comment\n\n{}\n  {}  \n", one.display(), two.display()),
+        )
+        .unwrap();
         let registry = Registry::load_from(&path);
         assert_eq!(registry.entries.len(), 2);
         assert_eq!(registry.entries[1].name, "two");
+    }
+
+    #[test]
+    fn clones_that_are_gone_are_dropped_on_load_and_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let here = repo(dir.path(), "here");
+        let path = dir.path().join("repos");
+        let gone = dir.path().join("gone");
+        fs::write(&path, format!("{}\n{}\n", here.display(), gone.display())).unwrap();
+        let registry = Registry::load_from(&path);
+        assert_eq!(registry.entries.len(), 1);
+        registry.save_to(&path).unwrap();
+        assert!(!fs::read_to_string(&path).unwrap().contains("gone"));
+    }
+
+    #[test]
+    fn a_name_resolves_to_the_clone_in_the_project_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let (a, b, c) = (root.join("a"), root.join("b"), root.join("c"));
+        let code_a = repo(&a, "p-code");
+        let code_b = repo(&b, "p-code");
+        let shared = repo(&c, "shared");
+        let mut registry = Registry::default();
+        for clone in [&code_a, &code_b, &shared] {
+            registry.add(clone).unwrap();
+        }
+        assert_eq!(registry.find_near("p-code", &a).unwrap().root, code_a);
+        assert_eq!(registry.find_near("p-code", &b).unwrap().root, code_b);
+        // The only clone of a name is used from anywhere.
+        assert_eq!(registry.find_near("shared", &a).unwrap().root, shared);
+        // Two elsewhere and none here: no guess.
+        assert!(registry.find_near("p-code", &root).is_none());
+        assert_eq!(project_dir_of(&code_a.join("tasks")), a);
+    }
+
+    fn git(root: &Path, args: &[&str]) {
+        let ok = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["-c", "user.email=t@t.co", "-c", "user.name=t"])
+            .args(args)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+
+    #[test]
+    fn clones_of_one_remote_are_found_however_its_url_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let one = repo(&root, "one");
+        let two = repo(&root.join("elsewhere"), "one");
+        let other = repo(&root, "other");
+        git(
+            &one,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:Agile-MD/board.git",
+            ],
+        );
+        git(
+            &two,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/agile-md/board",
+            ],
+        );
+        git(
+            &other,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/agile-md/other",
+            ],
+        );
+        let mut registry = Registry::default();
+        for clone in [&one, &two, &other] {
+            registry.add(clone).unwrap();
+        }
+        assert_eq!(registry.same_remote(&one), [two]);
+        assert!(registry.same_remote(&other).is_empty());
+    }
+
+    #[test]
+    fn without_an_origin_clones_are_matched_by_their_first_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let first = repo(&root, "first");
+        git(&first, &["commit", "-q", "--allow-empty", "-m", "seed"]);
+        let copy = root.join("copy");
+        git(&root, &["clone", "-q", "first", "copy"]);
+        git(&copy, &["remote", "remove", "origin"]);
+        let unrelated = repo(&root, "unrelated");
+        // A different message, or two empty commits made in the same second
+        // are the same commit.
+        git(
+            &unrelated,
+            &["commit", "-q", "--allow-empty", "-m", "another"],
+        );
+        let mut registry = Registry::default();
+        for clone in [&first, &copy, &unrelated] {
+            registry.add(clone).unwrap();
+        }
+        assert_eq!(registry.same_remote(&first), [copy]);
+        assert!(registry.same_remote(&unrelated).is_empty());
     }
 }

@@ -75,7 +75,7 @@ impl Draft {
     pub fn prepare(board: &Board, templates: &Templates, ticket: NewTicket) -> Result<Draft> {
         branch::validate_sluggable(&ticket.title)?;
         let repository = crate::task::repo_name(&ticket.repository);
-        crate::task::check_repository(&repository)?;
+        crate::task::check_repository(&board.root, &repository)?;
 
         // A branch type is optional: with one, the ticket is worked on a branch
         // named from it and the title; without, there's simply nothing to check

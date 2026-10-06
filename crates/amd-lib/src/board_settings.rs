@@ -193,7 +193,7 @@ fn documents_root(board: &Board) -> Option<std::path::PathBuf> {
     let project = local.get(PROJECT)?;
     let declared = format!("{project}-documents");
     crate::registry::Registry::load()
-        .find(&declared)
+        .find_near(&declared, &crate::registry::project_dir_of(repo))
         .map(|entry| entry.root.clone())
 }
 
