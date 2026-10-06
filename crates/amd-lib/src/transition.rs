@@ -75,7 +75,7 @@ pub fn with_auto_commit<T>(
 ) -> Result<(T, Option<String>)> {
     let before = snapshot(board);
     let result = mutate()?;
-    let warning = commit_since(board, before, &format!("{verb}: {subject} \"{detail}\""));
+    let warning = commit_since(board, before, &format!("{verb}: {subject} \"{detail}\""))?;
     Ok((result, warning))
 }
 
@@ -92,20 +92,36 @@ fn snapshot(
 
 /// Commit and push whatever changed since `before` was taken, with `message`.
 /// Returns the warning to show if that couldn't be done.
-fn commit_since(
+///
+/// A push rejected because someone else pushed in the meantime goes to
+/// `sync::after_rejected_push` (ticket 102): the change is replayed on top
+/// of theirs when that's clean, and otherwise undone — the one case this
+/// returns an `Err` (`sync::ConcurrentChange`) rather than a warning, since
+/// nothing was applied.
+pub fn commit_since(
     board: &Board,
     before: Option<std::collections::BTreeMap<PathBuf, Option<std::time::SystemTime>>>,
     message: &str,
-) -> Option<String> {
-    let before = before?;
-    let after = git::dirty_paths(board.repo_root()).unwrap_or_default();
+) -> Result<Option<String>> {
+    let Some(before) = before else {
+        return Ok(None);
+    };
+    let repo = board.repo_root();
+    let after = git::dirty_paths(repo).unwrap_or_default();
     let changed = git::changed_paths(&before, &after);
     if changed.is_empty() {
-        return None;
+        return Ok(None);
     }
-    git::commit_paths(board.repo_root(), message, &changed)
-        .err()
-        .map(|err| format!("could not commit/push automatically: {err:#}"))
+    let pre = git::head(repo);
+    if let Err(err) = git::commit_paths_locally(repo, message, &changed) {
+        return Ok(Some(format!(
+            "could not commit/push automatically: {err:#}"
+        )));
+    }
+    match git::push(repo) {
+        Ok(()) => Ok(None),
+        Err(err) => crate::sync::after_rejected_push(board, pre.as_deref(), &changed, &err),
+    }
 }
 
 /// Move a ticket and claim its lease when it enters `todo/` or `doing/`,
@@ -290,7 +306,7 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
         Column::Backlog
     )));
     let message = format!("new: {id_display} \"{title}\"");
-    if let Some(warning) = commit_since(board, before, &message) {
+    if let Some(warning) = commit_since(board, before, &message)? {
         outcome.events.push(Event::Warn(warning));
     }
     outcome.dest = Some(dest);

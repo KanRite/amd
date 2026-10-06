@@ -613,6 +613,22 @@ impl Board {
             .collect())
     }
 
+    /// Ticket ids held by more than one ticket on the board, sorted. Empty
+    /// on a healthy board; `sync.rs` checks it after replaying a change on
+    /// top of someone else's, so two tickets numbered alike never reach the
+    /// remote.
+    pub fn duplicate_ids(&self) -> Result<Vec<u32>> {
+        let mut seen = std::collections::BTreeMap::<u32, usize>::new();
+        for id in self.tasks()?.iter().filter_map(|task| task.id) {
+            *seen.entry(id).or_default() += 1;
+        }
+        Ok(seen
+            .into_iter()
+            .filter(|&(_, count)| count > 1)
+            .map(|(id, _)| id)
+            .collect())
+    }
+
     pub fn tasks(&self) -> Result<Vec<Task>> {
         let mut all = Vec::new();
         for column in Column::ALL {
@@ -707,7 +723,22 @@ impl Board {
     /// is already in use, and a ticket added by hand still pushes it along.
     /// Only the columns are scanned; the archive is off the board and the
     /// counter already accounts for it.
+    ///
+    /// That's `local` numbering, the default; the project can choose another
+    /// (`numbering.rs`), and this dispatches to it.
     pub fn next_id(&self) -> Result<u32> {
+        crate::numbering::Numbering::for_board(self)?.next_id(self)
+    }
+
+    /// Record that `used` has been taken — through whichever numbering the
+    /// project uses (`numbering.rs`).
+    pub fn record_id(&self, used: u32) -> Result<()> {
+        crate::numbering::Numbering::for_board(self)?.record_id(self, used)
+    }
+
+    /// `local` numbering's next id: the counter, or one past the highest id
+    /// in the columns, whichever is higher.
+    pub(crate) fn local_next_id(&self) -> Result<u32> {
         let highest = self
             .tasks()?
             .iter()
@@ -720,7 +751,7 @@ impl Board {
     /// Record that `used` has been taken, so the next ticket gets the one
     /// after. Called once the ticket is on disk, never when one is merely
     /// drafted — an abandoned draft should leave no gap.
-    pub fn record_id(&self, used: u32) -> Result<()> {
+    pub(crate) fn local_record_id(&self, used: u32) -> Result<()> {
         let next = used.saturating_add(1);
         if self.stored_next_id().is_some_and(|stored| stored >= next) {
             return Ok(());

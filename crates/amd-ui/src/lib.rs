@@ -45,6 +45,12 @@ async fn change<T: Send + 'static>(
         let _guard = writing
             .lock()
             .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
+        // In step with the remote before any change (ticket 102): never
+        // write on a stale clone. A clone that can't be brought up to date
+        // refuses the change; no network only warns, so is ignored here.
+        for (_, board) in &Project::open()?.repos {
+            agile_md::sync::catch_up(board, agile_md::sync::Purpose::Write).map_err(err)?;
+        }
         f(&Project::open()?)
     })
     .await
@@ -124,6 +130,32 @@ async fn board_fingerprint() -> Result<String> {
             std::hash::Hash::hash(&(name, agile_md::model::fingerprint(board)), &mut hasher);
         }
         Ok(format!("{:016x}", std::hash::Hasher::finish(&hasher)))
+    })
+    .await
+}
+
+/// Brings every repository on screen up to date with its remote, the way a
+/// listing in the CLI does (ticket 102). The page calls it every 30 seconds;
+/// whatever it pulls in changes the fingerprint, and the board refreshes.
+/// Warnings (offline, a diverged clone) are returned, not raised.
+#[tauri::command]
+async fn sync_board(state: Tauri<'_, AppState>) -> Result<Vec<String>> {
+    let writing = Arc::clone(&state.writing);
+    blocking(move || {
+        let _guard = writing
+            .lock()
+            .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
+        let mut warnings = Vec::new();
+        for (_, board) in &Project::open()?.repos {
+            match agile_md::sync::catch_up(board, agile_md::sync::Purpose::Read) {
+                Ok(events) => warnings.extend(events.into_iter().filter_map(|event| match event {
+                    Event::Warn(text) => Some(text),
+                    Event::Info(_) => None,
+                })),
+                Err(e) => warnings.push(format!("{e:#}")),
+            }
+        }
+        Ok(warnings)
     })
     .await
 }
@@ -719,6 +751,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_board,
             board_fingerprint,
+            sync_board,
             ticket_version,
             open_ticket,
             save_ticket,

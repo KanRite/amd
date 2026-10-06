@@ -123,6 +123,14 @@ projects and no choice made, amd says so rather than guessing. `amd init`
 and `amd join` never switch you: adding a second project keeps the first
 one current.
 
+A board with a remote stays in step with it. Before a change, amd fetches
+and fast-forwards your clone, so you never number a ticket or take a lease
+from a stale copy; a listing does the same at most every 10 seconds. If
+someone pushes in the moment before you do, amd replays your change on top
+of theirs when it can, and otherwise undoes it, saves what you wrote, and
+exits non-zero so you can run it again on the up-to-date board. No network
+only warns. AMD_SYNC=0 (or `sync = off` in .settings) turns this off.
+
 Environment:
   AMD_DIR           board directory name under the repository root (default: tasks)
   AMD_BRANCH_TYPES  comma-separated branch types (default: feature, bugfix,
@@ -132,6 +140,9 @@ Environment:
   AMD_NO_BRANCH     set to 1 to never create branches (same as --no-branch)
   NO_COLOR          set to any value for plain output (same as --plain)
   EDITOR            editor used by `amd edit` (default: vi)
+  AMD_SYNC          set to 0 to stop catching up with the remote (default: on)
+  AMD_TICKET_NUMBERING  local (default) or cloud — cloud needs an agile-md
+                    plan, which isn't available yet
 
 AMD_BRANCH_TYPES and EDITOR can also be set in the settings file
 (`branch-types`, `editor`) — the environment variable wins when both are set.
@@ -580,6 +591,14 @@ fn run() -> Result<()> {
     // Notices if this board's declared project identity has silently
     // changed since amd last saw it — see project_trust.rs.
     agile_md::project_trust::check(&board)?;
+    // In step with the remote before anything else (ticket 102): a change
+    // never lands on a stale clone, and a listing shows teammates' work.
+    for event in agile_md::sync::catch_up(&board, sync_purpose(&command))? {
+        match event {
+            transition::Event::Info(text) => eprintln!("{text}"),
+            transition::Event::Warn(text) => eprintln!("amd: {text}"),
+        }
+    }
     match command {
         Cmd::Init { .. }
         | Cmd::Join { .. }
@@ -1149,6 +1168,47 @@ fn resolve_assignee(repo: &Path, who: Option<&str>) -> String {
     }
 }
 
+/// Whether `command` changes the board (catch up strictly first, refusing a
+/// clone that can't be brought up to date) or only looks at it (catch up if
+/// it's cheap, and warn rather than refuse). A destination verb or an epic
+/// name with a ticket ref moves it; without one it lists.
+fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
+    use agile_md::sync::Purpose::{Read, Write};
+    let moves = |task: &Option<String>| if task.is_some() { Write } else { Read };
+    match command {
+        Cmd::Board { .. }
+        | Cmd::Ls { .. }
+        | Cmd::Tag { .. }
+        | Cmd::Show { .. }
+        | Cmd::Log
+        | Cmd::Templates { .. }
+        | Cmd::Register { .. }
+        | Cmd::Deregister { .. }
+        | Cmd::WipLimit { .. }
+        | Cmd::Group {
+            command: None | Some(GroupCmd::List),
+        } => Read,
+        Cmd::Backlog { task, .. }
+        | Cmd::Todo { task, .. }
+        | Cmd::Doing { task, .. }
+        | Cmd::Done { task, .. }
+        | Cmd::Abandon { task, .. } => moves(task),
+        Cmd::Verb(args) => {
+            let mut rest = args.iter().skip(1);
+            let mut has_ref = false;
+            while let Some(arg) = rest.next() {
+                if arg == "--tag" || arg == "-t" {
+                    rest.next();
+                } else if !arg.starts_with('-') {
+                    has_ref = true;
+                }
+            }
+            if has_ref { Write } else { Read }
+        }
+        _ => Write,
+    }
+}
+
 /// Open the board, offering to create one when it isn't there: prompt when
 /// interactive, create outright with `AMD_YES=1`, and otherwise fail with a
 /// clear message — never block waiting on a pipe.
@@ -1331,19 +1391,16 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     let auto_commit = board_settings::load(board).auto_commit();
     let before = auto_commit.then(|| git::dirty_paths(board.repo_root()).unwrap_or_default());
     let created = draft.write(board, body)?;
-    if let Some(before) = before {
-        let after = git::dirty_paths(board.repo_root()).unwrap_or_default();
-        let changed = git::changed_paths(&before, &after);
-        if !changed.is_empty() {
-            let message = format!(
-                "new: {} \"{}\"",
-                created.task.id_display(),
-                created.task.title()
-            );
-            if let Err(err) = git::commit_paths(board.repo_root(), &message, &changed) {
-                eprintln!("amd: could not commit/push automatically: {err:#}");
-            }
-        }
+    // The same commit, push and replay-or-undo every other change gets
+    // (ticket 102): a clash with a ticket someone else numbered at the same
+    // moment is undone here, and fails, rather than reaching the remote.
+    let message = format!(
+        "new: {} \"{}\"",
+        created.task.id_display(),
+        created.task.title()
+    );
+    if let Some(warning) = transition::commit_since(board, before, &message)? {
+        eprintln!("amd: {warning}");
     }
     for id in &created.linked {
         println!("{id} now links to {}", created.task.id_display());

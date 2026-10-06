@@ -95,6 +95,8 @@ pub const DEFAULT_WIP_LIMIT: u32 = 2;
 const REPOS: &str = "repos";
 const AUTO_COMMIT: &str = "commit";
 const USERS: &str = "users";
+const SYNC: &str = "sync";
+const TICKET_NUMBERING: &str = "ticket-numbering";
 
 /// One person on the project: git's own `Name <email>` identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -148,7 +150,14 @@ fn parse_users(value: &str) -> Vec<User> {
 /// one is locatable. Everything else this module knows about (`next-id`,
 /// `commit`) — and anything it doesn't recognise at all — stays in this
 /// board's own file.
-const DOCUMENTS_KEYS: &[&str] = &[PROJECT, LEASE_HOURS, WIP_TODO, WIP_LIMIT, REPOS];
+const DOCUMENTS_KEYS: &[&str] = &[
+    PROJECT,
+    LEASE_HOURS,
+    WIP_TODO,
+    WIP_LIMIT,
+    REPOS,
+    TICKET_NUMBERING,
+];
 
 /// `<repo-root>/.settings` — a sibling of the board directory, not inside it.
 pub fn path(board: &Board) -> std::path::PathBuf {
@@ -375,6 +384,30 @@ impl BoardSettings {
             self.config.set(REPOS, &names.join(","));
         }
         Ok(())
+    }
+
+    /// Whether amd keeps this clone in step with its remote (ticket 102):
+    /// `AMD_SYNC`, then this board's `sync` key, then **on**. `0`/`off`/
+    /// `false` turns it off — the same shape as `commit`.
+    pub fn sync(&self) -> bool {
+        crate::settings::resolved("AMD_SYNC", &self.config, SYNC)
+            .map(|value| {
+                !matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "0" | "off" | "false"
+                )
+            })
+            .unwrap_or(true)
+    }
+
+    /// Where new ticket numbers come from: `AMD_TICKET_NUMBERING`, then the
+    /// project's `ticket-numbering` key, then `local`. A team decision, so it
+    /// lives with the project's reviewed settings (see `numbering.rs`).
+    pub fn ticket_numbering(&self) -> String {
+        crate::settings::resolved("AMD_TICKET_NUMBERING", &self.config, TICKET_NUMBERING)
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "local".to_string())
     }
 
     /// The project's users, in the order they joined.

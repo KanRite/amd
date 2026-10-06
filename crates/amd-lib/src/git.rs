@@ -310,6 +310,120 @@ pub fn clone(url: &str, target: &Path) -> Result<()> {
     Ok(())
 }
 
+/// A git command's trimmed stdout when it succeeds — for questions, not
+/// actions, so nothing is ever printed.
+fn ask(repo: &Path, args: &[&str]) -> Option<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// The commit `HEAD` points at, if there is one yet.
+pub fn head(repo: &Path) -> Option<String> {
+    ask(repo, &["rev-parse", "--verify", "--quiet", "HEAD"])
+}
+
+/// Whether the current branch tracks a remote branch (`@{u}`).
+pub fn has_upstream(repo: &Path) -> bool {
+    ask(
+        repo,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )
+    .is_some()
+}
+
+/// `(ahead, behind)`: commits here that the upstream lacks, and commits the
+/// upstream has that aren't here — as of the last fetch. `None` without an
+/// upstream.
+pub fn ahead_behind(repo: &Path) -> Option<(u32, u32)> {
+    let counts = ask(
+        repo,
+        &["rev-list", "--left-right", "--count", "HEAD...@{u}"],
+    )?;
+    let mut parts = counts.split_whitespace().map(str::parse::<u32>);
+    match (parts.next(), parts.next()) {
+        (Some(Ok(ahead)), Some(Ok(behind))) => Some((ahead, behind)),
+        _ => None,
+    }
+}
+
+/// Whether the last fetch was under `seconds` ago (`FETCH_HEAD`'s mtime), so
+/// a read right after another needn't go back to the network.
+pub fn fetched_within(repo: &Path, seconds: u64) -> bool {
+    let Some(git_dir) = ask(repo, &["rev-parse", "--absolute-git-dir"]) else {
+        return false;
+    };
+    std::fs::metadata(Path::new(&git_dir).join("FETCH_HEAD"))
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|at| at.elapsed().ok())
+        .is_some_and(|age| age.as_secs() < seconds)
+}
+
+/// `git merge --ff-only @{u}` — brings a clone that's only behind up to
+/// date; refuses (an error) rather than merging, and rather than
+/// overwriting local edits.
+pub fn merge_ff_only(repo: &Path) -> Result<()> {
+    let (ok, detail) = run(Command::new("git").arg("-C").arg(repo).args([
+        "merge",
+        "--ff-only",
+        "--quiet",
+        "@{u}",
+    ]))
+    .context("running git merge --ff-only")?;
+    if !ok {
+        bail!(failed("git merge --ff-only", &detail));
+    }
+    Ok(())
+}
+
+/// `git rebase @{u}` — replays local commits on top of the upstream. `false`
+/// when it stopped on a conflict; the caller must `rebase_abort`.
+pub fn rebase_upstream(repo: &Path) -> Result<bool> {
+    let (ok, _) = run(Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rebase", "--quiet", "@{u}"]))
+    .context("running git rebase")?;
+    Ok(ok)
+}
+
+/// `git rebase --abort`, after `rebase_upstream` stopped.
+pub fn rebase_abort(repo: &Path) -> Result<()> {
+    let (ok, detail) = run(Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rebase", "--abort"]))
+    .context("running git rebase --abort")?;
+    if !ok {
+        bail!(failed("git rebase --abort", &detail));
+    }
+    Ok(())
+}
+
+/// `git reset --keep <rev>` — moves the branch back to `rev`, dropping the
+/// commits after it while keeping unrelated local edits; refuses rather
+/// than overwriting one.
+pub fn reset_keep(repo: &Path, rev: &str) -> Result<()> {
+    let (ok, detail) = run(Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["reset", "--quiet", "--keep", rev]))
+    .context("running git reset --keep")?;
+    if !ok {
+        bail!(failed(&format!("git reset --keep {rev}"), &detail));
+    }
+    Ok(())
+}
+
 /// `git fetch origin`.
 pub fn fetch(repo: &Path) -> Result<()> {
     let (ok, detail) = run(Command::new("git")

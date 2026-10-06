@@ -382,7 +382,9 @@ redundant. Their history is in git if it is ever wanted again.
   unparsable defaults to **2**, not unlimited; `0` turns it off; todo is
   never limited, so `AMD_WIP_TODO` is ignored since ticket 083), `AMD_COMMIT` (auto-commit-and-push,
   unset = **on**; `0`/`off`/`false` turns it off), `AMD_GIT_BASE` (where
-  `amd join` clones from, default `git@github.com:`). **`AMD_TYPES` is dead** —
+  `amd join` clones from, default `git@github.com:`), `AMD_SYNC` (catch up
+  with the remote, default on, ticket 102), `AMD_TICKET_NUMBERING`
+  (`local`/`cloud`). **`AMD_TYPES` is dead** —
   it was in `--help` long after nothing read it. **`AMD_NO_REGISTER` is also
   gone** (2026-09-26) — registration is a deliberate act (`amd register`)
   again, not something running in the background to opt out of.
@@ -457,6 +459,38 @@ redundant. Their history is in git if it is ever wanted again.
     `amd register`/`deregister` (the registry, not the board),
     `{project}-documents` (a different repository entirely, PR-reviewed by
     design, never auto-committed).
+  - **Sync with the remote** (ticket 102, `crates/amd-lib/src/sync.rs`).
+    Before it, nothing fetched or pulled, and a rejected push only warned:
+    the multi-user suite (076) proved duplicate ids, a lease claimed twice
+    and invisible teammates' tickets. Two halves:
+    - **`catch_up(board, Purpose)`**, before a command: the CLI calls it
+      once in `run()` (`sync_purpose` classifies each command: a ticket
+      ref = Write, a listing = Read); amdui calls it in `change()` (Write)
+      and every 30s from the page (`sync_board`, Read). It fetches (a Read
+      skips that if `FETCH_HEAD` is under 10s old), then: only behind →
+      `merge --ff-only`; only ahead → push the leftovers; diverged → a
+      Write refuses with the fix, a Read warns. No remote/upstream, or
+      `AMD_SYNC=0`/`sync = off`, does nothing; no network only warns.
+    - **`after_rejected_push`**, from `transition::commit_since` (now
+      commit-locally, then push — and `cmd_new` goes through it too): a
+      push rejected because the remote moved is replayed with `rebase @{u}`
+      when that's clean **and** `Board::duplicate_ids()` is empty; otherwise
+      the written files are copied to `$XDG_STATE_HOME/agile-md/recovered/`,
+      the commit is dropped (`reset --keep`), the clone fast-forwarded, and
+      `ConcurrentChange` returned — an `Err`, so a non-zero exit. Any other
+      push failure keeps the old warn-and-keep-local behaviour; the next
+      catch-up pushes it. **Note:** two clones bumping `next-id` to the
+      *same* value rebase cleanly (identical change), which is exactly why
+      the duplicate-id check exists.
+    - `tests/test.sh` forces the race deterministically with a one-shot
+      `pre-push` hook in clone B that makes clone A push first (`race()`,
+      clearing git's per-repo env with `git rev-parse --local-env-vars`).
+  - **Ticket numbering** (`crates/amd-lib/src/numbering.rs`): `local` (the
+    counter + scan, unchanged, the default) or `cloud` — a stub for a future
+    paid plan where a service hands out numbers; it refuses with "needs an
+    agile-md plan". `ticket-numbering` is a documents-shaped key;
+    `AMD_TICKET_NUMBERING` overrides. `Board::next_id`/`record_id` dispatch
+    through it, so no caller changed.
   - **`amd log`** (`cmd_log`) renders the board's transition history —
     `date time action id title sha` — from `git log --name-status -M`,
     reading paths and rename status only, never the commit message, so it
