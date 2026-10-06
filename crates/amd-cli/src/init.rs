@@ -5,8 +5,8 @@
 //! Two sibling repositories, not one (`rfc/0003-ticket-repository-topology-and-team-collaboration.md`
 //! in `agile-md-documents`): `{project}-tickets` behaves exactly as it
 //! always has — a board, direct pushes, no PR. `{project}-documents` is
-//! new — ADRs, RFCs, docs, and (ticket 057) the settings that are worth a
-//! review before they take effect — PR-reviewed. One repository can't
+//! new — ADRs, RFCs and docs — PR-reviewed. (Board settings live in the
+//! tickets repository, ticket 111.) One repository can't
 //! carry both policies at once, since GitHub branch protection is
 //! repository-wide, not path-scoped.
 
@@ -18,6 +18,8 @@ use anyhow::{Context, Result, bail};
 
 use agile_md::board::Board;
 use agile_md::board_settings::User;
+use agile_md::sync::{self, Purpose};
+use agile_md::transition::Event;
 use agile_md::{board_settings, git, registry::Registry};
 
 use crate::github;
@@ -44,13 +46,8 @@ pub fn run(project: String, local_only: bool, org: Option<String>) -> Result<()>
     }
     let base = std::env::current_dir().context("reading the current directory")?;
 
-    // Tickets first, documents second: `init_tickets`'s own `set_project`
-    // runs before documents exists to be found (ticket 057's sibling
-    // derivation needs the directory already there), so `project` lands in
-    // the tickets repo's own file too, not just documents's. Harmless —
-    // once both repos exist, `board_settings::load` always prefers
-    // documents's copy — but worth knowing before "why is `project` in
-    // both places" looks like a bug.
+    // Tickets first, documents second. Every board setting, `project`
+    // included, lives in the tickets repository (ticket 111).
     let tickets = init_tickets(&base, &project, org.as_deref())?;
     let documents = init_documents(&base, &project, org.as_deref())?;
 
@@ -89,11 +86,17 @@ fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf
     };
 
     let board = Board::in_repo(&target);
+    // An existing clone may be behind its remote (ticket 094): catch it up
+    // before anything is written, or the user lands on stale state and the
+    // push conflicts with whatever the remote has since.
+    let up_to_date = created_new || ready_to_record(&board, project);
     board.create()?;
     set_project(&board, project)?;
     // A new repository's initial commit below carries the entry; an existing
     // one gets a commit of its own.
-    add_first_user(&board, project, !created_new)?;
+    if up_to_date {
+        add_first_user(&board, project, !created_new)?;
+    }
 
     if created_new {
         git::commit_all(&target, &format!("Initialise {project} tickets board"))?;
@@ -106,13 +109,8 @@ fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf
 }
 
 /// Creates or connects `{project}-documents`: `adr/`, `rfc/`, `docs/`,
-/// `README.md`, `CHANGELOG.md`, and a `.settings/` **directory** (ticket
-/// 057's shape — one small file per key, so each setting reviews as its
-/// own legible diff) holding just `project` for now. `repos`/`wip-limit`/
-/// `lease-hours` (057) stay unset here — a team sets them later via a PR,
-/// same as any other documents change. Registered, same as tickets,
-/// since ticket 057's settings-reader needs
-/// this repository to be locatable on disk the same way.
+/// `README.md` and `CHANGELOG.md`. No settings: they all live in the tickets
+/// repository (ticket 111). Registered, same as tickets.
 fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf> {
     let target = base.join(format!("{project}-documents"));
     let full_name = format!("{}/{project}-documents", owner_for(project, org));
@@ -217,6 +215,45 @@ fn init_here(project: &str) -> Result<()> {
     }
     println!("Initialised agile-md board at {}", board.root.display());
     Ok(())
+}
+
+/// Whether an existing tickets clone is fit to record the user on (ticket
+/// 094). A clone with uncommitted edits to tracked files is left alone, as
+/// is one that can't be brought up to date ([`sync::catch_up`] refuses a
+/// clone that has diverged). Otherwise it's caught up exactly as any other
+/// change would be: fast-forwarded when only behind, its own earlier
+/// commits pushed when only ahead. No remote, or `sync = off`, is as before.
+/// Never resets or stashes: this may be someone's real working copy.
+fn ready_to_record(board: &Board, project: &str) -> bool {
+    let repo = board.repo_root();
+    let skipped = |why: &str| {
+        eprintln!(
+            "warning: {why}, so you weren't added to {project}'s users — run amd init {project} \
+             again once it's up to date"
+        );
+        false
+    };
+    if git::remote_url(repo).is_none() {
+        return true;
+    }
+    if git::has_local_edits(repo) == Some(true) {
+        return skipped(&format!(
+            "{} has uncommitted changes — commit or stash them first",
+            repo.display()
+        ));
+    }
+    match sync::catch_up(board, Purpose::Write) {
+        Ok(events) => {
+            for event in events {
+                match event {
+                    Event::Info(text) => println!("{text}"),
+                    Event::Warn(text) => eprintln!("warning: {text}"),
+                }
+            }
+            true
+        }
+        Err(err) => skipped(&format!("{err:#}")),
+    }
 }
 
 /// Records whoever is running `init` — git's `user.name <user.email>` — in

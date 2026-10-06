@@ -326,6 +326,13 @@ fn ask(repo: &Path, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// Whether any tracked file has uncommitted changes, staged or not.
+/// Untracked files don't count: they're nobody's half-finished edit to
+/// what's on the remote. `None` if git couldn't say.
+pub fn has_local_edits(repo: &Path) -> Option<bool> {
+    ask(repo, &["status", "--porcelain", "--untracked-files=no"]).map(|out| !out.is_empty())
+}
+
 /// The commit `HEAD` points at, if there is one yet.
 pub fn head(repo: &Path) -> Option<String> {
     ask(repo, &["rev-parse", "--verify", "--quiet", "HEAD"])
