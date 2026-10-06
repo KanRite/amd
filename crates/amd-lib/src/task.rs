@@ -398,7 +398,7 @@ impl Task {
     /// repository cloned on this machine can be chosen ([`check_repository`]).
     pub fn set_repository(&self, expected: ContentHash, name: &str) -> Result<()> {
         let name = repo_name(name);
-        check_repository(&name)?;
+        check_repository(&self.path, &name)?;
         self.write_checked(expected, |text| {
             set_meta(text, "repository", &format!("{name:?}"))
         })
@@ -440,7 +440,7 @@ impl Task {
         // here; leaving a teammate's choice alone never does.
         let chosen = repo_name(meta_in(&text, "repository").unwrap_or_default());
         if self.repository().unwrap_or_default() != chosen {
-            check_repository(&chosen)?;
+            check_repository(&self.path, &chosen)?;
         }
         self.write_checked(expected, |current| {
             let mut out = text.clone();
@@ -741,12 +741,12 @@ pub fn repo_name(value: &str) -> String {
 /// Refuses a repository that isn't cloned on this machine (tickets 101/107):
 /// you can only point a ticket at a repository you have. Empty — no
 /// repository — is always fine.
-pub fn check_repository(name: &str) -> Result<()> {
+pub fn check_repository(near: &Path, name: &str) -> Result<()> {
     if name.is_empty() {
         return Ok(());
     }
     crate::board_settings::validate_project_name(name)?;
-    if crate::registry::clone_of(name).is_none() {
+    if crate::registry::clone_of(near, name).is_none() {
         bail!("{name} isn't cloned on this machine — clone it first (and register it)");
     }
     Ok(())
@@ -1377,7 +1377,7 @@ mod tests {
 
     #[test]
     fn no_repository_is_always_allowed() {
-        check_repository("").unwrap();
+        check_repository(Path::new("."), "").unwrap();
     }
 
     #[test]

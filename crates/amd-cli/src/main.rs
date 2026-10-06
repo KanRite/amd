@@ -1193,6 +1193,7 @@ fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
     let mut registry = Registry::load();
     let added = registry.add(&canonical)?;
     registry.save()?;
+    init::warn_if_cloned_twice(&registry, &canonical);
 
     match added {
         true => println!("registered {name}"),
@@ -1311,7 +1312,7 @@ fn pick_repository(board: &Board) -> Result<String> {
     }
     let (here, missing): (Vec<String>, Vec<String>) = declared
         .into_iter()
-        .partition(|name| agile_md::registry::clone_of(name).is_some());
+        .partition(|name| agile_md::registry::clone_of(&board.root, name).is_some());
     if !missing.is_empty() {
         eprintln!(
             "not cloned on this machine, so not offered: {}",

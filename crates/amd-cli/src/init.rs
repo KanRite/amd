@@ -140,7 +140,25 @@ fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<PathB
 pub(crate) fn register(target: &Path) -> Result<()> {
     let mut registry = Registry::load();
     registry.add(target)?;
-    registry.save()
+    registry.save()?;
+    warn_if_cloned_twice(&registry, target);
+    Ok(())
+}
+
+/// Two clones of one repository work, but drift apart (ticket 095), so
+/// registering a second one warns, naming the other. Never refuses.
+pub(crate) fn warn_if_cloned_twice(registry: &Registry, target: &Path) {
+    let name = target
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| target.display().to_string());
+    for other in registry.same_remote(target) {
+        eprintln!(
+            "warning: {name} is also cloned at {} — two copies of one repository drift apart; \
+             prefer one",
+            other.display()
+        );
+    }
 }
 
 fn warn_if_already_present(target: &Path) -> Result<()> {

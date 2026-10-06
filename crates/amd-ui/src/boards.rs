@@ -183,10 +183,11 @@ impl Project {
                 .map(|t| t.repository.clone())
                 .filter(|r| !r.is_empty()),
         );
+        let here = &self.repos[0].1.root;
         names
             .into_iter()
             .map(|name| ui::RepoChoice {
-                available: agile_md::registry::clone_of(&name).is_some(),
+                available: agile_md::registry::clone_of(here, &name).is_some(),
                 name,
             })
             .collect()

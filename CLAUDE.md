@@ -613,10 +613,20 @@ project, into one `amdui` window:
   mechanism.
 - **Registered** (`crates/amd-lib/src/registry.rs`, `$XDG_CONFIG_HOME/agile-md/repos`,
   per-machine, unchanged in shape from before): whether a declared name is
-  actually cloned on *this* machine, and where. `Registry::find(name)` is
-  the only question this file answers now — *which* names are worth asking
-  about always comes from the current project's own declared list, never
-  from scanning this file's entries wholesale. There is deliberately no
+  actually cloned on *this* machine, and where. *Which* names are worth
+  asking about always comes from the current project's own declared list,
+  never from scanning this file's entries wholesale. **Lookups are scoped
+  by project directory** (ticket 095): the same project name can live in
+  two folders, so `Registry::find_near(name, project_dir)`/`clone_of(from,
+  name)` take the clone in the current project's folder, else the only
+  clone of that name anywhere, else nothing (ambiguous → shown as not
+  cloned, never a guess). `find(name)` is only for `deregister`. A path
+  that no longer exists is skipped on load and so dropped on the next
+  save. Registering (`init`, `join`, `register`) a clone of a remote
+  that's already registered elsewhere **warns** (`same_remote`: `origin`s
+  compared via `git::normalise_remote` — case, scheme, user, port, `.git`,
+  SSH host aliases resolved with `ssh -G`; no `origin` falls back to the
+  first commit), never refuses. There is deliberately no
   store of tickets in either half: the markdown is the source of truth, it
   changes under you on every checkout and pull, and an index would be
   stale the moment it was written.
