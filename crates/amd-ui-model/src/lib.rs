@@ -72,6 +72,10 @@ pub struct TicketSummary {
     /// The repository whose board it is on.
     #[serde(default)]
     pub repo: String,
+    /// The repository it's about (tickets 101/107), a bare name; empty if
+    /// it doesn't say. What the repository filter matches.
+    #[serde(default)]
+    pub repository: String,
     /// File name within its column directory, e.g. `001-some-title.md`.
     pub file: String,
     pub column: Column,
@@ -170,6 +174,32 @@ pub struct Board {
     /// header's switcher. Just this one when it's alone there.
     #[serde(default)]
     pub projects: Vec<ProjectChoice>,
+    /// The repositories tickets can be about, for the filter and the
+    /// Repository fields: the project's declared ones plus any a ticket
+    /// already names, sorted.
+    #[serde(default)]
+    pub ticket_repos: Vec<RepoChoice>,
+}
+
+/// A repository tickets can be about.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoChoice {
+    pub name: String,
+    /// Cloned on this machine. One that isn't can't be chosen for a ticket
+    /// (tickets 101/107) and is shown greyed out.
+    pub available: bool,
+}
+
+/// A `repository` value as a bare name: `agile-md/amd`, `amd.git` and `amd`
+/// all name `amd`. Must match `agile_md::task::repo_name`.
+pub fn repo_name(value: &str) -> String {
+    let value = value.trim().trim_end_matches('/');
+    let value = value.strip_suffix(".git").unwrap_or(value);
+    value
+        .rsplit(['/', ':'])
+        .next()
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// A project the header can switch to.
@@ -334,6 +364,8 @@ pub struct Frontmatter {
     pub id: String,
     pub title: String,
     pub assignee: String,
+    /// The repository it's about, as a bare name.
+    pub repository: String,
     pub tags: Vec<String>,
     pub branch_type: String,
     pub priority: String,
@@ -372,6 +404,7 @@ pub fn parse_frontmatter(content: &str) -> Frontmatter {
             "id" => fm.id = unquote(value),
             "title" => fm.title = unquote(value),
             "assignee" => fm.assignee = unquote(value),
+            "repository" => fm.repository = repo_name(&unquote(value)),
             "tags" => fm.tags = parse_list(value),
             "branch-type" => fm.branch_type = unquote(value),
             "priority" => fm.priority = unquote(value),
@@ -535,6 +568,7 @@ mod assigned_tests {
             text: String::new(),
             epic_label: String::new(),
             points: String::new(),
+            repository: String::new(),
             lock: None,
         }
     }
@@ -582,6 +616,7 @@ mod assigned_tests {
             }],
             epics: Vec::new(),
             projects: Vec::new(),
+            ticket_repos: Vec::new(),
         };
         board.epics.push(Epic {
             repo: String::new(),

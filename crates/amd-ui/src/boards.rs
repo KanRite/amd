@@ -154,6 +154,7 @@ impl Project {
             .map(str::to_string)
             .filter(|p| !p.trim().is_empty())
             .unwrap_or_else(|| own_name.clone());
+        let ticket_repos = self.ticket_repos(&columns, &epics);
         Ok(ui::Board {
             project,
             tasks_dir: self.repos[0].1.root.display().to_string(),
@@ -161,13 +162,49 @@ impl Project {
             columns,
             epics,
             projects: self.projects(),
+            ticket_repos,
         })
+    }
+
+    /// What the repository filter and fields offer (tickets 101/107): the
+    /// project's declared repositories plus any a ticket already names,
+    /// sorted, each marked available when it's cloned on this machine.
+    fn ticket_repos(&self, columns: &[BoardColumn], epics: &[Epic]) -> Vec<ui::RepoChoice> {
+        let mut names: std::collections::BTreeSet<String> = board_settings::load(&self.repos[0].1)
+            .repos()
+            .into_iter()
+            .collect();
+        let tickets = columns
+            .iter()
+            .flat_map(|c| c.tickets.iter())
+            .chain(epics.iter().flat_map(|e| e.tickets.iter()));
+        names.extend(
+            tickets
+                .map(|t| t.repository.clone())
+                .filter(|r| !r.is_empty()),
+        );
+        names
+            .into_iter()
+            .map(|name| ui::RepoChoice {
+                available: agile_md::registry::clone_of(&name).is_some(),
+                name,
+            })
+            .collect()
     }
 
     /// A ticket as a card on the board.
     pub fn summary_of(&self, task: &Task, repo: &str) -> TicketSummary {
         TicketSummary {
             repo: repo.to_string(),
+            // What it's about; a ticket on a repository's own board (not the
+            // project's tickets board) is about that repository by default.
+            repository: task.repository().unwrap_or_else(|| {
+                if repo == self.repos[0].0 {
+                    String::new()
+                } else {
+                    repo.to_string()
+                }
+            }),
             file: task.file_name(),
             column: from_column(task.column),
             id: task.id_display(),

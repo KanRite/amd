@@ -75,6 +75,8 @@ pub struct TaskContext {
     /// Who the ticket is assigned to, or an empty string — tickets can be
     /// created now and assigned later.
     pub assignee: String,
+    /// The repository the ticket is about (a bare name), or empty.
+    pub repository: String,
     /// Id of this ticket's parent, or an empty string. One field instead of
     /// epic/story: nesting gives you those, and any depth beyond them.
     pub parent: String,
@@ -344,6 +346,7 @@ pub fn example_context(board: &Board) -> TaskContext {
         branch_type: "feature".to_string(),
         branch_name: "feature/an-example-ticket".to_string(),
         assignee: String::new(),
+        repository: String::new(),
         parent: String::new(),
         parent_link: String::new(),
         related: Vec::new(),
@@ -423,6 +426,7 @@ mod tests {
             branch_type: "bugfix".to_string(),
             branch_name: "bugfix/first-task".to_string(),
             assignee: "tim".to_string(),
+            repository: String::new(),
             parent: "002".to_string(),
             parent_link: "002-checkout".to_string(),
             related: vec!["003".to_string()],

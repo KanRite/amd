@@ -802,30 +802,18 @@ impl Board {
         // Read before the move, not after: once the file lands in dest, it no
         // longer exists at task.path for task.branch() to read.
         let branch = task.branch();
+        // Its branch lives in the repository it's about, when it names one
+        // that's cloned here (ticket 107); otherwise where it always did.
+        let branch_repo = task
+            .repository()
+            .and_then(|name| crate::registry::clone_of(&name))
+            .unwrap_or_else(|| self.root.clone());
         if git::is_tracked(&self.root, &task.path) {
             git::untrack(&self.root, &task.path)?;
         }
         fs::rename(&task.path, &dest).with_context(|| format!("moving {}", task.path.display()))?;
-        let deleted = branch.and_then(|name| self.cleanup_branch(&name));
+        let deleted = branch.and_then(|name| cleanup_branch(&branch_repo, &name));
         Ok((dest, deleted))
-    }
-
-    /// Delete a branch if it's safe to: it exists locally, isn't checked out
-    /// right now, has never been pushed, and carries no commits `HEAD`
-    /// doesn't already have. Anything else — real work on it, shared with a
-    /// remote — is left alone. Best effort: a git failure here doesn't fail
-    /// the archive, which has already happened.
-    fn cleanup_branch(&self, name: &str) -> Option<String> {
-        if name.is_empty()
-            || !git::branch_exists(&self.root, name)
-            || git::current_branch(&self.root).as_deref() == Some(name)
-            || git::branch_pushed(&self.root, name)
-            || git::commits_ahead(&self.root, name) != Some(0)
-        {
-            return None;
-        }
-        git::delete_branch(&self.root, name).ok()?;
-        Some(name.to_string())
     }
 
     /// Resolve a task reference: a numeric id (`7`, `007`) or a unique slug
@@ -956,6 +944,24 @@ fn dir_name() -> String {
 /// same reason). A directory that can't be read (removed mid-scan, no
 /// permission) contributes no candidates rather than failing the whole
 /// scan — the same "best effort" stance the registry takes elsewhere.
+/// Delete a branch in `repo` if it's safe to: it exists locally, isn't
+/// checked out right now, has never been pushed, and carries no commits
+/// `HEAD` doesn't already have. Anything else — real work on it, shared with
+/// a remote — is left alone. Best effort: a git failure here doesn't fail the
+/// archive, which has already happened.
+fn cleanup_branch(repo: &Path, name: &str) -> Option<String> {
+    if name.is_empty()
+        || !git::branch_exists(repo, name)
+        || git::current_branch(repo).as_deref() == Some(name)
+        || git::branch_pushed(repo, name)
+        || git::commits_ahead(repo, name) != Some(0)
+    {
+        return None;
+    }
+    git::delete_branch(repo, name).ok()?;
+    Some(name.to_string())
+}
+
 pub(crate) fn project_siblings(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();

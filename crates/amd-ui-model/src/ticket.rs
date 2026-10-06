@@ -122,6 +122,8 @@ fn id_number(id: &str) -> u64 {
 pub struct Fields {
     pub title: String,
     pub assignee: String,
+    /// The repository it's about, a bare name; empty for none.
+    pub repository: String,
     pub tags: Vec<String>,
     pub branch_type: String,
     pub priority: String,
@@ -133,6 +135,7 @@ impl From<&Frontmatter> for Fields {
         Fields {
             title: fm.title.clone(),
             assignee: fm.assignee.clone(),
+            repository: fm.repository.clone(),
             tags: fm.tags.clone(),
             branch_type: fm.branch_type.clone(),
             priority: fm.priority.clone(),
@@ -188,6 +191,9 @@ pub fn apply_fields(content: &str, new: &Fields) -> String {
     }
     if new.assignee != old.assignee {
         fm = set_line(&fm, "assignee", &quote(&new.assignee));
+    }
+    if new.repository != old.repository {
+        fm = set_line(&fm, "repository", &quote(&new.repository));
     }
     if new.tags != old.tags {
         fm = set_line(&fm, "tags", &format!("[{}]", new.tags.join(",")));
@@ -348,6 +354,21 @@ mod tests {
     }
 
     #[test]
+    fn the_repository_round_trips_and_is_normalised() {
+        let ticket = "---\nid: \"009\"\ntitle: \"T\"\nrepository: \"agile-md/amd\"\n---\nBody\n";
+        let mut fields = Fields::from(&crate::parse_frontmatter(ticket));
+        assert_eq!(fields.repository, "amd");
+        fields.repository = "another-repository".into();
+        let saved = apply_fields(ticket, &fields);
+        assert!(
+            saved.contains("\nrepository: \"another-repository\"\n"),
+            "{saved}"
+        );
+        fields.repository.clear();
+        assert!(apply_fields(&saved, &fields).contains("\nrepository: \"\"\n"));
+    }
+
+    #[test]
     fn adds_a_missing_key() {
         let ticket = "---\nid: \"009\"\ntitle: \"T\"\n---\nBody\n";
         let fields = Fields {
@@ -438,6 +459,7 @@ mod tests {
             text: String::new(),
             epic_label: String::new(),
             points: String::new(),
+            repository: String::new(),
             lock: None,
         }
     }

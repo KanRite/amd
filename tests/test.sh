@@ -421,6 +421,48 @@ assert "cloud ticket numbering explains it needs a plan, and creates nothing" \
     && ! ls '${two}'/a/tasks/backlog/*cloudy* >/dev/null 2>&1"
 rm -rf "${two}"
 
+echo "a ticket's repository (tickets 101, 107):"
+# A board with a code repository beside it, registered so it counts as
+# cloned here; another declared but never cloned.
+rp="$(mktemp -d)"
+(
+  set -e
+  cd "${rp}"
+  git init -q -b main board && git init -q -b main code
+  for r in board code; do
+    git -C "${r}" config user.email t@t.co && git -C "${r}" config user.name t && git -C "${r}" config commit.gpgsign false
+  done
+  git -C code commit -q --allow-empty -m "seed for ticket 107"
+  cd board && AMD_COMMIT=0 "${AMD}" init repotest --local-only >/dev/null 2>&1
+  AMD_COMMIT=0 "${AMD}" register "${rp}/code" >/dev/null 2>&1
+)
+in_rp() { (cd "${rp}/board" && AMD_COMMIT=0 "${AMD}" "$@"); }
+assert "amd new --repository names the repository the work is in" \
+  bash -c "$(declare -f in_rp); rp='${rp}'; AMD='${AMD}'; in_rp new 'Code change' --repository code --branch-type feature --no-edit >/dev/null 2>&1 \
+    && grep -qx 'repository: \"code\"' '${rp}'/board/tasks/backlog/001-code-change.md"
+assert "...and refuses one that isn't cloned on this machine" \
+  bash -c "$(declare -f in_rp); rp='${rp}'; AMD='${AMD}'; in_rp new 'Elsewhere' --repository nowhere --no-edit 2>&1 | grep -q \"nowhere isn't cloned on this machine\" \
+    && ! ls '${rp}'/board/tasks/backlog/*elsewhere* >/dev/null 2>&1"
+assert "a new ticket without one leaves the field empty" \
+  bash -c "$(declare -f in_rp); rp='${rp}'; AMD='${AMD}'; in_rp new 'Board chore' --no-edit >/dev/null 2>&1 \
+    && grep -qx 'repository: \"\"' '${rp}'/board/tasks/backlog/002-board-chore.md"
+assert "amd set <ref> repository points an existing ticket at one" \
+  bash -c "$(declare -f in_rp); rp='${rp}'; AMD='${AMD}'; in_rp set 2 repository code 2>/dev/null | grep -q '002 repository code' \
+    && grep -qx 'repository: \"code\"' '${rp}'/board/tasks/backlog/002-board-chore.md"
+assert "...an owner/name value is the same repository" \
+  bash -c "$(declare -f in_rp); rp='${rp}'; AMD='${AMD}'; in_rp set 2 repository someorg/code 2>/dev/null | grep -q '002 repository code'"
+assert "...and an empty value clears it" \
+  bash -c "$(declare -f in_rp); rp='${rp}'; AMD='${AMD}'; in_rp set 2 repository '' >/dev/null 2>&1 \
+    && grep -qx 'repository: \"\"' '${rp}'/board/tasks/backlog/002-board-chore.md"
+assert "...but a repository not cloned here is refused" \
+  bash -c "$(declare -f in_rp); rp='${rp}'; AMD='${AMD}'; ! in_rp set 2 repository nowhere >/dev/null 2>&1"
+assert "entering todo makes the ticket's branch in its repository's clone" \
+  bash -c "$(declare -f in_rp); rp='${rp}'; AMD='${AMD}'; in_rp todo 1 2>&1 | grep -q 'branch feature/code-change in code' \
+    && [ \"\$(git -C '${rp}/code' rev-parse --abbrev-ref HEAD)\" = feature/code-change ] \
+    && [ \"\$(git -C '${rp}/board' symbolic-ref --short HEAD)\" = main ]"
+"${AMD}" deregister code >/dev/null 2>&1
+rm -rf "${rp}"
+
 echo "create:"
 "${AMD}" new "First task" >/dev/null
 "${AMD}" new "Second task" -t x -t y >/dev/null

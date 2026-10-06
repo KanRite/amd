@@ -289,6 +289,46 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                         />
                     </label>
                     <label class=label>
+                        "Repository"
+                        <select
+                            class=input
+                            title="The repository the work is in; only one cloned on this machine can be chosen"
+                            prop:value=move || fields.with(|f| f.repository.clone())
+                            on:change=set_field(|f, v| f.repository = v)
+                        >
+                            <option value="">"none"</option>
+                            {move || {
+                                let current = fields.with(|f| f.repository.clone());
+                                let mut choices = ctx
+                                    .board
+                                    .with(|b| b.as_ref().map(|b| b.ticket_repos.clone()).unwrap_or_default());
+                                // A repository the ticket already names stays visible
+                                // even if it isn't offered, so it's never silently changed.
+                                if !current.is_empty() && !choices.iter().any(|r| r.name == current) {
+                                    choices.push(amd_ui_model::RepoChoice {
+                                        name: current,
+                                        available: false,
+                                    });
+                                }
+                                choices
+                                    .into_iter()
+                                    .map(|r| {
+                                        let label = if r.available {
+                                            r.name.clone()
+                                        } else {
+                                            format!("{} (not cloned)", r.name)
+                                        };
+                                        view! {
+                                            <option value=r.name.clone() disabled=!r.available>
+                                                {label}
+                                            </option>
+                                        }
+                                    })
+                                    .collect_view()
+                            }}
+                        </select>
+                    </label>
+                    <label class=label>
                         "Branch type"
                         <select
                             class=input

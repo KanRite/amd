@@ -290,6 +290,7 @@ async fn create_ticket(
     state: Tauri<'_, AppState>,
     title: String,
     repo: Option<String>,
+    repository: Option<String>,
 ) -> Result<Created> {
     change(&state, move |project| {
         let repo = repo.unwrap_or_default();
@@ -297,6 +298,8 @@ async fn create_ticket(
         let fields = TicketFields {
             title: title.clone(),
             assignee: String::new(),
+            // What it's about: the repository being filtered to, if any.
+            repository,
             points: String::new(),
             epic: None,
             tags: Vec::new(),
@@ -820,6 +823,7 @@ mod tests {
         let fields = TicketFields {
             title: title.into(),
             assignee: String::new(),
+            repository: None,
             points: String::new(),
             epic: None,
             tags: Vec::new(),
