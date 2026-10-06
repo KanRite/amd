@@ -37,8 +37,12 @@ pub const READ_FETCH_SECS: u64 = 10;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Purpose {
-    /// Listing or showing: a stale view only warns.
+    /// Listing: a stale view only warns, and a fetch under
+    /// [`READ_FETCH_SECS`] old is reused.
     Read,
+    /// Asking about one named ticket (`amd show 015`): like `Read`, but
+    /// always fetches — it may be one a teammate created a second ago.
+    Lookup,
     /// Changing the board: refuse rather than write on stale state.
     Write,
 }
@@ -92,7 +96,7 @@ pub fn catch_up(board: &Board, purpose: Purpose) -> Result<Vec<Event>> {
     let stale = |what: String| -> Result<Vec<Event>> {
         match purpose {
             Purpose::Write => bail!("{what}"),
-            Purpose::Read => Ok(vec![Event::Warn(format!(
+            Purpose::Read | Purpose::Lookup => Ok(vec![Event::Warn(format!(
                 "{what} — showing your local copy"
             ))]),
         }
@@ -347,6 +351,11 @@ mod tests {
         assert!(
             !b.join("tasks/backlog/002-two.md").exists(),
             "fetched within the throttle"
+        );
+        catch_up(&board(&b), Purpose::Lookup).unwrap();
+        assert!(
+            b.join("tasks/backlog/002-two.md").exists(),
+            "a named lookup always fetches"
         );
         catch_up(&board(&b), Purpose::Write).unwrap();
         assert!(

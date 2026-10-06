@@ -1173,9 +1173,10 @@ fn resolve_assignee(repo: &Path, who: Option<&str>) -> String {
 /// it's cheap, and warn rather than refuse). A destination verb or an epic
 /// name with a ticket ref moves it; without one it lists.
 fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
-    use agile_md::sync::Purpose::{Read, Write};
+    use agile_md::sync::Purpose::{Lookup, Read, Write};
     let moves = |task: &Option<String>| if task.is_some() { Write } else { Read };
     match command {
+        Cmd::Show { task: Some(_) } => Lookup,
         Cmd::Board { .. }
         | Cmd::Ls { .. }
         | Cmd::Tag { .. }
