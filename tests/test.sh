@@ -463,6 +463,40 @@ assert "entering todo makes the ticket's branch in its repository's clone" \
 "${AMD}" deregister code >/dev/null 2>&1
 rm -rf "${rp}"
 
+echo "register in a folder of several projects (ticket 103):"
+# acme (current) and beta side by side, and a code repository, beta-app,
+# that belongs to beta. From inside beta-app, a plain `amd register` would
+# declare it on acme, the folder's current project.
+rg="$(mktemp -d)"
+rg_env="XDG_CONFIG_HOME=${rg}/config"
+(
+  set -e
+  export XDG_CONFIG_HOME="${rg}/config"
+  cd "${rg}"
+  for name in acme beta; do
+    git init -q "${name}-tickets"
+    ( cd "${name}-tickets" && git config user.email t@t.co && git config user.name t \
+      && AMD_COMMIT=0 "${AMD}" init "${name}" --local-only >/dev/null 2>&1 )
+  done
+  git init -q beta-app
+  "${AMD}" project use acme >/dev/null
+)
+assert "from a code repo, register refuses without a terminal, naming the folder's current project" \
+  bash -c "cd '${rg}/beta-app' && ! env ${rg_env} '${AMD}' register >/dev/null 2>&1 \
+    && env ${rg_env} '${AMD}' register 2>&1 | grep -q \"would be declared on project 'acme'\""
+assert "...suggests the project the repository's name points at" \
+  bash -c "cd '${rg}/beta-app' && env ${rg_env} '${AMD}' register 2>&1 | grep -q 'did you mean --project beta'"
+assert "...and declares nothing" \
+  bash -c "! grep -q 'beta-app' '${rg}/acme-tickets/.settings' && ! grep -q 'beta-app' '${rg}/beta-tickets/.settings'"
+assert "register --project beta declares it on beta" \
+  bash -c "cd '${rg}/beta-app' && env ${rg_env} '${AMD}' register --project beta | grep -q 'registered beta-app' \
+    && grep -q '^repos = .*beta-app' '${rg}/beta-tickets/.settings' && ! grep -q 'beta-app' '${rg}/acme-tickets/.settings'"
+assert "register --project with a name that isn't here is refused" \
+  bash -c "cd '${rg}/beta-app' && env ${rg_env} '${AMD}' register --project nosuch 2>&1 | grep -q \"no project 'nosuch'\""
+assert "from inside a tickets repository, register works as before" \
+  bash -c "cd '${rg}/acme-tickets' && env ${rg_env} '${AMD}' register '${rg}/beta-app' | grep -q 'beta-app'"
+rm -rf "${rg}"
+
 echo "create:"
 "${AMD}" new "First task" >/dev/null
 "${AMD}" new "Second task" -t x -t y >/dev/null

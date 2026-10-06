@@ -360,6 +360,11 @@ enum Cmd {
     Register {
         #[arg(value_name = "PATH")]
         path: Option<String>,
+        /// The project to declare it on, when the folder holds several
+        /// (default: the board you're in, or the folder's current project
+        /// — asked to confirm, since that's a team-wide change)
+        #[arg(long, value_name = "NAME")]
+        project: Option<String>,
     },
     /// Remove a repository's *local* registration only — the project-wide
     /// declaration is untouched, so it reappears greyed out, not gone
@@ -584,6 +589,13 @@ fn run() -> Result<()> {
     if let Cmd::Join { project, org } = command {
         return join::run(project, org);
     }
+    // `register` declares a repository for the whole team, so which project
+    // it lands on is checked before any board is chosen (ticket 103).
+    if let Cmd::Register { path, project } = command {
+        let board = register_board(path.as_deref(), project.as_deref())?;
+        agile_md::project_trust::check(&board)?;
+        return cmd_register(&board, path.as_deref());
+    }
     if let Cmd::Project { action } = command {
         return match action {
             None => project::list(),
@@ -612,7 +624,7 @@ fn run() -> Result<()> {
             unreachable!("handled above")
         }
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
-        Cmd::Register { path } => cmd_register(&board, path.as_deref()),
+        Cmd::Register { .. } => unreachable!("handled above"),
         Cmd::Deregister { name } => cmd_deregister(&name),
         Cmd::New(args) => cmd_new(&board, args),
         Cmd::Board { tag } => cmd_ls(&board, "all", tag.as_deref()),
@@ -1159,6 +1171,69 @@ fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
     }
     note_if_written_to_documents(&settings);
     Ok(())
+}
+
+/// Which project's board `amd register` declares on (ticket 103). Normally
+/// the board you're in, as for any command. But from a repository with no
+/// board of its own, in a folder holding several projects, that board is
+/// whichever `.current-project` names — easy to get wrong, and the result
+/// is a team-wide declaration on the wrong project. So there it asks
+/// first, in a terminal, and refuses without one, naming the fixes.
+/// `--project` always says outright.
+fn register_board(path: Option<&str>, project: Option<&str>) -> Result<Board> {
+    let dir = agile_md::current_project::project_dir()?;
+    let projects = agile_md::current_project::projects(&dir);
+    if let Some(name) = project {
+        let entry = projects.iter().find(|p| p.name == name).ok_or_else(|| {
+            let names: Vec<&str> = projects.iter().map(|p| p.name.as_str()).collect();
+            anyhow::anyhow!(
+                "no project '{name}' in {} (one of: {})",
+                dir.display(),
+                names.join(", ")
+            )
+        })?;
+        return Ok(Board::in_repo(&entry.tickets));
+    }
+    let own_board = Board::locate().is_ok_and(|board| board.root.is_dir());
+    if own_board || projects.len() <= 1 {
+        return ensure_board();
+    }
+
+    let board = ensure_board()?;
+    let current = board_settings::load(&board)
+        .project()
+        .map(str::to_string)
+        .unwrap_or_else(|| agile_md::current_project::project_name(board.repo_root()));
+    let repo = match path {
+        Some(path) => PathBuf::from(path),
+        None => git::repo_root().ok_or_else(|| anyhow::anyhow!("not inside a git repository"))?,
+    };
+    let repo_name = repo
+        .canonicalize()
+        .unwrap_or(repo)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let hint = projects
+        .iter()
+        .find(|p| p.name != current && repo_name.starts_with(&p.name))
+        .map(|p| format!(" — did you mean --project {}?", p.name))
+        .unwrap_or_default();
+    if form::available() {
+        let question = format!(
+            "Register {repo_name} with project {current} (this folder's current project){hint}"
+        );
+        if form::confirm(&question)? {
+            return Ok(board);
+        }
+        bail!("nothing registered");
+    }
+    bail!(
+        "{repo_name} would be declared on project '{current}', this folder's current project, \
+         and this folder holds {} projects — pass --project <name>, run it from \
+         <name>-tickets, or `amd project use <name>` first{hint}",
+        projects.len()
+    )
 }
 
 /// Removes only the *local* registration — the project-wide declaration is
