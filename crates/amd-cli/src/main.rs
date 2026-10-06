@@ -337,7 +337,7 @@ enum Cmd {
         task: String,
         #[arg(
             value_name = "FIELD",
-            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title", "priority"]),
+            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title", "priority", "repository"]),
         )]
         field: String,
         /// The new value; empty clears the field
@@ -423,6 +423,10 @@ struct NewArgs {
     /// created now and assigned later
     #[arg(short = 'a', long, alias = "owner", value_name = "WHO")]
     assignee: Option<String>,
+    /// The repository the work is in — one cloned on this machine. Its
+    /// branch is made there on entering todo
+    #[arg(short = 'R', long, value_name = "REPO")]
+    repository: Option<String>,
     /// Another ticket this one depends on or relates to (repeatable)
     #[arg(short = 'r', long = "related", value_name = "REF")]
     related: Vec<String>,
@@ -721,6 +725,17 @@ fn run() -> Result<()> {
                     "priority" => {
                         task.set_priority(task.hash()?, &value)?;
                         println!("{} priority {value}", task.id_display());
+                    }
+                    "repository" => {
+                        task.set_repository(task.hash()?, &value)?;
+                        let name = agile_md::task::repo_name(&value);
+                        if !name.is_empty() && !board_settings::load(&board).repos().contains(&name)
+                        {
+                            eprintln!(
+                                "amd: {name} isn't declared for this project — `amd register` it there so the team sees it"
+                            );
+                        }
+                        println!("{} repository {}", task.id_display(), display(&name));
                     }
                     other => bail!("unknown field {other}"),
                 }
@@ -1159,6 +1174,34 @@ fn cmd_deregister(name: &str) -> Result<()> {
     Ok(())
 }
 
+/// The new-ticket form's repository question: the project's declared
+/// repositories that are cloned on this machine, or none. One you haven't got
+/// can't be chosen (tickets 101/107), so it's named in the help instead.
+fn pick_repository(board: &Board) -> Result<String> {
+    let declared = board_settings::load(board).repos();
+    if declared.is_empty() {
+        return Ok(String::new());
+    }
+    let (here, missing): (Vec<String>, Vec<String>) = declared
+        .into_iter()
+        .partition(|name| agile_md::registry::clone_of(name).is_some());
+    if !missing.is_empty() {
+        eprintln!(
+            "not cloned on this machine, so not offered: {}",
+            missing.join(", ")
+        );
+    }
+    let none = "(none)".to_string();
+    let mut options = vec![none.clone()];
+    options.extend(here);
+    let chosen = form::select("Repository:", options, &none)?;
+    Ok(if chosen == none {
+        String::new()
+    } else {
+        chosen
+    })
+}
+
 /// `@me` is whoever git says you are — the name that ends up in the commits.
 fn resolve_assignee(repo: &Path, who: Option<&str>) -> String {
     match who {
@@ -1318,6 +1361,12 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         None => String::new(),
     };
 
+    let repository = match args.repository {
+        Some(name) => name,
+        None if full_form => pick_repository(board)?,
+        None => String::new(),
+    };
+
     let related = if full_form && args.related.is_empty() {
         form::related("", board.stems()?)?
     } else {
@@ -1355,6 +1404,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         NewTicket {
             title,
             assignee,
+            repository,
             template,
             branch_type,
             parent,

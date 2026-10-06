@@ -21,9 +21,11 @@ pub fn NewTicketDialog() -> impl IntoView {
         }
         busy.set(true);
         spawn_local(async move {
-            // Into the repository being shown, or the board's own under All.
+            // Onto the board being shown (the project's own under All), and
+            // about the repository being filtered to, if any (ticket 101).
             let repo = ctx.repo.get_untracked();
-            match api::create_ticket(&t, repo.as_deref()).await {
+            let about = ctx.about.get_untracked();
+            match api::create_ticket(&t, repo.as_deref(), about.as_deref()).await {
                 Ok(created) => {
                     ctx.report(created.sync);
                     ctx.reload();

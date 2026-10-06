@@ -385,6 +385,25 @@ impl Task {
             .filter(|who| !who.is_empty())
     }
 
+    /// The repository this ticket is about (tickets 101/107): its
+    /// `repository` field, as a bare name — `agile-md/amd` and `amd` are the
+    /// same repository. `None` when the ticket doesn't say.
+    pub fn repository(&self) -> Option<String> {
+        self.meta("repository")
+            .map(|value| repo_name(&value))
+            .filter(|name| !name.is_empty())
+    }
+
+    /// Point the ticket at `name`, or clear it with an empty name. Only a
+    /// repository cloned on this machine can be chosen ([`check_repository`]).
+    pub fn set_repository(&self, expected: ContentHash, name: &str) -> Result<()> {
+        let name = repo_name(name);
+        check_repository(&name)?;
+        self.write_checked(expected, |text| {
+            set_meta(text, "repository", &format!("{name:?}"))
+        })
+    }
+
     /// Assign the ticket, or clear it with an empty name.
     pub fn assign(&self, expected: ContentHash, who: &str) -> Result<()> {
         let quoted = format!("{who:?}");
@@ -416,6 +435,12 @@ impl Task {
         let text = ensure_priority(text)?;
         if let Some(points) = meta_in(&text, "points") {
             validate_points(points)?;
+        }
+        // Re-pointing the ticket at another repository needs that one to be
+        // here; leaving a teammate's choice alone never does.
+        let chosen = repo_name(meta_in(&text, "repository").unwrap_or_default());
+        if self.repository().unwrap_or_default() != chosen {
+            check_repository(&chosen)?;
         }
         self.write_checked(expected, |current| {
             let mut out = text.clone();
@@ -701,6 +726,32 @@ fn validate_points(points: &str) -> Result<()> {
 /// Replace a frontmatter value, adding the key before the closing fence when
 /// the ticket doesn't have it yet — tasks written by an older template, or by
 /// hand, still get linked.
+/// A `repository` value as a bare repository name: `agile-md/amd`,
+/// `git@github.com:agile-md/amd.git` and `amd` all name `amd`.
+pub fn repo_name(value: &str) -> String {
+    let value = value.trim().trim_end_matches('/');
+    let value = value.strip_suffix(".git").unwrap_or(value);
+    value
+        .rsplit(['/', ':'])
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Refuses a repository that isn't cloned on this machine (tickets 101/107):
+/// you can only point a ticket at a repository you have. Empty — no
+/// repository — is always fine.
+pub fn check_repository(name: &str) -> Result<()> {
+    if name.is_empty() {
+        return Ok(());
+    }
+    crate::board_settings::validate_project_name(name)?;
+    if crate::registry::clone_of(name).is_none() {
+        bail!("{name} isn't cloned on this machine — clone it first (and register it)");
+    }
+    Ok(())
+}
+
 pub(crate) fn set_meta(text: &str, key: &str, value: &str) -> Result<String> {
     if !text.starts_with("---") {
         bail!("no frontmatter to update");
@@ -1308,6 +1359,25 @@ mod tests {
         // Nothing else was written either -- validation happens before any
         // part of the combined write.
         assert_eq!(task.title(), "Old");
+    }
+
+    #[test]
+    fn repo_name_reduces_any_repository_value_to_its_bare_name() {
+        for value in [
+            "amd",
+            "agile-md/amd",
+            "git@github.com:agile-md/amd.git",
+            "https://github.com/agile-md/amd/",
+            "  amd.git ",
+        ] {
+            assert_eq!(repo_name(value), "amd", "{value}");
+        }
+        assert_eq!(repo_name(""), "");
+    }
+
+    #[test]
+    fn no_repository_is_always_allowed() {
+        check_repository("").unwrap();
     }
 
     #[test]

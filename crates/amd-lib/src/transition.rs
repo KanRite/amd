@@ -197,11 +197,28 @@ pub fn enter_todo(board: &Board, task: &Task, options: &TodoOptions) -> Result<O
         },
     };
 
+    // Where the branch goes (ticket 107): the clone of the repository the
+    // ticket is about, when it names one — not whichever repository amd
+    // happens to be run from. Read before the move, like everything else.
+    let repository = task.repository();
+
     let mut outcome = move_to(board, task, Column::Todo, options.force)?;
 
     if options.no_branch || std::env::var("AMD_NO_BRANCH").as_deref() == Ok("1") {
         return Ok(outcome);
     }
+    let target = match &repository {
+        None => board.root.clone(),
+        Some(name) => match crate::registry::clone_of(name) {
+            Some(clone) => clone,
+            None => {
+                outcome.events.push(Event::Info(format!(
+                    "{name} isn't cloned on this machine; left its branch alone"
+                )));
+                return Ok(outcome);
+            }
+        },
+    };
     let Some(name) = wanted else {
         outcome.events.push(Event::Warn(
             "no branch type on this ticket; left the branch alone".to_string(),
@@ -209,16 +226,20 @@ pub fn enter_todo(board: &Board, task: &Task, options: &TodoOptions) -> Result<O
         return Ok(outcome);
     };
     branch::validate(&name)?;
-    if git::current_branch(&board.root).as_deref() == Some(name.as_str()) {
+    let place = repository
+        .as_deref()
+        .map(|repo| format!(" in {repo}"))
+        .unwrap_or_default();
+    if git::current_branch(&target).as_deref() == Some(name.as_str()) {
         outcome
             .events
-            .push(Event::Info(format!("already on {name}")));
+            .push(Event::Info(format!("already on {name}{place}")));
         return Ok(outcome);
     }
-    let exists = git::branch_exists(&board.root, &name);
-    git::switch_branch(&board.root, &name, !exists)?;
+    let exists = git::branch_exists(&target, &name);
+    git::switch_branch(&target, &name, !exists)?;
     outcome.events.push(Event::Info(format!(
-        "{} {name}",
+        "{} {name}{place}",
         if exists { "switched to" } else { "branch" }
     )));
     Ok(outcome)
@@ -241,6 +262,9 @@ fn maybe_take_lease(board: &Board, task: &Task) -> Option<String> {
 pub struct TicketFields {
     pub title: String,
     pub assignee: String,
+    /// The repository it's about. On creation, `None` or empty means none;
+    /// on an edit, `None` leaves it as it is and `Some("")` clears it.
+    pub repository: Option<String>,
     /// One of `task::VALID_POINTS`, or empty.
     pub points: String,
     /// The epic or sprint to file it under, if any.
@@ -268,6 +292,7 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
             template: crate::templates::DEFAULT_TEMPLATE.to_string(),
             branch_type: fields.branch_type.trim().to_string(),
             assignee: fields.assignee.trim().to_string(),
+            repository: fields.repository.clone().unwrap_or_default(),
             parent: Some(fields.parent.trim().to_string()).filter(|p| !p.is_empty()),
             related: fields.related.clone(),
             tags: fields.tags.clone(),
@@ -339,6 +364,11 @@ pub fn edit_ticket(
                 body: &fields.body,
             },
         )?;
+        if let Some(repository) = &fields.repository
+            && crate::task::repo_name(repository) != task.repository().unwrap_or_default()
+        {
+            task.set_repository(task.hash()?, repository)?;
+        }
         board.set_epic(task, fields.epic.as_deref())?;
         Ok(())
     })?;

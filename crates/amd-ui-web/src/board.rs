@@ -627,6 +627,7 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
         priority,
         epic,
         repo,
+        repository,
         epic_label,
         points,
         lock,
@@ -691,12 +692,19 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                 <span class="font-mono text-xs text-slate-500">{id}</span>
                 <span class="flex-1 font-medium">{title}</span>
             </div>
-            // Which repository, when the board spans more than one.
-            <Show when=move || ctx.multi_repo()>
-                <div class="mt-0.5 truncate text-[11px] text-slate-500" title="Repository">
-                    {repo.clone()}
-                </div>
-            </Show>
+            // The repository it's about (ticket 101), unless the filter
+            // already says so.
+            {(!repository.is_empty())
+                .then(|| {
+                    let name = repository.clone();
+                    view! {
+                        <Show when=move || ctx.about.with(Option::is_none)>
+                            <div class="mt-0.5 truncate text-[11px] text-slate-500" title="Repository">
+                                {name.clone()}
+                            </div>
+                        </Show>
+                    }
+                })}
             <div class="mt-1.5 flex flex-wrap items-center gap-1 text-xs">
                 {lock.map(|l| view! { <LockBadge lock=l /> })}
                 {epic_tag

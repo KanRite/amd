@@ -135,6 +135,7 @@ struct SaveArgs<'a> {
 struct TitleArgs<'a> {
     title: &'a str,
     repo: Option<&'a str>,
+    repository: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -197,8 +198,20 @@ pub async fn archive_ticket(place: &Place, file: &str) -> Result<SyncReport, Str
 }
 
 /// Creates a ticket in `repo`'s backlog (the board's own when `None`).
-pub async fn create_ticket(title: &str, repo: Option<&str>) -> Result<Created, String> {
-    call("create_ticket", &TitleArgs { title, repo }).await
+pub async fn create_ticket(
+    title: &str,
+    repo: Option<&str>,
+    repository: Option<&str>,
+) -> Result<Created, String> {
+    call(
+        "create_ticket",
+        &TitleArgs {
+            title,
+            repo,
+            repository,
+        },
+    )
+    .await
 }
 
 pub async fn create_epic(name: &str, repo: Option<&str>) -> Result<SyncReport, String> {

@@ -34,6 +34,8 @@ pub struct NewTicket {
     pub branch_type: String,
     /// Who it's assigned to; empty for nobody, and assignable later.
     pub assignee: String,
+    /// The repository it's about; empty for none. Must be cloned here.
+    pub repository: String,
     /// A ref (id or slug) for the ticket this one sits under.
     pub parent: Option<String>,
     /// Refs for the tickets this one relates to.
@@ -72,6 +74,8 @@ impl Draft {
     /// Resolve and render, without writing anything.
     pub fn prepare(board: &Board, templates: &Templates, ticket: NewTicket) -> Result<Draft> {
         branch::validate_sluggable(&ticket.title)?;
+        let repository = crate::task::repo_name(&ticket.repository);
+        crate::task::check_repository(&repository)?;
 
         // A branch type is optional: with one, the ticket is worked on a branch
         // named from it and the title; without, there's simply nothing to check
@@ -137,6 +141,7 @@ impl Draft {
                 .map(|task| task.stem.clone())
                 .unwrap_or_default(),
             assignee: ticket.assignee,
+            repository,
             related: related.clone(),
             tags: ticket.tags,
             created,

@@ -142,6 +142,17 @@ impl Registry {
     }
 }
 
+/// Where the repository called `name` is cloned on this machine — registered,
+/// and its directory still there — or `None`. A repository you haven't got
+/// can't be targeted (tickets 101/107): no ticket can be pointed at it, and
+/// no branch made for it, until it's cloned.
+pub fn clone_of(name: &str) -> Option<PathBuf> {
+    Registry::load()
+        .find(name)
+        .map(|entry| entry.root.clone())
+        .filter(|root| root.is_dir())
+}
+
 /// `$XDG_CONFIG_HOME/agile-md/repos`, else `~/.config/agile-md/repos`.
 fn path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")

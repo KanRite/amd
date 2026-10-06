@@ -49,8 +49,12 @@ pub struct Ctx {
     pub sort: RwSignal<SortOrder>,
     /// The search box: only matching cards are shown while it has text.
     pub search: RwSignal<String>,
-    /// The repository filter: one repository's tickets, or all (`None`).
+    /// Which repository's *board* new tickets, epics and WIP limits go to;
+    /// `None` is the project's own. No longer set by the filter (ticket 101).
     pub repo: RwSignal<Option<String>>,
+    /// The repository filter (ticket 101): only tickets *about* this
+    /// repository (their `repository` field), or all (`None`).
+    pub about: RwSignal<Option<String>>,
     /// The user filter: whose tickets to show.
     pub user: RwSignal<Assigned>,
     /// The user's colour scheme (Admin → Appearance).
@@ -100,14 +104,16 @@ impl Ctx {
 
     /// Whether a card passes the repository and user filters and the search.
     pub fn in_view(self, t: &TicketSummary) -> bool {
-        let repo_ok = self.repo.with(|r| r.as_ref().is_none_or(|r| *r == t.repo));
+        let repo_ok = self
+            .about
+            .with(|r| r.as_ref().is_none_or(|r| *r == t.repository));
         repo_ok && self.user.with(|u| u.matches(t)) && self.search.with(|q| t.matches(q))
     }
 
     /// Whether any filter differs from its default: repository, user, sort
     /// or search.
     pub fn filters_changed(self) -> bool {
-        self.repo.with(Option::is_some)
+        self.about.with(Option::is_some)
             || self.user.with(|u| *u != Assigned::Anyone)
             || self.sort.get() != SortOrder::default()
             || self.searching()
@@ -116,7 +122,7 @@ impl Ctx {
     /// Puts every filter back to its default: all repositories, all users,
     /// the default order, and no search.
     pub fn reset_filters(self) {
-        self.repo.set(None);
+        self.about.set(None);
         self.user.set(Assigned::Anyone);
         self.sort.set(SortOrder::default());
         self.search.set(String::new());
@@ -170,6 +176,7 @@ pub fn App() -> impl IntoView {
         sort: RwSignal::new(SortOrder::default()),
         search: RwSignal::new(String::new()),
         repo: RwSignal::new(None),
+        about: RwSignal::new(None),
         user: RwSignal::new(Assigned::Anyone),
         sync: RwSignal::new(None),
         appearance: RwSignal::new(Appearance::default()),
@@ -426,21 +433,28 @@ fn SearchBox() -> impl IntoView {
 fn RepoFilter() -> impl IntoView {
     let ctx = Ctx::get();
     let repos = move || {
-        ctx.board
-            .with(|b| b.as_ref().map(|b| b.repos.clone()).unwrap_or_default())
+        ctx.board.with(|b| {
+            b.as_ref()
+                .map(|b| b.ticket_repos.clone())
+                .unwrap_or_default()
+        })
     };
+    let shown = move || ctx.about.get().unwrap_or_else(|| "All".to_string());
+    // A fixed width (tickets 096/100): a long repository name is cut short
+    // here, in full on hover, and in full in the opened list, so it never
+    // widens the filter or pushes the others onto another row.
     view! {
         <label
-            class="group relative flex cursor-pointer items-center gap-1 whitespace-nowrap rounded bg-accent-600 py-1.5 pr-2 pl-3 text-sm font-medium text-white hover:bg-accent-500 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent-500"
-            title="Show the tickets of one repository, or all of them"
+            class="group relative flex w-64 shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded bg-accent-600 py-1.5 pr-2 pl-3 text-sm font-medium text-white hover:bg-accent-500 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent-500"
+            title=move || format!("Repository: {} — show only the tickets about one repository", shown())
         >
             "Repository:"
             <select
-                class="cursor-pointer appearance-none border-0 bg-accent-600 pr-5 font-medium text-white group-hover:bg-accent-500 focus:outline-none"
-                prop:value=move || ctx.repo.get().unwrap_or_default()
+                class="min-w-0 flex-1 cursor-pointer appearance-none truncate border-0 bg-accent-600 pr-5 font-medium text-white group-hover:bg-accent-500 focus:outline-none"
+                prop:value=move || ctx.about.get().unwrap_or_default()
                 on:change=move |ev| {
                     let value = event_target_value(&ev);
-                    ctx.repo.set((!value.is_empty()).then_some(value));
+                    ctx.about.set((!value.is_empty()).then_some(value));
                 }
             >
                 <option class="bg-accent-600 text-white" value="">
