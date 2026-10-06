@@ -629,6 +629,15 @@ project, into one `amdui` window:
   locally — and is the *only* writer now. Registration is deliberate again:
   `registry::remember()`'s run-on-every-command auto-fill is gone, along
   with `AMD_NO_REGISTER` (nothing left to opt out of).
+- **Which project `amd register` declares on** (ticket 103,
+  `register_board` in `main.rs`): normally the board you're in. From a
+  repository with no board of its own, in a folder holding several
+  projects, that's whichever `.current-project` names, so it **asks** in a
+  terminal ("Register X with project P (this folder's current project)?")
+  and **refuses** without one, naming the fixes. It hints `--project Y` when
+  the repo's name starts with another project's name. `--project <name>`
+  always says outright. `deregister` needs no guard: it only drops this
+  machine's registration, by name, and never touches a declared list.
 - **`amd deregister <name>`** removes only the *local* registration. The
   declared list is untouched on purpose — you not having a repository
   cloned right now shouldn't silently un-declare it for the rest of the
