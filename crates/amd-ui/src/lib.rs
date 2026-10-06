@@ -908,6 +908,19 @@ mod tests {
     }
 
     #[test]
+    fn the_board_carries_the_project_users_for_the_assignee_picker() {
+        let (_dir, project) = project();
+        let settings = agile_md::board_settings::path(project.board("").unwrap());
+        std::fs::write(
+            &settings,
+            "commit = off\nusers = oldippy <o@t.co>, Ann <a@t.co>\n",
+        )
+        .unwrap();
+        let board = project.summary().unwrap();
+        assert_eq!(board.users, ["Ann", "oldippy"]);
+    }
+
+    #[test]
     fn a_lapsed_lease_is_shown_as_lapsed_not_as_a_lock() {
         let (_dir, project) = project();
         let file = new_ticket(&project, "Lapsed");

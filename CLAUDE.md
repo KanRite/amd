@@ -519,7 +519,13 @@ redundant. Their history is in git if it is ever wanted again.
   assigned later. There is deliberately **no second person field** — who created
   a ticket is already in `git log --follow`, so a `reporter` would duplicate
   history the tool is built on. It was briefly called `owner`; `Task::assignee`
-  still reads that key.
+  still reads that key. **Picked from the project's `users`** (ticket
+  089): `amd new`'s form and a bare `amd assign <ref>` in a terminal open
+  `form::assignee` (type-to-filter: nobody, `@me`, the users, someone
+  else); amdui's editor has `AssigneePicker`, fed by `Board.users`/`me`.
+  The *name* is stored. A name off the list is allowed with a warning
+  (`board_settings::unknown_assignee`; never for a board with no list).
+  Without a terminal, bare `amd assign` still clears; `--clear` says so.
 - **Frontmatter keys are hyphenated, template variables are not** —
   `branch-type: {{ branch_type | yaml }}`. Jinja would read `branch-type` as a
   subtraction, so the variable has to be `branch_type`; the key is just text.

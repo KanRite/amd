@@ -395,6 +395,15 @@ impl BoardSettings {
         self.config.get(USERS).map(parse_users).unwrap_or_default()
     }
 
+    /// The users' names, once each, sorted ignoring case: what an assignee
+    /// is picked from (ticket 089). An assignee is stored as a name.
+    pub fn user_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.users().into_iter().map(|u| u.name).collect();
+        names.sort_by_key(|n| n.to_lowercase());
+        names.dedup();
+        names
+    }
+
     /// Adds `user` unless they're already listed (by email). Returns whether
     /// anything changed, so a caller knows whether there's a commit to make —
     /// joining twice is not an error, the same as declaring a repo twice.
@@ -450,6 +459,17 @@ impl BoardSettings {
 /// project name as the default repository owner too. A project name outside
 /// that narrower set still validates here; it just needs `--org` to say
 /// where the tickets repository actually goes.
+/// The warning for assigning `who` when they aren't one of the project's
+/// users (ticket 089): allowed — someone may not have joined yet — but
+/// said. Nothing for nobody, a listed name, or a project with no users
+/// list at all (a board made before ticket 088 has none).
+pub fn unknown_assignee(board: &Board, who: &str) -> Option<String> {
+    let who = who.trim();
+    let names = load(board).user_names();
+    (!who.is_empty() && !names.is_empty() && !names.iter().any(|n| n == who))
+        .then(|| format!("{who} isn't one of this project's users — `amd join` adds them"))
+}
+
 pub fn validate_project_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("a project name can't be empty");
@@ -1014,5 +1034,38 @@ mod tests {
         assert!(settings.undeclare_repo("a"));
         assert!(!settings.undeclare_repo("a"));
         assert_eq!(settings.repos(), ["b"]);
+    }
+
+    #[test]
+    fn an_assignee_off_the_users_list_is_warned_about_only_when_there_is_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        assert_eq!(
+            unknown_assignee(&board, "anyone"),
+            None,
+            "no list, no warning"
+        );
+        let mut settings = load(&board);
+        for (name, email) in [
+            ("oldippy", "o@t.co"),
+            ("Ann", "a@t.co"),
+            ("oldippy", "o2@t.co"),
+        ] {
+            settings
+                .add_user(&User {
+                    name: name.into(),
+                    email: email.into(),
+                })
+                .unwrap();
+        }
+        settings.save(&board).unwrap();
+        assert_eq!(load(&board).user_names(), ["Ann", "oldippy"]);
+        assert_eq!(unknown_assignee(&board, "oldippy"), None);
+        assert_eq!(unknown_assignee(&board, ""), None);
+        let warning = unknown_assignee(&board, "stranger").unwrap();
+        assert!(
+            warning.contains("isn't one of this project's users"),
+            "{warning}"
+        );
     }
 }

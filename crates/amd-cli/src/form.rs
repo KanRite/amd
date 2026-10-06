@@ -121,6 +121,41 @@ pub fn label(message: &str, default: &str, known: Vec<String>, help: &str) -> Re
     Ok(answer.trim().to_string())
 }
 
+/// Who a ticket is assigned to (ticket 089): a type-to-filter list of the
+/// project's users, with nobody, yourself (`@me`, git's user name) and
+/// "someone else" — a name typed in, for someone who hasn't joined yet.
+/// Starts on `current`. Returns the name, or "" for nobody.
+pub fn assignee(users: Vec<String>, me: Option<String>, current: &str) -> Result<String> {
+    const NOBODY: &str = "(nobody)";
+    const OTHER: &str = "(someone else…)";
+    let me_label = me.as_ref().map(|me| format!("@me ({me})"));
+    let mut options = vec![NOBODY.to_string()];
+    options.extend(me_label.clone());
+    options.extend(users.iter().cloned());
+    options.push(OTHER.to_string());
+    let start = match current {
+        "" => Some(0),
+        current => options
+            .iter()
+            .position(|o| o == current)
+            .or_else(|| (me.as_deref() == Some(current)).then_some(1)),
+    };
+    let mut prompt =
+        Select::new("Assignee:", options).with_help_message("type to filter · enter to choose");
+    if let Some(start) = start {
+        prompt = prompt.with_starting_cursor(start);
+    }
+    let chosen = convert(prompt.prompt())?;
+    Ok(match chosen.as_str() {
+        NOBODY => String::new(),
+        OTHER => text("Assignee's name:", Some(current), None)?
+            .trim()
+            .to_string(),
+        _ if Some(&chosen) == me_label.as_ref() => me.unwrap_or_default(),
+        _ => chosen,
+    })
+}
+
 /// Pick one of `options`, starting on `default` when it's among them.
 pub fn select<T: fmt::Display + Eq>(message: &str, options: Vec<T>, default: &T) -> Result<T> {
     let start = options.iter().position(|option| option == default);

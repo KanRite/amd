@@ -163,6 +163,8 @@ impl Project {
             epics,
             projects: self.projects(),
             ticket_repos,
+            users: board_settings::load(&self.repos[0].1).user_names(),
+            me: agile_md::git::config(self.repos[0].1.repo_root(), "user.name"),
         })
     }
 
