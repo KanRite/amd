@@ -89,7 +89,7 @@ assert "the found-locally tickets repo's own board records the project" \
 assert "the found-locally documents repo is scaffolded, not a board" \
   bash -c "test -d '${plain_dir}/widgets-documents/adr' \
     && test ! -d '${plain_dir}/widgets-documents/tasks' \
-    && grep -q '^widgets\$' '${plain_dir}/widgets-documents/.settings/project'"
+    && test ! -e '${plain_dir}/widgets-documents/.settings'"
 assert "init records you as the first user of a found-locally project" \
   grep -qx 'users = t <t@t.co>' "${plain_dir}/widgets-tickets/.settings"
 assert "...in a commit of its own, since the repository already existed" \
@@ -496,6 +496,49 @@ assert "register --project with a name that isn't here is refused" \
 assert "from inside a tickets repository, register works as before" \
   bash -c "cd '${rg}/acme-tickets' && env ${rg_env} '${AMD}' register '${rg}/beta-app' | grep -q 'beta-app'"
 rm -rf "${rg}"
+
+echo "board settings live in the tickets repository (ticket 111):"
+# A project whose documents repository still holds settings from before
+# 111: repos and wip-limit there, an older repos value in tickets.
+st="$(mktemp -d)"
+st_env="XDG_CONFIG_HOME=${st}/config"
+(
+  set -e
+  export XDG_CONFIG_HOME="${st}/config"
+  cd "${st}"
+  git init -q -b main proj-tickets && git init -q -b main proj-documents && git init -q -b main code
+  for r in proj-tickets proj-documents code; do
+    git -C "${r}" config user.email t@t.co && git -C "${r}" config user.name t && git -C "${r}" config commit.gpgsign false
+  done
+  cd proj-tickets
+  AMD_COMMIT=0 "${AMD}" init proj --local-only >/dev/null 2>&1
+  echo "repos = old-repo" >>.settings
+  git add -A && git commit -q -m "seed for ticket 111"
+  mkdir -p ../proj-documents/.settings
+  echo "old-repo,docs-repo" >../proj-documents/.settings/repos
+  echo "4" >../proj-documents/.settings/wip-limit
+)
+assert "the first command carries documents settings across, and says so" \
+  bash -c "cd '${st}/proj-tickets' && out=\"\$(env ${st_env} '${AMD}' board --plain 2>&1)\" \
+    && grep -q '^moved .*repos.* from .*proj-documents/.settings' <<<\"\${out}\" && grep -q '^moved .*wip-limit' <<<\"\${out}\""
+assert "...repos is the union, wip-limit filled in, in the tickets .settings" \
+  bash -c "grep -qx 'repos = old-repo,docs-repo' '${st}/proj-tickets/.settings' && grep -qx 'wip-limit = 4' '${st}/proj-tickets/.settings'"
+assert "...committed, like any change" \
+  bash -c "git -C '${st}/proj-tickets' log -1 --format=%s | grep -q '^settings: migrate'"
+assert "...and silent once everything is across" \
+  bash -c "cd '${st}/proj-tickets' && ! env ${st_env} '${AMD}' board --plain 2>&1 | grep -q 'moved '"
+assert "amd wip-limit is committed" \
+  bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' wip-limit 3 >/dev/null 2>&1 \
+    && grep -qx 'wip-limit = 3' .settings && git log -1 --format=%s | grep -q '^settings: wip-limit'"
+assert "amd register declares the repository in the tickets .settings, committed" \
+  bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' register '${st}/code' >/dev/null 2>&1 \
+    && grep -q '^repos = .*code' .settings && git log -1 --format=%s | grep -q '^register: code'"
+assert "amd register --remove undeclares it for everyone, committed" \
+  bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' register --remove code 2>&1 | grep -q 'no longer part of the project' \
+    && ! grep -q '^repos = .*code' .settings && git log -1 --format=%s | grep -q '^unregister: code' && test -d '${st}/code'"
+assert "...and refuses a repository that isn't declared" \
+  bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' register --remove nowhere 2>&1 | grep -q \"nowhere isn't declared\""
+rm -rf "${st}"
 
 echo "create:"
 "${AMD}" new "First task" >/dev/null

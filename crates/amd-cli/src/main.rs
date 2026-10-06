@@ -365,6 +365,10 @@ enum Cmd {
         /// — asked to confirm, since that's a team-wide change)
         #[arg(long, value_name = "NAME")]
         project: Option<String>,
+        /// Take the named repository off the project's declared list, for
+        /// everyone (and off this machine's registry)
+        #[arg(long, value_name = "NAME", conflicts_with = "path")]
+        remove: Option<String>,
     },
     /// Remove a repository's *local* registration only — the project-wide
     /// declaration is untouched, so it reappears greyed out, not gone
@@ -591,10 +595,19 @@ fn run() -> Result<()> {
     }
     // `register` declares a repository for the whole team, so which project
     // it lands on is checked before any board is chosen (ticket 103).
-    if let Cmd::Register { path, project } = command {
+    if let Cmd::Register {
+        path,
+        project,
+        remove,
+    } = command
+    {
         let board = register_board(path.as_deref(), project.as_deref())?;
         agile_md::project_trust::check(&board)?;
-        return cmd_register(&board, path.as_deref());
+        migrate_settings(&board)?;
+        return match remove {
+            Some(name) => cmd_unregister(&board, &name),
+            None => cmd_register(&board, path.as_deref()),
+        };
     }
     if let Cmd::Project { action } = command {
         return match action {
@@ -615,6 +628,7 @@ fn run() -> Result<()> {
             transition::Event::Warn(text) => eprintln!("amd: {text}"),
         }
     }
+    migrate_settings(&board)?;
     match command {
         Cmd::Init { .. }
         | Cmd::Join { .. }
@@ -1112,29 +1126,40 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
 /// so clap already refuses a non-numeric argument before this runs; `0` is
 /// a valid value and means the limit is turned off.
 fn cmd_wip_limit(board: &Board, limit: u32) -> Result<()> {
-    let mut settings = board_settings::load(board);
-    settings.set_wip_limit(Column::Doing, Some(limit))?;
-    settings.save(board)?;
+    // Committed and pushed like a ticket move, so it reaches the whole team
+    // (ticket 111).
+    with_auto_commit(board, "settings", "wip-limit", &limit.to_string(), || {
+        let mut settings = board_settings::load(board);
+        settings.set_wip_limit(Column::Doing, Some(limit))?;
+        settings.save(board)
+    })?;
     match limit {
         0 => println!("doing/'s WIP limit is now off"),
         n => println!("doing/'s WIP limit is now {n}"),
     }
-    note_if_written_to_documents(&settings);
     Ok(())
 }
 
-/// `board_settings::save` writes a documents-shaped setting into
-/// documents's own local clone, but never commits or pushes it there —
-/// unlike the tickets repo, documents is PR-reviewed, so `amd` doesn't
-/// commit on the user's behalf (`adr/0006`'s tickets/documents boundary).
-/// This just says where the file landed and what still needs doing.
-fn note_if_written_to_documents(settings: &board_settings::BoardSettings) {
-    if let Some(root) = settings.documents_root() {
-        println!(
-            "  written to {} — commit and open a PR there to apply it",
-            root.join(".settings").display()
+/// Carries settings still kept in the project's documents repository into
+/// the tickets `.settings`, once, committed and pushed (ticket 111). Silent
+/// once everything is across.
+fn migrate_settings(board: &Board) -> Result<()> {
+    let mut moved = Vec::new();
+    with_auto_commit(board, "settings", "migrate", "from documents", || {
+        moved = board_settings::migrate_from_documents(board)?;
+        Ok(())
+    })?;
+    if !moved.is_empty() {
+        let from = board_settings::documents_settings_dir(board)
+            .map(|dir| dir.display().to_string())
+            .unwrap_or_else(|| "the documents repository".to_string());
+        eprintln!(
+            "moved {} from {from} into the tickets .settings, where board settings live now — \
+             {from} is no longer read; delete it with a documents PR",
+            moved.join(", ")
         );
     }
+    Ok(())
 }
 
 /// Registers a repository, both halves at once: declares its name for the
@@ -1157,9 +1182,13 @@ fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
         .map(|name| name.to_string_lossy().into_owned())
         .ok_or_else(|| anyhow::anyhow!("{} has no name", canonical.display()))?;
 
-    let mut settings = board_settings::load(board);
-    settings.declare_repo(&name)?;
-    settings.save(board)?;
+    // The declaration is the team's, so it's committed and pushed (ticket
+    // 111); the registry below is this machine's alone.
+    with_auto_commit(board, "register", &name, "", || {
+        let mut settings = board_settings::load(board);
+        settings.declare_repo(&name)?;
+        settings.save(board)
+    })?;
 
     let mut registry = Registry::load();
     let added = registry.add(&canonical)?;
@@ -1169,7 +1198,30 @@ fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
         true => println!("registered {name}"),
         false => println!("{name} was already registered on this machine"),
     }
-    note_if_written_to_documents(&settings);
+    Ok(())
+}
+
+/// `amd register --remove <name>`: takes a repository off the project's
+/// declared list for everyone, committed and pushed, and off this machine's
+/// registry if it's there. The clone itself is left alone.
+fn cmd_unregister(board: &Board, name: &str) -> Result<()> {
+    let mut removed = false;
+    with_auto_commit(board, "unregister", name, "", || {
+        let mut settings = board_settings::load(board);
+        removed = settings.undeclare_repo(name);
+        if removed {
+            settings.save(board)?;
+        }
+        Ok(())
+    })?;
+    if !removed {
+        bail!("{name} isn't declared for this project");
+    }
+    let mut registry = Registry::load();
+    if registry.remove(name) {
+        registry.save()?;
+    }
+    println!("{name} is no longer part of the project (its clone is untouched)");
     Ok(())
 }
 

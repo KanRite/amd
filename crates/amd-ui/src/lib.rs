@@ -50,6 +50,12 @@ async fn change<T: Send + 'static>(
         // refuses the change; no network only warns, so is ignored here.
         for (_, board) in &Project::open()?.repos {
             agile_md::sync::catch_up(board, agile_md::sync::Purpose::Write).map_err(err)?;
+            // Settings still in a documents repository come across, once
+            // (ticket 111).
+            transition::with_auto_commit(board, "settings", "migrate", "from documents", || {
+                board_settings::migrate_from_documents(board).map(|_| ())
+            })
+            .map_err(err)?;
         }
         f(&Project::open()?)
     })
@@ -481,9 +487,8 @@ async fn unlock_ticket(
     .await
 }
 
-/// Saves a board setting through amd-lib. Settings that live in the
-/// project's documents repository land there uncommitted — that repository
-/// takes changes by pull request — and the report says so.
+/// Saves a board setting through amd-lib, committed and pushed like any
+/// change, since every setting lives in the tickets repository (ticket 111).
 fn save_setting(
     board: &Board,
     what: &str,
@@ -491,18 +496,6 @@ fn save_setting(
 ) -> Result<SyncReport> {
     let mut settings = board_settings::load(board);
     change(&mut settings).map_err(err)?;
-    if let Some(documents) = settings.documents_root().map(PathBuf::from) {
-        settings.save(board).map_err(err)?;
-        return Ok(SyncReport {
-            message: format!("settings: {what}"),
-            committed: false,
-            pushed: false,
-            warning: Some(format!(
-                "Saved in {}/.settings/ — commit it there and open a pull request.",
-                documents.display()
-            )),
-        });
-    }
     committed(board, "settings", what, "", || settings.save(board))
 }
 
