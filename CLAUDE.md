@@ -226,6 +226,16 @@ redundant. Their history is in git if it is ever wanted again.
   it, then `mv` over it, never `cp` onto it — Linux refuses to write into a
   running executable ("Text file busy"), which left an install half done. A
   running one (found via `/proc/*/exe`) gets a "restart it" note.
+  **On Linux it also installs amdui's launcher** (`install_launcher`,
+  ticket 073): `amdui.desktop` and the icons (`app-icon.svg` plus the 32,
+  128 and 256 px PNGs from `crates/amd-ui/icons/`) into
+  `${XDG_DATA_HOME:-~/.local/share}`. GNOME's dock and top bar take an app's
+  icon from its launcher entry, matched by app id, never from the window,
+  so without it amdui shows a generic icon. The app id is `amdui`: Tauri
+  leaves GTK's as the program name unless `app.enableGTKAppId` is set,
+  which would also make GTK route a second `amdui` to the first process.
+  The icons come from the clone, so a release download run outside one
+  installs no launcher and says so.
 - `tests/test.sh` — assert-based end-to-end suite; builds with cargo and spins
   up temp git repos. Unit tests live next to the code in `#[cfg(test)] mod tests`.
 - `.github/workflows/ci.yml` — fmt + clippy + cargo test + tests/test.sh, and
