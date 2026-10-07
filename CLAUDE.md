@@ -479,10 +479,17 @@ redundant. Their history is in git if it is ever wanted again.
       once in `run()` (`sync_purpose` classifies each command: a ticket
       ref = Write, a listing = Read); amdui calls it in `change()` (Write)
       and every 30s from the page (`sync_board`, Read). It fetches (a Read
-      skips that if `FETCH_HEAD` is under 10s old), then: only behind →
+      skips that if amd's last fetch was under 10s ago), then: only behind →
       `merge --ff-only`; only ahead → push the leftovers; diverged → a
       Write refuses with the fix, a Read warns. No remote/upstream, or
       `AMD_SYNC=0`/`sync = off`, does nothing; no network only warns.
+    - **amd's fetch never writes `FETCH_HEAD`** (ticket 118,
+      `git::fetch`): `--no-write-fetch-head`, with `.git/amd-fetched`
+      touched instead as the "fetched recently" timestamp
+      (`fetched_within`). `FETCH_HEAD` belongs to `git pull`, which writes
+      it and reads it back; amdui's 30s fetch landing mid-pull made the
+      pull fail with "Cannot fast-forward to multiple branches" (142 of 200
+      pulls in a race loop, 0 after). This is why amd needs **git 2.29+**.
     - **`after_rejected_push`**, from `transition::commit_since` (now
       commit-locally, then push — and `cmd_new` goes through it too): a
       push rejected because the remote moved is replayed with `rebase @{u}`
