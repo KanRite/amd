@@ -37,6 +37,10 @@ cargo build --release        # target/release/{amd,amdui}
 ./install.sh                 # builds and installs
 ```
 
+On Linux, installing from a clone also adds the board to your application
+menu: a launcher entry and the agile-md icon in `~/.local/share`, which is
+where the dock and top bar take the icon from.
+
 The desktop board needs [Trunk](https://trunkrs.dev) and the
 `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`)
 to build its pages, and WebKitGTK on Linux (`libwebkit2gtk-4.1-dev`). For the

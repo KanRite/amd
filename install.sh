@@ -14,6 +14,10 @@
 # board's source build needs Trunk and the wasm32-unknown-unknown target (and
 # WebKitGTK on Linux), and is skipped with a note when they're missing.
 #
+# On Linux, installing amdui from a clone also installs its launcher entry and
+# icon into ~/.local/share ($XDG_DATA_HOME), which is where the dock and top
+# bar take the board's icon from.
+#
 # Then, in any project directory:  amd init project-name will initialise your tasks board"
 #
 set -euo pipefail
@@ -79,6 +83,52 @@ running() {
 }
 
 RESTART=""
+
+# The desktop shows an app's icon in its dock and top bar from the app's
+# launcher entry, matched by app id, not from the window. amdui's app id is
+# `amdui` (Tauri leaves GTK's as the program name unless enableGTKAppId is
+# set, which would also make every amdui window share one process), so the
+# entry is amdui.desktop. The icons come from the source tree: a release
+# download run outside a clone has none to install, and says so.
+install_launcher() {
+  local src data apps icons size
+  [ "$(uname -s)" = "Linux" ] && [ -x "${DIR}/amdui" ] || return 0
+  src="${SELF}/crates/amd-ui"
+  if [ ! -f "${src}/app-icon.svg" ]; then
+    printf 'No launcher for amdui: its icon is installed from a clone of the repository.\n' >&2
+    return 0
+  fi
+  data="${XDG_DATA_HOME:-${HOME}/.local/share}"
+  apps="${data}/applications"
+  icons="${data}/icons/hicolor"
+  mkdir -p "${apps}" "${icons}/scalable/apps"
+  cp "${src}/app-icon.svg" "${icons}/scalable/apps/amdui.svg"
+  # <size directory>:<generated file>, all made from app-icon.svg.
+  for size in 32x32:32x32 128x128:128x128 256x256:128x128@2x; do
+    mkdir -p "${icons}/${size%%:*}/apps"
+    cp "${src}/icons/${size#*:}.png" "${icons}/${size%%:*}/apps/amdui.png"
+  done
+  cat > "${apps}/amdui.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=agile-md
+GenericName=Kanban board
+Comment=The agile-md desktop board
+Exec="${DIR}/amdui"
+Icon=amdui
+Terminal=false
+Categories=Development;ProjectManagement;
+StartupWMClass=amdui
+EOF
+  # Caches some desktops read; harmless where they're not used or not there.
+  if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache -q -t "${icons}" 2>/dev/null || true
+  fi
+  if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database -q "${apps}" 2>/dev/null || true
+  fi
+  echo "Installed the amdui launcher -> ${apps}/amdui.desktop"
+}
 
 # Rust target triple for this machine — matches the assets published by
 # mrdoodles/rust-release (amd-<target>.zip).
@@ -171,6 +221,7 @@ echo "Installed amd -> ${DIR}/amd"
 if [ -f "${DIR}/amdui" ]; then
   chmod +x "${DIR}/amdui"
   echo "Installed amdui -> ${DIR}/amdui   (the desktop board)"
+  install_launcher
 fi
 case ":${PATH}:" in
   *":${DIR}:"*) ;;
