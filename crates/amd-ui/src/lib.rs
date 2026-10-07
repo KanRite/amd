@@ -862,6 +862,41 @@ mod tests {
         assert_eq!(renamed.message, "group-rename: Old \"New\"");
     }
 
+    /// Ticket 120: the Repository filter and fields hold the project's
+    /// declared repositories plus any a ticket names, so one that
+    /// `amd deregister` takes off the project leaves them, unless a ticket
+    /// still names it.
+    #[test]
+    fn a_repository_leaves_the_lists_when_undeclared_unless_a_ticket_names_it() {
+        let (_dir, project) = project();
+        let settings = project.repos[0].1.repo_root().join(".settings");
+        let listed = |p: &Project| -> Vec<String> {
+            p.summary()
+                .unwrap()
+                .ticket_repos
+                .into_iter()
+                .map(|r| r.name)
+                .collect()
+        };
+
+        std::fs::write(&settings, "commit = off\nrepos = site\n").unwrap();
+        assert_eq!(listed(&project), ["site"]);
+
+        std::fs::write(&settings, "commit = off\n").unwrap();
+        assert!(listed(&project).is_empty(), "undeclared and unnamed: gone");
+
+        let file = new_ticket(&project, "About the site");
+        let path = project.repos[0].1.root.join("backlog").join(&file);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("repository: \"\""), "{text}");
+        std::fs::write(
+            &path,
+            text.replace("repository: \"\"", "repository: \"site\""),
+        )
+        .unwrap();
+        assert_eq!(listed(&project), ["site"], "a ticket still names it");
+    }
+
     #[test]
     fn the_window_is_titled_after_its_project() {
         assert_eq!(window_title("fantastic-tools"), "fantastic-tools — amdui");

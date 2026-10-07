@@ -376,7 +376,7 @@ enum Cmd {
         #[arg(long, value_name = "NAME")]
         project: Option<String>,
         /// Take the named repository off the project's declared list, for
-        /// everyone (and off this machine's registry)
+        /// everyone (and off this machine's registry); same as `amd deregister`
         #[arg(long, value_name = "NAME", conflicts_with = "path")]
         remove: Option<String>,
     },
@@ -389,11 +389,18 @@ enum Cmd {
         #[arg(long)]
         all: bool,
     },
-    /// Remove a repository's *local* registration only — the project-wide
-    /// declaration is untouched, so it reappears greyed out, not gone
+    /// Take a repository off the project for everyone: off its declared list
+    /// (committed and pushed), so it leaves the repository lists unless a
+    /// ticket names it, and off this machine. One that's only registered here
+    /// just loses that. The clone itself is left alone
     Deregister {
         #[arg(value_name = "NAME")]
         name: String,
+        /// The project to take it off, when the folder holds several
+        /// (default: the board you're in, or the folder's current project
+        /// — asked to confirm, since that's a team-wide change)
+        #[arg(long, value_name = "NAME")]
+        project: Option<String>,
     },
     /// Link tickets together: both ends get the other in `related`
     Link {
@@ -620,13 +627,21 @@ fn run() -> Result<()> {
         remove,
     } = command
     {
-        let board = register_board(path.as_deref(), project.as_deref())?;
+        let board = register_board(path.as_deref(), project.as_deref(), remove.as_deref())?;
         agile_md::project_trust::check(&board)?;
         migrate_settings(&board)?;
         return match remove {
             Some(name) => cmd_unregister(&board, &name),
             None => cmd_register(&board, path.as_deref()),
         };
+    }
+    // `deregister` can take a repository off the project for everyone, so it
+    // gets the same check of which project (ticket 120).
+    if let Cmd::Deregister { name, project } = command {
+        let board = register_board(None, project.as_deref(), Some(&name))?;
+        agile_md::project_trust::check(&board)?;
+        migrate_settings(&board)?;
+        return cmd_deregister(&board, &name);
     }
     if let Cmd::Project { action } = command {
         return match action {
@@ -657,8 +672,7 @@ fn run() -> Result<()> {
             unreachable!("handled above")
         }
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
-        Cmd::Register { .. } => unreachable!("handled above"),
-        Cmd::Deregister { name } => cmd_deregister(&name),
+        Cmd::Register { .. } | Cmd::Deregister { .. } => unreachable!("handled above"),
         Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
         Cmd::New(args) => cmd_new(&board, args),
         Cmd::Board { tag } => cmd_ls(&board, "all", tag.as_deref()),
@@ -1290,8 +1304,13 @@ fn cmd_unregister(board: &Board, name: &str) -> Result<()> {
 /// whichever `.current-project` names — easy to get wrong, and the result
 /// is a team-wide declaration on the wrong project. So there it asks
 /// first, in a terminal, and refuses without one, naming the fixes.
-/// `--project` always says outright.
-fn register_board(path: Option<&str>, project: Option<&str>) -> Result<Board> {
+/// `--project` always says outright. `removing` is the repository being
+/// taken off (`deregister`, `register --remove`), which the question names.
+fn register_board(
+    path: Option<&str>,
+    project: Option<&str>,
+    removing: Option<&str>,
+) -> Result<Board> {
     let dir = agile_md::current_project::project_dir()?;
     let projects = agile_md::current_project::projects(&dir);
     if let Some(name) = project {
@@ -1315,32 +1334,42 @@ fn register_board(path: Option<&str>, project: Option<&str>) -> Result<Board> {
         .project()
         .map(str::to_string)
         .unwrap_or_else(|| agile_md::current_project::project_name(board.repo_root()));
-    let repo = match path {
-        Some(path) => PathBuf::from(path),
-        None => git::repo_root().ok_or_else(|| anyhow::anyhow!("not inside a git repository"))?,
+    let repo_name = match removing {
+        Some(name) => name.to_string(),
+        None => {
+            let repo = match path {
+                Some(path) => PathBuf::from(path),
+                None => git::repo_root()
+                    .ok_or_else(|| anyhow::anyhow!("not inside a git repository"))?,
+            };
+            repo.canonicalize()
+                .unwrap_or(repo)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        }
     };
-    let repo_name = repo
-        .canonicalize()
-        .unwrap_or(repo)
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
     let hint = projects
         .iter()
         .find(|p| p.name != current && repo_name.starts_with(&p.name))
         .map(|p| format!(" — did you mean --project {}?", p.name))
         .unwrap_or_default();
+    let (asking, refused, would) = match removing {
+        Some(_) => ("Take", "nothing deregistered", "taken off"),
+        None => ("Register", "nothing registered", "declared on"),
+    };
     if form::available() {
+        let preposition = if removing.is_some() { "off" } else { "with" };
         let question = format!(
-            "Register {repo_name} with project {current} (this folder's current project){hint}"
+            "{asking} {repo_name} {preposition} project {current} (this folder's current project){hint}"
         );
         if form::confirm(&question)? {
             return Ok(board);
         }
-        bail!("nothing registered");
+        bail!("{refused}");
     }
     bail!(
-        "{repo_name} would be declared on project '{current}', this folder's current project, \
+        "{repo_name} would be {would} project '{current}', this folder's current project, \
          and this folder holds {} projects — pass --project <name>, run it from \
          <name>-tickets, or `amd project use <name>` first{hint}",
         projects.len()
@@ -1402,13 +1431,27 @@ fn cmd_clone(board: &Board, name: Option<&str>, all: bool) -> Result<()> {
 /// Removes only the *local* registration — the project-wide declaration is
 /// untouched, so `name` goes back to showing greyed out in `amdui` rather
 /// than disappearing for the rest of the team.
-fn cmd_deregister(name: &str) -> Result<()> {
+/// `amd deregister <name>` (ticket 120). A repository the project declares
+/// comes off the project for everyone, exactly as `register --remove`: off the
+/// declared list, committed and pushed, so it leaves every teammate's
+/// repository filter and fields unless a ticket names it, and off this
+/// machine's registry. One that's only registered here (a project's own
+/// tickets or documents repository, say) just loses that registration. The
+/// clone is never touched.
+fn cmd_deregister(board: &Board, name: &str) -> Result<()> {
+    if board_settings::load(board)
+        .repos()
+        .iter()
+        .any(|r| r == name)
+    {
+        return cmd_unregister(board, name);
+    }
     let mut registry = Registry::load();
     if !registry.remove(name) {
-        bail!("'{name}' is not registered on this machine");
+        bail!("'{name}' is neither declared for this project nor registered on this machine");
     }
     registry.save()?;
-    println!("deregistered {name} on this machine (still declared for the project)");
+    println!("deregistered {name} on this machine");
     Ok(())
 }
 
@@ -1465,7 +1508,6 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::Log
         | Cmd::Templates { .. }
         | Cmd::Register { .. }
-        | Cmd::Deregister { .. }
         | Cmd::Clone { .. }
         | Cmd::WipLimit { .. }
         | Cmd::Group {
