@@ -112,9 +112,10 @@ fn committed(
 ) -> Result<SyncReport> {
     let ((), warning) =
         transition::with_auto_commit(board, verb, subject, detail, f).map_err(err)?;
+    // The status line says what the commit says, empty detail and all.
     Ok(report(
         board,
-        format!("{verb}: {subject} \"{detail}\""),
+        transition::commit_message(verb, subject, detail),
         warning,
     ))
 }
@@ -848,6 +849,18 @@ fn clone_into(project: &Project, name: &str) -> Result<Vec<String>> {
 mod tests {
     use super::*;
     use amd_ui_model::Column as UiColumn;
+
+    /// Ticket 117: the status line after a change matches its commit, with
+    /// no empty `""` when there is no detail.
+    #[test]
+    fn the_status_line_says_what_the_commit_says() {
+        let (_dir, project) = project();
+        let board = &project.repos[0].1;
+        let started = committed(board, "group-start", "Sprint 1", "", || Ok(())).unwrap();
+        assert_eq!(started.message, "group-start: Sprint 1");
+        let renamed = committed(board, "group-rename", "Old", "New", || Ok(())).unwrap();
+        assert_eq!(renamed.message, "group-rename: Old \"New\"");
+    }
 
     #[test]
     fn the_window_is_titled_after_its_project() {

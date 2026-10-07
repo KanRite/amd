@@ -81,7 +81,9 @@ pub fn with_auto_commit<T>(
 
 /// `verb: subject "detail"`, or `verb: subject` when there is no detail
 /// (`register`, `group start`, …), rather than ending in an empty `""`.
-fn commit_message(verb: &str, subject: &str, detail: &str) -> String {
+/// Public so a front end's own report of the change says what the commit
+/// says (ticket 117).
+pub fn commit_message(verb: &str, subject: &str, detail: &str) -> String {
     if detail.is_empty() {
         format!("{verb}: {subject}")
     } else {
