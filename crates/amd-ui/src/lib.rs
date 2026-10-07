@@ -120,8 +120,30 @@ fn committed(
 }
 
 #[tauri::command]
-async fn load_board() -> Result<amd_ui_model::Board> {
-    blocking(|| Project::open()?.summary()).await
+async fn load_board(window: tauri::WebviewWindow) -> Result<amd_ui_model::Board> {
+    titled(&window, blocking(|| Project::open()?.summary()).await)
+}
+
+/// A window's title for the project it shows: `<project> — amdui`, so two
+/// boards' windows can be told apart in the window switcher (ticket 116).
+fn window_title(project: &str) -> String {
+    match project.trim() {
+        "" => "amdui".to_string(),
+        project => format!("{project} — amdui"),
+    }
+}
+
+/// Titles `window` after the board it is about to show. Every command that
+/// hands the page a whole board goes through this, so the title follows a
+/// change of project too. Only cosmetic, so a failure to set it is ignored.
+fn titled(
+    window: &tauri::WebviewWindow,
+    board: Result<amd_ui_model::Board>,
+) -> Result<amd_ui_model::Board> {
+    if let Ok(board) = &board {
+        let _ = window.set_title(&window_title(&board.project));
+    }
+    board
 }
 
 /// What's on disk for the project on screen, summarised (ticket 091): the
@@ -663,15 +685,20 @@ async fn tasks_dir() -> Result<Option<String>> {
 /// directory, or the folder holding a project's repositories), and
 /// remembers it for a launch from outside any project.
 #[tauri::command]
-async fn set_tasks_dir(state: Tauri<'_, AppState>, path: String) -> Result<amd_ui_model::Board> {
+async fn set_tasks_dir(
+    window: tauri::WebviewWindow,
+    state: Tauri<'_, AppState>,
+    path: String,
+) -> Result<amd_ui_model::Board> {
     let writing = Arc::clone(&state.writing);
-    blocking(move || {
+    let board = blocking(move || {
         let _guard = writing
             .lock()
             .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
         show_from(Path::new(path.trim()))
     })
-    .await
+    .await;
+    titled(&window, board)
 }
 
 /// Switches to another project in the same folder (ticket 093): records
@@ -680,9 +707,13 @@ async fn set_tasks_dir(state: Tauri<'_, AppState>, path: String) -> Result<amd_u
 /// the file is what decides, not whichever tickets repository it was
 /// launched inside.
 #[tauri::command]
-async fn use_project(state: Tauri<'_, AppState>, name: String) -> Result<amd_ui_model::Board> {
+async fn use_project(
+    window: tauri::WebviewWindow,
+    state: Tauri<'_, AppState>,
+    name: String,
+) -> Result<amd_ui_model::Board> {
     let writing = Arc::clone(&state.writing);
-    blocking(move || {
+    let board = blocking(move || {
         let _guard = writing
             .lock()
             .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
@@ -708,7 +739,8 @@ async fn use_project(state: Tauri<'_, AppState>, name: String) -> Result<amd_ui_
             };
         })
     })
-    .await
+    .await;
+    titled(&window, board)
 }
 
 /// Moves the process to `path`, opens the project found from there, and
@@ -816,6 +848,13 @@ fn clone_into(project: &Project, name: &str) -> Result<Vec<String>> {
 mod tests {
     use super::*;
     use amd_ui_model::Column as UiColumn;
+
+    #[test]
+    fn the_window_is_titled_after_its_project() {
+        assert_eq!(window_title("fantastic-tools"), "fantastic-tools — amdui");
+        assert_eq!(window_title(""), "amdui");
+        assert_eq!(window_title("  "), "amdui");
+    }
 
     /// The page's "clone…" goes through amd-lib's own checks (ticket 108).
     /// A successful clone writes the machine's registry, so it's covered in
