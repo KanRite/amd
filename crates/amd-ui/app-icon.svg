@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <title>agile-md</title>
+  <!-- The board: a dark tile, as in amdui's dark theme (slate-900),
+       with a slate-700 edge so it stands out on a dark dock. -->
+  <rect x="72" y="72" width="880" height="880" rx="192" fill="#0f172a" stroke="#334155" stroke-width="16"/>
+  <!-- Three columns (slate-800). -->
+  <g fill="#1e293b">
+    <rect x="160" y="176" width="192" height="672" rx="40"/>
+    <rect x="416" y="176" width="192" height="672" rx="40"/>
+    <rect x="672" y="176" width="192" height="672" rx="40"/>
+  </g>
+  <!-- Cards: three waiting, two in progress, one done. Indigo is amdui's
+       default accent; the done card is teal. -->
+  <g fill="#6366f1">
+    <rect x="184" y="208" width="144" height="120" rx="28"/>
+    <rect x="184" y="360" width="144" height="120" rx="28"/>
+    <rect x="184" y="512" width="144" height="120" rx="28"/>
+  </g>
+  <g fill="#818cf8">
+    <rect x="440" y="208" width="144" height="120" rx="28"/>
+    <rect x="440" y="360" width="144" height="120" rx="28"/>
+  </g>
+  <rect x="696" y="208" width="144" height="120" rx="28" fill="#2dd4bf"/>
+</svg>
