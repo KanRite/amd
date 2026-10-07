@@ -20,6 +20,8 @@ no daemon, no database.
 
 ## Install
 
+Needs **git 2.29 or later** (`git --version`) on your `PATH`.
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v4/install.sh | bash
 ```

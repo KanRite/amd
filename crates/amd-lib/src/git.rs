@@ -457,13 +457,13 @@ pub fn ahead_behind(repo: &Path) -> Option<(u32, u32)> {
     }
 }
 
-/// Whether the last fetch was under `seconds` ago (`FETCH_HEAD`'s mtime), so
-/// a read right after another needn't go back to the network.
+/// Whether amd's last [`fetch`] was under `seconds` ago (its marker's
+/// mtime), so a read right after another needn't go back to the network.
 pub fn fetched_within(repo: &Path, seconds: u64) -> bool {
-    let Some(git_dir) = ask(repo, &["rev-parse", "--absolute-git-dir"]) else {
+    let Some(marker) = fetch_marker(repo) else {
         return false;
     };
-    std::fs::metadata(Path::new(&git_dir).join("FETCH_HEAD"))
+    std::fs::metadata(marker)
         .and_then(|meta| meta.modified())
         .ok()
         .and_then(|at| at.elapsed().ok())
@@ -526,17 +526,32 @@ pub fn reset_keep(repo: &Path, rev: &str) -> Result<()> {
     Ok(())
 }
 
-/// `git fetch origin`.
+/// `git fetch origin`, without writing `FETCH_HEAD` (ticket 118). That file
+/// belongs to `git pull`, which writes it and then reads it back: amdui
+/// fetching every 30 seconds made a pull that overlapped it fail with
+/// "Cannot fast-forward to multiple branches". amd only ever wanted it as a
+/// timestamp, so it records its own ([`fetched_within`]). Needs git 2.29.
 pub fn fetch(repo: &Path) -> Result<()> {
-    let (ok, detail) = run(Command::new("git")
-        .arg("-C")
-        .arg(repo)
-        .args(["fetch", "--quiet", "origin"]))
+    let (ok, detail) = run(Command::new("git").arg("-C").arg(repo).args([
+        "fetch",
+        "--quiet",
+        "--no-write-fetch-head",
+        "origin",
+    ]))
     .context("running git fetch")?;
     if !ok {
         bail!(failed("git fetch", &detail));
     }
+    // Only a timestamp: if it can't be written, the next read fetches again.
+    if let Some(marker) = fetch_marker(repo) {
+        let _ = std::fs::write(marker, b"");
+    }
     Ok(())
+}
+
+/// `<git dir>/amd-fetched`, touched after each [`fetch`].
+fn fetch_marker(repo: &Path) -> Option<PathBuf> {
+    ask(repo, &["rev-parse", "--absolute-git-dir"]).map(|dir| Path::new(&dir).join("amd-fetched"))
 }
 
 /// `git reset --hard <rev>` — throws away local commits and changes. Only
@@ -757,6 +772,31 @@ mod tests {
         git(dir, &["init", "-q"]);
         git(dir, &["config", "user.email", "t@t.co"]);
         git(dir, &["config", "user.name", "t"]);
+    }
+
+    /// Ticket 118: amd's fetch leaves FETCH_HEAD to `git pull`, and keeps
+    /// its own record of when it fetched.
+    #[test]
+    fn fetch_leaves_fetch_head_alone_and_marks_the_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("origin.git");
+        std::fs::create_dir_all(&bare).unwrap();
+        git(&bare, &["init", "-q", "--bare"]);
+        let working = dir.path().join("working");
+        init_repo(&working);
+        git(
+            &working,
+            &["remote", "add", "origin", bare.to_str().unwrap()],
+        );
+        std::fs::write(working.join("README.md"), "hello\n").unwrap();
+        commit_all(&working, "seed").unwrap();
+        push(&working).unwrap();
+
+        assert!(!fetched_within(&working, 60), "never fetched yet");
+        fetch(&working).unwrap();
+        assert!(!working.join(".git/FETCH_HEAD").exists());
+        assert!(working.join(".git/amd-fetched").exists());
+        assert!(fetched_within(&working, 60));
     }
 
     #[test]
