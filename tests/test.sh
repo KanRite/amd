@@ -687,10 +687,10 @@ assert "amd wip-limit is committed" \
     && grep -qx 'wip-limit = 3' .settings && git log -1 --format=%s | grep -q '^settings: wip-limit'"
 assert "amd register declares the repository in the tickets .settings, committed" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' register '${st}/code' >/dev/null 2>&1 \
-    && grep -q '^repos = .*code' .settings && git log -1 --format=%s | grep -q '^register: code'"
+    && grep -q '^repos = .*code' .settings && git log -1 --format=%s | grep -qx 'register: code'"
 assert "amd register --remove undeclares it for everyone, committed" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' register --remove code 2>&1 | grep -q 'no longer part of the project' \
-    && ! grep -q '^repos = .*code' .settings && git log -1 --format=%s | grep -q '^unregister: code' && test -d '${st}/code'"
+    && ! grep -q '^repos = .*code' .settings && git log -1 --format=%s | grep -qx 'unregister: code' && test -d '${st}/code'"
 assert "...and refuses a repository that isn't declared" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' register --remove nowhere 2>&1 | grep -q \"nowhere isn't declared\""
 rm -rf "${st}"

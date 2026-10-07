@@ -75,8 +75,18 @@ pub fn with_auto_commit<T>(
 ) -> Result<(T, Option<String>)> {
     let before = snapshot(board);
     let result = mutate()?;
-    let warning = commit_since(board, before, &format!("{verb}: {subject} \"{detail}\""))?;
+    let warning = commit_since(board, before, &commit_message(verb, subject, detail))?;
     Ok((result, warning))
+}
+
+/// `verb: subject "detail"`, or `verb: subject` when there is no detail
+/// (`register`, `group start`, …), rather than ending in an empty `""`.
+fn commit_message(verb: &str, subject: &str, detail: &str) -> String {
+    if detail.is_empty() {
+        format!("{verb}: {subject}")
+    } else {
+        format!("{verb}: {subject} \"{detail}\"")
+    }
 }
 
 /// The repository's dirty paths as they stand, when auto-commit is on for
@@ -408,6 +418,18 @@ pub fn save_text(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn commit_message_leaves_out_an_empty_detail() {
+        assert_eq!(
+            commit_message("doing", "007", "Fix the thing"),
+            "doing: 007 \"Fix the thing\""
+        );
+        assert_eq!(
+            commit_message("register", "typofix", ""),
+            "register: typofix"
+        );
+    }
 
     fn board_with(dir: &std::path::Path, name: &str, column: Column) -> (Board, Task) {
         let board = Board::at(dir.join("tasks"));
