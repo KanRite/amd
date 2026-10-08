@@ -1229,6 +1229,16 @@ assert "amd log renders a transition with a real sha" \
   bash -c "cd '${commit_repo}' && '${AMD}' log | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}  add .*[0-9a-f]{7,}\$'"
 rm -rf "${commit_repo}"
 
+# Ticket 142: a board with no remote commits, and doesn't try to push.
+local_repo="$(mktemp -d)"
+( cd "${local_repo}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init localonly --local-only >/dev/null 2>&1 )
+assert "with no remote, a change is committed and nothing is pushed or complained about" \
+  bash -c "cd '${local_repo}' && out=\$('${AMD}' new 'Local only' --no-edit 2>&1) \
+    && ! printf '%s' \"\$out\" | grep -qiE 'fatal|could not push' \
+    && git log -1 --pretty=%s | grep -q 'Local only'"
+rm -rf "${local_repo}"
+
 echo "WIP limits (doing only, ticket 083):"
 wip_repo="$(mktemp -d)"
 ( cd "${wip_repo}" && git init -q && git config user.email t@t.co && git config user.name t \
