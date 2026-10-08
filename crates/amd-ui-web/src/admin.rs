@@ -699,7 +699,7 @@ fn TagsAdmin() -> impl IntoView {
                     disabled=move || busy.get()
                     on:change=move |ev| set_only(event_target_checked(&ev))
                 />
-                "Only listed tags"
+                "Prevent arbitrary tags"
             </label>
             {move || note.get().map(|n| view! { <p class="text-sm">{n}</p> })}
             {move || {
@@ -730,7 +730,7 @@ fn TagsAdmin() -> impl IntoView {
                     })
             }}
             <p class="text-xs text-slate-500">
-                "Tags are always UPPERCASE. A tag can only be removed once no ticket on the project's boards carries it. With \"Only listed tags\" on, the editor offers just these; otherwise any tag can be typed. Saved with the tickets, in .settings, and committed and pushed."
+                "Tags are always UPPERCASE. A tag can only be removed once no ticket on the project's boards carries it. With \"Prevent arbitrary tags\" on (the default), only these tags can be used; off, any tag can be typed, and ones not on the list are flagged. With no list, any tag goes. Saved with the tickets, in .settings, and committed and pushed."
             </p>
         </section>
     }

@@ -104,8 +104,9 @@ rest:
 **Tags** are always UPPERCASE, so they stand out. A project can keep a tag
 list (Admin in the desktop board, or `amd tags`), saved in the tickets
 repository's `.settings`. The editor then offers it as a sorted dropdown, and
-`amd new` warns about a tag that isn't on it. Turn on "Only listed tags"
-(`amd tags only on`) to refuse those instead. A tag can only be removed from
+a tag that isn't on it is refused: "Prevent arbitrary tags" is on by
+default. Turn it off (`amd tags only off`) to allow other tags, which `amd
+new` then only warns about and the editor shows dashed. A tag can only be removed from
 the list once no ticket carries it. Matching ignores case, so a ticket written
 before tags were uppercase still matches.
 

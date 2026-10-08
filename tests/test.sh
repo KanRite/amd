@@ -584,8 +584,12 @@ assert "...refuses one already listed, ignoring case" \
   bash -c "cd '${tgb}' && ! env ${tg_env} '${AMD}' tags add Future 2>/dev/null"
 assert "...and one that isn't one word" \
   bash -c "cd '${tgb}' && ! env ${tg_env} '${AMD}' tags add 'two words' 2>/dev/null"
-assert "amd new saves tags in UPPERCASE and warns about an unlisted one" \
-  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' new 'Tagged' -t future -t misc --no-edit 2>&1 | grep -q \"not on the project's tag list: MISC\" \
+assert "arbitrary tags are prevented by default once there's a list" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags | grep -q 'only listed tags: on' \
+    && ! env ${tg_env} '${AMD}' new 'Prevented' -t misc --no-edit 2>/dev/null && ! ls tasks/backlog/*-prevented.md 2>/dev/null"
+assert "amd new saves tags in UPPERCASE and, with arbitrary tags allowed, warns about an unlisted one" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags only off | grep -q 'only listed tags: off' \
+    && env ${tg_env} '${AMD}' new 'Tagged' -t future -t misc --no-edit 2>&1 | grep -q \"not on the project's tag list: MISC\" \
     && grep -q '^tags: \[FUTURE,MISC\]' tasks/backlog/*-tagged.md"
 assert "amd tag matches without regard to case" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tag future --plain | grep -q 'Tagged'"

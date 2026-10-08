@@ -473,10 +473,12 @@ impl BoardSettings {
         true
     }
 
-    /// Whether only listed tags may be put on a ticket (`tags-only`), off
-    /// unless set. Has no effect while the list is empty.
+    /// Whether only listed tags may be put on a ticket (`tags-only`):
+    /// "Prevent arbitrary tags". **On unless set to off** (ticket 141), so a
+    /// project's list is its vocabulary from the moment it has one. Has no
+    /// effect while the list is empty: then any tag goes.
     pub fn only_listed_tags(&self) -> bool {
-        self.config.get(TAGS_ONLY).is_some_and(|value| {
+        self.config.get(TAGS_ONLY).is_none_or(|value| {
             matches!(
                 value.trim().to_ascii_lowercase().as_str(),
                 "1" | "on" | "true"
@@ -673,6 +675,11 @@ mod tests {
 
         settings.add_tag("FUTURE").unwrap();
         assert_eq!(settings.check_tags(&tags(&["future"])).unwrap(), None);
+        // Arbitrary tags are prevented by default (ticket 141)...
+        assert!(settings.only_listed_tags());
+        assert!(settings.check_tags(&tags(&["misc"])).is_err());
+        // ...and, allowed, an unlisted one only warns.
+        settings.set_only_listed_tags(false);
         let warning = settings
             .check_tags(&tags(&["future", "misc"]))
             .unwrap()

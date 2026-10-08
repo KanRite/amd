@@ -1333,8 +1333,8 @@ enum TagsAction {
         #[arg(value_name = "TAG")]
         tag: String,
     },
-    /// Allow only listed tags on tickets (`on`), or any tag with a warning
-    /// for unlisted ones (`off`, the default)
+    /// Prevent arbitrary tags: allow only listed tags on tickets (`on`, the
+    /// default), or any tag with a warning for unlisted ones (`off`)
     Only {
         #[arg(value_name = "on|off")]
         state: String,
@@ -1368,9 +1368,9 @@ fn cmd_tags(board: &Board, action: Option<TagsAction>) -> Result<()> {
             }
             if !listed.is_empty() {
                 let only = if settings.only_listed_tags() {
-                    "on"
+                    "on (arbitrary tags are prevented)"
                 } else {
-                    "off"
+                    "off (arbitrary tags are allowed, with a warning)"
                 };
                 println!("only listed tags: {only}");
             }
