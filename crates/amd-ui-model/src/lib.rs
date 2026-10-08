@@ -10,6 +10,7 @@ pub mod epic;
 pub mod rich;
 pub mod ticket;
 pub mod wip;
+pub mod zoom;
 
 /// A board column. Each one is a directory under `tasks/`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
