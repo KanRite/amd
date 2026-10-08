@@ -1220,6 +1220,15 @@ assert "amd group empty commits every ticket it moves in one commit" \
     && [ \$((after - before)) -eq 1 ] \
     && git show --stat --pretty=format: HEAD | grep -q '001-first-ticket.md' \
     && git show --stat --pretty=format: HEAD | grep -q '002-second-ticket.md'"
+assert "amd link commits both ends of the relation in one commit (ticket 054)" \
+  bash -c "cd '${commit_repo}' && before=\$(git rev-list --count HEAD) \
+    && '${AMD}' link 1 2 >/dev/null \
+    && after=\$(git rev-list --count HEAD) \
+    && [ \$((after - before)) -eq 1 ] \
+    && [ \"\$(git show --name-only --pretty=format: HEAD | grep -c .)\" -eq 2 ] \
+    && git show --name-only --pretty=format: HEAD | grep -q '001-first-ticket.md' \
+    && git show --name-only --pretty=format: HEAD | grep -q '002-second-ticket.md' \
+    && git log -1 --pretty=%s | grep -q '^link: 001 -> 002'"
 assert "amd log renders a transition with a real sha" \
   bash -c "cd '${commit_repo}' && '${AMD}' log | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}  add .*[0-9a-f]{7,}\$'"
 rm -rf "${commit_repo}"
