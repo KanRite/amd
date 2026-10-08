@@ -327,6 +327,20 @@ redundant. Their history is in git if it is ever wanted again.
   exist any more, this replaced it. `amd abandon` also deletes the ticket's
   branch if it's still empty, since a ticket can be abandoned from `todo/`
   before real work starts.
+- **Tags are UPPERCASE and can come from a project list** (ticket 122).
+  Every writer stores them uppercase (`task::normalize_tag(s)`: `Draft`,
+  `apply_edit`, `set_text`), and every match ignores case
+  (`Task::has_tag`, `card_visible`), so older lowercase tickets still
+  match. The project's list is `tags` in the tickets `.settings`
+  (`board_settings::{tags, add_tag, remove_tag}`), with `tags-only` to
+  refuse unlisted tags (`check_tags`: a warning, or an error when on).
+  `model::remove_unused_tag` refuses a tag any ticket on the project's
+  boards carries (`model::tag_counts`, archive excluded), so removing one
+  never changes a ticket. CLI: `amd tags [add|remove|only on|off]`, and
+  `amd new` warns or refuses. amdui: Admin's Tags section (add form,
+  remove-unused dropdown, the switch), the editor's `TagPicker`, and
+  `save_ticket` checks the list; `Board.tags`/`tags_only` carry it to the
+  page.
 - **Tag filtering**: `amd tag <tag>` lists every ticket carrying `<tag>`,
   across every column, via `Board::tasks_tagged()`/`Task::has_tag()`. Every
   listing form also takes `--tag <tag>` to narrow it down: `amd board`,

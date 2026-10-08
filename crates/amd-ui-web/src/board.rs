@@ -867,7 +867,7 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                     .into_iter()
                     .map(|tag| {
                         view! {
-                            <span class="rounded bg-accent-100 px-1.5 text-accent-800 dark:bg-accent-900 dark:text-accent-200">
+                            <span class="rounded bg-accent-100 px-1.5 uppercase text-accent-800 dark:bg-accent-900 dark:text-accent-200">
                                 {tag}
                             </span>
                         }

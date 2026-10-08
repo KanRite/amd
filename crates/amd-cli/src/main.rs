@@ -240,6 +240,12 @@ enum Cmd {
         #[arg(value_name = "TAG")]
         tag: String,
     },
+    /// The project's tag list: with no action, every listed tag and how many
+    /// tickets carry it. Tags are always UPPERCASE
+    Tags {
+        #[command(subcommand)]
+        action: Option<TagsAction>,
+    },
     /// Import tickets from an existing tasks directory tree: status kept,
     /// ids renumbered, links remapped within the batch, same-titled
     /// tickets flagged DUPLICATE
@@ -664,6 +670,7 @@ fn run() -> Result<()> {
         Cmd::Board { tag } => cmd_ls(&board, "all", tag.as_deref()),
         Cmd::Ls { column, tag } => cmd_ls(&board, &column, tag.as_deref()),
         Cmd::Tag { tag } => render::named(&format!("tag: {tag}"), board.tasks_tagged(&tag)?, None),
+        Cmd::Tags { action } => cmd_tags(&board, action),
         Cmd::Import { path, dry_run } => cmd_import(&board, &path, dry_run),
         Cmd::Backlog { task, tag } => cmd_destination(
             &board,
@@ -1260,6 +1267,105 @@ fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// `amd tags` (ticket 122): the CLI side of Admin's Tags section.
+#[derive(Subcommand, Debug)]
+enum TagsAction {
+    /// Add a tag to the project's list, in UPPERCASE
+    Add {
+        #[arg(value_name = "TAG")]
+        tag: String,
+    },
+    /// Take a tag off the list. Only an unused tag can go: one no ticket on
+    /// any of the project's boards carries
+    Remove {
+        #[arg(value_name = "TAG")]
+        tag: String,
+    },
+    /// Allow only listed tags on tickets (`on`), or any tag with a warning
+    /// for unlisted ones (`off`, the default)
+    Only {
+        #[arg(value_name = "on|off")]
+        state: String,
+    },
+}
+
+/// Lists the project's tags with how many tickets on its boards carry each,
+/// or changes the list. Every change is committed like any other setting.
+fn cmd_tags(board: &Board, action: Option<TagsAction>) -> Result<()> {
+    let repos = agile_md::model::load_repos()?;
+    let boards: Vec<&Board> = repos.repos.iter().map(|r| &r.board).collect();
+    match action {
+        None => {
+            let settings = board_settings::load(board);
+            let listed = settings.tags();
+            let counts = agile_md::model::tag_counts(&boards)?;
+            if listed.is_empty() {
+                println!("no tag list for this project; `amd tags add <TAG>` starts one");
+            }
+            for tag in &listed {
+                let n = counts.get(tag).copied().unwrap_or(0);
+                println!("{tag}\t{n}{}", if n == 0 { "\tunused" } else { "" });
+            }
+            let unlisted: Vec<String> = counts
+                .iter()
+                .filter(|(tag, _)| !listed.contains(tag))
+                .map(|(tag, n)| format!("{tag} ({n})"))
+                .collect();
+            if !listed.is_empty() && !unlisted.is_empty() {
+                println!("in use but not listed: {}", unlisted.join(", "));
+            }
+            if !listed.is_empty() {
+                let only = if settings.only_listed_tags() {
+                    "on"
+                } else {
+                    "off"
+                };
+                println!("only listed tags: {only}");
+            }
+            Ok(())
+        }
+        Some(TagsAction::Add { tag }) => {
+            let mut added = String::new();
+            with_auto_commit(board, "tags", "add", &task::normalize_tag(&tag), || {
+                let mut settings = board_settings::load(board);
+                added = settings.add_tag(&tag)?;
+                settings.save(board)
+            })?;
+            println!("added {added}");
+            Ok(())
+        }
+        Some(TagsAction::Remove { tag }) => {
+            let mut removed = String::new();
+            with_auto_commit(board, "tags", "remove", &task::normalize_tag(&tag), || {
+                removed = agile_md::model::remove_unused_tag(board, &boards, &tag)?;
+                Ok(())
+            })?;
+            println!("removed {removed}");
+            Ok(())
+        }
+        Some(TagsAction::Only { state }) => {
+            let on = match state.trim().to_ascii_lowercase().as_str() {
+                "on" => true,
+                "off" => false,
+                other => bail!("'{other}': say `on` or `off`"),
+            };
+            with_auto_commit(
+                board,
+                "tags",
+                "only listed",
+                if on { "on" } else { "off" },
+                || {
+                    let mut settings = board_settings::load(board);
+                    settings.set_only_listed_tags(on);
+                    settings.save(board)
+                },
+            )?;
+            println!("only listed tags: {}", if on { "on" } else { "off" });
+            Ok(())
+        }
+    }
+}
+
 /// `amd register --remove <name>`: takes a repository off the project's
 /// declared list for everyone, committed and pushed, and off this machine's
 /// registry if it's there. The clone itself is left alone.
@@ -1461,6 +1567,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         Cmd::Board { .. }
         | Cmd::Ls { .. }
         | Cmd::Tag { .. }
+        | Cmd::Tags { action: None }
         | Cmd::Show { .. }
         | Cmd::Log
         | Cmd::Templates { .. }
@@ -1608,11 +1715,23 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         args.related
     };
 
+    // Offered from the project's tag list when it has one, else from the
+    // tags already in use (ticket 122). Saved in uppercase either way.
+    let listed = board_settings::load(board).tags();
     let tags = if full_form {
-        form::tags(&args.tags.join(", "), board.tags()?)?
+        let known = if listed.is_empty() {
+            board.tags()?
+        } else {
+            listed
+        };
+        form::tags(&args.tags.join(", "), known)?
     } else {
         args.tags
     };
+    let tags = task::normalize_tags(&tags);
+    if let Some(warning) = board_settings::load(board).check_tags(&tags)? {
+        eprintln!("amd: {warning}");
+    }
 
     // Fields the template itself asks for: `{{ extra.owner }}` becomes a
     // question, so a template can't reference a value nobody collected.

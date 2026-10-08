@@ -70,7 +70,6 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
     let fm = parse_frontmatter(&content);
     let has_frontmatter = RwSignal::new(ticket::split(&content).frontmatter.is_some());
     let fields = RwSignal::new(Fields::from(&fm));
-    let tags_text = RwSignal::new(fm.tags.join(", "));
     let id = RwSignal::new(fm.id);
     let body_touched = RwSignal::new(false);
     let dirty = RwSignal::new(false);
@@ -133,7 +132,6 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
             let md = text.get_untracked();
             let fm = parse_frontmatter(&md);
             has_frontmatter.set(ticket::split(&md).frontmatter.is_some());
-            tags_text.set(fm.tags.join(", "));
             id.set(fm.id.clone());
             fields.set(Fields::from(&fm));
             body_touched.set(false);
@@ -341,20 +339,10 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                             {BRANCH_TYPES.map(|t| view! { <option value=t>{t}</option> }).collect_view()}
                         </select>
                     </label>
-                    <label class=label>
-                        "Tags (comma separated)"
-                        <input
-                            type="text"
-                            class=input
-                            prop:value=move || tags_text.get()
-                            on:input=move |ev| {
-                                let value = event_target_value(&ev);
-                                fields.update(|f| f.tags = ticket::parse_tags(&value));
-                                tags_text.set(value);
-                                refresh_dirty();
-                            }
-                        />
-                    </label>
+                    <div class=label>
+                        "Tags"
+                        <TagPicker fields on_change=refresh_dirty class=input />
+                    </div>
                     <label class=label>
                         "Points"
                         <select
@@ -767,6 +755,219 @@ fn Toolbar(on_change: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoView
                     }
                 />
             </Show>
+        </div>
+    }
+}
+
+/// The tags field (ticket 122): the ticket's tags as chips, each with a ×
+/// to take it off, and a box to add one that offers the project's listed
+/// tags (or, with no list, every tag in use), sorted and narrowed as you
+/// type. Tags are UPPERCASE. With "Only listed tags" on, only a listed tag
+/// can be added; otherwise a new one can be typed and added with Enter. A
+/// tag that isn't on the list is shown dashed.
+#[component]
+fn TagPicker(
+    fields: RwSignal<Fields>,
+    on_change: impl Fn() + Copy + Send + Sync + 'static,
+    class: &'static str,
+) -> impl IntoView {
+    let ctx = Ctx::get();
+    let open = RwSignal::new(false);
+    let cursor = RwSignal::new(0usize);
+    let typed = RwSignal::new(String::new());
+    let note = RwSignal::new(None::<String>);
+    let current = move || fields.with(|f| f.tags.clone());
+    let listed = move || {
+        ctx.board.with(|b| {
+            b.as_ref()
+                .map(|b| {
+                    b.tags
+                        .iter()
+                        .filter(|t| t.listed)
+                        .map(|t| t.name.clone())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        })
+    };
+    // What's offered: the list, or with no list the tags in use.
+    let known = move || {
+        let list = listed();
+        if !list.is_empty() {
+            return list;
+        }
+        ctx.board.with(|b| {
+            b.as_ref()
+                .map(|b| b.tags.iter().map(|t| t.name.clone()).collect::<Vec<_>>())
+                .unwrap_or_default()
+        })
+    };
+    let only =
+        move || ctx.board.with(|b| b.as_ref().is_some_and(|b| b.tags_only)) && !listed().is_empty();
+    let options = move || {
+        let query = typed.get().trim().to_uppercase();
+        let have: Vec<String> = current().iter().map(|t| t.to_uppercase()).collect();
+        known()
+            .into_iter()
+            .filter(|t| !have.contains(t) && (query.is_empty() || t.contains(&query)))
+            .collect::<Vec<_>>()
+    };
+    let add = move |tag: String| {
+        let tag = tag.trim().to_uppercase();
+        if tag.is_empty() {
+            return;
+        }
+        if tag.contains(|c: char| c.is_whitespace() || matches!(c, ',' | '[' | ']' | '"' | '\'')) {
+            note.set(Some("A tag is one word.".into()));
+            return;
+        }
+        if only() && !listed().contains(&tag) {
+            note.set(Some(format!(
+                "{tag} isn't on the project's tag list, and only listed tags can be used."
+            )));
+            return;
+        }
+        fields.update(|f| {
+            if !f.tags.iter().any(|t| t.to_uppercase() == tag) {
+                f.tags.push(tag);
+            }
+        });
+        typed.set(String::new());
+        note.set(None);
+        cursor.set(0);
+        on_change();
+    };
+    let take_off = move |tag: String| {
+        fields.update(|f| f.tags.retain(|t| *t != tag));
+        on_change();
+    };
+
+    view! {
+        <div class="flex flex-col gap-1">
+            <ul class="flex flex-wrap gap-1" aria-label="This ticket's tags">
+                {move || {
+                    let list = listed();
+                    current()
+                        .into_iter()
+                        .map(|tag| {
+                            let off_list = !list.is_empty() && !list.contains(&tag.to_uppercase());
+                            let style = if off_list {
+                                "border border-dashed border-accent-400"
+                            } else {
+                                "bg-accent-100 dark:bg-accent-900"
+                            };
+                            let title = if off_list { "Not on the project's tag list" } else { "" };
+                            let label = format!("Remove tag {}", tag.to_uppercase());
+                            let gone = tag.clone();
+                            view! {
+                                <li
+                                    class=format!("flex items-center gap-1 rounded px-1.5 text-sm uppercase text-accent-800 dark:text-accent-200 {style}")
+                                    title=title
+                                >
+                                    {tag}
+                                    <button
+                                        type="button"
+                                        class="text-slate-500 hover:text-red-600"
+                                        aria-label=label
+                                        on:click=move |_| take_off(gone.clone())
+                                    >
+                                        "×"
+                                    </button>
+                                </li>
+                            }
+                        })
+                        .collect_view()
+                }}
+            </ul>
+            <div class="relative">
+                <input
+                    type="text"
+                    class=format!("{class} uppercase")
+                    role="combobox"
+                    aria-label="Add a tag"
+                    aria-expanded=move || open.get().to_string()
+                    autocomplete="off"
+                    placeholder=move || if only() { "Add a listed tag" } else { "Add a tag" }
+                    prop:value=move || typed.get()
+                    on:focus=move |_| {
+                        cursor.set(0);
+                        open.set(true);
+                    }
+                    on:blur=move |_| open.set(false)
+                    on:input=move |ev| {
+                        typed.set(event_target_value(&ev));
+                        note.set(None);
+                        cursor.set(0);
+                        open.set(true);
+                    }
+                    on:keydown=move |ev| {
+                        let shown = options();
+                        match ev.key().as_str() {
+                            "ArrowDown" => {
+                                ev.prevent_default();
+                                open.set(true);
+                                cursor.update(|c| *c = (*c + 1).min(shown.len().saturating_sub(1)));
+                            }
+                            "ArrowUp" => {
+                                ev.prevent_default();
+                                cursor.update(|c| *c = c.saturating_sub(1));
+                            }
+                            "Enter" => {
+                                ev.prevent_default();
+                                let exact = typed.get_untracked().trim().to_uppercase();
+                                match shown.get(cursor.get_untracked()) {
+                                    Some(choice) if open.get_untracked() && !shown.contains(&exact) => add(choice.clone()),
+                                    _ => add(exact),
+                                }
+                            }
+                            "Escape" if open.get_untracked() => {
+                                ev.prevent_default();
+                                ev.stop_propagation();
+                                open.set(false);
+                            }
+                            _ => {}
+                        }
+                    }
+                />
+                <Show when=move || open.get() && !options().is_empty()>
+                    <ul
+                        role="listbox"
+                        class="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded border border-slate-300 bg-white py-1 text-sm shadow-lg dark:border-slate-600 dark:bg-slate-800"
+                    >
+                        {move || {
+                            options()
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, tag)| {
+                                    let chosen = tag.clone();
+                                    view! {
+                                        <li
+                                            role="option"
+                                            aria-selected=move || (cursor.get() == i).to_string()
+                                            class=move || {
+                                                let base = "cursor-pointer px-2 py-1";
+                                                if cursor.get() == i {
+                                                    format!("{base} bg-accent-600 text-white")
+                                                } else {
+                                                    format!("{base} hover:bg-slate-100 dark:hover:bg-slate-700")
+                                                }
+                                            }
+                                            // Before the input's blur, so the click lands.
+                                            on:mousedown=move |ev| {
+                                                ev.prevent_default();
+                                                add(chosen.clone());
+                                            }
+                                        >
+                                            {tag}
+                                        </li>
+                                    }
+                                })
+                                .collect_view()
+                        }}
+                    </ul>
+                </Show>
+            </div>
+            {move || note.get().map(|n| view! { <p class="text-xs text-red-600 dark:text-red-400">{n}</p> })}
         </div>
     }
 }

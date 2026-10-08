@@ -189,6 +189,24 @@ pub struct Board {
     /// Who's using the board, by git `user.name`: the picker's "Me".
     #[serde(default)]
     pub me: Option<String>,
+    /// The project's tags (ticket 122): every listed tag, and every tag in
+    /// use on its boards, each with how many tickets carry it. Sorted;
+    /// always UPPERCASE.
+    #[serde(default)]
+    pub tags: Vec<TagUse>,
+    /// Only listed tags may be put on a ticket (the project's `tags-only`).
+    #[serde(default)]
+    pub tags_only: bool,
+}
+
+/// One of a project's tags and how much it's used.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TagUse {
+    pub name: String,
+    /// Tickets carrying it, across the project's boards (not the archive).
+    pub count: usize,
+    /// On the project's tag list (Admin), as opposed to only in use.
+    pub listed: bool,
 }
 
 /// A repository tickets can be about.
@@ -634,6 +652,8 @@ mod assigned_tests {
             ticket_repos: Vec::new(),
             users: Vec::new(),
             me: None,
+            tags: Vec::new(),
+            tags_only: false,
         };
         board.epics.push(Epic {
             repo: String::new(),

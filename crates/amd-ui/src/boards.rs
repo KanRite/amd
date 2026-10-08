@@ -155,6 +155,8 @@ impl Project {
             .filter(|p| !p.trim().is_empty())
             .unwrap_or_else(|| own_name.clone());
         let ticket_repos = self.ticket_repos(&columns, &epics);
+        let settings = board_settings::load(&self.repos[0].1);
+        let tags = self.tag_uses(&settings)?;
         Ok(ui::Board {
             project,
             tasks_dir: self.repos[0].1.root.display().to_string(),
@@ -165,7 +167,31 @@ impl Project {
             ticket_repos,
             users: board_settings::load(&self.repos[0].1).user_names(),
             me: agile_md::git::config(self.repos[0].1.repo_root(), "user.name"),
+            tags,
+            tags_only: settings.only_listed_tags(),
         })
+    }
+
+    /// Every board of the project, the tickets repository's first.
+    pub fn boards(&self) -> Vec<&Board> {
+        self.repos.iter().map(|(_, board)| board).collect()
+    }
+
+    /// The project's listed tags and the tags in use on its boards, with
+    /// counts (ticket 122).
+    fn tag_uses(&self, settings: &board_settings::BoardSettings) -> Result<Vec<ui::TagUse>> {
+        let counts = agile_md::model::tag_counts(&self.boards()).map_err(err)?;
+        let listed = settings.tags();
+        let mut names: std::collections::BTreeSet<String> = listed.iter().cloned().collect();
+        names.extend(counts.keys().cloned());
+        Ok(names
+            .into_iter()
+            .map(|name| ui::TagUse {
+                count: counts.get(&name).copied().unwrap_or(0),
+                listed: listed.contains(&name),
+                name,
+            })
+            .collect())
     }
 
     /// What the repository filter and fields offer (tickets 101/107): the

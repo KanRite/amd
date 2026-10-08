@@ -69,6 +69,8 @@ amd abandon 1                     # take it off the board, into tasks/archive/ â
                                    # delete its branch too, if it's still empty
 amd link    1 3                   # relate two tickets
 amd tag     urgent                # list every ticket carrying a tag, across every column
+amd tags                          # the project's tag list, with how many tickets carry each
+amd tags add future               # add a tag (saved as FUTURE); `amd tags remove` takes an unused one off
 amd todo    --tag urgent          # any listing form narrows to a tag: board, ls, a
                                    # destination verb, or an epic by name
 amd lock    1                     # claim a ticket so someone else's edits and moves
@@ -94,8 +96,16 @@ rest:
 | `branch-name` | automatic | `<branch-type>/<title>`, empty without a branch type |
 | `parent`      | optional | the ticket this sits under, any depth |
 | `related`     | optional | ids of tickets this depends on |
-| `tags`        | optional | free-form |
+| `tags`        | optional | always UPPERCASE; from the project's tag list if it has one |
 | `created`     | automatic | the date |
+
+**Tags** are always UPPERCASE, so they stand out. A project can keep a tag
+list (Admin in the desktop board, or `amd tags`), saved in the tickets
+repository's `.settings`. The editor then offers it as a sorted dropdown, and
+`amd new` warns about a tag that isn't on it. Turn on "Only listed tags"
+(`amd tags only on`) to refuse those instead. A tag can only be removed from
+the list once no ticket carries it. Matching ignores case, so a ticket written
+before tags were uppercase still matches.
 
 **The branch type is what makes a ticket a piece of code work**, and it's empty
 by default. A ticket without one is still a ticket â€” a rota, an approval, a

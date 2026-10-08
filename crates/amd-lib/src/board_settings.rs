@@ -94,6 +94,8 @@ const AUTO_COMMIT: &str = "commit";
 const USERS: &str = "users";
 const SYNC: &str = "sync";
 const TICKET_NUMBERING: &str = "ticket-numbering";
+const TAGS: &str = "tags";
+const TAGS_ONLY: &str = "tags-only";
 
 /// One person on the project: git's own `Name <email>` identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -428,6 +430,85 @@ impl BoardSettings {
         Ok(true)
     }
 
+    /// The project's tag list (ticket 122): uppercase, sorted. Empty when
+    /// the project hasn't defined one, and then any tag goes.
+    pub fn tags(&self) -> Vec<String> {
+        let mut tags = crate::task::normalize_tags(&crate::task::parse_list(
+            self.config.get(TAGS).unwrap_or(""),
+        ));
+        tags.sort();
+        tags
+    }
+
+    /// Adds a tag to the list, in UPPERCASE, and returns it as stored.
+    /// Refused if it isn't one word, or is already listed (ignoring case).
+    pub fn add_tag(&mut self, tag: &str) -> Result<String> {
+        let tag = crate::task::normalize_tag(tag);
+        crate::task::validate_tag(&tag)?;
+        let mut tags = self.tags();
+        if tags.contains(&tag) {
+            bail!("{tag} is already a tag");
+        }
+        tags.push(tag.clone());
+        tags.sort();
+        self.config.set(TAGS, &tags.join(", "));
+        Ok(tag)
+    }
+
+    /// Takes a tag off the list (ignoring case). Returns whether it was
+    /// there. Whether any ticket still carries it is the caller's check
+    /// ([`crate::model::remove_unused_tag`]); this only edits the list.
+    pub fn remove_tag(&mut self, tag: &str) -> bool {
+        let tag = crate::task::normalize_tag(tag);
+        let mut tags = self.tags();
+        let before = tags.len();
+        tags.retain(|known| *known != tag);
+        if tags.len() == before {
+            return false;
+        }
+        self.config.set(TAGS, &tags.join(", "));
+        true
+    }
+
+    /// Whether only listed tags may be put on a ticket (`tags-only`), off
+    /// unless set. Has no effect while the list is empty.
+    pub fn only_listed_tags(&self) -> bool {
+        self.config.get(TAGS_ONLY).is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "on" | "true"
+            )
+        })
+    }
+
+    pub fn set_only_listed_tags(&mut self, on: bool) {
+        self.config.set(TAGS_ONLY, if on { "on" } else { "off" });
+    }
+
+    /// Checks a ticket's tags against the list: `Ok(None)` when they're all
+    /// listed (or there's no list), `Ok(Some(warning))` naming the unlisted
+    /// ones, or an error naming them when only listed tags are allowed.
+    pub fn check_tags(&self, tags: &[String]) -> Result<Option<String>> {
+        let listed = self.tags();
+        if listed.is_empty() {
+            return Ok(None);
+        }
+        let unlisted: Vec<String> = crate::task::normalize_tags(tags)
+            .into_iter()
+            .filter(|tag| !listed.contains(tag))
+            .collect();
+        if unlisted.is_empty() {
+            return Ok(None);
+        }
+        let names = unlisted.join(", ");
+        if self.only_listed_tags() {
+            bail!(
+                "not on the project's tag list: {names} (only listed tags are allowed; add them in Admin or with `amd tags add`)"
+            );
+        }
+        Ok(Some(format!("not on the project's tag list: {names}")))
+    }
+
     /// Takes a repository off the project's declared list (`amd register
     /// --remove`). Returns whether it was there.
     pub fn undeclare_repo(&mut self, name: &str) -> bool {
@@ -540,6 +621,64 @@ mod tests {
 
     fn board(dir: &std::path::Path) -> Board {
         Board::at(dir.join("tasks"))
+    }
+
+    #[test]
+    fn tags_are_listed_in_uppercase_without_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        assert!(settings.tags().is_empty());
+        assert_eq!(settings.add_tag(" future ").unwrap(), "FUTURE");
+        assert_eq!(settings.add_tag("business").unwrap(), "BUSINESS");
+        assert!(
+            settings.add_tag("Future").is_err(),
+            "already listed, ignoring case"
+        );
+        assert!(settings.add_tag("two words").is_err());
+        assert!(settings.add_tag("").is_err());
+        settings.save(&board).unwrap();
+        assert_eq!(load(&board).tags(), ["BUSINESS", "FUTURE"]);
+
+        let mut settings = load(&board);
+        assert!(settings.remove_tag("business"));
+        assert!(!settings.remove_tag("business"));
+        assert_eq!(settings.tags(), ["FUTURE"]);
+    }
+
+    #[test]
+    fn unlisted_tags_warn_or_are_refused_when_only_listed_tags_are_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = load(&board(dir.path()));
+        let tags = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            settings.check_tags(&tags(&["anything"])).unwrap(),
+            None,
+            "no list, any tag"
+        );
+
+        settings.add_tag("FUTURE").unwrap();
+        assert_eq!(settings.check_tags(&tags(&["future"])).unwrap(), None);
+        let warning = settings
+            .check_tags(&tags(&["future", "misc"]))
+            .unwrap()
+            .unwrap();
+        assert!(
+            warning.contains("MISC") && !warning.contains("FUTURE"),
+            "{warning}"
+        );
+
+        assert!(!settings.only_listed_tags());
+        settings.set_only_listed_tags(true);
+        let refused = settings
+            .check_tags(&tags(&["misc"]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("MISC") && refused.contains("only listed tags"),
+            "{refused}"
+        );
+        assert_eq!(settings.check_tags(&tags(&["FUTURE"])).unwrap(), None);
     }
 
     #[test]

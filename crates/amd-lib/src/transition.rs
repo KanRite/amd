@@ -526,7 +526,7 @@ mod tests {
         let task = Task::from_path(&path, Column::Backlog).unwrap();
         assert_eq!(task.title(), "Make a thing");
         assert_eq!(task.points().as_deref(), Some("3"));
-        assert_eq!(task.tags(), ["ux"]);
+        assert_eq!(task.tags(), ["UX"], "saved in uppercase (ticket 122)");
         assert!(task.body().unwrap().contains("hello"));
         assert!(
             matches!(outcome.events.first(), Some(Event::Info(text)) if text.starts_with("created backlog/001-")),
