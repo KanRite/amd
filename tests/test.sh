@@ -550,6 +550,20 @@ assert "register --project with a name that isn't here is refused" \
   bash -c "cd '${rg}/beta-app' && env ${rg_env} '${AMD}' register --project nosuch 2>&1 | grep -q \"no project 'nosuch'\""
 assert "from inside a tickets repository, register works as before" \
   bash -c "cd '${rg}/acme-tickets' && env ${rg_env} '${AMD}' register '${rg}/beta-app' | grep -q 'beta-app'"
+# beta-app is now declared on both acme and beta. deregister takes it off a
+# project for everyone, so it is guarded the same way (ticket 120).
+assert "from a code repo, deregister refuses without a terminal, naming the folder's current project" \
+  bash -c "cd '${rg}/beta-app' && env ${rg_env} '${AMD}' deregister beta-app 2>&1 | grep -q \"would be taken off project 'acme'\" \
+    && grep -q '^repos = .*beta-app' '${rg}/acme-tickets/.settings' && grep -q '^repos = .*beta-app' '${rg}/beta-tickets/.settings'"
+assert "deregister --project beta takes it off beta only" \
+  bash -c "cd '${rg}/beta-app' && env ${rg_env} '${AMD}' deregister beta-app --project beta | grep -q 'no longer part of the project' \
+    && ! grep -q 'beta-app' '${rg}/beta-tickets/.settings' && grep -q '^repos = .*beta-app' '${rg}/acme-tickets/.settings'"
+assert "from inside a tickets repository, deregister takes it off that project" \
+  bash -c "cd '${rg}/acme-tickets' && env ${rg_env} '${AMD}' deregister beta-app | grep -q 'no longer part of the project' \
+    && ! grep -q 'beta-app' '${rg}/acme-tickets/.settings'"
+assert "...and once nothing declares or registers it, deregister refuses" \
+  bash -c "cd '${rg}/acme-tickets' && ! env ${rg_env} '${AMD}' deregister beta-app 2>/dev/null \
+    && env ${rg_env} '${AMD}' deregister beta-app 2>&1 | grep -q 'neither declared for this project nor registered'"
 rm -rf "${rg}"
 
 echo "tags (ticket 122):"
@@ -1007,12 +1021,11 @@ assert "registering the same path again is a local no-op, not an error" \
   bash -c "'${AMD}' register | grep -q 'already registered on this machine'"
 assert "a non-repository is refused" \
   bash -c "'${AMD}' register '${nongit}' 2>&1 | grep -q 'not a git repository'"
-assert "amd deregister removes only the local registration" \
-  bash -c "'${AMD}' deregister \"${tmp_name}\" | grep -q '^deregistered ' \
+assert "amd deregister takes a declared repository off the project and this machine (ticket 120)" \
+  bash -c "'${AMD}' deregister \"${tmp_name}\" | grep -q 'no longer part of the project' \
+    && ! grep -qE \"^repos = .*${tmp_name}\" .settings \
     && ! grep -q \"${tmp_name}\$\" \"\${XDG_CONFIG_HOME}/agile-md/repos\""
-assert "the project-wide declaration survives deregistering locally" \
-  bash -c "grep -qE \"^repos = .*${tmp_name}\" .settings"
-assert "deregistering something not registered locally fails" \
+assert "deregistering what's neither declared nor registered fails" \
   bash -c "! '${AMD}' deregister nope"
 
 echo "aliases (removed, ticket 097):"
