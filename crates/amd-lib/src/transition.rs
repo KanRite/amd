@@ -13,7 +13,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 
 use crate::board::{Board, Column};
 use crate::task::Task;
@@ -219,10 +219,24 @@ pub fn enter_todo(board: &Board, task: &Task, options: &TodoOptions) -> Result<O
     // ticket is about, when it names one — not whichever repository amd
     // happens to be run from. Read before the move, like everything else.
     let repository = task.repository();
+    let branching = !(options.no_branch || std::env::var("AMD_NO_BRANCH").as_deref() == Ok("1"));
+
+    // A dedicated tickets repository holds tickets, not code (ticket 053):
+    // a ticket that wants a branch must say which repository it's about,
+    // or its branch would land here. Refused before the move, so nothing
+    // is half done. A board inside a code repository (`amd init
+    // --local-only` there) is that code repository, and branches as before.
+    if branching && wanted.is_some() && repository.is_none() && is_tickets_repo(board) {
+        let id = task.id_display();
+        bail!(
+            "{id} wants a branch but names no repository, and this board's repository only holds tickets: \
+             set one with `amd set {id} repository <name>`, or move it with --no-branch"
+        );
+    }
 
     let mut outcome = move_to(board, task, Column::Todo, options.force)?;
 
-    if options.no_branch || std::env::var("AMD_NO_BRANCH").as_deref() == Ok("1") {
+    if !branching {
         return Ok(outcome);
     }
     let target = match &repository {
@@ -261,6 +275,17 @@ pub fn enter_todo(board: &Board, task: &Task, options: &TodoOptions) -> Result<O
         if exists { "switched to" } else { "branch" }
     )));
     Ok(outcome)
+}
+
+/// Whether `board` lives in a dedicated tickets repository, the
+/// `{project}-tickets` that `amd init <project>` and `amd join` make, rather
+/// than inside the code it tracks.
+fn is_tickets_repo(board: &Board) -> bool {
+    board
+        .repo_root()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with("-tickets"))
 }
 
 /// Best-effort: a failure here (no git email configured, or someone else

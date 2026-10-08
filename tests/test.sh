@@ -518,6 +518,24 @@ assert "entering todo makes the ticket's branch in its repository's clone" \
 "${AMD}" deregister code >/dev/null 2>&1
 rm -rf "${rp}"
 
+echo "a tickets repository holds no code branches (ticket 053):"
+tr="$(mktemp -d)"
+( cd "${tr}" && git init -q -b main demo-tickets && cd demo-tickets \
+  && git config user.email t@t.co && git config user.name t && git config commit.gpgsign false \
+  && AMD_COMMIT=0 "${AMD}" init demo --local-only >/dev/null 2>&1 \
+  && AMD_COMMIT=0 "${AMD}" new 'Needs code' --branch-type feature --no-edit >/dev/null 2>&1 )
+in_tr() { (cd "${tr}/demo-tickets" && AMD_COMMIT=0 "${AMD}" "$@"); }
+assert "a ticket that wants a branch but names no repository is refused, unmoved" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; ! in_tr todo 1 >/dev/null 2>&1 \
+    && in_tr todo 1 2>&1 | grep -q 'names no repository' \
+    && ls '${tr}'/demo-tickets/tasks/backlog/001-needs-code.md >/dev/null \
+    && [ \"\$(git -C '${tr}/demo-tickets' symbolic-ref --short HEAD)\" = main ]"
+assert "...and --no-branch moves it without a branch" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; in_tr todo 1 --no-branch >/dev/null 2>&1 \
+    && ls '${tr}'/demo-tickets/tasks/todo/001-needs-code.md >/dev/null \
+    && [ \"\$(git -C '${tr}/demo-tickets' symbolic-ref --short HEAD)\" = main ]"
+rm -rf "${tr}"
+
 echo "register in a folder of several projects (ticket 103):"
 # acme (current) and beta side by side, and a code repository, beta-app,
 # that belongs to beta. From inside beta-app, a plain `amd register` would

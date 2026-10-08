@@ -129,6 +129,12 @@ amd todo 1      # moves it; "no branch type on this ticket"
 amd todo 2      # moves it and switches to bugfix/crash-on-save
 ```
 
+The branch is made in the repository the ticket names (`--repository`, or
+`amd set <ref> repository <name>`). On a board in its own `*-tickets`
+repository, the layout `amd init <project>` makes, a ticket that wants a
+branch but names no repository is refused on entering todo rather than
+branching the tickets repository; `--no-branch` moves it anyway.
+
 The branch types are the ones
 [conventional-validator](https://github.com/mrdoodles/conventional-validator)
 accepts, so a branch made from a ticket passes its check. `AMD_BRANCH_TYPES`
