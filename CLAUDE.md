@@ -467,8 +467,10 @@ redundant. Their history is in git if it is ever wanted again.
   - **Scope**: every verb in `Board::move_task`/`archive`/`set_epic`/
     `Task::assign`/`take_lease`/`release_lease`/`break_lease`, plus every
     `amd group` command including `empty` (one commit for every ticket it
-    moves, not one per ticket — a single logical action). Not in scope:
-    `amd register`/`deregister` (the registry, not the board),
+    moves, not one per ticket — a single logical action), and declaring or
+    undeclaring a repository (`amd register`, `register --remove`,
+    `deregister`). Not in scope: this machine's registry alone (a
+    `deregister` of a repository that's only registered here),
     `{project}-documents` (a different repository entirely, PR-reviewed by
     design, never auto-committed).
   - **Sync with the remote** (ticket 102, `crates/amd-lib/src/sync.rs`).
@@ -671,13 +673,18 @@ project, into one `amdui` window:
   terminal ("Register X with project P (this folder's current project)?")
   and **refuses** without one, naming the fixes. It hints `--project Y` when
   the repo's name starts with another project's name. `--project <name>`
-  always says outright. `deregister` needs no guard: it only drops this
-  machine's registration, by name, and never touches a declared list.
-- **`amd deregister <name>`** removes only the *local* registration. The
-  declared list is untouched on purpose — you not having a repository
-  cloned right now shouldn't silently un-declare it for the rest of the
-  team. It goes back to showing greyed out for you, the same state a
-  teammate who's never registered it at all would see.
+  always says outright. `deregister` (and `register --remove`) go through
+  the same check, worded "Take X off project P?" (ticket 120).
+- **`amd deregister <name>`** (ticket 120, reversing the earlier
+  local-only design): a repository the project **declares** comes off the
+  project for everyone, exactly as `amd register --remove` (now an alias):
+  undeclared in the tickets `.settings`, committed and pushed, and dropped
+  from this machine's registry. The repository filter and fields list the
+  declared repositories plus any a ticket names (`ticket_repos`), so it
+  leaves everyone's lists unless a ticket still names it. A repository
+  that's only *registered* here (a project's own tickets or documents
+  repository, a scratch board) just loses its registration. Neither is an
+  error. The clone is never touched. It takes `--project` like `register`.
 - **`amd clone [name | --all]`** (ticket 108, `crates/amd-lib/src/clone.rs`):
   clones a declared repository this machine hasn't got into the project
   directory, from the tickets repo's own `origin` with the last path part
