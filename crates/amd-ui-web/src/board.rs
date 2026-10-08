@@ -42,12 +42,10 @@ fn group_state(ctx: Ctx, place: &Place) -> Option<GroupState> {
     })
 }
 
-/// A ticket's points, looked up by where it is.
-fn points_of(ctx: Ctx, file: &str, from: &Place) -> String {
+/// The ticket being dragged, looked up by where it is.
+fn ticket_at(ctx: Ctx, file: &str, from: &Place) -> Option<TicketSummary> {
     ctx.board.with(|b| {
-        let Some(b) = b.as_ref() else {
-            return String::new();
-        };
+        let b = b.as_ref()?;
         let list = match &from.epic {
             Some(name) => b
                 .epics
@@ -57,19 +55,22 @@ fn points_of(ctx: Ctx, file: &str, from: &Place) -> String {
             None => Some(&b.columns[from.column.index()].tickets),
         };
         list.and_then(|l| l.iter().find(|t| t.file == file && t.repo == from.repo))
-            .map(|t| t.points.clone())
-            .unwrap_or_default()
+            .cloned()
     })
 }
 
 /// Whether the dragged ticket may go to `to`: the column and epic rules,
-/// then the sprint rules. An empty error means `to` is not a target at all.
+/// then the draft and sprint rules. An empty error means `to` is not a
+/// target at all.
 fn verdict(ctx: Ctx, file: &str, from: &Place, to: &Place) -> Result<(), String> {
     if !can_move(from, to) {
         return Err(String::new());
     }
-    let sized = epic::has_points(&points_of(ctx, file, from));
+    let ticket = ticket_at(ctx, file, from);
+    let sized = ticket.as_ref().is_some_and(|t| epic::has_points(&t.points));
+    let draft = ticket.as_ref().is_some_and(|t| epic::is_draft(&t.tags));
     let stem = file.trim_end_matches(".md");
+    epic::draft_rule(from, to, group_state(ctx, to), draft, stem)?;
     epic::sprint_rule(
         from,
         to,
@@ -750,6 +751,8 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
     } = ticket;
     // Someone else's lock: the card can be opened to read, but not dragged.
     let held = lock.as_ref().is_some_and(|l| !l.mine);
+    // A draft (ticket 114) says so first, and its outline is dashed.
+    let draft = epic::is_draft(&tags);
     // Outside its epic's box, a card still says which epic it belongs to.
     let epic_tag = (epic.is_none() && !epic_label.is_empty()).then(|| {
         let colour = epics_in_view(ctx)
@@ -779,9 +782,10 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
             tabindex="0"
             class=move || {
                 format!(
-                    "{} rounded-md border border-slate-200 bg-white p-2.5 text-sm shadow-sm hover:border-accent-400 focus:outline-2 focus:outline-accent-500 dark:border-slate-700 dark:bg-slate-900 {}",
+                    "{} rounded-md border border-slate-200 bg-white p-2.5 text-sm shadow-sm hover:border-accent-400 focus:outline-2 focus:outline-accent-500 dark:border-slate-700 dark:bg-slate-900 {} {}",
                     if held { "cursor-pointer" } else { "cursor-grab" },
                     if is_dragging() { "opacity-50" } else { "" },
+                    if draft { "border-dashed border-amber-400 dark:border-amber-500" } else { "" },
                 )
             }
             on:dragstart=move |ev: DragEvent| {
@@ -821,6 +825,17 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                     }
                 })}
             <div class="mt-1.5 flex flex-wrap items-center gap-1 text-xs">
+                {draft
+                    .then(|| {
+                        view! {
+                            <span
+                                class="rounded border border-dashed border-amber-500 px-1.5 font-semibold text-amber-700 dark:text-amber-300"
+                                title="Draft: stays in the backlog until DRAFT is removed"
+                            >
+                                "DRAFT"
+                            </span>
+                        }
+                    })}
                 {match (lock, lapsed) {
                     (Some(l), _) => Some(view! { <LockBadge lock=l lapsed=false /> }),
                     (None, Some(l)) => Some(view! { <LockBadge lock=l lapsed=true /> }),
@@ -865,6 +880,7 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                     })}
                 {tags
                     .into_iter()
+                    .filter(|tag| !tag.trim().eq_ignore_ascii_case(epic::DRAFT_TAG))
                     .map(|tag| {
                         view! {
                             <span class="rounded bg-accent-100 px-1.5 uppercase text-accent-800 dark:bg-accent-900 dark:text-accent-200">

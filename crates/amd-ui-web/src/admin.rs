@@ -540,7 +540,7 @@ fn TagsAdmin() -> impl IntoView {
     let unlisted = move || {
         tags()
             .into_iter()
-            .filter(|t| !t.listed)
+            .filter(|t| !t.listed && !t.reserved)
             .map(|t| format!("{} ({})", t.name, t.count))
             .collect::<Vec<_>>()
     };
@@ -709,6 +709,22 @@ fn TagsAdmin() -> impl IntoView {
                         view! {
                             <p class="text-xs text-slate-500">
                                 "In use but not listed: " {others.join(", ")}
+                            </p>
+                        }
+                    })
+            }}
+            {move || {
+                let built_in = tags()
+                    .into_iter()
+                    .filter(|t| t.reserved)
+                    .map(|t| format!("{} ({})", t.name, t.count))
+                    .collect::<Vec<_>>();
+                (!built_in.is_empty())
+                    .then(|| {
+                        view! {
+                            <p class="text-xs text-slate-500">
+                                "Built in: " {built_in.join(", ")}
+                                ". DRAFT keeps a ticket in the backlog until it's removed; it's always allowed and can't be removed."
                             </p>
                         }
                     })

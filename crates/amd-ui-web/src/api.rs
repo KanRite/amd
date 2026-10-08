@@ -142,6 +142,7 @@ struct TitleArgs<'a> {
     title: &'a str,
     repo: Option<&'a str>,
     repository: Option<&'a str>,
+    draft: bool,
 }
 
 #[derive(Serialize)]
@@ -203,11 +204,13 @@ pub async fn archive_ticket(place: &Place, file: &str) -> Result<SyncReport, Str
     call("archive_ticket", &TicketRef { place, file }).await
 }
 
-/// Creates a ticket in `repo`'s backlog (the board's own when `None`).
+/// Creates a ticket in `repo`'s backlog (the board's own when `None`),
+/// as a draft when `draft` (ticket 114).
 pub async fn create_ticket(
     title: &str,
     repo: Option<&str>,
     repository: Option<&str>,
+    draft: bool,
 ) -> Result<Created, String> {
     call(
         "create_ticket",
@@ -215,6 +218,7 @@ pub async fn create_ticket(
             title,
             repo,
             repository,
+            draft,
         },
     )
     .await

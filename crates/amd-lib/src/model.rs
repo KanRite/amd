@@ -65,6 +65,9 @@ pub fn tag_counts(boards: &[&Board]) -> anyhow::Result<std::collections::BTreeMa
 /// caller's (the auto-commit wraps this).
 pub fn remove_unused_tag(project: &Board, boards: &[&Board], tag: &str) -> anyhow::Result<String> {
     let tag = crate::task::normalize_tag(tag);
+    if crate::task::is_reserved_tag(&tag) {
+        anyhow::bail!("{tag} is built in and can't be removed");
+    }
     let used = tag_counts(boards)?.get(&tag).copied().unwrap_or(0);
     if used > 0 {
         anyhow::bail!("{tag} is still on {used} ticket(s); take it off them first");
@@ -362,6 +365,10 @@ mod tests {
         assert_eq!(remove_unused_tag(&first, &boards, "old").unwrap(), "OLD");
         assert_eq!(crate::board_settings::load(&first).tags(), ["FUTURE"]);
         assert!(remove_unused_tag(&first, &boards, "nope").is_err());
+        let refused = remove_unused_tag(&first, &boards, "draft")
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("built in"), "{refused}");
     }
 
     #[test]

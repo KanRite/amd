@@ -339,6 +339,17 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: String,
     },
+    /// Make a ticket a draft: it's tagged DRAFT and stays in the backlog
+    /// (and out of sprints) until `amd ready` takes it out of draft
+    Draft {
+        #[arg(value_name = "REF")]
+        task: String,
+    },
+    /// Take a ticket out of draft, so it can leave the backlog
+    Ready {
+        #[arg(value_name = "REF")]
+        task: String,
+    },
     /// Release a ticket's lease
     Unlock {
         #[arg(value_name = "REF")]
@@ -474,6 +485,10 @@ struct NewArgs {
     /// Tag to add (repeatable)
     #[arg(short = 't', long = "tag", value_name = "TAG")]
     tags: Vec<String>,
+    /// Create it as a draft: tagged DRAFT, it stays in the backlog until
+    /// `amd ready` takes it out of draft
+    #[arg(long)]
+    draft: bool,
     /// Template to render the ticket from (default: ticket). A board can add
     /// its own under <board>/templates/
     #[arg(
@@ -840,6 +855,8 @@ fn run() -> Result<()> {
             Ok(())
         }
         Cmd::Lock { task } => cmd_lock(&board, &task),
+        Cmd::Draft { task } => cmd_draft(&board, &task, true),
+        Cmd::Ready { task } => cmd_draft(&board, &task, false),
         Cmd::Unlock { task, force } => cmd_unlock(&board, &task, force),
         Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
@@ -883,6 +900,27 @@ fn cmd_lock(board: &Board, reference: &str) -> Result<()> {
             .and_then(|until| until.format(&Rfc3339).ok())
             .unwrap_or_default();
         println!("{} locked until {until}", task.id_display());
+        Ok(())
+    })
+}
+
+/// `amd draft` / `amd ready` (ticket 114): add or remove the DRAFT tag. A
+/// ticket that's already so says so and changes nothing.
+fn cmd_draft(board: &Board, reference: &str, draft: bool) -> Result<()> {
+    let task = board.find(reference)?;
+    let (id_display, title) = (task.id_display(), task.title());
+    let verb = if draft { "draft" } else { "ready" };
+    with_auto_commit(board, verb, &id_display, &title, || {
+        let changed = task.set_draft(task.hash()?, draft)?;
+        let id = task.id_display();
+        match (changed, draft) {
+            (true, true) => {
+                println!("{id} is a draft: it stays in the backlog until `amd ready {id}`")
+            }
+            (true, false) => println!("{id} is ready: it can leave the backlog"),
+            (false, true) => println!("{id} is already a draft"),
+            (false, false) => println!("{id} isn't a draft"),
+        }
         Ok(())
     })
 }
@@ -1770,6 +1808,15 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     } else {
         args.tags
     };
+    // A draft is a ticket carrying DRAFT (ticket 114). The form asks unless
+    // `--draft` already said so, or the tags already carry it.
+    let mut tags = tags;
+    let draft = args.draft
+        || tags.iter().any(|t| task::is_reserved_tag(t))
+        || (full_form && form::confirm("Save as a draft?")?);
+    if draft {
+        tags.push(task::DRAFT_TAG.to_string());
+    }
     let tags = task::normalize_tags(&tags);
     if let Some(warning) = board_settings::load(board).check_tags(&tags)? {
         eprintln!("amd: {warning}");

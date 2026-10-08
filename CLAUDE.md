@@ -341,6 +341,17 @@ redundant. Their history is in git if it is ever wanted again.
   remove-unused dropdown, the switch), the editor's `TagPicker`, and
   `save_ticket` checks the list; `Board.tags`/`tags_only` carry it to the
   page.
+- **Drafts** (ticket 114): a ticket tagged `DRAFT` (`task::DRAFT_TAG`,
+  `Task::is_draft`/`set_draft`) can't leave the backlog (`Board::move_task`)
+  or go into a sprint (`Board::set_epic`); an epic, edits and abandoning are
+  fine. DRAFT is one of `task::RESERVED_TAGS`: `check_tags` always allows
+  it, `add_tag` and `remove_unused_tag` refuse it, and amdui's `TagUse`
+  carries it as `reserved`. CLI: `amd new --draft` (the form asks),
+  `amd draft`/`amd ready <ref>`. amdui: a dashed DRAFT badge on the card,
+  a Draft banner with Mark ready in the editor, "Save as draft" in New
+  ticket, and `amd_ui_model::epic::draft_rule` refuses the drag. Named
+  commands win over epic names, so an epic called `draft` or `ready` is
+  reached through `amd group`/`amd set epic` instead.
 - **Tag filtering**: `amd tag <tag>` lists every ticket carrying `<tag>`,
   across every column, via `Board::tasks_tagged()`/`Task::has_tag()`. Every
   listing form also takes `--tag <tag>` to narrow it down: `amd board`,

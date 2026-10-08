@@ -71,6 +71,8 @@ amd link    1 3                   # relate two tickets
 amd tag     urgent                # list every ticket carrying a tag, across every column
 amd tags                          # the project's tag list, with how many tickets carry each
 amd tags add future               # add a tag (saved as FUTURE); `amd tags remove` takes an unused one off
+amd new     "Idea" --draft        # a draft: tagged DRAFT, it stays in the backlog
+amd ready   1                     # take it out of draft (`amd draft 1` puts it back)
 amd todo    --tag urgent          # any listing form narrows to a tag: board, ls, a
                                    # destination verb, or an epic by name
 amd lock    1                     # claim a ticket so someone else's edits and moves
@@ -106,6 +108,14 @@ repository's `.settings`. The editor then offers it as a sorted dropdown, and
 (`amd tags only on`) to refuse those instead. A tag can only be removed from
 the list once no ticket carries it. Matching ignores case, so a ticket written
 before tags were uppercase still matches.
+
+**Drafts.** A ticket tagged **DRAFT** is a draft: it can't leave the
+backlog, or go into a sprint, until the tag is taken off. It can still be
+edited, assigned, sized and filed into an epic, or abandoned. Make one with
+`amd new --draft`, `amd draft <ref>` or "Save as draft" in the desktop
+board; `amd ready <ref>` (or the editor's **Mark ready**) takes it out of
+draft, and `amd tag DRAFT` lists them. DRAFT is built in: it's allowed even
+when only listed tags are, and it can't be removed from the list.
 
 **The branch type is what makes a ticket a piece of code work**, and it's empty
 by default. A ticket without one is still a ticket — a rota, an approval, a

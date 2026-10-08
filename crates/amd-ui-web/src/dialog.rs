@@ -12,10 +12,12 @@ use crate::app::{Ctx, Modal, Overlay};
 pub fn NewTicketDialog() -> impl IntoView {
     let ctx = Ctx::get();
     let title = RwSignal::new(String::new());
+    let draft = RwSignal::new(false);
     let busy = RwSignal::new(false);
 
     let create = move || {
         let t = title.get_untracked();
+        let as_draft = draft.get_untracked();
         if t.trim().is_empty() || busy.get_untracked() {
             return;
         }
@@ -25,7 +27,7 @@ pub fn NewTicketDialog() -> impl IntoView {
             // about the repository being filtered to, if any (ticket 101).
             let repo = ctx.repo.get_untracked();
             let about = ctx.about.get_untracked();
-            match api::create_ticket(&t, repo.as_deref(), about.as_deref()).await {
+            match api::create_ticket(&t, repo.as_deref(), about.as_deref(), as_draft).await {
                 Ok(created) => {
                     ctx.report(created.sync);
                     ctx.reload();
@@ -58,8 +60,16 @@ pub fn NewTicketDialog() -> impl IntoView {
                         on:input=move |ev| title.set(event_target_value(&ev))
                     />
                 </label>
+                <label class="flex items-center gap-2 text-sm">
+                    <input
+                        type="checkbox"
+                        prop:checked=move || draft.get()
+                        on:change=move |ev| draft.set(event_target_checked(&ev))
+                    />
+                    "Save as draft"
+                </label>
                 <p class="text-xs text-slate-500">
-                    "The ticket is created in the backlog from the board's ticket template."
+                    "The ticket is created in the backlog from the board's ticket template. A draft stays in the backlog until it's marked ready."
                 </p>
                 <div class="flex justify-end gap-2">
                     <button

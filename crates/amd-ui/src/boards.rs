@@ -184,11 +184,13 @@ impl Project {
         let listed = settings.tags();
         let mut names: std::collections::BTreeSet<String> = listed.iter().cloned().collect();
         names.extend(counts.keys().cloned());
+        names.extend(agile_md::task::RESERVED_TAGS.iter().map(|t| t.to_string()));
         Ok(names
             .into_iter()
             .map(|name| ui::TagUse {
                 count: counts.get(&name).copied().unwrap_or(0),
                 listed: listed.contains(&name),
+                reserved: agile_md::task::is_reserved_tag(&name),
                 name,
             })
             .collect())
