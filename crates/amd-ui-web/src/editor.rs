@@ -798,7 +798,7 @@ fn Toolbar(on_change: impl Fn() + Copy + Send + Sync + 'static) -> impl IntoView
 /// The tags field (ticket 122): the ticket's tags as chips, each with a ×
 /// to take it off, and a box to add one that offers the project's listed
 /// tags (or, with no list, every tag in use), sorted and narrowed as you
-/// type. Tags are UPPERCASE. With "Only listed tags" on, only a listed tag
+/// type. Tags are UPPERCASE. With "Prevent arbitrary tags" on (the default), only a listed tag
 /// can be added; otherwise a new one can be typed and added with Enter. A
 /// tag that isn't on the list is shown dashed.
 #[component]

@@ -332,7 +332,8 @@ redundant. Their history is in git if it is ever wanted again.
   `apply_edit`, `set_text`), and every match ignores case
   (`Task::has_tag`, `card_visible`), so older lowercase tickets still
   match. The project's list is `tags` in the tickets `.settings`
-  (`board_settings::{tags, add_tag, remove_tag}`), with `tags-only` to
+  (`board_settings::{tags, add_tag, remove_tag}`), with `prevent-arbitrary-tags` (formerly `tags-only`, still read and renamed on the next write; Admin's "Prevent arbitrary tags", **on unless set to
+off**, ticket 141) to
   refuse unlisted tags (`check_tags`: a warning, or an error when on).
   `model::remove_unused_tag` refuses a tag any ticket on the project's
   boards carries (`model::tag_counts`, archive excluded), so removing one
