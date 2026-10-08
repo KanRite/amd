@@ -648,6 +648,30 @@ fn appearance() -> Appearance {
     )
 }
 
+/// Applies the board's saved zoom (ticket 024) and returns it, in percent.
+#[tauri::command]
+fn zoom(window: tauri::WebviewWindow) -> Result<u32> {
+    let percent = amd_ui_model::zoom::parse(Config::load().get("ui.zoom").unwrap_or_default());
+    window
+        .set_zoom(f64::from(percent) / 100.0)
+        .map_err(|e| format!("zooming the board: {e}"))?;
+    Ok(percent)
+}
+
+/// Zooms the board to `percent` (snapped to a step) and remembers it on this
+/// machine, so it opens at that size next time.
+#[tauri::command]
+fn set_zoom(window: tauri::WebviewWindow, percent: u32) -> Result<u32> {
+    let percent = amd_ui_model::zoom::normalise(percent);
+    window
+        .set_zoom(f64::from(percent) / 100.0)
+        .map_err(|e| format!("zooming the board: {e}"))?;
+    let mut config = Config::load();
+    config.set("ui.zoom", &percent.to_string());
+    config.save().map_err(err)?;
+    Ok(percent)
+}
+
 /// Saves the user's colour scheme, so it is used again next time.
 #[tauri::command]
 fn set_appearance(appearance: Appearance) -> Result<Appearance> {
@@ -861,6 +885,8 @@ pub fn run() {
             set_auto_commit,
             appearance,
             set_appearance,
+            zoom,
+            set_zoom,
             get_template,
             preview_template,
             save_template,

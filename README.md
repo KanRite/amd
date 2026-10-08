@@ -246,6 +246,9 @@ disagree.
   ticket template (with a preview), renaming epics and sprints, and your
   colour scheme — light, dark or the system's, with an accent colour —
   remembered in `~/.config/agile-md/config`.
+- **Zoom** with **Ctrl +** and **Ctrl −**, and **Ctrl 0** back to 100%; the
+  size is remembered on this machine (`ui.zoom`). F5 or Ctrl+R refreshes the
+  board without losing your filters.
 
 A **sprint** takes only sized tickets — an unsized one would make its point
 total a lie. Once **started** it is a commitment: it takes nothing more and

@@ -67,6 +67,8 @@ pub struct Ctx {
     pub user: RwSignal<Assigned>,
     /// The user's colour scheme (Admin → Appearance).
     pub appearance: RwSignal<Appearance>,
+    /// The board's zoom, in percent (ticket 024).
+    pub zoom: RwSignal<u32>,
     /// Whether the desktop is in dark mode, for "follow the system".
     pub system_dark: RwSignal<bool>,
     /// What git did with the last ticket change.
@@ -189,6 +191,7 @@ pub fn App() -> impl IntoView {
         user: RwSignal::new(Assigned::Anyone),
         sync: RwSignal::new(None),
         appearance: RwSignal::new(Appearance::default()),
+        zoom: RwSignal::new(amd_ui_model::zoom::DEFAULT),
         system_dark: RwSignal::new(false),
         disk_tick: RwSignal::new(0),
     };
@@ -197,6 +200,7 @@ pub fn App() -> impl IntoView {
     use_colour_scheme(ctx);
     watch_disk(ctx);
     refresh_keys(ctx);
+    zoom_keys(ctx);
 
     let tasks_dir = move || ctx.board.with(|b| b.as_ref().map(|b| b.tasks_dir.clone()));
     // The project's own name (ticket 087), until a board is open.
@@ -338,6 +342,41 @@ fn refresh_keys(ctx: Ctx) {
             ev.prevent_default();
             ctx.refresh();
         }
+    });
+}
+
+/// Ctrl + and Ctrl - zoom the board a step, Ctrl 0 back to 100% (ticket 024),
+/// remembered on this machine. The saved size is applied at start.
+fn zoom_keys(ctx: Ctx) {
+    spawn_local(async move {
+        if let Ok(saved) = api::zoom().await {
+            ctx.zoom.set(saved);
+        }
+    });
+    let _keys = window_event_listener(leptos::ev::keydown, move |ev| {
+        if !(ev.ctrl_key() || ev.meta_key()) {
+            return;
+        }
+        use amd_ui_model::zoom;
+        let now = ctx.zoom.get_untracked();
+        let to = match ev.key().as_str() {
+            "+" | "=" => zoom::step(now, true),
+            "-" | "_" => zoom::step(now, false),
+            "0" => zoom::DEFAULT,
+            _ => return,
+        };
+        ev.prevent_default();
+        if to == now {
+            return;
+        }
+        // Set before the call returns, so a quick second press steps on
+        // from here rather than from the old size.
+        ctx.zoom.set(to);
+        spawn_local(async move {
+            if let Err(e) = api::set_zoom(to).await {
+                ctx.error.set(Some(e));
+            }
+        });
     });
 }
 

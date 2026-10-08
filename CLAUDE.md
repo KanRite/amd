@@ -968,6 +968,11 @@ changes):
   (`check_board_libraries`, via `ldd`) and names WebKitGTK when it's
   missing; its source build needs Trunk, the wasm target and WebKitGTK, and
   skips the board with a note without them.
+- **Zoom** (ticket 024): Ctrl +/−/0 step through `amd_ui_model::zoom::STEPS`
+  (50–200%); the page's `zoom_keys` sets `ctx.zoom` at once (so fast presses
+  step on) and calls `set_zoom`, which applies Tauri's `WebviewWindow::set_zoom`
+  and saves `ui.zoom` in `~/.config/agile-md/config`. `zoom` reapplies it at
+  start. A real webview zoom, not CSS `zoom`, so `100vh` layouts still fit.
 - WebKitGTK quirks met building it: the CSP needs `'wasm-unsafe-eval'` and
   `connect-src 'self' ipc: http://ipc.localhost`; native `<select>`s draw a
   white box (styled with `appearance-none`); `dragDropEnabled: false` so

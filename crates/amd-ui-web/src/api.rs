@@ -266,6 +266,21 @@ pub async fn appearance() -> Result<Appearance, String> {
     call("appearance", &NoArgs {}).await
 }
 
+/// Applies the board's saved zoom and returns it, in percent (ticket 024).
+pub async fn zoom() -> Result<u32, String> {
+    call("zoom", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct ZoomArgs {
+    percent: u32,
+}
+
+/// Zooms the board and remembers the size on this machine.
+pub async fn set_zoom(percent: u32) -> Result<u32, String> {
+    call("set_zoom", &ZoomArgs { percent }).await
+}
+
 pub async fn set_appearance(appearance: Appearance) -> Result<Appearance, String> {
     call("set_appearance", &AppearanceArgs { appearance }).await
 }
