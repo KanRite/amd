@@ -130,6 +130,12 @@ pub fn commit_since(
             "could not commit/push automatically: {err:#}"
         )));
     }
+    // A board with no remote (`amd init --local-only`, a scratch board) has
+    // nowhere to push: the commit is the whole job, said nothing about
+    // (ticket 142). Same as `sync::catch_up`, which does nothing there.
+    if git::remote_url(repo).is_none() {
+        return Ok(None);
+    }
     match git::push(repo) {
         Ok(()) => Ok(None),
         Err(err) => crate::sync::after_rejected_push(board, pre.as_deref(), &changed, &err),
