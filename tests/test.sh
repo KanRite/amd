@@ -815,7 +815,7 @@ assert "board shows all three columns" \
   bash -c "'${AMD}' board | grep -q TODO && '${AMD}' board | grep -q DOING && '${AMD}' board | grep -q DONE"
 assert "board lists the task by id and title" \
   bash -c "'${AMD}' board | grep -q '\[001\] First task'"
-assert "empty columns say so" bash -c "'${AMD}' ls doing | grep -q '(empty)'"
+assert "empty columns say so" bash -c "'${AMD}' doing | grep -q '(empty)'"
 
 echo "branch types:"
 "${AMD}" new "Crash on save" --branch-type bugfix >/dev/null
@@ -874,12 +874,8 @@ assert "amd doing <ref> moves it to doing/" \
   bash -c "'${AMD}' doing 4 >/dev/null && test -f tasks/doing/004-address-form.md"
 assert "amd backlog <ref> moves it back to backlog/, a column at a time" \
   bash -c "'${AMD}' todo 4 --no-branch >/dev/null && '${AMD}' backlog 4 >/dev/null && test -f tasks/backlog/004-address-form.md"
-assert "amd todo with no ref lists todo/, same as amd ls todo" \
-  bash -c "diff <('${AMD}' todo) <('${AMD}' ls todo) >/dev/null"
-assert "amd done with no ref lists done/, same as amd ls done" \
-  bash -c "diff <('${AMD}' done) <('${AMD}' ls done) >/dev/null"
-assert "amd board and amd ls are unaffected by the no-ref list form" \
-  bash -c "diff <('${AMD}' board) <('${AMD}' ls) >/dev/null"
+assert "amd ls is gone: the bare destination verbs list (ticket 050)" \
+  bash -c "! '${AMD}' ls >/dev/null 2>&1 && ! '${AMD}' list >/dev/null 2>&1"
 assert "an unknown destination names what is valid" \
   bash -c "'${AMD}' retest-tui 4 2>&1 | grep -q \"'retest-tui' is not a column, 'abandon', or an epic on this board\""
 assert "the error lists the columns and says there are no epics" \
@@ -1332,8 +1328,6 @@ assert "amd board --tag narrows every column to tasks carrying that tag" \
     && echo \"\$out\" | grep -q 'In progress work' \
     && echo \"\$out\" | grep -q 'Shipped feature' \
     && test \"\$(echo \"\$out\" | grep -c 'Old backlog ticket')\" = 1"
-assert "amd ls all --tag behaves the same as amd board --tag" \
-  bash -c "cd '${import_dst}' && test \"\$('${AMD}' ls all --tag DUPLICATE --plain | grep -c 'Shipped feature')\" = 1"
 assert "amd <destination> --tag with no matches lists an empty column, not an error" \
   bash -c "cd '${import_dst}' && '${AMD}' backlog --tag NO-SUCH-TAG --plain | grep -q '(empty)'"
 
