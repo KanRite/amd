@@ -55,7 +55,7 @@ or sprint can move on to todo, and sent back from todo it returns to its
 epic. A sprint takes only sized tickets, and once started it takes nothing
 more and gives nothing back — its tickets only move on, to todo. `amd tag
 <tag>` lists every ticket carrying it, across every column. Any listing
-form — `board`, `ls`, a bare destination verb, an epic by name — takes
+form — `board`, a bare destination verb, an epic by name — takes
 `--tag <tag>` to narrow it to tickets carrying that tag instead.
 
 `doing/` carries a WIP limit (`AMD_WIP_LIMIT`, or `wip-limit` in
@@ -218,19 +218,6 @@ enum Cmd {
     New(NewArgs),
     /// Show all columns (the default command)
     Board {
-        /// Only show tasks carrying this tag
-        #[arg(short = 't', long = "tag", value_name = "TAG")]
-        tag: Option<String>,
-    },
-    /// List a column: backlog, todo, doing, done or all
-    #[command(alias = "list")]
-    Ls {
-        #[arg(
-            default_value = "all",
-            value_name = "COLUMN",
-            value_parser = PossibleValuesParser::new(["backlog", "todo", "doing", "done", "all"]),
-        )]
-        column: String,
         /// Only show tasks carrying this tag
         #[arg(short = 't', long = "tag", value_name = "TAG")]
         tag: Option<String>,
@@ -696,8 +683,7 @@ fn run() -> Result<()> {
         Cmd::Register { .. } | Cmd::Deregister { .. } => unreachable!("handled above"),
         Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
         Cmd::New(args) => cmd_new(&board, args),
-        Cmd::Board { tag } => cmd_ls(&board, "all", tag.as_deref()),
-        Cmd::Ls { column, tag } => cmd_ls(&board, &column, tag.as_deref()),
+        Cmd::Board { tag } => render::columns(&board, &Column::ALL, tag.as_deref()),
         Cmd::Tag { tag } => render::named(&format!("tag: {tag}"), board.tasks_tagged(&tag)?, None),
         Cmd::Tags { action } => cmd_tags(&board, action),
         Cmd::Import { path, dry_run } => cmd_import(&board, &path, dry_run),
@@ -1646,7 +1632,6 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
     match command {
         Cmd::Show { task: Some(_) } => Lookup,
         Cmd::Board { .. }
-        | Cmd::Ls { .. }
         | Cmd::Tag { .. }
         | Cmd::Tags { action: None }
         | Cmd::Show { .. }
@@ -1908,15 +1893,6 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         eprintln!("warning: {warning}");
     }
     Ok(())
-}
-
-fn cmd_ls(board: &Board, column: &str, tag: Option<&str>) -> Result<()> {
-    if column.eq_ignore_ascii_case("all") {
-        return render::columns(board, &Column::ALL, tag);
-    }
-    let column = Column::parse(column)
-        .with_context(|| format!("unknown column '{column}' (todo, doing, done or all)"))?;
-    render::columns(board, &[column], tag)
 }
 
 fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {

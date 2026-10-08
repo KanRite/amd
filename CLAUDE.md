@@ -356,7 +356,7 @@ off**, ticket 141) to
 - **Tag filtering**: `amd tag <tag>` lists every ticket carrying `<tag>`,
   across every column, via `Board::tasks_tagged()`/`Task::has_tag()`. Every
   listing form also takes `--tag <tag>` to narrow it down: `amd board`,
-  `amd ls [column]`, a bare destination verb (`amd todo`, `amd backlog`, …)
+  a bare destination verb (`amd todo`, `amd backlog`, …)
   and an epic by name (`amd checkout --tag urgent`) all thread it through to
   `render::columns()`/`render::named()`, which filter before building the
   tree. Moving a ticket (`<ref>` given) ignores `--tag` — it only applies to

@@ -148,8 +148,8 @@ amd assign 3                          # unassign it
 ```
 
 Tickets are meant to be created now and assigned later, so `assignee` starts
-empty. It shows on the board as `@sam`, and `amd ls --assignee` narrows to
-one person. Who *created* a ticket isn't a field — `git log --follow` on the
+empty. It shows on the board as `@sam`, and the desktop board's User filter
+narrows to one person. Who *created* a ticket isn't a field — `git log --follow` on the
 file already knows.
 
 ## Related tickets
@@ -304,7 +304,7 @@ stderr, so redirecting gives you a clean file.
 
 Completion covers values, not just names — `amd new --branch-type <TAB>` offers
 the branch types this board accepts (including anything you added with
-`AMD_BRANCH_TYPES`), `-T <TAB>` the templates, `amd ls <TAB>` the columns, and
+`AMD_BRANCH_TYPES`), `-T <TAB>` the templates, and
 `amd set <ref> <TAB>` the fields. Scripts are generated from the CLI itself, so
 they can't drift from it.
 

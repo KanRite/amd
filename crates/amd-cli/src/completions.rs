@@ -7,7 +7,7 @@
 //!
 //! The value-level completions come from the parsers in `value.rs`: `--type`
 //! offers the change types this board accepts, `--template` the built-in ticket
-//! types, `ls` its columns.
+//! types, `amd set` its fields.
 
 use std::env;
 use std::io;
@@ -120,7 +120,6 @@ mod tests {
         assert!(fish.contains("bugfix"), "{fish}");
         assert!(fish.contains("ticket"), "{fish}");
         let bash = script(Shell::Bash);
-        assert!(bash.contains("todo doing done all"), "{bash}");
         assert!(bash.contains("points epic order title"), "{bash}");
     }
 }
