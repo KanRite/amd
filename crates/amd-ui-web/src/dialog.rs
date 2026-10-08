@@ -14,6 +14,9 @@ pub fn NewTicketDialog() -> impl IntoView {
     let title = RwSignal::new(String::new());
     let draft = RwSignal::new(false);
     let busy = RwSignal::new(false);
+    // Why the create failed, shown in the dialog (ticket 021): the status
+    // line is behind it, where a failure looked like a button doing nothing.
+    let problem = RwSignal::new(None::<String>);
 
     let create = move || {
         let t = title.get_untracked();
@@ -34,7 +37,7 @@ pub fn NewTicketDialog() -> impl IntoView {
                     ctx.overlay.set(Some(Overlay::Editor(created.doc)));
                 }
                 Err(e) => {
-                    ctx.error.set(Some(e));
+                    problem.set(Some(e));
                     busy.set(false);
                 }
             }
@@ -56,8 +59,12 @@ pub fn NewTicketDialog() -> impl IntoView {
                         type="text"
                         autofocus
                         class="rounded border border-slate-300 bg-slate-50 px-2 py-1.5 dark:border-slate-600 dark:bg-slate-900"
+                        aria-invalid=move || problem.with(Option::is_some).to_string()
                         prop:value=move || title.get()
-                        on:input=move |ev| title.set(event_target_value(&ev))
+                        on:input=move |ev| {
+                            title.set(event_target_value(&ev));
+                            problem.set(None);
+                        }
                     />
                 </label>
                 <label class="flex items-center gap-2 text-sm">
@@ -71,6 +78,7 @@ pub fn NewTicketDialog() -> impl IntoView {
                 <p class="text-xs text-slate-500">
                     "The ticket is created in the backlog from the board's ticket template. A draft stays in the backlog until it's marked ready."
                 </p>
+                <ProblemNote problem />
                 <div class="flex justify-end gap-2">
                     <button
                         type="button"
@@ -330,6 +338,8 @@ pub fn OverLimitDialog(file: String, from: Place, to: Place, reason: String) -> 
 pub fn CloneRepoDialog(name: String) -> impl IntoView {
     let ctx = Ctx::get();
     let busy = RwSignal::new(false);
+    // A failed clone says why here and stays open (ticket 021).
+    let problem = RwSignal::new(None::<String>);
     let target = StoredValue::new(name.clone());
     let clone = move |_| {
         if busy.get_untracked() {
@@ -353,8 +363,8 @@ pub fn CloneRepoDialog(name: String) -> impl IntoView {
                     ctx.reload();
                 }
                 Err(e) => {
-                    ctx.close_overlay();
-                    ctx.error.set(Some(e));
+                    problem.set(Some(e));
+                    busy.set(false);
                 }
             }
         });
@@ -367,6 +377,7 @@ pub fn CloneRepoDialog(name: String) -> impl IntoView {
                      tickets repository, from the same place the tickets repository came from?"
                 )}
             </p>
+            <ProblemNote problem />
             <div class="flex justify-end gap-2">
                 <button
                     type="button"
@@ -385,5 +396,20 @@ pub fn CloneRepoDialog(name: String) -> impl IntoView {
                 </button>
             </div>
         </Modal>
+    }
+}
+
+/// Why a dialog's action failed, shown inside the dialog next to its
+/// buttons (ticket 021), rather than on the status line behind it.
+#[component]
+fn ProblemNote(problem: RwSignal<Option<String>>) -> impl IntoView {
+    move || {
+        problem.get().map(|p| {
+            view! {
+                <p role="alert" class="text-sm font-medium text-red-700 dark:text-red-300">
+                    {p}
+                </p>
+            }
+        })
     }
 }
