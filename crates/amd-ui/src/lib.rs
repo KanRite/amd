@@ -327,6 +327,7 @@ async fn create_ticket(
     title: String,
     repo: Option<String>,
     repository: Option<String>,
+    draft: Option<bool>,
 ) -> Result<Created> {
     change(&state, move |project| {
         let repo = repo.unwrap_or_default();
@@ -338,7 +339,12 @@ async fn create_ticket(
             repository,
             points: String::new(),
             epic: None,
-            tags: Vec::new(),
+            // A draft is a ticket carrying DRAFT (ticket 114).
+            tags: if draft.unwrap_or(false) {
+                vec![agile_md::task::DRAFT_TAG.to_string()]
+            } else {
+                Vec::new()
+            },
             branch_type: String::new(),
             parent: String::new(),
             related: Vec::new(),
@@ -934,17 +940,19 @@ mod tests {
         std::fs::write(&path, text.replace("tags: []", "tags: [future,misc]")).unwrap();
 
         let summary = project.summary().unwrap();
-        let uses: Vec<(String, usize, bool)> = summary
+        let uses: Vec<(String, usize, bool, bool)> = summary
             .tags
             .iter()
-            .map(|t| (t.name.clone(), t.count, t.listed))
+            .map(|t| (t.name.clone(), t.count, t.listed, t.reserved))
             .collect();
+        // DRAFT is built in (ticket 114): always there, never listed.
         assert_eq!(
             uses,
             [
-                ("FUTURE".to_string(), 1, true),
-                ("MISC".to_string(), 1, false),
-                ("OLD".to_string(), 0, true),
+                ("DRAFT".to_string(), 0, false, true),
+                ("FUTURE".to_string(), 1, true, false),
+                ("MISC".to_string(), 1, false, false),
+                ("OLD".to_string(), 0, true, false),
             ]
         );
         assert!(summary.tags_only);

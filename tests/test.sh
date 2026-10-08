@@ -601,6 +601,27 @@ assert "with only listed tags on, amd new refuses an unlisted tag" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags only on | grep -q 'only listed tags: on' \
     && ! env ${tg_env} '${AMD}' new 'Refused' -t misc --no-edit 2>/dev/null && ! ls tasks/backlog/*-refused.md 2>/dev/null \
     && env ${tg_env} '${AMD}' new 'Allowed' -t future --no-edit >/dev/null 2>&1"
+
+echo "drafts (ticket 114):"
+assert "amd new --draft tags it DRAFT, even with only listed tags on" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' new 'Draft idea' --draft --no-edit >/dev/null 2>&1 \
+    && grep -q '^tags: \[DRAFT\]' tasks/backlog/*-draft-idea.md"
+dr_id() { basename "$(ls "${tgb}"/tasks/backlog/*-draft-idea.md "${tgb}"/tasks/todo/*-draft-idea.md 2>/dev/null)" | cut -c1-3; }
+assert "a draft can't leave the backlog" \
+  bash -c "cd '${tgb}' && env ${tg_env} AMD_NO_BRANCH=1 '${AMD}' todo $(dr_id) 2>&1 | grep -q 'is a draft' \
+    && ls tasks/backlog/*-draft-idea.md >/dev/null"
+assert "amd draft on a draft says so and changes nothing" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' draft $(dr_id) | grep -q 'already a draft'"
+assert "amd ready takes it out of draft, and then it moves on" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' ready $(dr_id) | grep -q 'is ready' \
+    && ! grep -q 'DRAFT' tasks/backlog/*-draft-idea.md \
+    && env ${tg_env} AMD_NO_BRANCH=1 '${AMD}' todo $(dr_id) >/dev/null 2>&1 && ls tasks/todo/*-draft-idea.md >/dev/null"
+assert "amd tag DRAFT lists the drafts" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' new 'Second draft' --draft --no-edit >/dev/null 2>&1 \
+    && env ${tg_env} '${AMD}' tag DRAFT | grep -q 'Second draft'"
+assert "DRAFT is built in: it can't be added to or removed from the list" \
+  bash -c "cd '${tgb}' && ! env ${tg_env} '${AMD}' tags add draft 2>/dev/null \
+    && env ${tg_env} '${AMD}' tags remove DRAFT 2>&1 | grep -q 'built in'"
 rm -rf "${tg}"
 
 echo "the registry is scoped by project directory (ticket 095):"

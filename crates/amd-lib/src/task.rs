@@ -603,6 +603,32 @@ impl Task {
         self.tags().iter().any(|known| normalize_tag(known) == tag)
     }
 
+    /// Whether this ticket is a draft (ticket 114): it carries [`DRAFT_TAG`],
+    /// and so can't leave the backlog until that's taken off.
+    pub fn is_draft(&self) -> bool {
+        self.has_tag(DRAFT_TAG)
+    }
+
+    /// Make this ticket a draft, or take it out of draft, by adding or
+    /// removing [`DRAFT_TAG`]. The other tags are kept, in uppercase.
+    /// Returns whether the file changed.
+    pub fn set_draft(&self, expected: ContentHash, draft: bool) -> Result<bool> {
+        let mut tags = normalize_tags(&self.tags());
+        let had = tags.iter().any(|tag| tag == DRAFT_TAG);
+        if had == draft {
+            return Ok(false);
+        }
+        if draft {
+            tags.push(DRAFT_TAG.to_string());
+        } else {
+            tags.retain(|tag| tag != DRAFT_TAG);
+        }
+        self.write_checked(expected, |text| {
+            set_meta(text, "tags", &format!("[{}]", tags.join(",")))
+        })?;
+        Ok(true)
+    }
+
     /// Add ids to the `related` list, in id order and without duplicates.
     /// Returns whether the file changed.
     pub fn add_related(&self, expected: ContentHash, ids: &[String]) -> Result<bool> {
@@ -667,6 +693,21 @@ impl Task {
 /// in this form, so a ticket written before that still matches.
 pub fn normalize_tag(tag: &str) -> String {
     tag.trim().trim_matches(['"', '\'']).to_uppercase()
+}
+
+/// The tag that makes a ticket a draft (ticket 114). A draft can't leave
+/// the backlog, and can't go into a sprint, until the tag is taken off.
+pub const DRAFT_TAG: &str = "DRAFT";
+
+/// Tags the tool itself gives a meaning to. They're always allowed, even
+/// when a project only allows its listed tags, always offered, and can't be
+/// taken off the project's list.
+pub const RESERVED_TAGS: [&str; 1] = [DRAFT_TAG];
+
+/// Whether `tag` is one of [`RESERVED_TAGS`] (ignoring case).
+pub fn is_reserved_tag(tag: &str) -> bool {
+    let tag = normalize_tag(tag);
+    RESERVED_TAGS.contains(&tag.as_str())
 }
 
 /// [`normalize_tag`] over a list, keeping the first of any duplicates and

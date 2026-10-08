@@ -207,6 +207,10 @@ pub struct TagUse {
     pub count: usize,
     /// On the project's tag list (Admin), as opposed to only in use.
     pub listed: bool,
+    /// Built into the tool (ticket 114: DRAFT): always offered and allowed,
+    /// never on the project's list, never removable.
+    #[serde(default)]
+    pub reserved: bool,
 }
 
 /// A repository tickets can be about.

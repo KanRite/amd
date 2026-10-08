@@ -261,6 +261,42 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                         }
                     })
             }}
+            // A draft (ticket 114) says so at the top. Mark ready takes the
+            // DRAFT tag off; saving writes it, like any other field.
+            <Show when=move || {
+                is_rich() && fields.with(|f| amd_ui_model::epic::is_draft(&f.tags))
+            }>
+                <div
+                    role="status"
+                    class="flex items-center gap-3 rounded border border-dashed border-amber-500 px-3 py-2 text-sm text-amber-800 dark:text-amber-200"
+                >
+                    <span class="font-semibold">"Draft"</span>
+                    <span class="flex-1">
+                        "It stays in the backlog, and out of sprints, until it's marked ready."
+                    </span>
+                    <button
+                        class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-500 disabled:opacity-50"
+                        disabled=held
+                        on:click=move |_| {
+                            fields.update(|f| {
+                                f.tags.retain(|t| !t.trim().eq_ignore_ascii_case(amd_ui_model::epic::DRAFT_TAG))
+                            });
+                            refresh_dirty();
+                        }
+                    >
+                        "Mark ready"
+                    </button>
+                </div>
+            </Show>
+            <Show when=move || {
+                is_rich() && dirty.get() && original.with_value(|o| {
+                    amd_ui_model::epic::is_draft(&parse_frontmatter(o).tags)
+                }) && !fields.with(|f| amd_ui_model::epic::is_draft(&f.tags))
+            }>
+                <p role="status" class="text-sm text-amber-800 dark:text-amber-200">
+                    "Marked ready: save to take it out of draft."
+                </p>
+            </Show>
             // Everything above the buttons scrolls as one, so a short window
             // scrolls the dialog instead of squeezing the editor to nothing.
             <div class="-mx-1 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-1">
@@ -777,24 +813,30 @@ fn TagPicker(
     let typed = RwSignal::new(String::new());
     let note = RwSignal::new(None::<String>);
     let current = move || fields.with(|f| f.tags.clone());
+    // The listed tags, plus the built-in ones (DRAFT, ticket 114), which are
+    // always allowed and offered.
     let listed = move || {
         ctx.board.with(|b| {
             b.as_ref()
                 .map(|b| {
                     b.tags
                         .iter()
-                        .filter(|t| t.listed)
+                        .filter(|t| t.listed || t.reserved)
                         .map(|t| t.name.clone())
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default()
         })
     };
+    // Whether the project has a tag list of its own.
+    let has_list = move || {
+        ctx.board
+            .with(|b| b.as_ref().is_some_and(|b| b.tags.iter().any(|t| t.listed)))
+    };
     // What's offered: the list, or with no list the tags in use.
     let known = move || {
-        let list = listed();
-        if !list.is_empty() {
-            return list;
+        if has_list() {
+            return listed();
         }
         ctx.board.with(|b| {
             b.as_ref()
@@ -802,8 +844,7 @@ fn TagPicker(
                 .unwrap_or_default()
         })
     };
-    let only =
-        move || ctx.board.with(|b| b.as_ref().is_some_and(|b| b.tags_only)) && !listed().is_empty();
+    let only = move || ctx.board.with(|b| b.as_ref().is_some_and(|b| b.tags_only)) && has_list();
     let options = move || {
         let query = typed.get().trim().to_uppercase();
         let have: Vec<String> = current().iter().map(|t| t.to_uppercase()).collect();
@@ -847,10 +888,11 @@ fn TagPicker(
             <ul class="flex flex-wrap gap-1" aria-label="This ticket's tags">
                 {move || {
                     let list = listed();
+                    let has = has_list();
                     current()
                         .into_iter()
                         .map(|tag| {
-                            let off_list = !list.is_empty() && !list.contains(&tag.to_uppercase());
+                            let off_list = has && !list.contains(&tag.to_uppercase());
                             let style = if off_list {
                                 "border border-dashed border-accent-400"
                             } else {

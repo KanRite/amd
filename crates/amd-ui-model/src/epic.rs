@@ -135,6 +135,44 @@ pub fn sprint_rule(
     Ok(())
 }
 
+/// The tag that makes a ticket a draft (ticket 114), as `amd` writes it.
+pub const DRAFT_TAG: &str = "DRAFT";
+
+/// Whether a ticket with these tags is a draft. Case is ignored, as
+/// everywhere tags are matched.
+pub fn is_draft(tags: &[String]) -> bool {
+    tags.iter()
+        .any(|tag| tag.trim().eq_ignore_ascii_case(DRAFT_TAG))
+}
+
+/// The draft rule (ticket 114), mirroring `amd`'s: a draft can't leave the
+/// backlog, and can't go into a sprint. Filing it into an epic, or moving
+/// it between the loose backlog and an epic, is fine.
+pub fn draft_rule(
+    from: &Place,
+    to: &Place,
+    to_group: Option<GroupState>,
+    draft: bool,
+    ticket: &str,
+) -> Result<(), String> {
+    if !draft {
+        return Ok(());
+    }
+    if from.column == Column::Backlog && to.column != Column::Backlog {
+        return Err(format!(
+            "{ticket} is a draft: remove {DRAFT_TAG} to take it out of the backlog."
+        ));
+    }
+    if let (Some(group), Some(name)) = (to_group, &to.epic)
+        && group.kind == GroupKind::Sprint
+    {
+        return Err(format!(
+            "{ticket} is a draft: remove {DRAFT_TAG} before it can go in {name}."
+        ));
+    }
+    Ok(())
+}
+
 /// Whether a ticket's `points:` value is a usable size (a number, 0 or more).
 pub fn has_points(points: &str) -> bool {
     points.trim().parse::<f64>().is_ok_and(|p| p >= 0.0)
@@ -171,6 +209,36 @@ mod tests {
 
     fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_draft_stays_in_the_backlog_and_out_of_sprints() {
+        let place = |column, epic: Option<&str>| Place {
+            repo: String::new(),
+            column,
+            epic: epic.map(str::to_string),
+        };
+        let loose = place(Column::Backlog, None);
+        let todo = place(Column::Todo, None);
+        let in_epic = place(Column::Backlog, Some("e"));
+        let in_sprint = place(Column::Backlog, Some("s"));
+        let epic = Some(GroupState {
+            kind: GroupKind::Epic,
+            started: false,
+        });
+        let sprint = Some(GroupState {
+            kind: GroupKind::Sprint,
+            started: false,
+        });
+
+        assert!(draft_rule(&loose, &todo, None, true, "001").is_err());
+        assert!(draft_rule(&in_epic, &todo, None, true, "001").is_err());
+        assert!(draft_rule(&loose, &in_sprint, sprint, true, "001").is_err());
+        assert!(draft_rule(&loose, &in_epic, epic, true, "001").is_ok());
+        assert!(draft_rule(&in_epic, &loose, None, true, "001").is_ok());
+        assert!(draft_rule(&loose, &todo, None, false, "001").is_ok());
+        assert!(is_draft(&names(&["cli", "draft"])));
+        assert!(!is_draft(&names(&["cli"])));
     }
 
     #[test]

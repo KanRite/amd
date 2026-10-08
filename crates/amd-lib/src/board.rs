@@ -513,6 +513,15 @@ impl Board {
             if group.is_sprint() && task.points().is_none() {
                 bail!("{} needs points before it can go in {name}", task.stem);
             }
+            // A sprint is a commitment, and a draft isn't ready to commit to
+            // (ticket 114). An epic is fine: it's still the backlog.
+            if group.is_sprint() && task.is_draft() {
+                bail!(
+                    "{} is a draft: remove {} before it can go in {name}",
+                    task.id_display(),
+                    crate::task::DRAFT_TAG
+                );
+            }
         }
 
         if task.column != Column::Backlog {
@@ -867,6 +876,16 @@ impl Board {
                 task.column
             );
         }
+        // A draft stays in the backlog until it's ready (ticket 114). Moves
+        // go one column at a time, so backlog -> todo is the only way out.
+        if task.column == Column::Backlog && task.is_draft() {
+            bail!(
+                "{} is a draft: remove {} (`amd ready {}`) to take it out of the backlog",
+                task.id_display(),
+                crate::task::DRAFT_TAG,
+                task.id_display()
+            );
+        }
         task.ensure_not_leased()?;
         if !force && let Some(limit) = crate::board_settings::load(self).wip_limit(to) {
             let current = self.tasks_in(to)?.len();
@@ -1173,6 +1192,71 @@ mod tests {
         };
         board.create_group(&group).unwrap();
         group
+    }
+
+    #[test]
+    fn a_draft_stays_in_the_backlog_until_it_is_ready() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        backlog_ticket(&board, "001-a.md");
+        let task = board.find("001").unwrap();
+        assert!(task.set_draft(task.hash().unwrap(), true).unwrap());
+        assert!(board.find("001").unwrap().is_draft());
+
+        let err = board
+            .move_task(&board.find("001").unwrap(), Column::Todo, false)
+            .unwrap_err();
+        assert!(err.to_string().contains("is a draft"), "{err}");
+        assert_eq!(board.find("001").unwrap().column, Column::Backlog);
+
+        // Still workable while it's a draft: sized, and filed into an epic.
+        let task = board.find("001").unwrap();
+        task.set_points(task.hash().unwrap(), "3").unwrap();
+        board
+            .create_group(&crate::group::Group {
+                dir: board.dir(Column::Backlog).join("epic-1"),
+                name: "epic-1".into(),
+                kind: crate::group::Kind::Epic,
+                description: String::new(),
+                days: crate::group::DEFAULT_DAYS,
+                state: crate::group::State::Pending,
+            })
+            .unwrap();
+        board
+            .set_epic(&board.find("001").unwrap(), Some("epic-1"))
+            .unwrap();
+
+        // Ready, it moves on; marking it again changes nothing.
+        let task = board.find("001").unwrap();
+        assert!(task.set_draft(task.hash().unwrap(), false).unwrap());
+        let task = board.find("001").unwrap();
+        assert!(!task.set_draft(task.hash().unwrap(), false).unwrap());
+        board
+            .move_task(&board.find("001").unwrap(), Column::Todo, false)
+            .unwrap();
+        assert_eq!(board.find("001").unwrap().column, Column::Todo);
+    }
+
+    #[test]
+    fn a_sprint_refuses_a_draft() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        sprint(&board, "sprint-1");
+        backlog_ticket(&board, "001-a.md");
+        let task = board.find("001").unwrap();
+        task.set_points(task.hash().unwrap(), "3").unwrap();
+        task.set_draft(task.hash().unwrap(), true).unwrap();
+
+        let err = board
+            .set_epic(&board.find("001").unwrap(), Some("sprint-1"))
+            .unwrap_err();
+        assert!(err.to_string().contains("is a draft"), "{err}");
+
+        let task = board.find("001").unwrap();
+        task.set_draft(task.hash().unwrap(), false).unwrap();
+        board
+            .set_epic(&board.find("001").unwrap(), Some("sprint-1"))
+            .unwrap();
     }
 
     #[test]

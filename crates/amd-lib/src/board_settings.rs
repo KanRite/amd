@@ -445,6 +445,9 @@ impl BoardSettings {
     pub fn add_tag(&mut self, tag: &str) -> Result<String> {
         let tag = crate::task::normalize_tag(tag);
         crate::task::validate_tag(&tag)?;
+        if crate::task::is_reserved_tag(&tag) {
+            bail!("{tag} is built in: every project has it");
+        }
         let mut tags = self.tags();
         if tags.contains(&tag) {
             bail!("{tag} is already a tag");
@@ -495,7 +498,7 @@ impl BoardSettings {
         }
         let unlisted: Vec<String> = crate::task::normalize_tags(tags)
             .into_iter()
-            .filter(|tag| !listed.contains(tag))
+            .filter(|tag| !listed.contains(tag) && !crate::task::is_reserved_tag(tag))
             .collect();
         if unlisted.is_empty() {
             return Ok(None);
@@ -644,6 +647,17 @@ mod tests {
         assert!(settings.remove_tag("business"));
         assert!(!settings.remove_tag("business"));
         assert_eq!(settings.tags(), ["FUTURE"]);
+    }
+
+    #[test]
+    fn draft_is_built_in_and_always_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = load(&board(dir.path()));
+        assert!(settings.add_tag("draft").is_err(), "built in, not listed");
+        settings.add_tag("FUTURE").unwrap();
+        settings.set_only_listed_tags(true);
+        let tags = vec!["draft".to_string(), "FUTURE".to_string()];
+        assert_eq!(settings.check_tags(&tags).unwrap(), None);
     }
 
     #[test]
