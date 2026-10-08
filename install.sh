@@ -130,8 +130,8 @@ EOF
   echo "Installed the amdui launcher -> ${apps}/amdui.desktop"
 }
 
-# Rust target triple for this machine — matches the assets published by
-# mrdoodles/rust-release (amd-<target>.zip).
+# Rust target triple for this machine — matches the assets this repository's
+# release workflow publishes (amd-<target>.zip).
 target_triple() {
   local os arch
   os="$(uname -s)"
@@ -202,7 +202,23 @@ download_release() {
   # zip carried both binaries, and `amd gui` is the way in to the board there.
   if [ -f "${TMP}/amdui" ]; then
     replace_bin "${TMP}/amdui" amdui
+    check_board_libraries
   fi
+}
+
+# A downloaded amdui is linked against WebKitGTK on Linux (ticket 085). It
+# installs either way; this says what to add when the libraries are missing,
+# rather than leaving a board that won't start with no reason given.
+check_board_libraries() {
+  [ "$(uname -s)" = "Linux" ] || return 0
+  command -v ldd >/dev/null 2>&1 || return 0
+  local missing
+  missing="$(ldd "${DIR}/amdui" 2>/dev/null | awk '/not found/ {print $1}' | tr '\n' ' ')"
+  [ -n "${missing}" ] || return 0
+  printf 'Note: the desktop board (amdui) needs libraries this machine lacks:\n  %s\n' "${missing}" >&2
+  printf 'Install WebKitGTK 4.1, e.g. Debian/Ubuntu: sudo apt install libwebkit2gtk-4.1-0\n' >&2
+  printf '  Fedora: sudo dnf install webkit2gtk4.1    Arch: sudo pacman -S webkit2gtk-4.1\n' >&2
+  printf 'amd itself works without them.\n' >&2
 }
 
 if [ "${FROM_SOURCE}" = "1" ]; then
