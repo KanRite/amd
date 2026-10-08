@@ -194,7 +194,7 @@ pub struct Board {
     /// always UPPERCASE.
     #[serde(default)]
     pub tags: Vec<TagUse>,
-    /// Only listed tags may be put on a ticket (the project's `tags-only`).
+    /// Only listed tags may be put on a ticket (the project's `prevent-arbitrary-tags`, formerly `tags-only`).
     #[serde(default)]
     pub tags_only: bool,
 }

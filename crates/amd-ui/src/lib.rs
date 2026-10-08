@@ -571,7 +571,7 @@ async fn set_tags_only(state: Tauri<'_, AppState>, on: bool) -> Result<SyncRepor
         let board = &p.repos[0].1;
         save_setting(
             board,
-            &format!("tags-only {}", if on { "on" } else { "off" }),
+            &format!("prevent-arbitrary-tags {}", if on { "on" } else { "off" }),
             |s| {
                 s.set_only_listed_tags(on);
                 Ok(())

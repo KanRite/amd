@@ -60,6 +60,17 @@ impl Config {
         }
     }
 
+    /// Renames a key in place (its line keeps its position), for a setting
+    /// whose name has changed. If both names are present, the old one is
+    /// dropped and the new one's value kept.
+    pub fn rename_key(&mut self, old: &str, new: &str) {
+        if self.get(new).is_some() {
+            self.entries.retain(|(name, _)| name != old);
+        } else if let Some((name, _)) = self.entries.iter_mut().find(|(name, _)| name == old) {
+            *name = new.to_string();
+        }
+    }
+
     pub fn save(&self) -> Result<()> {
         let path = path().ok_or_else(|| anyhow::anyhow!("no config directory"))?;
         self.save_to(&path)

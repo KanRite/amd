@@ -95,7 +95,10 @@ const USERS: &str = "users";
 const SYNC: &str = "sync";
 const TICKET_NUMBERING: &str = "ticket-numbering";
 const TAGS: &str = "tags";
-const TAGS_ONLY: &str = "tags-only";
+const TAGS_ONLY: &str = "prevent-arbitrary-tags";
+/// `prevent-arbitrary-tags`' name until ticket 141. Still read, and renamed
+/// the next time the setting is written.
+const TAGS_ONLY_OLD: &str = "tags-only";
 
 /// One person on the project: git's own `Name <email>` identity.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -473,12 +476,17 @@ impl BoardSettings {
         true
     }
 
-    /// Whether only listed tags may be put on a ticket (`tags-only`):
+    /// Whether only listed tags may be put on a ticket
+    /// (`prevent-arbitrary-tags`, formerly `tags-only`):
     /// "Prevent arbitrary tags". **On unless set to off** (ticket 141), so a
     /// project's list is its vocabulary from the moment it has one. Has no
     /// effect while the list is empty: then any tag goes.
     pub fn only_listed_tags(&self) -> bool {
-        self.config.get(TAGS_ONLY).is_none_or(|value| {
+        let value = self
+            .config
+            .get(TAGS_ONLY)
+            .or_else(|| self.config.get(TAGS_ONLY_OLD));
+        value.is_none_or(|value| {
             matches!(
                 value.trim().to_ascii_lowercase().as_str(),
                 "1" | "on" | "true"
@@ -487,6 +495,7 @@ impl BoardSettings {
     }
 
     pub fn set_only_listed_tags(&mut self, on: bool) {
+        self.config.rename_key(TAGS_ONLY_OLD, TAGS_ONLY);
         self.config.set(TAGS_ONLY, if on { "on" } else { "off" });
     }
 
@@ -649,6 +658,24 @@ mod tests {
         assert!(settings.remove_tag("business"));
         assert!(!settings.remove_tag("business"));
         assert_eq!(settings.tags(), ["FUTURE"]);
+    }
+
+    #[test]
+    fn the_old_tags_only_name_is_read_and_renamed_on_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        std::fs::write(
+            board.repo_root().join(".settings"),
+            "tags = FUTURE\ntags-only = off\n",
+        )
+        .unwrap();
+        let mut settings = load(&board);
+        assert!(!settings.only_listed_tags(), "the old name still counts");
+        settings.set_only_listed_tags(true);
+        settings.save(&board).unwrap();
+        let text = std::fs::read_to_string(board.repo_root().join(".settings")).unwrap();
+        assert_eq!(text, "tags = FUTURE\nprevent-arbitrary-tags = on\n");
+        assert!(load(&board).only_listed_tags());
     }
 
     #[test]
