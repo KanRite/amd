@@ -46,10 +46,42 @@ pub struct RepoBoard {
     pub selected_group: Option<String>,
 }
 
+/// How many tickets carry each tag across `boards` — a project's boards,
+/// the tickets repository's and every registered repository's (ticket 122).
+/// Uppercase, sorted; the archive doesn't count.
+pub fn tag_counts(boards: &[&Board]) -> anyhow::Result<std::collections::BTreeMap<String, usize>> {
+    let mut counts = std::collections::BTreeMap::new();
+    for board in boards {
+        for (tag, n) in board.tag_counts()? {
+            *counts.entry(tag).or_insert(0) += n;
+        }
+    }
+    Ok(counts)
+}
+
+/// Takes `tag` off the project's list, kept in `project`'s `.settings`, but
+/// only if no ticket on any of `boards` carries it: removing a tag never
+/// changes a ticket (ticket 122). Saves the settings; committing is the
+/// caller's (the auto-commit wraps this).
+pub fn remove_unused_tag(project: &Board, boards: &[&Board], tag: &str) -> anyhow::Result<String> {
+    let tag = crate::task::normalize_tag(tag);
+    let used = tag_counts(boards)?.get(&tag).copied().unwrap_or(0);
+    if used > 0 {
+        anyhow::bail!("{tag} is still on {used} ticket(s); take it off them first");
+    }
+    let mut settings = crate::board_settings::load(project);
+    if !settings.remove_tag(&tag) {
+        anyhow::bail!("{tag} isn't on the project's tag list");
+    }
+    settings.save(project)?;
+    Ok(tag)
+}
+
 /// Whether `card` should be drawn under the current tag filter. An empty
-/// filter matches everything, same as no filter at all.
+/// filter matches everything, same as no filter at all. Case is ignored
+/// (ticket 122).
 pub fn card_visible(card: &Card, filter: &BTreeSet<String>) -> bool {
-    filter.is_empty() || card.task.tags().iter().any(|tag| filter.contains(tag))
+    filter.is_empty() || filter.iter().any(|tag| card.task.has_tag(tag))
 }
 
 /// Whether `card`'s task currently belongs to the group named `name`. Inside
@@ -288,6 +320,48 @@ mod tests {
         }
         std::fs::write(board.root.join("backlog/001-a.md"), "a").unwrap();
         (dir, board)
+    }
+
+    /// Ticket 122: usage counts across boards ignore case, and a tag any
+    /// ticket carries can't be taken off the list.
+    #[test]
+    fn a_tag_in_use_on_any_board_is_not_removed() {
+        let (_one, first) = scratch_board();
+        let (_two, second) = scratch_board();
+        std::fs::write(
+            first.root.join("backlog/002-b.md"),
+            "---\nid: \"002\"\ntitle: \"B\"\ntags: [future]\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            second.root.join("todo/003-c.md"),
+            "---\nid: \"003\"\ntitle: \"C\"\ntags: [FUTURE,cli]\n---\n",
+        )
+        .unwrap();
+        // The archive doesn't count.
+        std::fs::write(
+            second.root.join("archive/004-d.md"),
+            "---\nid: \"004\"\ntitle: \"D\"\ntags: [OLD]\n---\n",
+        )
+        .unwrap();
+        let boards = [&first, &second];
+        let counts = tag_counts(&boards).unwrap();
+        assert_eq!(counts.get("FUTURE"), Some(&2));
+        assert_eq!(counts.get("CLI"), Some(&1));
+        assert_eq!(counts.get("OLD"), None);
+
+        let mut settings = crate::board_settings::load(&first);
+        for tag in ["FUTURE", "OLD"] {
+            settings.add_tag(tag).unwrap();
+        }
+        settings.save(&first).unwrap();
+        let refused = remove_unused_tag(&first, &boards, "future")
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("still on 2 ticket(s)"), "{refused}");
+        assert_eq!(remove_unused_tag(&first, &boards, "old").unwrap(), "OLD");
+        assert_eq!(crate::board_settings::load(&first).tags(), ["FUTURE"]);
+        assert!(remove_unused_tag(&first, &boards, "nope").is_err());
     }
 
     #[test]

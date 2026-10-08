@@ -566,6 +566,43 @@ assert "...and once nothing declares or registers it, deregister refuses" \
     && env ${rg_env} '${AMD}' deregister beta-app 2>&1 | grep -q 'neither declared for this project nor registered'"
 rm -rf "${rg}"
 
+echo "tags (ticket 122):"
+tg="$(mktemp -d)"
+tg_env="XDG_CONFIG_HOME=${tg}/config AMD_NO_INPUT=1"
+(
+  set -e
+  cd "${tg}" && git init -q tags-tickets && cd tags-tickets
+  git config user.email t@t.co && git config user.name t
+  env ${tg_env} "${AMD}" init tags --local-only >/dev/null 2>&1
+)
+tgb="${tg}/tags-tickets"
+assert "with no list, amd tags says so" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags | grep -q 'no tag list'"
+assert "amd tags add saves the tag in UPPERCASE in .settings" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags add ' future ' | grep -qx 'added FUTURE' && grep -qx 'tags = FUTURE' .settings"
+assert "...refuses one already listed, ignoring case" \
+  bash -c "cd '${tgb}' && ! env ${tg_env} '${AMD}' tags add Future 2>/dev/null"
+assert "...and one that isn't one word" \
+  bash -c "cd '${tgb}' && ! env ${tg_env} '${AMD}' tags add 'two words' 2>/dev/null"
+assert "amd new saves tags in UPPERCASE and warns about an unlisted one" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' new 'Tagged' -t future -t misc --no-edit 2>&1 | grep -q \"not on the project's tag list: MISC\" \
+    && grep -q '^tags: \[FUTURE,MISC\]' tasks/backlog/*-tagged.md"
+assert "amd tag matches without regard to case" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tag future --plain | grep -q 'Tagged'"
+assert "amd tags lists counts, and tags in use but not listed" \
+  bash -c "cd '${tgb}' && out=\$(env ${tg_env} '${AMD}' tags) && printf '%s\\n' \"\$out\" | grep -q '^FUTURE.1\$' \
+    && printf '%s\\n' \"\$out\" | grep -q 'in use but not listed: MISC (1)'"
+assert "a tag a ticket carries can't be removed" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags remove future 2>&1 | grep -q 'still on 1 ticket' && grep -q 'tags = FUTURE' .settings"
+assert "an unused tag can" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags add old >/dev/null && env ${tg_env} '${AMD}' tags remove OLD | grep -qx 'removed OLD' \
+    && grep -qx 'tags = FUTURE' .settings"
+assert "with only listed tags on, amd new refuses an unlisted tag" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags only on | grep -q 'only listed tags: on' \
+    && ! env ${tg_env} '${AMD}' new 'Refused' -t misc --no-edit 2>/dev/null && ! ls tasks/backlog/*-refused.md 2>/dev/null \
+    && env ${tg_env} '${AMD}' new 'Allowed' -t future --no-edit >/dev/null 2>&1"
+rm -rf "${tg}"
+
 echo "the registry is scoped by project directory (ticket 095):"
 # Two folders, each with a project called p: p-tickets and p-code. Both
 # p-codes are registered on this machine; each board must use its own.
@@ -715,7 +752,7 @@ echo "create:"
 git add -A; git commit -qm seed
 assert "creates tasks/backlog/001-first-task.md (new work starts in the backlog)" test -f tasks/backlog/001-first-task.md
 assert "title in frontmatter" grep -q '^title: "First task"$' tasks/backlog/001-first-task.md
-assert "tags in frontmatter" grep -q '^tags: \[x,y\]$' tasks/backlog/002-second-task.md
+assert "tags in frontmatter, in UPPERCASE (ticket 122)" grep -q '^tags: \[X,Y\]$' tasks/backlog/002-second-task.md
 assert "a new ticket has priority low" grep -q '^priority: "low"$' tasks/backlog/002-second-task.md
 assert "amd set priority changes it" \
   bash -c "'${AMD}' set 2 priority high | grep -q 'priority high' && grep -q '^priority: \"high\"\$' tasks/backlog/002-second-task.md"

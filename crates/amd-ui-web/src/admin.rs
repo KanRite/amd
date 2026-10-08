@@ -148,6 +148,8 @@ pub fn AdminPanel() -> impl IntoView {
                     </p>
                 </section>
 
+                <TagsAdmin />
+
                 <WipAdmin />
 
                 <LeaseAdmin />
@@ -510,6 +512,209 @@ fn WipAdmin() -> impl IntoView {
                     "The most tickets Doing may hold at once ({} unless changed); 0 means no limit. To do has no limit, so work never gets stuck. A move into a full Doing asks before going ahead, and moving a ticket out is never blocked. Saved with the tickets, in .settings, and committed and pushed.",
                     amd_ui_model::wip::DEFAULT_LIMIT,
                 )}
+            </p>
+        </section>
+    }
+}
+
+/// The project's tag list (ticket 122): the listed tags with how many
+/// tickets carry each, a form to add one (saved in UPPERCASE), a dropdown of
+/// the unused ones to remove, and whether only listed tags may be used.
+/// Kept with the tickets in `.settings`, like the WIP limit.
+#[component]
+fn TagsAdmin() -> impl IntoView {
+    let ctx = Ctx::get();
+    let tags = move || {
+        ctx.board
+            .with(|b| b.as_ref().map(|b| b.tags.clone()).unwrap_or_default())
+    };
+    let only = move || ctx.board.with(|b| b.as_ref().is_some_and(|b| b.tags_only));
+    let listed = move || tags().into_iter().filter(|t| t.listed).collect::<Vec<_>>();
+    let unused = move || {
+        listed()
+            .into_iter()
+            .filter(|t| t.count == 0)
+            .map(|t| t.name)
+            .collect::<Vec<_>>()
+    };
+    let unlisted = move || {
+        tags()
+            .into_iter()
+            .filter(|t| !t.listed)
+            .map(|t| format!("{} ({})", t.name, t.count))
+            .collect::<Vec<_>>()
+    };
+    let new_tag = RwSignal::new(String::new());
+    let to_remove = RwSignal::new(String::new());
+    let note = RwSignal::new(None::<String>);
+    let busy = RwSignal::new(false);
+
+    let add = move || {
+        let tag = new_tag.get_untracked().trim().to_uppercase();
+        if tag.is_empty() {
+            note.set(Some("Type a tag first.".into()));
+            return;
+        }
+        busy.set(true);
+        spawn_local(async move {
+            match api::add_tag(&tag).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    note.set(Some(format!("Added {tag}.")));
+                    new_tag.set(String::new());
+                    ctx.reload();
+                }
+                Err(e) => note.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
+    let remove = move |_| {
+        let tag = to_remove.get_untracked();
+        if tag.is_empty() {
+            return;
+        }
+        busy.set(true);
+        spawn_local(async move {
+            match api::remove_tag(&tag).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    note.set(Some(format!("Removed {tag}.")));
+                    to_remove.set(String::new());
+                    ctx.reload();
+                }
+                Err(e) => note.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
+    let set_only = move |on: bool| {
+        busy.set(true);
+        spawn_local(async move {
+            match api::set_tags_only(on).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    ctx.reload();
+                }
+                Err(e) => note.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
+    let field = "rounded border border-slate-300 bg-slate-50 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900";
+    let button = "rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50";
+
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Tags"</h3>
+            {move || {
+                let all = listed();
+                if all.is_empty() {
+                    view! {
+                        <p class="text-sm text-slate-500">
+                            "No tags defined yet, so any tag can be used. Adding one starts the project's list."
+                        </p>
+                    }
+                        .into_any()
+                } else {
+                    view! {
+                        <ul class="flex flex-wrap gap-1.5" aria-label="Listed tags">
+                            {all
+                                .into_iter()
+                                .map(|t| {
+                                    let label = format!("{} · {}", t.name, t.count);
+                                    view! {
+                                        <li class="rounded bg-accent-100 px-1.5 text-sm text-accent-800 dark:bg-accent-900 dark:text-accent-200">
+                                            {label}
+                                        </li>
+                                    }
+                                })
+                                .collect_view()}
+                        </ul>
+                    }
+                        .into_any()
+                }
+            }}
+            <div class="flex flex-wrap items-center gap-2">
+                <input
+                    type="text"
+                    class=format!("{field} w-48 uppercase")
+                    aria-label="New tag"
+                    placeholder="New tag"
+                    prop:value=move || new_tag.get()
+                    on:input=move |ev| {
+                        new_tag.set(event_target_value(&ev));
+                        note.set(None);
+                    }
+                    on:keydown=move |ev| {
+                        if ev.key() == "Enter" {
+                            ev.prevent_default();
+                            add();
+                        }
+                    }
+                />
+                <button
+                    class=button
+                    disabled=move || busy.get() || new_tag.with(|t| t.trim().is_empty())
+                    on:click=move |_| add()
+                >
+                    "Add tag"
+                </button>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <select
+                    class=format!("{field} w-48 appearance-none")
+                    aria-label="Unused tag to remove"
+                    disabled=move || unused().is_empty()
+                    prop:value=move || to_remove.get()
+                    on:change=move |ev| to_remove.set(event_target_value(&ev))
+                >
+                    <option value="">
+                        {move || {
+                            if unused().is_empty() { "No unused tags" } else { "Choose an unused tag" }
+                        }}
+                    </option>
+                    {move || {
+                        unused()
+                            .into_iter()
+                            .map(|name| {
+                                let value = name.clone();
+                                view! { <option value=value>{name}</option> }
+                            })
+                            .collect_view()
+                    }}
+                </select>
+                <button
+                    class=button
+                    disabled=move || busy.get() || to_remove.with(|t| t.is_empty())
+                    on:click=remove
+                >
+                    "Remove"
+                </button>
+            </div>
+            <label class="flex items-center gap-2 text-sm">
+                <input
+                    type="checkbox"
+                    prop:checked=only
+                    disabled=move || busy.get()
+                    on:change=move |ev| set_only(event_target_checked(&ev))
+                />
+                "Only listed tags"
+            </label>
+            {move || note.get().map(|n| view! { <p class="text-sm">{n}</p> })}
+            {move || {
+                let others = unlisted();
+                (!others.is_empty())
+                    .then(|| {
+                        view! {
+                            <p class="text-xs text-slate-500">
+                                "In use but not listed: " {others.join(", ")}
+                            </p>
+                        }
+                    })
+            }}
+            <p class="text-xs text-slate-500">
+                "Tags are always UPPERCASE. A tag can only be removed once no ticket on the project's boards carries it. With \"Only listed tags\" on, the editor offers just these; otherwise any tag can be typed. Saved with the tickets, in .settings, and committed and pushed."
             </p>
         </section>
     }

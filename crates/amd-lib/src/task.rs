@@ -433,6 +433,7 @@ impl Task {
     /// locking and unlocking, never as a side effect of saving an edit.
     pub fn set_text(&self, expected: ContentHash, text: &str) -> Result<()> {
         let text = ensure_priority(text)?;
+        let text = uppercase_tags(&text)?;
         if let Some(points) = meta_in(&text, "points") {
             validate_points(points)?;
         }
@@ -548,7 +549,8 @@ impl Task {
             let text = set_meta(text, "title", &format!("{:?}", fields.title))?;
             let text = set_meta(&text, "assignee", &format!("{:?}", fields.assignee))?;
             let text = set_meta(&text, "points", &format!("{:?}", fields.points))?;
-            let text = set_meta(&text, "tags", &format!("[{}]", fields.tags.join(",")))?;
+            let tags = normalize_tags(fields.tags);
+            let text = set_meta(&text, "tags", &format!("[{}]", tags.join(",")))?;
             let text = set_meta(&text, "branch-type", &format!("{:?}", fields.branch_type))?;
             let text = set_meta(&text, "branch-name", &format!("{branch_name:?}"))?;
             let text = set_meta(&text, "parent", &format!("{parent:?}"))?;
@@ -593,12 +595,12 @@ impl Task {
             .unwrap_or_default()
     }
 
-    /// Whether this ticket carries `tag`, matched exactly (tags are
-    /// free-form labels, not normalised the way a title is for duplicate
-    /// detection — `amd import` writes `DUPLICATE` verbatim, so filtering
-    /// on it is exact too).
+    /// Whether this ticket carries `tag`. Case is ignored (ticket 122):
+    /// tags are saved in uppercase, but a ticket written before that may
+    /// still carry `cli` where the list says `CLI`.
     pub fn has_tag(&self, tag: &str) -> bool {
-        self.tags().iter().any(|known| known == tag)
+        let tag = normalize_tag(tag);
+        self.tags().iter().any(|known| normalize_tag(known) == tag)
     }
 
     /// Add ids to the `related` list, in id order and without duplicates.
@@ -660,6 +662,55 @@ impl Task {
 
 /// `[003,007]` -> `["003", "007"]`. Tolerant of spaces and quotes, since a
 /// human may well have typed the line.
+/// A tag as it's stored (ticket 122): trimmed, unquoted and UPPERCASE, so
+/// tags stand out. Every writer stores tags this way; every match compares
+/// in this form, so a ticket written before that still matches.
+pub fn normalize_tag(tag: &str) -> String {
+    tag.trim().trim_matches(['"', '\'']).to_uppercase()
+}
+
+/// [`normalize_tag`] over a list, keeping the first of any duplicates and
+/// dropping empty ones.
+pub fn normalize_tags(tags: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for tag in tags.iter().map(|t| normalize_tag(t)) {
+        if !tag.is_empty() && !out.contains(&tag) {
+            out.push(tag);
+        }
+    }
+    out
+}
+
+/// Refuses a tag that isn't one word: empty, or holding whitespace, a
+/// comma, a bracket or a quote, any of which would break the `tags: [..]`
+/// list it's written into.
+pub fn validate_tag(tag: &str) -> Result<()> {
+    if tag.is_empty() {
+        bail!("a tag can't be empty");
+    }
+    if let Some(bad) = tag
+        .chars()
+        .find(|c| c.is_whitespace() || matches!(c, ',' | '[' | ']' | '"' | '\''))
+    {
+        bail!("'{tag}' isn't one word: a tag can't contain {bad:?}");
+    }
+    Ok(())
+}
+
+/// `text` with its `tags` list in uppercase ([`normalize_tag`]), unchanged
+/// when there's no `tags` key or it's already so.
+fn uppercase_tags(text: &str) -> Result<String> {
+    let Some(raw) = meta_in(text, "tags") else {
+        return Ok(text.to_string());
+    };
+    let tags = parse_list(raw);
+    let upper = normalize_tags(&tags);
+    if upper == tags {
+        return Ok(text.to_string());
+    }
+    set_meta(text, "tags", &format!("[{}]", upper.join(",")))
+}
+
 pub fn parse_list(raw: &str) -> Vec<String> {
     raw.trim()
         .trim_start_matches('[')
@@ -973,7 +1024,7 @@ mod tests {
     }
 
     #[test]
-    fn tags_reads_the_list_and_has_tag_matches_exactly() {
+    fn tags_reads_the_list_and_has_tag_ignores_case() {
         let dir = tempfile::tempdir().unwrap();
         let task = ranked(
             dir.path(),
@@ -982,11 +1033,42 @@ mod tests {
         );
         assert_eq!(task.tags(), ["DUPLICATE", "urgent"]);
         assert!(task.has_tag("DUPLICATE"));
-        assert!(
-            !task.has_tag("duplicate"),
-            "tag matching is exact, not case-insensitive"
-        );
+        // Ticket 122: tags are uppercase, and a ticket written before that
+        // still matches its tag in any case.
+        assert!(task.has_tag("duplicate"));
+        assert!(task.has_tag("URGENT"));
         assert!(!task.has_tag("missing"));
+    }
+
+    #[test]
+    fn tags_normalise_to_one_uppercase_word() {
+        assert_eq!(normalize_tag("  future "), "FUTURE");
+        assert_eq!(normalize_tag("\"cli\""), "CLI");
+        let tags = ["cli".to_string(), "CLI".into(), "".into(), "Ux".into()];
+        assert_eq!(normalize_tags(&tags), ["CLI", "UX"]);
+        assert!(validate_tag("FUTURE").is_ok());
+        assert!(validate_tag("NEXT-RELEASE").is_ok());
+        for bad in ["", "TWO WORDS", "A,B", "[X]", "\"Q\""] {
+            assert!(validate_tag(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn saving_a_whole_ticket_stores_its_tags_in_uppercase() {
+        let dir = tempfile::tempdir().unwrap();
+        let task = ranked(
+            dir.path(),
+            "001-a.md",
+            "---\nid: \"001\"\ntitle: \"A\"\npriority: \"low\"\ntags: [cli]\n---\n\nbody\n",
+        );
+        let edited = "---\nid: \"001\"\ntitle: \"A\"\npriority: \"low\"\ntags: [cli,future,Cli]\n---\n\nbody\n";
+        task.set_text(task.hash().unwrap(), edited).unwrap();
+        let saved = fs::read_to_string(&task.path).unwrap();
+        assert!(saved.contains("tags: [CLI,FUTURE]"), "{saved}");
+        assert!(
+            saved.ends_with("\n\nbody\n"),
+            "the body is untouched: {saved}"
+        );
     }
 
     #[test]
@@ -1131,7 +1213,11 @@ mod tests {
         assert_eq!(task.title(), "New");
         assert_eq!(task.assignee(), Some("sam".to_string()));
         assert_eq!(task.points(), Some("5".to_string()));
-        assert_eq!(task.tags(), ["urgent", "gui"]);
+        assert_eq!(
+            task.tags(),
+            ["URGENT", "GUI"],
+            "saved in uppercase (ticket 122)"
+        );
         assert_eq!(task.branch_type(), Some("feature".to_string()));
         assert_eq!(task.branch(), Some("feature/new".to_string()));
         assert_eq!(task.parent(), Some("001".to_string()));

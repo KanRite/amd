@@ -242,6 +242,12 @@ async fn save_ticket(
         let expected: ContentHash = version
             .parse()
             .map_err(|_| "the editor lost track of this ticket — reopen it".to_string())?;
+        // The project's tag list decides (ticket 122): an unlisted tag is
+        // refused when only listed tags are allowed. Saved in uppercase.
+        let tags = amd_ui_model::parse_frontmatter(&content).tags;
+        board_settings::load(&project.repos[0].1)
+            .check_tags(&tags)
+            .map_err(err)?;
         let outcome = transition::save_text(board, &task, expected, &content).map_err(err)?;
         Ok(report_outcome(board, message("edit", &task), &outcome))
     })
@@ -524,6 +530,51 @@ fn save_setting(
     committed(board, "settings", what, "", || settings.save(board))
 }
 
+/// Adds a tag to the project's list, in UPPERCASE (ticket 122).
+#[tauri::command]
+async fn add_tag(state: Tauri<'_, AppState>, tag: String) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let name = agile_md::task::normalize_tag(&tag);
+        let mut settings = board_settings::load(board);
+        settings.add_tag(&tag).map_err(err)?;
+        committed(board, "tags", "add", &name, || settings.save(board))
+    })
+    .await
+}
+
+/// Takes an unused tag off the project's list: refused while any ticket on
+/// the project's boards carries it (ticket 122).
+#[tauri::command]
+async fn remove_tag(state: Tauri<'_, AppState>, tag: String) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let boards = p.boards();
+        let name = agile_md::task::normalize_tag(&tag);
+        committed(board, "tags", "remove", &name, || {
+            agile_md::model::remove_unused_tag(board, &boards, &tag).map(|_| ())
+        })
+    })
+    .await
+}
+
+/// Whether only listed tags may be put on a ticket (ticket 122).
+#[tauri::command]
+async fn set_tags_only(state: Tauri<'_, AppState>, on: bool) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        save_setting(
+            board,
+            &format!("tags-only {}", if on { "on" } else { "off" }),
+            |s| {
+                s.set_only_listed_tags(on);
+                Ok(())
+            },
+        )
+    })
+    .await
+}
+
 /// Sets `repo`'s WIP limit on doing (0 turns it off).
 #[tauri::command]
 async fn set_wip_limits(
@@ -797,6 +848,9 @@ pub fn run() {
             unlock_ticket,
             set_wip_limits,
             set_lease_hours,
+            add_tag,
+            remove_tag,
+            set_tags_only,
             auto_commit,
             set_auto_commit,
             appearance,
@@ -860,6 +914,40 @@ mod tests {
         assert_eq!(started.message, "group-start: Sprint 1");
         let renamed = committed(board, "group-rename", "Old", "New", || Ok(())).unwrap();
         assert_eq!(renamed.message, "group-rename: Old \"New\"");
+    }
+
+    /// Ticket 122: the board carries the project's tags, listed and in
+    /// use, with counts and the "only listed" switch, for Admin and the
+    /// editor.
+    #[test]
+    fn the_board_carries_the_project_tags_with_counts() {
+        let (_dir, project) = project();
+        let board = &project.repos[0].1;
+        let mut settings = board_settings::load(board);
+        settings.add_tag("future").unwrap();
+        settings.add_tag("old").unwrap();
+        settings.set_only_listed_tags(true);
+        settings.save(board).unwrap();
+        let file = new_ticket(&project, "Tagged");
+        let path = board.root.join("backlog").join(&file);
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, text.replace("tags: []", "tags: [future,misc]")).unwrap();
+
+        let summary = project.summary().unwrap();
+        let uses: Vec<(String, usize, bool)> = summary
+            .tags
+            .iter()
+            .map(|t| (t.name.clone(), t.count, t.listed))
+            .collect();
+        assert_eq!(
+            uses,
+            [
+                ("FUTURE".to_string(), 1, true),
+                ("MISC".to_string(), 1, false),
+                ("OLD".to_string(), 0, true),
+            ]
+        );
+        assert!(summary.tags_only);
     }
 
     /// Ticket 120: the Repository filter and fields hold the project's

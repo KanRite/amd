@@ -277,6 +277,26 @@ pub async fn set_wip_limits(limits: WipLimits, repo: Option<&str>) -> Result<Syn
 }
 
 #[derive(Serialize)]
+struct TagArgs<'a> {
+    tag: &'a str,
+}
+
+/// Adds a tag to the project's list (ticket 122); saved in UPPERCASE.
+pub async fn add_tag(tag: &str) -> Result<SyncReport, String> {
+    call("add_tag", &TagArgs { tag }).await
+}
+
+/// Takes an unused tag off the project's list (ticket 122).
+pub async fn remove_tag(tag: &str) -> Result<SyncReport, String> {
+    call("remove_tag", &TagArgs { tag }).await
+}
+
+/// Whether only listed tags may be put on a ticket (ticket 122).
+pub async fn set_tags_only(on: bool) -> Result<SyncReport, String> {
+    call("set_tags_only", &OnArgs { on }).await
+}
+
+#[derive(Serialize)]
 struct UnlockArgs<'a> {
     place: &'a Place,
     file: &'a str,

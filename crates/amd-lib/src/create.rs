@@ -143,7 +143,7 @@ impl Draft {
             assignee: ticket.assignee,
             repository,
             related: related.clone(),
-            tags: ticket.tags,
+            tags: crate::task::normalize_tags(&ticket.tags),
             created,
             timestamp,
             column: Column::Backlog.to_string(),

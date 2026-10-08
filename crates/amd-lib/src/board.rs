@@ -637,23 +637,24 @@ impl Board {
         Ok(all)
     }
 
-    /// Every tag already in use on the board, sorted and deduplicated — the
-    /// suggestions offered when a task is created interactively.
+    /// Every tag already in use on the board, in uppercase (ticket 122),
+    /// sorted and deduplicated — the suggestions offered when a task is
+    /// created interactively.
     pub fn tags(&self) -> Result<Vec<String>> {
-        let mut tags: Vec<String> = Vec::new();
+        Ok(self.tag_counts()?.into_keys().collect())
+    }
+
+    /// How many tickets carry each tag, in uppercase, across every column
+    /// and epic or sprint folder (not the archive). A ticket carrying a tag
+    /// twice in different cases counts once.
+    pub fn tag_counts(&self) -> Result<std::collections::BTreeMap<String, usize>> {
+        let mut counts = std::collections::BTreeMap::new();
         for task in self.tasks()? {
-            let Some(raw) = task.meta("tags") else {
-                continue;
-            };
-            for tag in raw.trim_matches(['[', ']']).split(',') {
-                let tag = tag.trim().trim_matches(['"', '\'']).to_string();
-                if !tag.is_empty() && !tags.contains(&tag) {
-                    tags.push(tag);
-                }
+            for tag in crate::task::normalize_tags(&task.tags()) {
+                *counts.entry(tag).or_insert(0) += 1;
             }
         }
-        tags.sort();
-        Ok(tags)
+        Ok(counts)
     }
 
     /// Every ticket carrying `tag`, across every column, in board order.
