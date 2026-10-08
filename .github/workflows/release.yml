@@ -1,24 +1,125 @@
 name: Release
 
 # Tag a release (git tag -a vX.Y.Z && git push --tags) and this builds both
-# binaries for every platform, then attaches amd-<target>.zip to the GitHub
-# Release — which is what install.sh downloads.
+# binaries for every platform, creates the GitHub Release, and attaches
+# amd-<target>.zip to it — which is what install.sh downloads.
 #
-# The zip carries `amd` and `amdui`, and is named after the first of them, so
-# the download URL is the same one install.sh has always used.
+# amd's own workflow rather than lite-actions/rust-release (ticket 085): the
+# desktop board (amdui) is a Tauri app whose page is built to WebAssembly by
+# Trunk and embedded at compile time, and on Linux it needs WebKitGTK. A plain
+# `cargo build` can't make it, so those steps live here, beside the one app
+# that needs them.
+#
+# A pull request that changes this file, or a run by hand (workflow_dispatch),
+# is a dry run: it builds every platform and keeps the zips as workflow
+# artifacts, and creates no release.
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-24.04 }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm }
+          - { target: aarch64-apple-darwin, runner: macos-latest }
+          # Built on the Apple-silicon runner, cross-compiled to Intel.
+          - { target: x86_64-apple-darwin, runner: macos-latest, cross: true }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # The desktop board (crates/amd-ui) is a Tauri app: WebKitGTK on Linux.
+      - name: Install the desktop board's system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev
+
+      - name: Install Rust (stable, ${{ matrix.target }} + wasm32)
+        run: |
+          rustup toolchain install stable --profile minimal \
+            --target ${{ matrix.target }} --target wasm32-unknown-unknown
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+
+      # amdui embeds the board's page at compile time, so it comes first.
+      - name: Build the desktop board's front end
+        working-directory: crates/amd-ui-web
+        run: trunk build --release
+
+      - name: Build amd and amdui
+        run: cargo build --release --locked --target ${{ matrix.target }} -p amd-cli -p amd-ui
+
+      # Both binaries start and name themselves (amdui's --version needs no
+      # window). Skipped where the runner can't run the target.
+      - name: Smoke test
+        if: ${{ !matrix.cross }}
+        run: |
+          target/${{ matrix.target }}/release/amd --version
+          target/${{ matrix.target }}/release/amdui --version
+
+      - name: Package amd-${{ matrix.target }}.zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$(mktemp -d)"
+          cp "target/${{ matrix.target }}/release/amd" "target/${{ matrix.target }}/release/amdui" "${stage}/"
+          (cd "${stage}" && zip -q "${GITHUB_WORKSPACE}/amd-${{ matrix.target }}.zip" amd amdui)
+          unzip -l "amd-${{ matrix.target }}.zip"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: amd-${{ matrix.target }}
+          path: amd-${{ matrix.target }}.zip
+
+  # One job creates the release and attaches every zip, so the release is
+  # made by the workflow, never by hand. A platform whose build failed is
+  # left out with a warning rather than holding the others back: install.sh
+  # falls back to a source build where there's no zip.
   release:
-    uses: lite-actions/rust-release/.github/workflows/rust-release.yml@v1
-    with:
-      platforms: "linux macos"
-      architectures: "x86_64 aarch64"
-      bin-name: "amd amdui"
-      upload-to-release: true
-    secrets: inherit
+    needs: build
+    if: ${{ !cancelled() && github.ref_type == 'tag' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create the release and attach the zips
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls dist/*.zip >/dev/null 2>&1 || { echo "::error::No zips were built"; exit 1; }
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin; do
+            [ -f "dist/amd-${target}.zip" ] || echo "::warning::No zip for ${target}: its build failed"
+          done
+          if ! gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release create "${TAG}" --verify-tag --title "${TAG}" --generate-notes
+          fi
+          gh release upload "${TAG}" dist/*.zip --clobber

@@ -240,12 +240,17 @@ redundant. Their history is in git if it is ever wanted again.
   up temp git repos. Unit tests live next to the code in `#[cfg(test)] mod tests`.
 - `.github/workflows/ci.yml` — fmt + clippy + cargo test + tests/test.sh, and
   shellcheck for the shell files.
-- `.github/workflows/release.yml` — on a `vX.Y.Z` tag, calls
-  `lite-actions/rust-release` to build and attach `amd-<target>.zip` per platform.
-  `bin-name: "amd amdui"` — this needs rust-release to accept a list of
-  binaries. **That change was lost in a laptop crash and must be redone**
-  (lite-actions/rust-release); until it is, a tagged release fails looking for
-  a binary literally named "amd amdui".
+- `.github/workflows/release.yml` — on a `vX.Y.Z` tag, builds `amd` and
+  `amdui` for Linux and macOS, x86_64 and aarch64 (ticket 085): WebKitGTK on
+  Linux, the wasm target and Trunk, `trunk build`, then `cargo build -p
+  amd-cli -p amd-ui`, a `--version` smoke test, and `amd-<target>.zip`
+  holding both. A `release` job then creates the GitHub Release (`gh release
+  create --verify-tag --generate-notes`) and attaches every zip, so no
+  release is made by hand; a platform whose build failed is left out with a
+  warning. amd's own workflow, not `lite-actions/rust-release`, because only
+  amdui needs the Tauri steps (decided 2026-10-08). `workflow_dispatch` is a
+  dry run: artifacts only, no release. macOS x86_64 is cross-compiled on the
+  Apple-silicon runner; the binaries aren't signed or notarised.
 - `docs/adr/` — architecture decision records: why the tool is shaped as it
   is, and what each decision costs. `docs/workspace-split.md` is the plan for
   the amd-lib / amd-cli / amd-ui split (ADR-0004).
@@ -958,10 +963,11 @@ changes):
   directory remembered as `ui.board` in `~/.config/agile-md/config`, which
   Admin's "Tasks directory" sets. The colour scheme is `ui.theme`/
   `ui.accent` in the same file.
-- **Not done here**: the release workflow still can't build `amdui` (it
-  needs Trunk, the wasm target and WebKitGTK before `cargo build`, which
-  `lite-actions/rust-release` doesn't do), and `install.sh`'s source build
-  needs the same.
+- **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
+  download path checks a downloaded amdui's libraries on Linux
+  (`check_board_libraries`, via `ldd`) and names WebKitGTK when it's
+  missing; its source build needs Trunk, the wasm target and WebKitGTK, and
+  skips the board with a note without them.
 - WebKitGTK quirks met building it: the CSP needs `'wasm-unsafe-eval'` and
   `connect-src 'self' ipc: http://ipc.localhost`; native `<select>`s draw a
   white box (styled with `appearance-none`); `dragDropEnabled: false` so
