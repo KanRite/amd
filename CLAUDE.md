@@ -592,6 +592,13 @@ off**, ticket 141) to
   `--branch`, else the ticket's `branch-name`, else derives one from
   `branch-type` and the title (`--no-branch` skips all of this). **Order
   matters**: `git mv` is staged first so the rename travels with the switch.
+  The branch goes in the clone of the ticket's `repository` (ticket 107).
+  **A dedicated tickets repository never gets one** (ticket 053,
+  `transition::enter_todo`): on a board whose repository is named
+  `*-tickets`, a ticket that wants a branch but names no repository is
+  refused before the move, naming `amd set <ref> repository` and
+  `--no-branch`. A board inside a code repository (`init --local-only`
+  there) is that repository and branches as before.
 
 ## Board rendering (`crates/amd-cli/src/render.rs`)
 
