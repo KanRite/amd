@@ -994,20 +994,26 @@ fn cmd_link(board: &Board, reference: &str, to: &[String], one_way: bool) -> Res
     }
 
     let ids: Vec<String> = others.iter().map(|other| other.id_display()).collect();
-    if task.add_related(task.hash()?, &ids)? {
-        println!("{} related: {}", id, ids.join(", "));
-    } else {
-        println!("{id} was already related to {}", ids.join(", "));
-    }
-    if one_way {
-        return Ok(());
-    }
-    for other in &others {
-        if other.add_related(other.hash()?, std::slice::from_ref(&id))? {
-            println!("{} related: {id}", other.id_display());
+    // Both ends of the relation are one logical change, so one commit
+    // (ticket 054), like `amd group empty`.
+    // The message reads `link: 001 -> 002, 003 "<001's title>"`.
+    let subject = format!("{id} -> {}", ids.join(", "));
+    with_auto_commit(board, "link", &subject, &task.title(), || {
+        if task.add_related(task.hash()?, &ids)? {
+            println!("{} related: {}", id, ids.join(", "));
+        } else {
+            println!("{id} was already related to {}", ids.join(", "));
         }
-    }
-    Ok(())
+        if one_way {
+            return Ok(());
+        }
+        for other in &others {
+            if other.add_related(other.hash()?, std::slice::from_ref(&id))? {
+                println!("{} related: {id}", other.id_display());
+            }
+        }
+        Ok(())
+    })
 }
 
 /// Opens the desktop board: the `amdui` binary installed beside this one,
