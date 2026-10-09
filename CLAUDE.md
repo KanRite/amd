@@ -1005,7 +1005,12 @@ changes):
 - **Where it opens**: `Board::discover()` from the launch directory; from
   outside any project (a desktop launcher starts in `$HOME`) it goes to the
   directory remembered as `ui.board` in `~/.config/agile-md/config`, which
-  Admin's "Tasks directory" sets. The colour scheme is `ui.theme`/
+  Preferences' "Board to open" sets.
+- **Preferences vs Admin** (ticket 148): Preferences (`preferences.rs`) is
+  personal and per machine (`~/.config/agile-md/config`: colour scheme,
+  zoom, board to open), never committed. Admin (`admin.rs`) is the
+  project's settings in the tickets `.settings`, committed for the team.
+  Header: New ticket | Preferences | Admin. The colour scheme is `ui.theme`/
   `ui.accent` in the same file.
 - **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
   download path checks a downloaded amdui's libraries on Linux

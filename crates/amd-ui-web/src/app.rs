@@ -17,6 +17,7 @@ use crate::dialog::{
     CloneRepoDialog, NewEpicDialog, NewSprintDialog, NewTicketDialog, OverLimitDialog,
 };
 use crate::editor::Editor;
+use crate::preferences::PreferencesPanel;
 
 /// Which overlay, if any, is open over the board.
 #[derive(Clone, Debug, PartialEq)]
@@ -26,6 +27,7 @@ pub enum Overlay {
     NewEpic,
     NewSprint,
     Admin,
+    Preferences,
     /// A "(not cloned)" repository chosen in the filter: clone it? (108)
     CloneRepo(String),
     /// A ticket dropped on a column at its WIP limit: move it anyway?
@@ -65,7 +67,7 @@ pub struct Ctx {
     pub about: RwSignal<Option<String>>,
     /// The user filter: whose tickets to show.
     pub user: RwSignal<Assigned>,
-    /// The user's colour scheme (Admin → Appearance).
+    /// The user's colour scheme (Preferences → Appearance).
     pub appearance: RwSignal<Appearance>,
     /// The board's zoom, in percent (ticket 024).
     pub zoom: RwSignal<u32>,
@@ -238,6 +240,14 @@ pub fn App() -> impl IntoView {
                 </button>
                 <button
                     class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                    title="Your own settings on this machine: colours, zoom, the board to open"
+                    on:click=move |_| ctx.overlay.set(Some(Overlay::Preferences))
+                >
+                    "Preferences"
+                </button>
+                <button
+                    class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                    title="The project's settings, shared with the team"
                     on:click=move |_| ctx.overlay.set(Some(Overlay::Admin))
                 >
                     "Admin"
@@ -282,6 +292,7 @@ pub fn App() -> impl IntoView {
                 Some(Overlay::NewEpic) => view! { <NewEpicDialog /> }.into_any(),
                 Some(Overlay::NewSprint) => view! { <NewSprintDialog /> }.into_any(),
                 Some(Overlay::Admin) => view! { <AdminPanel /> }.into_any(),
+                Some(Overlay::Preferences) => view! { <PreferencesPanel /> }.into_any(),
                 Some(Overlay::CloneRepo(name)) => view! { <CloneRepoDialog name /> }.into_any(),
                 Some(Overlay::OverLimit { file, from, to, reason }) => {
                     view! { <OverLimitDialog file from to reason /> }.into_any()
@@ -366,17 +377,23 @@ fn zoom_keys(ctx: Ctx) {
             _ => return,
         };
         ev.prevent_default();
-        if to == now {
-            return;
+        zoom_to(ctx, to);
+    });
+}
+
+/// Zooms the board to `to` percent and remembers it (ticket 024): the keys
+/// and Preferences both come here.
+pub fn zoom_to(ctx: Ctx, to: u32) {
+    if to == ctx.zoom.get_untracked() {
+        return;
+    }
+    // Set before the call returns, so a quick second press steps on from
+    // here rather than from the old size.
+    ctx.zoom.set(to);
+    spawn_local(async move {
+        if let Err(e) = api::set_zoom(to).await {
+            ctx.error.set(Some(e));
         }
-        // Set before the call returns, so a quick second press steps on
-        // from here rather than from the old size.
-        ctx.zoom.set(to);
-        spawn_local(async move {
-            if let Err(e) = api::set_zoom(to).await {
-                ctx.error.set(Some(e));
-            }
-        });
     });
 }
 
