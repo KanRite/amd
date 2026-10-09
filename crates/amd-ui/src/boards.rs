@@ -251,6 +251,8 @@ impl Project {
             points: task.points().unwrap_or_default(),
             lock: self.lock_of(task),
             lapsed: self.lapsed_of(task),
+            parent: task.parent().unwrap_or_default(),
+            related: task.related(),
         }
     }
 

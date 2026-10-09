@@ -108,6 +108,24 @@ pub struct TicketSummary {
     /// nothing; it's shown so a lapsed lock isn't mistaken for no lock.
     #[serde(default)]
     pub lapsed: Option<Lock>,
+    /// The ticket it sits under (`parent:`), as written; empty if none.
+    #[serde(default)]
+    pub parent: String,
+    /// The tickets it's related to (`related:`), as written.
+    #[serde(default)]
+    pub related: Vec<String>,
+}
+
+/// The ticket number a `parent`/`related` entry names: `042`, `"042"` or
+/// `[[042-some-title]]` all give 42.
+pub fn ticket_number(reference: &str) -> Option<u32> {
+    let digits: String = reference
+        .trim()
+        .trim_matches(|c| c == '"' || c == '[')
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    digits.parse().ok()
 }
 
 /// A lock (lease) on a ticket that is in force: who holds it and until when.
@@ -628,6 +646,8 @@ mod assigned_tests {
             repository: String::new(),
             lock: None,
             lapsed: None,
+            parent: String::new(),
+            related: Vec::new(),
         }
     }
 
@@ -655,6 +675,15 @@ mod assigned_tests {
         ] {
             assert_eq!(Assigned::from_key(&a.key()), a);
         }
+    }
+
+    #[test]
+    fn relationship_entries_name_a_ticket_number() {
+        assert_eq!(ticket_number("042"), Some(42));
+        assert_eq!(ticket_number("\"150\""), Some(150));
+        assert_eq!(ticket_number("[[007-some-title]]"), Some(7));
+        assert_eq!(ticket_number(""), None);
+        assert_eq!(ticket_number("abc"), None);
     }
 
     #[test]

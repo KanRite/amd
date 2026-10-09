@@ -439,6 +439,8 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                 </div>
             </Show>
 
+            <Relationships id=id place=place dirty=dirty />
+
             // ---- Rich text: toolbar + editable body
             <div class=move || if is_rich() { "flex shrink-0 flex-col gap-2" } else { "hidden" }>
                 <Toolbar on_change=touch_body />
@@ -1155,5 +1157,132 @@ fn AssigneePicker(
                 </p>
             </Show>
         </div>
+    }
+}
+
+/// A ticket's relationships (ticket 154): its parent, its children, the
+/// tickets it's related to, and those that name it as related without being
+/// named back. Each shows its number, title and column, and opens on a
+/// click; the links wait while there are unsaved edits, so following one
+/// can't lose them.
+#[component]
+fn Relationships(
+    id: RwSignal<String>,
+    place: StoredValue<Place>,
+    dirty: RwSignal<bool>,
+) -> impl IntoView {
+    use amd_ui_model::{TicketSummary, ticket_number};
+    let ctx = Ctx::get();
+    // Every ticket on this ticket's board: the columns and the epics.
+    let tickets = move || -> Vec<TicketSummary> {
+        let repo = place.with_value(|p| p.repo.clone());
+        ctx.board.with(|b| {
+            b.as_ref()
+                .map(|b| {
+                    b.columns
+                        .iter()
+                        .flat_map(|c| c.tickets.iter())
+                        .chain(b.epics.iter().flat_map(|e| e.tickets.iter()))
+                        .filter(|t| t.repo == repo || repo.is_empty())
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+    };
+    let groups = move || {
+        let me = ticket_number(&id.get());
+        let all = tickets();
+        let find = |n: u32| {
+            all.iter()
+                .find(|t| ticket_number(&t.id) == Some(n))
+                .cloned()
+        };
+        let this = me.and_then(find);
+        let parent: Vec<TicketSummary> = this
+            .as_ref()
+            .and_then(|t| ticket_number(&t.parent))
+            .and_then(find)
+            .into_iter()
+            .collect();
+        let children: Vec<TicketSummary> = all
+            .iter()
+            .filter(|t| me.is_some() && ticket_number(&t.parent) == me)
+            .cloned()
+            .collect();
+        let mine: Vec<u32> = this
+            .as_ref()
+            .map(|t| t.related.iter().filter_map(|r| ticket_number(r)).collect())
+            .unwrap_or_default();
+        let related: Vec<TicketSummary> = mine.iter().filter_map(|&n| find(n)).collect();
+        let linked_from: Vec<TicketSummary> = all
+            .iter()
+            .filter(|t| {
+                me.is_some()
+                    && t.related.iter().any(|r| ticket_number(r) == me)
+                    && !ticket_number(&t.id).is_some_and(|n| mine.contains(&n))
+            })
+            .cloned()
+            .collect();
+        [
+            ("Parent", parent),
+            ("Children", children),
+            ("Related", related),
+            ("Linked from", linked_from),
+        ]
+        .into_iter()
+        .filter(|(_, list)| !list.is_empty())
+        .collect::<Vec<_>>()
+    };
+    let link = move |t: TicketSummary| {
+        let label = format!("{} {}", t.id, t.title);
+        let column = t.column.dir_name();
+        let target = Place {
+            repo: t.repo.clone(),
+            column: t.column,
+            epic: t.epic.clone(),
+        };
+        let file = t.file.clone();
+        view! {
+            <li>
+                <button
+                    type="button"
+                    class="text-left text-sm text-accent-700 hover:underline disabled:cursor-not-allowed disabled:opacity-60 dark:text-accent-300"
+                    disabled=move || dirty.get()
+                    title=move || if dirty.get() { "Save or discard your edits first" } else { "Open this ticket" }
+                    on:click=move |_| ctx.open_ticket(target.clone(), file.clone())
+                >
+                    {label}
+                </button>
+                <span class="ml-2 text-xs text-slate-500">{column}</span>
+            </li>
+        }
+    };
+    view! {
+        <Show when=move || !groups().is_empty()>
+            <section
+                aria-label="Relationships"
+                class="flex flex-col gap-1.5 rounded border border-slate-200 px-3 py-2 dark:border-slate-700"
+            >
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    "Relationships"
+                </h3>
+                {move || {
+                    groups()
+                        .into_iter()
+                        .map(|(name, list)| {
+                            view! {
+                                <div class="flex flex-col gap-0.5">
+                                    <span class="text-xs font-medium text-slate-500">{name}</span>
+                                    <ul class="flex flex-col gap-0.5 pl-2">
+                                        {list.into_iter().map(link).collect_view()}
+                                    </ul>
+                                </div>
+                            }
+                        })
+                        .collect_view()
+                }}
+            </section>
+        </Show>
     }
 }
