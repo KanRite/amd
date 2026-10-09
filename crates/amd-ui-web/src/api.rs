@@ -341,3 +341,20 @@ struct HoursArgs<'a> {
 pub async fn set_lease_hours(hours: u32, repo: Option<&str>) -> Result<SyncReport, String> {
     call("set_lease_hours", &HoursArgs { hours, repo }).await
 }
+
+/// The landing page: your work across every project, and the projects
+/// (ticket 020).
+pub async fn home() -> Result<amd_ui_model::Home, String> {
+    call("home", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct HiddenArgs<'a> {
+    root: &'a str,
+    hidden: bool,
+}
+
+/// Hides a project from My work, or shows it again.
+pub async fn set_project_hidden(root: &str, hidden: bool) -> Result<(), String> {
+    call("set_project_hidden", &HiddenArgs { root, hidden }).await
+}

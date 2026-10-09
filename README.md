@@ -242,7 +242,8 @@ board as `@sam`, so it moves with the file and is visible in the diff.
 
 ## My work, across every project
 
-`amd mine` lists the tickets assigned to you in todo and doing, across
+`amd mine` (and the desktop board's landing page) lists the tickets
+assigned to you in todo and doing, across
 every project on this machine (everything `amd init`, `amd join` or `amd
 register` has registered), highest priority first, then oldest:
 
@@ -252,8 +253,9 @@ todo   high     2 pts  acme              015  Screen reader labels on the produc
 doing  low      1 pts  fantastic-tools   004  Write the returns policy page
 ```
 
-"You" is your git email, matched against each project's users list for the
-name the team knows you by. `--sort age` or `--sort points` changes the
+"You" is git's identity in each project's own repository (else your global
+one), matched against that project's users list for the name the team
+knows you by. `--sort age` or `--sort points` changes the
 order, and `--json` is for scripts. `amd mine --hide <project>` leaves a
 project out on this machine (`--unhide` puts it back, `--all` shows
 everything); scratch boards under the temporary directory are never
@@ -323,6 +325,12 @@ board it showed last. It is a Tauri window over a Leptos page, and every
 change it makes goes through the same library as `amd`, so the two never
 disagree.
 
+- **It opens on a landing page**: **My work** (your todo and doing tickets
+  across every project on this machine, highest priority first; click one
+  to open it on its board) and **Projects** (click one to open its board;
+  **Hide** leaves it out of My work on this machine). **⌂ Home** in a
+  board's header comes back. "You" is git's identity in each project's own
+  repository, so a different email per organisation works.
 - **A Backlogs column** of sprints, then epics, beside the four columns. Drag
   a card to the next column, or into and out of an epic or sprint; the move is
   a `git mv`, committed and pushed like `amd`'s. Moving into doing
