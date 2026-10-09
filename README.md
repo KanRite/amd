@@ -359,6 +359,12 @@ To work on the board with live reload: `cargo tauri dev -- --no-default-features
 in `crates/amd-ui` (it runs `trunk serve` for you; `--no-default-features`
 serves the pages live instead of the ones built into the binary).
 
+For screenshots, `scripts/demo-board.sh [DIR]` builds a demo project: a
+fictional shop with every column, epics, a running sprint, assignees,
+priorities, points, tags, a draft and locks, all made-up names at
+example.com. It keeps its own config in `DIR/config`, so your own boards and
+settings are untouched, and prints the command to open it.
+
 `amd` was pure bash through v3; v4 is the same tool in Rust, which is what
 buys the templating. The CLI, the board layout and the file format are
 unchanged — v3 boards work as-is.
