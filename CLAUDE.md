@@ -274,6 +274,12 @@ redundant. Their history is in git if it is ever wanted again.
 - `docs/adr/` — architecture decision records: why the tool is shaped as it
   is, and what each decision costs. `docs/workspace-split.md` is the plan for
   the amd-lib / amd-cli / amd-ui split (ADR-0004).
+- `scripts/demo-board.sh [DIR]` — builds a fictional "Acme" project for
+  screenshots (ticket 147) through the `amd` CLI itself: tickets, code
+  repositories, users, tags, two epics, a started sprint, a draft, every
+  column, locks only in doing, creation dates spread back. Own
+  `XDG_CONFIG_HOME` in `DIR/config`; refuses a DIR it didn't make
+  (`.agile-md-demo` marker). Shellchecked in CI.
 - `README.md`, `LICENSE` (MIT).
 
 ## How `amd` works (architecture)
