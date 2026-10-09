@@ -5,7 +5,7 @@
 //! Nothing here writes. Every change is an amd-lib call in `lib.rs`.
 
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use agile_md::board::{Board, Column};
 use agile_md::board_settings;
@@ -169,6 +169,7 @@ impl Project {
             me: agile_md::git::config(self.repos[0].1.repo_root(), "user.name"),
             tags,
             tags_only: settings.only_listed_tags(),
+            admin: admin_access(&self.repos[0].1),
         })
     }
 
@@ -331,4 +332,29 @@ pub fn task_at(board: &Board, place: &Place, file: &str) -> Result<Task> {
         .ok_or_else(|| format!("no ticket {file} there any more — reload the board"))?;
     task.epic = place.epic.clone();
     Ok(task)
+}
+
+/// Who gets Admin on `board`'s project (ticket 149). GitHub's answer is
+/// asked once per repository per session, through `gh`, and kept: a call
+/// takes a moment, and the board reloads every time a file changes. The
+/// project's `admins` list is read fresh each time, so editing it shows at
+/// once.
+fn admin_access(board: &Board) -> ui::AdminAccess {
+    use agile_md::access::{self, GitHub};
+    static ASKED: Mutex<Vec<(std::path::PathBuf, GitHub)>> = Mutex::new(Vec::new());
+    let decided = access::admin_access_with(board, |repo| {
+        let mut asked = ASKED
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((_, answer)) = asked.iter().find(|(r, _)| r == repo) {
+            return *answer;
+        }
+        let answer = access::github_access(repo);
+        asked.push((repo.to_path_buf(), answer));
+        answer
+    });
+    ui::AdminAccess {
+        allowed: decided.allowed,
+        note: decided.note,
+    }
 }
