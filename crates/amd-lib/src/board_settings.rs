@@ -97,6 +97,8 @@ const ADMINS: &str = "admins";
 const SYNC: &str = "sync";
 const TICKET_NUMBERING: &str = "ticket-numbering";
 const TAGS: &str = "tags";
+/// The documents repository every project shares (ticket 129).
+const SHARED_DOCUMENTS: &str = "shared-documents";
 const TAGS_ONLY: &str = "prevent-arbitrary-tags";
 /// `prevent-arbitrary-tags`' name until ticket 141. Still read, and renamed
 /// the next time the setting is written.
@@ -538,6 +540,31 @@ impl BoardSettings {
                 "1" | "on" | "true"
             )
         })
+    }
+
+    /// The documents repository shared beside the project's own (ticket
+    /// 129): standards and notes every project reads. A repository name,
+    /// found on this machine the way declared repositories are.
+    pub fn shared_documents(&self) -> Option<String> {
+        self.config
+            .get(SHARED_DOCUMENTS)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+    }
+
+    /// Names the shared documents repository, or clears it with `None`.
+    pub fn set_shared_documents(&mut self, name: Option<&str>) -> Result<()> {
+        match name.map(str::trim).filter(|name| !name.is_empty()) {
+            Some(name) => {
+                validate_project_name(name)?;
+                self.config.set(SHARED_DOCUMENTS, name);
+            }
+            None => {
+                self.config.remove(SHARED_DOCUMENTS);
+            }
+        }
+        Ok(())
     }
 
     pub fn set_only_listed_tags(&mut self, on: bool) {

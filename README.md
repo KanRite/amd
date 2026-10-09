@@ -327,10 +327,21 @@ disagree.
 
 - **It opens on a landing page**: **My work** (your todo and doing tickets
   across every project on this machine, highest priority first; click one
-  to open it on its board) and **Projects** (click one to open its board;
-  **Hide** leaves it out of My work on this machine). **⌂ Home** in a
-  board's header comes back. "You" is git's identity in each project's own
-  repository, so a different email per organisation works.
+  to open it on its board) and **Projects** (click one to open its board,
+  or **Documents** for its documents; **Hide** leaves it out of My work on
+  this machine). **⌂ Home** in a board's header comes back. "You" is git's
+  identity in each project's own repository, so a different email per
+  organisation works.
+- **Board | Documents**: a project's documents beside its board. The left
+  lists every markdown file in the project's `{project}-documents`
+  repository by folder, titled by its first heading, and the right reads
+  one: tables, code, task lists and pictures from the repository. Links
+  between documents open in the reader; web links open in your browser.
+  Reading only, for now: documents change through pull requests. A
+  documents repository the whole organisation shares (standards, the
+  handbook) can sit beside it: name it in Admin, or with
+  `amd shared-documents <repository>`, and clone it next to the project's
+  repositories. Raw HTML in a document is shown as text, never run.
 - **A Backlogs column** of sprints, then epics, beside the four columns. Drag
   a card to the next column, or into and out of an epic or sprint; the move is
   a `git mv`, committed and pushed like `amd`'s. Moving into doing

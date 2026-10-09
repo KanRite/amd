@@ -17,6 +17,7 @@ pub mod branch;
 pub mod clone;
 pub mod create;
 pub mod current_project;
+pub mod documents;
 pub mod git;
 pub mod group;
 pub mod import;
