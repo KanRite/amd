@@ -462,6 +462,8 @@ mod tests {
             repository: String::new(),
             lock: None,
             lapsed: None,
+            parent: String::new(),
+            related: Vec::new(),
         }
     }
 

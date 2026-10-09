@@ -262,8 +262,9 @@ disagree.
   a `git mv`, committed and pushed like `amd`'s. Moving into todo or doing
   locks the ticket for you.
 - **Click a ticket** to edit it: its fields as a form (title, assignee, branch
-  type, tags, points, priority) and its body as rich text, with a switch to
-  the raw markdown. Lock, renew, unlock — or break someone else's lock, after
+  type, tags, points, priority), its relationships (parent, children,
+  related, and tickets that link to it), each a click away, and its body as
+  rich text, with a switch to the raw markdown. Lock, renew, unlock — or break someone else's lock, after
   a confirmation — from the same window.
 - **Filters** across the top: repository, person, a search, the sort order,
   and Reset.
