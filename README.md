@@ -69,6 +69,8 @@ amd abandon 1                     # take it off the board, into tasks/archive/ â
                                    # delete its branch too, if it's still empty
 amd recover                       # tickets deleted or abandoned: who removed each, and when
 amd recover 1                     # bring one back into the backlog, exactly as it was
+amd renumber                      # two tickets with the same number: shows the fix
+amd renumber --apply              # ...and makes it, in one commit
 amd link    1 3                   # relate two tickets
 amd tag     urgent                # list every ticket carrying a tag, across every column
 amd tags                          # the project's tag list, with how many tickets carry each
