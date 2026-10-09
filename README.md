@@ -104,6 +104,14 @@ rest:
 | `related`     | optional | ids of tickets this depends on |
 | `tags`        | optional | always UPPERCASE; from the project's tag list if it has one |
 | `created`     | automatic | the date |
+| `created-by`  | automatic | who made it, `Name <email>`; never changes |
+
+**Who to ask.** `amd show` and the desktop board's editor say who created a
+ticket and who last edited it: "created by Priya Shah on 2026-10-02; last
+edited by Sam Lee on 2026-10-08". Last edited comes from git history (a move
+between columns doesn't count), so an edit made in any editor is credited
+to the right person. A ticket made before `created-by` existed is credited
+from git, and gets the field the next time it's saved.
 
 **Tags** are always UPPERCASE, so they stand out. A project can keep a tag
 list (Admin in the desktop board, or `amd tags`), saved in the tickets

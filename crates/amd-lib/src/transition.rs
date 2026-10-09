@@ -435,8 +435,16 @@ pub fn save_text(
     text: &str,
 ) -> Result<Outcome> {
     let (id_display, title) = (task.id_display(), task.title());
+    // A ticket from before `created-by` (ticket 155) gets it from git's
+    // first commit as it's saved; one that has it keeps it.
+    let text = match crate::authorship::created(board, task) {
+        Some(c) if !c.email.is_empty() => {
+            crate::authorship::ensure_created_by(text, &format!("{} <{}>", c.name, c.email))?
+        }
+        _ => text.to_string(),
+    };
     let ((), warning) = with_auto_commit(board, "edit", &id_display, &title, || {
-        task.set_text(expected, text)
+        task.set_text(expected, &text)
     })?;
     let mut outcome = Outcome::default();
     outcome

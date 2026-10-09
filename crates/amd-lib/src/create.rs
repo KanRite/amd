@@ -149,6 +149,7 @@ impl Draft {
             column: Column::Backlog.to_string(),
             author: git::config(&board.root, "user.name").unwrap_or_else(|| "unknown".to_string()),
             email: git::config(&board.root, "user.email").unwrap_or_default(),
+            created_by: crate::authorship::current_person(board).unwrap_or_default(),
             board: board.name(),
             template: ticket.template.clone(),
             extra: ticket.extra,
@@ -177,6 +178,11 @@ impl Draft {
         // Every ticket has a priority — a custom template without the field
         // gets the default; an invalid one typed in the editor is refused.
         let body = crate::task::ensure_priority(&body)?;
+        // Who made it (ticket 155), for a custom template that doesn't say.
+        let body = match crate::authorship::current_person(board) {
+            Some(person) => crate::authorship::ensure_created_by(&body, &person)?,
+            None => body,
+        };
         let dir = self
             .path
             .parent()
