@@ -37,7 +37,7 @@ board is being rebuilt on Tauri and Leptos (ticket 084), which makes both
 redundant. Their history is in git if it is ever wanted again.
 
 - `crates/amd-lib/src/lib.rs` — the library: `board`, `board_settings`,
-  `branch`, `create`, `git`, `group`, `project_trust`, `registry`,
+  `branch`, `create`, `documents`, `git`, `group`, `project_trust`, `registry`,
   `settings`, `task`, `templates`, `model`, `richtext`, `transition` (and `gui` behind
   the feature, pending phase 4). **No `render`** — drawing is a front end's
   business.
@@ -289,7 +289,7 @@ redundant. Their history is in git if it is ever wanted again.
 - `scripts/demo-board.sh [DIR]` — builds a fictional "Acme" project for
   screenshots (ticket 147) through the `amd` CLI itself: tickets, code
   repositories, users, tags, two epics, a started sprint, a draft, every
-  column, locks only in doing, creation dates spread back. Own
+  column, a documents repository and a shared handbook, locks only in doing, creation dates spread back. Own
   `XDG_CONFIG_HOME` in `DIR/config`; refuses a DIR it didn't make
   (`.agile-md-demo` marker). Shellchecked in CI.
 - `README.md`, `LICENSE` (MIT).
@@ -1058,6 +1058,23 @@ changes):
   page hides the button and Admin shows the note. A convenience, not
   enforcement: the CLI's settings commands aren't gated. The colour scheme is `ui.theme`/
   `ui.accent` in the same file.
+- **Documents** (ticket 129, `crates/amd-lib/src/documents.rs`): Board |
+  Documents tabs in a project's header (`View::Documents`), and Documents
+  on each landing-page project row. `documents::sources` finds the
+  project's `{project}-documents` (sibling first, else the registry's
+  `find_near`) and the shared one the tickets `.settings` names
+  (`shared-documents`, `amd shared-documents`, Admin's "Shared
+  documents"); `list` walks markdown files, skipping dot-folders and not
+  following links; `resolve`/`read`/`read_bytes` refuse anything outside
+  the repository (`..`, absolute, a symlink out, `.git`) and files over
+  `MAX_FILE`. `amd-ui`'s `documents.rs` renders with pulldown-cmark (its
+  `html` feature is on only there): raw HTML becomes text, a link to
+  another document becomes `#doc:<path>`, web/mail links stay and the page
+  hands them to `open_external` (`xdg-open`/`open`, http(s)/mailto only),
+  anything else becomes `#`, and relative images are inlined as data URLs
+  (the CSP allows `data:` images only). Read only: editing is a branch and
+  a PR (138). The demo board has `acme-documents` and a shared
+  `acme-handbook`.
 - **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
   download path checks a downloaded amdui's libraries on Linux
   (`check_board_libraries`, via `ldd`) and names WebKitGTK when it's

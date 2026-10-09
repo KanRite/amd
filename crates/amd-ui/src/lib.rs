@@ -5,6 +5,7 @@
 //! ticket, git or settings logic here of its own.
 
 mod boards;
+mod documents;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -583,6 +584,106 @@ async fn set_tags_only(state: Tauri<'_, AppState>, on: bool) -> Result<SyncRepor
     .await
 }
 
+/// Names the documents repository every project shares (ticket 129), or
+/// clears it when `name` is empty.
+#[tauri::command]
+async fn set_shared_documents(state: Tauri<'_, AppState>, name: String) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let name = name.trim().to_string();
+        let what = if name.is_empty() {
+            "shared-documents cleared".to_string()
+        } else {
+            format!("shared-documents {name}")
+        };
+        save_setting(board, &what, |s| {
+            s.set_shared_documents(Some(name.as_str()))
+        })
+    })
+    .await
+}
+
+/// The project's documents repositories and what's in them (ticket 129):
+/// its own, then the shared one. One not cloned here is listed empty.
+#[tauri::command]
+async fn list_documents() -> Result<Vec<amd_ui_model::DocSource>> {
+    blocking(|| {
+        let project = Project::open()?;
+        Ok(agile_md::documents::sources(&project.repos[0].1)
+            .into_iter()
+            .map(|source| {
+                let documents = source
+                    .root
+                    .as_deref()
+                    .and_then(|root| agile_md::documents::list(root).ok())
+                    .unwrap_or_default();
+                amd_ui_model::DocSource {
+                    shared: source.kind == agile_md::documents::Kind::Shared,
+                    cloned: source.root.is_some(),
+                    name: source.name,
+                    documents: documents
+                        .into_iter()
+                        .map(|d| amd_ui_model::DocEntry {
+                            path: d.path,
+                            title: d.title,
+                        })
+                        .collect(),
+                }
+            })
+            .collect())
+    })
+    .await
+}
+
+/// The document `path` in the documents repository `source`, rendered for
+/// the reader (ticket 129). Only the project's own documents repositories
+/// can be read, and nothing outside them.
+#[tauri::command]
+async fn read_document(source: String, path: String) -> Result<amd_ui_model::RenderedDoc> {
+    blocking(move || {
+        let project = Project::open()?;
+        let root = agile_md::documents::sources(&project.repos[0].1)
+            .into_iter()
+            .find(|s| s.name == source)
+            .ok_or_else(|| format!("{source} isn't one of this project's documents repositories"))?
+            .root
+            .ok_or_else(|| format!("{source} isn't cloned on this machine"))?;
+        let text = agile_md::documents::read(&root, &path).map_err(err)?;
+        Ok(amd_ui_model::RenderedDoc {
+            html: documents::render(&root, &path, &text),
+            source,
+            path,
+        })
+    })
+    .await
+}
+
+/// Opens a web or mail link from a document in the system's own browser or
+/// mail program, never in amdui's window (ticket 129).
+#[tauri::command]
+async fn open_external(url: String) -> Result<()> {
+    let lower = url.to_ascii_lowercase();
+    if !(lower.starts_with("https://")
+        || lower.starts_with("http://")
+        || lower.starts_with("mailto:"))
+    {
+        return Err(format!("amd only opens web and mail links, not {url}"));
+    }
+    let opener = if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(opener)
+        .arg(&url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("couldn't open {url}: {e}"))
+}
+
 /// Sets `repo`'s WIP limit on doing (0 turns it off).
 #[tauri::command]
 async fn set_wip_limits(
@@ -939,6 +1040,10 @@ pub fn run() {
             add_tag,
             remove_tag,
             set_tags_only,
+            set_shared_documents,
+            list_documents,
+            read_document,
+            open_external,
             auto_commit,
             set_auto_commit,
             appearance,

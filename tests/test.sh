@@ -779,6 +779,14 @@ assert "...and silent once everything is across" \
 assert "amd wip-limit is committed" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' wip-limit 3 >/dev/null 2>&1 \
     && grep -qx 'wip-limit = 3' .settings && git log -1 --format=%s | grep -q '^settings: wip-limit'"
+assert "amd shared-documents names the shared documents repository, committed (ticket 129)" \
+  bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' shared-documents org-documents >/dev/null 2>&1 \
+    && grep -qx 'shared-documents = org-documents' .settings \
+    && git log -1 --format=%s | grep -q '^settings: shared-documents' \
+    && env ${st_env} '${AMD}' shared-documents 2>/dev/null | grep -qx org-documents"
+assert "...and --clear removes it" \
+  bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' shared-documents --clear >/dev/null 2>&1 \
+    && ! grep -q '^shared-documents' .settings"
 assert "amd register declares the repository in the tickets .settings, committed" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' register '${st}/code' >/dev/null 2>&1 \
     && grep -q '^repos = .*code' .settings && git log -1 --format=%s | grep -qx 'register: code'"

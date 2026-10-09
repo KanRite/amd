@@ -7,6 +7,7 @@ mod api;
 mod app;
 mod board;
 mod dialog;
+mod documents;
 mod editor;
 mod home;
 mod preferences;
