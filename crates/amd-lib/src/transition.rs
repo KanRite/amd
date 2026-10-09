@@ -142,7 +142,8 @@ pub fn commit_since(
     }
 }
 
-/// Move a ticket and claim its lease when it enters `todo/` or `doing/`,
+/// Move a ticket, claiming its lease when it enters `doing/` and giving it
+/// back when it leaves (ticket 156),
 /// auto-committing the result. The wording of the `moved` line is the CLI's
 /// — `Board::move_task` returns where the ticket landed and leaves the
 /// reporting to whoever asked for the move.
@@ -151,27 +152,28 @@ pub fn move_to(board: &Board, task: &Task, to: Column, force: bool) -> Result<Ou
     // ticket's own file, which move_task is about to relocate.
     let (id_display, title) = (task.id_display(), task.title());
     let file_name = task.file_name();
+    let from = task.column;
     let (mut outcome, warning) = with_auto_commit(board, to.as_str(), &id_display, &title, || {
         let mut outcome = Outcome::default();
         let dest = board.move_task(task, to, force)?;
         outcome
             .events
             .push(Event::Info(format!("moved {file_name} -> {to}/")));
-        // Entering todo/doing already means "I'm starting this" — claiming
-        // the lease at the same moment matches that intent with no extra
-        // step. Every other column move (and every column move that's
-        // already leased by someone else) is refused earlier, inside
-        // move_task itself.
-        if matches!(to, Column::Todo | Column::Doing)
+        // A ticket is locked exactly while it's in doing (ticket 156): the
+        // lease is claimed on entering doing ("I'm working on this now"),
+        // not earlier, since todo only means it's next. A move onto a
+        // ticket someone else has leased is refused earlier, in move_task.
+        if to == Column::Doing
             && let Some(moved) = Task::from_path(&dest, to)
             && let Some(warning) = maybe_take_lease(board, &moved)
         {
             outcome.events.push(Event::Warn(warning));
         }
-        // Leaving active work — finished, or handed back to the backlog —
-        // gives the lease back, in the same commit as the move (ticket 092).
-        // doing → todo keeps it: that's still yours.
-        if matches!(to, Column::Done | Column::Backlog)
+        // ...and given back on leaving doing in any direction, or on
+        // reaching done or the backlog (ticket 092), in the same commit as
+        // the move. Only your own lease is ever released.
+        if (from == Column::Doing || matches!(to, Column::Done | Column::Backlog))
+            && to != Column::Doing
             && let Some(moved) = Task::from_path(&dest, to)
             && let Err(err) = moved.release_if_mine()
         {

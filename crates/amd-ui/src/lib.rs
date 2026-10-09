@@ -1162,11 +1162,25 @@ mod tests {
         let err = move_in(&project, &a, &backlog, &column(UiColumn::Done), false).unwrap_err();
         assert!(err.contains("one column at a time"), "{err}");
 
-        // Into todo takes the lease for the mover.
+        // Into todo takes no lease (ticket 156): todo only means it's next.
         move_in(&project, &a, &backlog, &todo, false).unwrap();
         let summary = project.summary().unwrap();
-        let lock = summary.columns[1].tickets[0].lock.clone().unwrap();
+        assert!(summary.columns[1].tickets[0].lock.is_none());
+
+        // Into doing takes it for the mover; back to todo gives it back.
+        let doing = column(UiColumn::Doing);
+        move_in(&project, &a, &todo, &doing, false).unwrap();
+        let lock = project.summary().unwrap().columns[2].tickets[0]
+            .lock
+            .clone()
+            .unwrap();
         assert!(lock.mine && lock.by == "t@t.co", "{lock:?}");
+        move_in(&project, &a, &doing, &todo, false).unwrap();
+        assert!(
+            project.summary().unwrap().columns[1].tickets[0]
+                .lock
+                .is_none()
+        );
 
         // From todo onto an epic: back to the backlog, filed in it.
         move_in(&project, &a, &todo, &Place::epic("ui"), false).unwrap();

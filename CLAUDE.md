@@ -42,7 +42,7 @@ redundant. Their history is in git if it is ever wanted again.
   the feature, pending phase 4). **No `render`** — drawing is a front end's
   business.
 - `crates/amd-lib/src/transition.rs` — moving a ticket the way `amd todo`/
-  `doing`/`done` do: the move, the lease on entering `todo`/`doing`, the
+  `doing`/`done` do: the move, the lease on entering `doing` (ticket 156), the
   branch switch on entering `todo`, and the auto-commit (`with_auto_commit`).
   Shared by every front end so a move leaves the board, git history and
   working tree in the same state from any of them. **Nothing here
@@ -403,7 +403,7 @@ off**, ticket 141) to
   `now > locked_until` comparison against data already in the file — no
   `Board` handle needed except at the one place a duration is actually
   chosen (`Task::take_lease`, called from `amd lock` and from
-  `move_and_report`/`amdui`'s `apply()` on entering `todo`/`doing`, both of
+  `transition::move_to` on entering `doing`, which both front ends use, both of
   which already hold one). Identity is `git::config(repo, "user.email")` —
   `git.rs`'s `config()` takes an explicit repo path like every other
   function there, not the process's current directory, so a desktop board
@@ -414,11 +414,14 @@ off**, ticket 141) to
   (blocked if someone else holds it; blocked unless *you're* the holder).
   Only `break_lease` (`amd unlock --force`) bypasses that gate — the one
   deliberate act ADR-0007 wants kept separate from an ordinary write.
-  **Leaving active work gives it back** (ticket 092): `transition::move_to`
-  calls `Task::release_if_mine` when a ticket lands in `done` or `backlog`,
-  inside the same `with_auto_commit` closure, so the move and the release
-  are one commit. `Board::archive` does the same before archiving
-  (best-effort; the archive is untracked). `doing → todo` keeps the lease.
+  **A ticket is locked exactly while it's in doing** (ticket 156; it used
+  to be todo or doing): `move_to` takes the lease on entering `doing`, and
+  calls `Task::release_if_mine` on leaving it in any direction or on
+  landing in `done` or `backlog` (ticket 092), inside the same
+  `with_auto_commit` closure, so the move and the release are one commit.
+  `Board::archive` does the same before archiving (best-effort; the archive
+  is untracked). A lock taken by hand (`amd lock`) on a backlog or todo
+  ticket stays until it leaves doing, done or the backlog takes it.
   `release_if_mine` only ever clears the current identity's own lease,
   lapsed or not; someone else's, even lapsed, stays for `unlock --force`.
   **A lapsed lease is said as such** (ticket 110): still recorded, it

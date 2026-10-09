@@ -73,8 +73,9 @@ folder the backlog is divided into. A ticket can have both.
 (`user.email`), so anyone else's edits or moves on it are refused with a
 clear message until it's released or it lapses on its own (8 hours by
 default). `amd unlock <ref>` releases your own; `amd unlock <ref> --force`
-breaks someone else's, a separate, deliberate act. Entering `todo`/`doing`
-claims a free lease automatically — a lease is advisory, not a guarantee:
+breaks someone else's, a separate, deliberate act. Entering `doing` claims
+a free lease automatically, and leaving it gives yours back: a ticket is
+locked while it's being worked on. A lease is advisory, not a guarantee:
 it only stops local tools from writing, and a concurrent edit on another
 clone still surfaces as a normal git merge conflict.
 

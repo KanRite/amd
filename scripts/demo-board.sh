@@ -14,9 +14,13 @@ set -euo pipefail
 
 DIR="${1:-./agile-md-demo}"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-AMD="${AMD:-$(command -v amd || true)}"
-[ -x "${SELF}/target/release/amd" ] && AMD="${SELF}/target/release/amd"
-[ -x "${SELF}/target/debug/amd" ] && [ -z "${AMD}" ] && AMD="${SELF}/target/debug/amd"
+# Which amd: $AMD if given, else the installed one, else a build in this
+# clone. Never a stale build over one you asked for.
+if [ -z "${AMD:-}" ]; then
+  AMD="$(command -v amd || true)"
+  [ -z "${AMD}" ] && [ -x "${SELF}/target/release/amd" ] && AMD="${SELF}/target/release/amd"
+  [ -z "${AMD}" ] && [ -x "${SELF}/target/debug/amd" ] && AMD="${SELF}/target/debug/amd"
+fi
 [ -n "${AMD}" ] || { echo "amd not found: install it, or build it here first" >&2; exit 1; }
 
 if [ -e "${DIR}" ]; then
@@ -122,12 +126,11 @@ size "${t1}" 2; size "${t2}" 5; size "${d1}" 3; size "${d2}" 1
 amd link "${d1}" "${s3}"
 note "${d1}" "Totals are summed from rounded line prices; round once, at the end. Same root cause as the confirmation email (see related)."
 # Done first: doing has a WIP limit of 2, and the finished work passes
-# through it. Entering todo locks a ticket for whoever moved it (Alex, here),
-# so the todo ones are unlocked again: only the work in doing stays locked.
+# through it. Entering doing locks a ticket for whoever moved it (Alex,
+# here), and leaving it unlocks it again.
 walk "${f1}" todo doing "done"; walk "${f2}" todo doing "done"; walk "${f3}" todo doing "done"
 walk "${d1}" todo doing; walk "${d2}" todo doing
 walk "${t1}" todo; walk "${t2}" todo
-amd unlock "${t1}"; amd unlock "${t2}"
 
 # Spread the creation dates over the last few weeks, so "oldest" means something.
 day=0
