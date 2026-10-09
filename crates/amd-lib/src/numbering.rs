@@ -1,7 +1,7 @@
 //! Where new ticket numbers come from (ticket 102).
 //!
 //! **`local`** — the default, and what individuals and small teams get for
-//! free: the board's own `next-id` counter in `.settings`, with a scan of
+//! free: the board's own counter (`<repo-root>/.next-id`), with a scan of
 //! the columns as a safety net (`Board::local_next_id`). Two people creating
 //! tickets at the same moment can race for the same number; `sync.rs`
 //! catches that before anything reaches the remote.

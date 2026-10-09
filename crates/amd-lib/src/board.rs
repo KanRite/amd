@@ -37,6 +37,11 @@ pub const ABANDON: &str = "abandon";
 /// outright rather than archived — a scan can only see what's still there.
 const COUNTER: &str = ".next-id";
 
+/// A counter file's number, if it has one.
+fn read_counter(path: &Path) -> Option<u32> {
+    fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Column {
     Backlog,
@@ -253,39 +258,51 @@ impl Board {
         self.root.join(ARCHIVE)
     }
 
-    /// Where the counter lived before it moved into the board-local settings
-    /// file's `next-id` key. Still read, as a fallback, for boards that
-    /// predate the move — never written to again.
+    /// The id counter (ticket 150): `.next-id` at the repository root, beside
+    /// `.settings`. It has a file of its own so `.settings` holds only
+    /// settings, which lets a rule that only admins may change settings
+    /// (151) leave everyone free to create tickets.
+    pub fn counter_path(&self) -> PathBuf {
+        self.repo_root().join(COUNTER)
+    }
+
+    /// Where the counter lived first, inside the board directory. Read, to
+    /// migrate it, and never written.
     pub fn legacy_counter_path(&self) -> PathBuf {
         self.root.join(COUNTER)
     }
 
-    /// What the next id should be, if something on disk says so — the
-    /// board-local settings file first. A board that predates the move to
-    /// board-local settings still has the legacy `.next-id` file instead;
-    /// the first time that's seen, its value is migrated into settings and
-    /// the legacy file is removed, so this only ever happens once per board
-    /// rather than reading around the old file forever.
+    /// What the next id should be, if something on disk says so. The
+    /// counter file first; a board from before ticket 150 has a `next-id`
+    /// key in `.settings` instead, and an older one `<board>/.next-id`. The
+    /// first time either is seen, the highest value found moves into the
+    /// counter file and the old places are cleared, so it happens once per
+    /// board and never hands out a number twice. Only reached on the way to
+    /// handing out a number, so the migration lands in that command's own
+    /// commit.
     fn stored_next_id(&self) -> Option<u32> {
-        let settings = crate::board_settings::load(self);
-        if let Some(id) = settings.next_id() {
-            return Some(id);
+        let current = read_counter(&self.counter_path());
+        let mut settings = crate::board_settings::load(self);
+        let in_settings = settings.next_id();
+        let legacy = read_counter(&self.legacy_counter_path());
+        if in_settings.is_none() && legacy.is_none() {
+            return current;
         }
-        let legacy = self.legacy_next_id()?;
-        let mut settings = settings;
-        settings.set_next_id(legacy);
-        if settings.save(self).is_ok() {
-            let _ = fs::remove_file(self.legacy_counter_path());
+        let highest = [current, in_settings, legacy].into_iter().flatten().max()?;
+        if self.write_counter(highest).is_ok() {
+            if in_settings.is_some() && settings.remove_next_id() {
+                let _ = settings.save(self);
+            }
+            if legacy.is_some() {
+                let _ = fs::remove_file(self.legacy_counter_path());
+            }
         }
-        Some(legacy)
+        Some(highest)
     }
 
-    fn legacy_next_id(&self) -> Option<u32> {
-        fs::read_to_string(self.legacy_counter_path())
-            .ok()?
-            .trim()
-            .parse::<u32>()
-            .ok()
+    fn write_counter(&self, next: u32) -> Result<()> {
+        let path = self.counter_path();
+        fs::write(&path, format!("{next}\n")).with_context(|| format!("writing {}", path.display()))
     }
 
     /// Scaffold the columns, the board-local settings file's counter, and
@@ -309,9 +326,7 @@ impl Board {
         }
 
         if self.stored_next_id().is_none() {
-            let mut settings = crate::board_settings::load(self);
-            settings.set_next_id(1);
-            settings.save(self)?;
+            self.write_counter(1)?;
         }
 
         let readme = self.repo_root().join("README.md");
@@ -766,9 +781,7 @@ impl Board {
         if self.stored_next_id().is_some_and(|stored| stored >= next) {
             return Ok(());
         }
-        let mut settings = crate::board_settings::load(self);
-        settings.set_next_id(next);
-        settings.save(self)
+        self.write_counter(next)
     }
 
     /// Take a ticket off the board. The archive is gitignored, so a
@@ -1858,8 +1871,8 @@ mod tests {
         assert_eq!(board.next_id().unwrap(), 1);
         assert_eq!(
             crate::board_settings::load(&board).next_id(),
-            Some(1),
-            "the counter lives in board-local settings, not the legacy file"
+            None,
+            "the counter lives in its own file (ticket 150), not .settings"
         );
         assert!(
             !board.legacy_counter_path().exists(),
@@ -1868,28 +1881,77 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_next_id_file_is_migrated_into_settings_and_removed() {
+    fn a_new_board_keeps_its_counter_in_its_own_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        assert_eq!(
+            fs::read_to_string(board.counter_path()).unwrap().trim(),
+            "1"
+        );
+        assert_eq!(crate::board_settings::load(&board).next_id(), None);
+        assert!(!board.legacy_counter_path().exists());
+    }
+
+    #[test]
+    fn a_counter_in_settings_moves_to_its_own_file_once() {
         let dir = tempfile::tempdir().unwrap();
         let board = board_at(dir.path());
         touch(&board, "007-seven.md");
-        // A board that predates the move to board-local settings: no
-        // `next-id` key there, only the old file.
-        fs::remove_file(crate::board_settings::path(&board)).unwrap();
+        // A board from before ticket 150: the counter in `.settings`.
+        fs::remove_file(board.counter_path()).unwrap();
+        let mut settings = crate::board_settings::load(&board);
+        settings.set_next_id(12);
+        settings.save(&board).unwrap();
+
+        assert_eq!(board.next_id().unwrap(), 12);
+        assert_eq!(
+            fs::read_to_string(board.counter_path()).unwrap().trim(),
+            "12"
+        );
+        assert_eq!(
+            crate::board_settings::load(&board).next_id(),
+            None,
+            "the key leaves .settings once it's moved"
+        );
+        touch(&board, "012-twelve.md");
+        board.record_id(12).unwrap();
+        assert_eq!(board.next_id().unwrap(), 13);
+    }
+
+    #[test]
+    fn migration_keeps_the_highest_counter_it_finds() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        // All three places say something (a half-migrated board): the
+        // highest wins, so no number already handed out comes round again.
+        fs::write(board.counter_path(), "4\n").unwrap();
+        let mut settings = crate::board_settings::load(&board);
+        settings.set_next_id(9);
+        settings.save(&board).unwrap();
+        fs::write(board.legacy_counter_path(), "6\n").unwrap();
+        assert_eq!(board.next_id().unwrap(), 9);
+        assert!(!board.legacy_counter_path().exists());
+        assert_eq!(crate::board_settings::load(&board).next_id(), None);
+    }
+
+    #[test]
+    fn a_legacy_next_id_file_is_migrated_and_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        touch(&board, "007-seven.md");
+        // The oldest boards: only `<board>/.next-id`.
+        fs::remove_file(board.counter_path()).unwrap();
         fs::write(board.legacy_counter_path(), "9\n").unwrap();
 
         assert_eq!(board.next_id().unwrap(), 9);
         assert_eq!(
-            crate::board_settings::load(&board).next_id(),
-            Some(9),
-            "the value should now live in board-local settings"
+            fs::read_to_string(board.counter_path()).unwrap().trim(),
+            "9"
         );
         assert!(
             !board.legacy_counter_path().exists(),
             "the legacy file should be gone once migrated, not kept around forever"
         );
-
-        // Reading again (the ordinary case: a second command against the
-        // same, now-migrated board) must not require the legacy file.
         touch(&board, "009-nine.md");
         board.record_id(9).unwrap();
         assert_eq!(board.next_id().unwrap(), 10);
@@ -1924,12 +1986,10 @@ mod tests {
         let board = board_at(dir.path());
         touch(&board, "007-seven.md");
         // Counter behind what's on disk — a bad merge, or a hand-added ticket.
-        let mut settings = crate::board_settings::load(&board);
-        settings.set_next_id(3);
-        settings.save(&board).unwrap();
+        fs::write(board.counter_path(), "3\n").unwrap();
         assert_eq!(board.next_id().unwrap(), 8);
-        // Counter missing entirely — the settings file itself is gone.
-        fs::remove_file(crate::board_settings::path(&board)).unwrap();
+        // Counter missing entirely — its file is gone.
+        fs::remove_file(board.counter_path()).unwrap();
         assert_eq!(board.next_id().unwrap(), 8);
     }
 

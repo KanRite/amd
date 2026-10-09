@@ -51,7 +51,7 @@ pub struct TodoOptions {
 /// Runs `mutate`, then — if `commit` is on for this board — commits and
 /// pushes exactly the paths it changed, determined by diffing `git status`
 /// before and after rather than a hand-maintained list. That's not a
-/// simplification: `Board::record_id` writes `.settings`'s `next-id`
+/// simplification: `Board::record_id` writes the `.next-id` counter
 /// alongside a new ticket, so `amd new` genuinely touches two files in one
 /// operation, and a hand-picked paths argument at each call site is exactly
 /// the shape of place a second incidental write like that gets missed.

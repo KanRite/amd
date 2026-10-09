@@ -70,9 +70,8 @@ redundant. Their history is in git if it is ever wanted again.
 - `crates/amd-lib/src/settings.rs` — the shared config file, which keeps keys it does not
   recognise so one writer cannot delete another's.
 - `crates/amd-lib/src/board_settings.rs` — the board-local settings file
-  (`<repo-root>/.settings`, git-tracked, hidden to match the legacy
-  `.next-id` file it partly replaces): the `next-id` ticket counter, the
-  `commit` auto-commit toggle and the project's `users` (ticket 088 —
+  (`<repo-root>/.settings`, git-tracked, hidden): the `commit` auto-commit
+  toggle and the project's `users` (ticket 088 —
   `Name <email>, …`, git's own identity shape, parsed on `>` so a comma in
   a name survives; email is the identity) live here. **So does every other
   board setting** (ticket 111): `project`, `repos`, `wip-limit`,
@@ -328,10 +327,12 @@ redundant. Their history is in git if it is ever wanted again.
     second project was initialised beside it). Unrelated scratch boards
     still fall back quietly.
 - Tasks are `NNN-slug.md`. `Board::next_id()` takes whichever is higher of the
-  counter (the board-local settings file's `next-id` key, `<repo-root>/.settings`
-  — a board that predates the move still has the legacy `<board>/.next-id`
-  file instead; the first read migrates its value into settings and deletes
-  it, so this only ever happens once per board) and one past the highest id
+  counter (its own file, `<repo-root>/.next-id`, ticket 150, so `.settings`
+  holds only settings and a rule limiting who may change it (151) never
+  stops anyone creating tickets; a board from before still has a `next-id`
+  key in `.settings`, or the oldest a `<board>/.next-id` file, and the
+  first time a number is handed out the highest of them moves into the
+  counter file and the old places are cleared) and one past the highest id
   in the columns. The counter is the
   authority — it remembers ids whose tickets have gone, archived or deleted,
   which no scan can — and the scan is the safety net, so a lost or badly
@@ -481,9 +482,9 @@ off**, ticket 141) to
     runs; `git::changed_paths` diffs the two. This isn't a simplification
     over passing an explicit paths list — it's the fix for a real bug a
     hand-maintained list would have shipped with: `Board::record_id` (via
-    `amd new`) also writes `.settings`'s `next-id` counter, so a new ticket
+    `amd new`) also writes the `.next-id` counter, so a new ticket
     genuinely touches two files in one operation, and nobody wrote that
-    call site expecting to enumerate `.settings` too.
+    call site expecting to enumerate the counter too.
   - **The diff has to be signature-based, not presence-based.** An
     untracked file's `git status` is always `??` regardless of content, so
     a path already dirty in the *before* snapshot that changes again by the

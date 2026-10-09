@@ -60,6 +60,13 @@ impl Config {
         }
     }
 
+    /// Removes a key. Returns whether it was there.
+    pub fn remove(&mut self, key: &str) -> bool {
+        let before = self.entries.len();
+        self.entries.retain(|(name, _)| name != key);
+        self.entries.len() != before
+    }
+
     /// Renames a key in place (its line keeps its position), for a setting
     /// whose name has changed. If both names are present, the old one is
     /// dropped and the new one's value kept.
