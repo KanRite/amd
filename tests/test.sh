@@ -973,8 +973,9 @@ assert "the archive stays out of git" bash -c "! git status --porcelain | grep -
 assert "an archived ticket is no longer findable" bash -c "! '${AMD}' show bin-this-one"
 assert "ids are not reused after archiving" \
   bash -c "before=\$(ls tasks/archive | head -1 | cut -d- -f1); '${AMD}' new 'After the bin' >/dev/null; ! test -f tasks/backlog/\${before}-after-the-bin.md"
-assert "the counter records the next id, in .settings, not tasks/" \
-  bash -c "test ! -f tasks/.next-id && test \"\$(grep '^next-id' .settings | sed 's/.*= //')\" -gt \"\$(ls tasks/backlog | tail -1 | cut -d- -f1 | sed 's/^0*//')\""
+assert "the counter records the next id in its own file, not .settings or tasks/ (ticket 150)" \
+  bash -c "test ! -f tasks/.next-id && ! grep -q '^next-id' .settings \
+    && test \"\$(cat .next-id)\" -gt \"\$(ls tasks/backlog | tail -1 | cut -d- -f1 | sed 's/^0*//')\""
 assert "a deleted ticket does not hand its id back" \
   bash -c "'${AMD}' new 'Doomed' >/dev/null; id=\$(ls tasks/backlog | grep doomed | cut -d- -f1); rm tasks/backlog/\${id}-doomed.md; '${AMD}' new 'After the delete' >/dev/null; ! test -f tasks/backlog/\${id}-after-the-delete.md"
 
@@ -1208,10 +1209,10 @@ mkdir -p "${commit_origin}" && git init -q --bare "${commit_origin}"
 ( cd "${commit_repo}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
   && git remote add origin "${commit_origin}" \
   && AMD_YES=1 "${AMD}" init committest --local-only >/dev/null )
-assert "amd new commits both the new ticket and .settings' next-id bump" \
+assert "amd new commits both the new ticket and the counter bump" \
   bash -c "cd '${commit_repo}' && '${AMD}' new 'First ticket' --no-edit >/dev/null \
     && git show --stat --pretty=format: HEAD | grep -q '001-first-ticket.md' \
-    && git show --stat --pretty=format: HEAD | grep -q '.settings'"
+    && git show --stat --pretty=format: HEAD | grep -q '.next-id'"
 assert "that commit was pushed to origin" \
   bash -c "cd '${commit_repo}' && [ \"\$(git rev-parse HEAD)\" = \"\$(git rev-parse origin/main)\" ]"
 assert "a file staged by hand beforehand is never swept into the next commit" \

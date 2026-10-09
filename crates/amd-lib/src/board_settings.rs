@@ -1,22 +1,23 @@
 //! Board-local settings: facts about this board itself, not a user's
 //! preferences. Lives at `<repo-root>/.settings` — a sibling of the board
 //! directory, not inside it, the same way `README.md` sits at the repo root
-//! rather than inside `tasks/`. Hidden, matching the legacy `.next-id` file
-//! it partly replaces: this is tool-managed state, not something meant to
+//! rather than inside `tasks/`. Hidden, like the `.next-id` counter beside
+//! it: this is tool-managed state, not something meant to
 //! be browsed the way `README.md` is. **Git-tracked** — unlike the shared config
 //! file (`settings.rs`) or the registry, both of which are per-machine. A
 //! board-local value needs to travel with the repository to every clone,
 //! which is exactly why it can't live in either of those.
 //!
-//! Three keys today:
+//! Among its keys:
 //! - `project`: the declared identity `amd init <project>` records. It is
 //!   immutable once set — a policy this module enforces on its own write
 //!   path, not a filesystem lock. Hand-editing the file directly is not
 //!   prevented here; `project_trust.rs` is what notices when that's
 //!   happened.
-//! - `next-id`: the board's id counter, moved here from the legacy
-//!   `<board>/.next-id` file so the ticket columns hold nothing but tickets.
-//!   Freely mutable — every new ticket advances it — unlike `project`.
+//! - `next-id`: **no longer here** (ticket 150). The id counter has its own
+//!   file, `<repo-root>/.next-id`, so this file holds only settings; a board
+//!   that still has the key here is migrated the first time a number is
+//!   handed out.
 //! - `lease-hours`: how long a taken ticket lease lasts before it lapses on
 //!   its own (`docs/adr/0007-concurrency-and-locking.md`). Unlike the two
 //!   above, nothing writes this programmatically — it's meant to be
@@ -269,15 +270,21 @@ impl BoardSettings {
         Ok(())
     }
 
-    /// The id the next ticket will take, if this file says anything
-    /// sensible. `board.rs`'s `next_id()`/`record_id()` migrate the legacy
-    /// `.next-id` file's value in here (and remove it) the first time this
-    /// is `None` but that file exists, for boards that predate the move.
+    /// The id counter as a board from before ticket 150 kept it here. It
+    /// lives in its own file now (`Board::counter_path`); `board.rs` reads
+    /// this only to migrate it, then removes it.
     pub fn next_id(&self) -> Option<u32> {
         self.config.get(NEXT_ID)?.trim().parse().ok()
     }
 
-    /// Freely mutable, unlike `project` — every ticket recorded advances it.
+    /// Takes the old counter out of `.settings` once it has moved to its
+    /// own file. Returns whether it was there.
+    pub fn remove_next_id(&mut self) -> bool {
+        self.config.remove(NEXT_ID)
+    }
+
+    /// Writes the old key: only for tests that build a board from before
+    /// ticket 150.
     pub fn set_next_id(&mut self, id: u32) {
         self.config.set(NEXT_ID, &id.to_string());
     }
