@@ -8,6 +8,7 @@ mod app;
 mod board;
 mod dialog;
 mod editor;
+mod home;
 mod preferences;
 mod rich_dom;
 

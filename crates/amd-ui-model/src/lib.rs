@@ -418,6 +418,48 @@ pub struct SyncReport {
     pub warning: Option<String>,
 }
 
+/// The landing page (ticket 020): your work across every project on this
+/// machine, and the projects themselves.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Home {
+    /// Your todo and doing tickets, highest priority first, then oldest.
+    pub work: Vec<WorkItem>,
+    /// Every project on this machine, by name; hidden ones marked.
+    pub projects: Vec<HomeProject>,
+    /// Who "you" is (git's `user.email`); empty when git doesn't say.
+    pub me: String,
+}
+
+/// A project on the landing page.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HomeProject {
+    pub name: String,
+    /// Its board's repository: what opening it opens.
+    pub root: String,
+    /// The folder holding its repositories, to tell two clones apart.
+    pub dir: String,
+    /// Left out of My work by you.
+    pub hidden: bool,
+}
+
+/// One ticket in My work.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkItem {
+    pub project: String,
+    /// The project's board repository, opened to show the ticket.
+    pub project_root: String,
+    /// The repository whose board the ticket is on.
+    pub repo: String,
+    pub column: Column,
+    pub id: String,
+    /// File name, `NNN-slug.md`.
+    pub file: String,
+    pub title: String,
+    pub priority: String,
+    pub points: String,
+    pub created: String,
+}
+
 /// A newly created ticket and what happened when it was recorded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Created {

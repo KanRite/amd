@@ -182,8 +182,9 @@ fn names_for(board: &Board, email: &str, fallback: Option<&str>) -> Vec<String> 
 
 /// Your work: todo and doing tickets assigned to you in every project on
 /// this machine, hidden ones left out unless `include_hidden`, ordered by
-/// `sort`. "You" is `email` (git's `user.email`) and `name` (git's
-/// `user.name`). A board that can't be read is skipped, not fatal.
+/// `sort`. "You" is git's identity in each board's own repository (people
+/// use a different email per organisation, as leases already allow), else
+/// `email`/`name`. A board that can't be read is skipped, not fatal.
 pub fn my_work(email: &str, name: Option<&str>, include_hidden: bool, sort: Sort) -> Vec<WorkItem> {
     let registry = Registry::load();
     let projects = projects_in(&registry, &hidden());
@@ -196,7 +197,12 @@ pub fn my_work(email: &str, name: Option<&str>, include_hidden: bool, sort: Sort
                 continue;
             }
             seen.push(board.root.clone());
-            let mine = names_for(&board, email, name);
+            let repo_email = git::config(board.repo_root(), "user.email");
+            let repo_name = git::config(board.repo_root(), "user.name");
+            let mine = match &repo_email {
+                Some(e) => names_for(&board, e, repo_name.as_deref()),
+                None => names_for(&board, email, name),
+            };
             for column in [Column::Todo, Column::Doing] {
                 let Ok(tasks) = board.tasks_in(column) else {
                     continue;

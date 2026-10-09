@@ -120,12 +120,13 @@ redundant. Their history is in git if it is ever wanted again.
   `current_project::project_name`), each with its declared repositories'
   boards (`boards_of`, as `load_repos` does for one project); hidden ones
   in your own config (`ui.hidden-projects`, by path). `my_work(email,
-  name, …)` gathers todo and doing tickets assigned to you: names from each
+  name, …)` gathers todo and doing tickets assigned to you, as git's
+  identity in each board's repository (else `email`/`name`): names from each
   project's users list by email, git's `user.name` only where the email
   isn't listed (else one person's git name would match another's tickets).
   Sorted by priority then oldest (`Sort::{Priority, Age, Points}`). Read
   on demand, no cache, no fetching. `amd mine` (CLI, works from anywhere)
-  prints it; the desktop board's landing page will show it.
+  prints it; the desktop board's landing page shows it.
 - `crates/amd-lib/src/recover.rs` — `amd recover` (ticket 144): tickets
   removed from the board, found with `git log --diff-filter=D -M` (so a
   move between columns isn't a removal), each read back from its removing
@@ -1027,7 +1028,17 @@ changes):
   still refuses a stale write. The header's ↻, F5 and Ctrl+R all call
   `refresh()`. F5/Ctrl+R are intercepted, because a webview reload would
   throw away filters and sort.
-- **Where it opens**: `Board::discover()` from the launch directory; from
+- **The landing page** (ticket 020, `amd-ui-web/src/home.rs`): amdui
+  always opens on it (`Ctx.view`: `View::Home`/`View::Board`). The `home`
+  command returns `amd_ui_model::Home` (My work from `agile_md::my_work`,
+  and the projects); `set_project_hidden` flips `ui.hidden-projects`.
+  Opening a project or a work item reuses `set_tasks_dir` (which also
+  remembers it as `ui.board`), then `open_ticket`. On Home the header
+  hides New ticket, Admin and the filter bar, and ↻ reloads Home; on a
+  board, ⌂ Home goes back. It's the shell documents (129), ideas (131) and
+  collaboration (138) are meant to join. "You" is git's identity in each
+  board's own repository, falling back to the global one.
+- **Which board a project opens**: `Board::discover()` from the launch directory; from
   outside any project (a desktop launcher starts in `$HOME`) it goes to the
   directory remembered as `ui.board` in `~/.config/agile-md/config`, which
   Preferences' "Board to open" sets.

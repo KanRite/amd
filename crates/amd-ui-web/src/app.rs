@@ -19,6 +19,14 @@ use crate::dialog::{
 use crate::editor::Editor;
 use crate::preferences::PreferencesPanel;
 
+/// What fills the window: the landing page or a project's board (ticket
+/// 020). amdui always opens on the landing page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum View {
+    Home,
+    Board,
+}
+
 /// Which overlay, if any, is open over the board.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Overlay {
@@ -44,6 +52,10 @@ pub enum Overlay {
 #[derive(Clone, Copy)]
 pub struct Ctx {
     pub board: RwSignal<Option<Board>>,
+    /// Landing page or board (ticket 020).
+    pub view: RwSignal<View>,
+    /// The landing page's data, loaded on arrival there.
+    pub home: RwSignal<Option<Result<amd_ui_model::Home, String>>>,
     pub error: RwSignal<Option<String>>,
     pub overlay: RwSignal<Option<Overlay>>,
     pub collapsed: RwSignal<BTreeSet<Column>>,
@@ -180,6 +192,8 @@ impl Ctx {
 pub fn App() -> impl IntoView {
     let ctx = Ctx {
         board: RwSignal::new(None),
+        view: RwSignal::new(View::Home),
+        home: RwSignal::new(None),
         error: RwSignal::new(None),
         overlay: RwSignal::new(None),
         collapsed: RwSignal::new(BTreeSet::new()),
@@ -203,6 +217,13 @@ pub fn App() -> impl IntoView {
     watch_disk(ctx);
     refresh_keys(ctx);
     zoom_keys(ctx);
+    crate::home::load_home(ctx.home);
+    let on_home = move || ctx.view.get() == View::Home;
+    let go_home = move |_| {
+        ctx.overlay.set(None);
+        ctx.view.set(View::Home);
+        crate::home::load_home(ctx.home);
+    };
 
     let tasks_dir = move || ctx.board.with(|b| b.as_ref().map(|b| b.tasks_dir.clone()));
     // The project's own name (ticket 087), until a board is open.
@@ -218,26 +239,58 @@ pub fn App() -> impl IntoView {
     view! {
         <div class="flex h-screen flex-col bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
             <header class="flex items-center gap-4 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-800">
-                <ProjectSwitcher project=project />
+                // The landing page has no project of its own; a board offers
+                // the way back to it (ticket 020).
+                <Show
+                    when=on_home
+                    fallback=move || {
+                        view! {
+                            <button
+                                class="rounded border border-slate-300 px-2.5 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                                title="Back to My work and your projects"
+                                on:click=go_home
+                            >
+                                "⌂ Home"
+                            </button>
+                            <ProjectSwitcher project=project />
+                        }
+                    }
+                >
+                    <span class="text-lg font-semibold">"agile-md"</span>
+                </Show>
                 <span class="min-w-0 flex-1 truncate text-xs text-slate-500" title=tasks_dir>
-                    {move || tasks_dir().unwrap_or_else(|| "No tasks directory open".into())}
+                    {move || {
+                        if on_home() {
+                            String::new()
+                        } else {
+                            tasks_dir().unwrap_or_else(|| "No tasks directory open".into())
+                        }
+                    }}
                 </span>
                 <SyncStatus />
                 <button
                     class="rounded border border-slate-300 px-2.5 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
-                    title="Refresh the board from disk (F5)"
+                    title="Refresh from disk (F5)"
                     aria-label="Refresh"
-                    on:click=move |_| ctx.refresh()
+                    on:click=move |_| {
+                        if on_home() {
+                            crate::home::load_home(ctx.home);
+                        } else {
+                            ctx.refresh();
+                        }
+                    }
                 >
                     "↻"
                 </button>
-                <button
-                    class="whitespace-nowrap rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
-                    disabled=move || ctx.board.with(Option::is_none)
-                    on:click=move |_| ctx.overlay.set(Some(Overlay::NewTicket))
-                >
-                    "New ticket"
-                </button>
+                <Show when=move || !on_home()>
+                    <button
+                        class="whitespace-nowrap rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
+                        disabled=move || ctx.board.with(Option::is_none)
+                        on:click=move |_| ctx.overlay.set(Some(Overlay::NewTicket))
+                    >
+                        "New ticket"
+                    </button>
+                </Show>
                 <button
                     class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
                     title="Your own settings on this machine: colours, zoom, the board to open"
@@ -248,7 +301,7 @@ pub fn App() -> impl IntoView {
                 // Only for the project's admins (ticket 149): its admins list,
                 // or admin access on GitHub, or open when amd can't tell.
                 <Show when=move || {
-                    ctx.board.with(|b| b.as_ref().is_none_or(|b| b.admin.allowed))
+                    !on_home() && ctx.board.with(|b| b.as_ref().is_none_or(|b| b.admin.allowed))
                 }>
                     <button
                         class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
@@ -260,7 +313,9 @@ pub fn App() -> impl IntoView {
                 </Show>
             </header>
 
-            <FilterBar />
+            <Show when=move || !on_home()>
+                <FilterBar />
+            </Show>
 
             <Show when=move || ctx.error.with(Option::is_some)>
                 <div
@@ -289,7 +344,9 @@ pub fn App() -> impl IntoView {
             </Show>
 
             <main class="min-h-0 flex-1">
-                <BoardView />
+                <Show when=on_home fallback=|| view! { <BoardView /> }>
+                    <crate::home::HomeView home=ctx.home />
+                </Show>
             </main>
 
             {move || match ctx.overlay.get() {

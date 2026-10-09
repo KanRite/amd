@@ -785,6 +785,60 @@ async fn set_tasks_dir(
     titled(&window, board)
 }
 
+/// The landing page (ticket 020): your todo and doing work across every
+/// project on this machine, and the projects. Read fresh each time.
+#[tauri::command]
+async fn home() -> Result<amd_ui_model::Home> {
+    blocking(|| {
+        use agile_md::my_work;
+        let here = std::env::current_dir().unwrap_or_default();
+        let me = my_work::me(&here);
+        let work = match &me {
+            Some((email, name)) => {
+                my_work::my_work(email, name.as_deref(), false, my_work::Sort::Priority)
+            }
+            None => Vec::new(),
+        };
+        Ok(amd_ui_model::Home {
+            work: work
+                .into_iter()
+                .map(|w| amd_ui_model::WorkItem {
+                    project: w.project,
+                    project_root: w.project_root.display().to_string(),
+                    repo: w.repo,
+                    column: agile_md::board::Column::parse(&w.column)
+                        .map(boards::from_column)
+                        .unwrap_or(amd_ui_model::Column::Todo),
+                    id: w.id,
+                    file: format!("{}.md", w.stem),
+                    title: w.title,
+                    priority: w.priority,
+                    points: w.points,
+                    created: w.created,
+                })
+                .collect(),
+            projects: my_work::projects()
+                .into_iter()
+                .map(|p| amd_ui_model::HomeProject {
+                    name: p.name,
+                    root: p.root.display().to_string(),
+                    dir: p.dir.display().to_string(),
+                    hidden: p.hidden,
+                })
+                .collect(),
+            me: me.map(|(email, _)| email).unwrap_or_default(),
+        })
+    })
+    .await
+}
+
+/// Hides a project from My work, or shows it again (ticket 020): saved in
+/// your own config on this machine, never committed.
+#[tauri::command]
+async fn set_project_hidden(root: String, hidden: bool) -> Result<()> {
+    blocking(move || agile_md::my_work::set_hidden(Path::new(&root), hidden).map_err(err)).await
+}
+
 /// Switches to another project in the same folder (ticket 093): records
 /// it in that folder's `.current-project` — the same file `amd project use`
 /// writes — and shows it. The window then runs from the folder itself, so
@@ -864,6 +918,8 @@ pub fn run() {
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             load_board,
+            home,
+            set_project_hidden,
             board_fingerprint,
             sync_board,
             ticket_version,
