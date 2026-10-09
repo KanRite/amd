@@ -114,6 +114,18 @@ redundant. Their history is in git if it is ever wanted again.
   rewritten; a bare number in `parent`/`related` only when the moved
   ticket's own `## Children`/`related` proves which ticket it meant, else
   reported as ambiguous and left. Without `--apply` it only shows the plan.
+- `crates/amd-lib/src/my_work.rs` — My work (ticket 020): every project
+  registered on this machine (`Registry` entries with a board, scratch
+  boards under `std::env::temp_dir()` skipped, named by
+  `current_project::project_name`), each with its declared repositories'
+  boards (`boards_of`, as `load_repos` does for one project); hidden ones
+  in your own config (`ui.hidden-projects`, by path). `my_work(email,
+  name, …)` gathers todo and doing tickets assigned to you: names from each
+  project's users list by email, git's `user.name` only where the email
+  isn't listed (else one person's git name would match another's tickets).
+  Sorted by priority then oldest (`Sort::{Priority, Age, Points}`). Read
+  on demand, no cache, no fetching. `amd mine` (CLI, works from anywhere)
+  prints it; the desktop board's landing page will show it.
 - `crates/amd-lib/src/recover.rs` — `amd recover` (ticket 144): tickets
   removed from the board, found with `git log --diff-filter=D -M` (so a
   move between columns isn't a removal), each read back from its removing

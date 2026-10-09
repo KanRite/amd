@@ -55,6 +55,7 @@ dependencies = [
  "inquire",
  "libc",
  "richrs",
+ "serde_json",
  "tempfile",
  "time",
 ]

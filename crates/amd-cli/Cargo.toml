@@ -25,5 +25,6 @@ clap_complete.workspace = true
 inquire.workspace = true
 libc.workspace = true
 richrs.workspace = true
+serde_json.workspace = true
 tempfile.workspace = true
 time.workspace = true

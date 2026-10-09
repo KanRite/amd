@@ -21,6 +21,7 @@ pub mod git;
 pub mod group;
 pub mod import;
 pub mod model;
+pub mod my_work;
 pub mod numbering;
 pub mod project_trust;
 pub mod recover;

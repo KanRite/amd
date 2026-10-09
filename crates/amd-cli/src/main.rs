@@ -447,6 +447,27 @@ enum Cmd {
     /// Open the desktop board across every registered repository (same window
     /// as the `amdui` command)
     Gui,
+    /// Your work: todo and doing tickets assigned to you, across every
+    /// project on this machine, highest priority first. Read as this
+    /// machine last saw each board
+    Mine {
+        /// Include projects you've hidden
+        #[arg(long)]
+        all: bool,
+        /// Order by priority (then oldest), age, or points
+        #[arg(long, value_name = "ORDER", default_value = "priority",
+              value_parser = PossibleValuesParser::new(["priority", "age", "points"]))]
+        sort: String,
+        /// Print the list as JSON
+        #[arg(long)]
+        json: bool,
+        /// Leave a project out of your work (by name), on this machine only
+        #[arg(long, value_name = "PROJECT", conflicts_with = "unhide")]
+        hide: Option<String>,
+        /// Put a hidden project back
+        #[arg(long, value_name = "PROJECT")]
+        unhide: Option<String>,
+    },
     /// Print a shell completion script (bash, zsh, fish, …)
     Completions {
         /// Shell to generate for; defaults to $SHELL
@@ -679,6 +700,16 @@ fn run() -> Result<()> {
         migrate_settings(&board)?;
         return cmd_deregister(&board, &name);
     }
+    if let Cmd::Mine {
+        all,
+        sort,
+        json,
+        hide,
+        unhide,
+    } = &command
+    {
+        return cmd_mine(*all, sort, *json, hide.as_deref(), unhide.as_deref());
+    }
     if let Cmd::Project { action } = command {
         return match action {
             None => project::list(),
@@ -703,6 +734,7 @@ fn run() -> Result<()> {
         Cmd::Init { .. }
         | Cmd::Join { .. }
         | Cmd::Project { .. }
+        | Cmd::Mine { .. }
         | Cmd::Completions { .. }
         | Cmd::Gui => {
             unreachable!("handled above")
@@ -999,6 +1031,81 @@ fn cmd_recover(
         }
         Ok(())
     })
+}
+
+/// `amd mine` (ticket 020): your todo and doing tickets across every project
+/// on this machine. Works from anywhere: it isn't about one board.
+fn cmd_mine(
+    all: bool,
+    sort: &str,
+    json: bool,
+    hide: Option<&str>,
+    unhide: Option<&str>,
+) -> Result<()> {
+    use agile_md::my_work::{self, Sort};
+    let projects = my_work::projects();
+    if let Some(name) = hide.or(unhide) {
+        let matches: Vec<_> = projects.iter().filter(|p| p.name == name).collect();
+        let project = match matches.as_slice() {
+            [one] => *one,
+            [] => bail!(
+                "no project called '{name}' on this machine (projects: {})",
+                projects
+                    .iter()
+                    .map(|p| p.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            _ => bail!(
+                "'{name}' is cloned in more than one folder; hide it from the desktop board instead"
+            ),
+        };
+        my_work::set_hidden(&project.root, hide.is_some())?;
+        let what = if hide.is_some() {
+            "hidden from"
+        } else {
+            "back in"
+        };
+        println!("{} is {what} your work on this machine", project.name);
+        return Ok(());
+    }
+    let here = env::current_dir().unwrap_or_default();
+    let Some((email, name)) = my_work::me(&here) else {
+        bail!("git has no user.email, so amd can't tell which tickets are yours");
+    };
+    let order = match sort {
+        "age" => Sort::Age,
+        "points" => Sort::Points,
+        _ => Sort::Priority,
+    };
+    let items = my_work::my_work(&email, name.as_deref(), all, order);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&items)?);
+        return Ok(());
+    }
+    if items.is_empty() {
+        println!("nothing in todo or doing is assigned to you");
+    }
+    for item in &items {
+        let points = if item.points.is_empty() {
+            "      ".to_string()
+        } else {
+            format!("{:>2} pts", item.points)
+        };
+        println!(
+            "{:<5}  {:<6}  {}  {:<16}  {}  {}",
+            item.column, item.priority, points, item.project, item.id, item.title
+        );
+    }
+    let hidden = projects.iter().filter(|p| p.hidden).count();
+    if hidden > 0 && !all {
+        eprintln!(
+            "{hidden} hidden project{} left out; --all includes {}",
+            if hidden == 1 { "" } else { "s" },
+            if hidden == 1 { "it" } else { "them" }
+        );
+    }
+    Ok(())
 }
 
 /// What `amd show` says about a ticket's lease, on stderr so the ticket on

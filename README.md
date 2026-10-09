@@ -67,6 +67,7 @@ amd show    publish               # print a task (id or slug substring)
 amd edit    1                     # open in $EDITOR
 amd abandon 1                     # take it off the board, into tasks/archive/ — and
                                    # delete its branch too, if it's still empty
+amd mine                          # your todo and doing tickets, across every project on this machine
 amd recover                       # tickets deleted or abandoned: who removed each, and when
 amd recover 1                     # bring one back into the backlog, exactly as it was
 amd renumber                      # two tickets with the same number: shows the fix
@@ -238,6 +239,25 @@ amd assign 3                          # unassign it
 
 The name lands in the ticket's frontmatter (`assignee: "sam"`) and shows on the
 board as `@sam`, so it moves with the file and is visible in the diff.
+
+## My work, across every project
+
+`amd mine` lists the tickets assigned to you in todo and doing, across
+every project on this machine (everything `amd init`, `amd join` or `amd
+register` has registered), highest priority first, then oldest:
+
+```
+doing  high     3 pts  acme              017  Fix the basket total rounding
+todo   high     2 pts  acme              015  Screen reader labels on the product page
+doing  low      1 pts  fantastic-tools   004  Write the returns policy page
+```
+
+"You" is your git email, matched against each project's users list for the
+name the team knows you by. `--sort age` or `--sort points` changes the
+order, and `--json` is for scripts. `amd mine --hide <project>` leaves a
+project out on this machine (`--unhide` puts it back, `--all` shows
+everything); scratch boards under the temporary directory are never
+listed. It reads each board as this machine last saw it.
 
 ## Working together, and getting tickets back
 
