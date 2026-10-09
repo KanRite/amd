@@ -231,6 +231,22 @@ amd assign 3                          # unassign it
 The name lands in the ticket's frontmatter (`assignee: "sam"`) and shows on the
 board as `@sam`, so it moves with the file and is visible in the diff.
 
+## Working together, and getting tickets back
+
+Every change amd makes is committed and pushed, and before each command it
+catches up with the remote: it fast-forwards when you're behind, pushes
+anything you made offline, and refuses a change on a clone that has
+diverged rather than write on stale state.
+
+Nothing a commit has seen is lost. `amd recover` lists every ticket that was
+deleted or abandoned, with who removed it and when, and brings any of them
+back exactly as it was. If catching up would remove five or more tickets at
+once, amd says so (how many, which commits, by whom) and points at `amd
+recover`. If someone force-pushes and rewrites the remote's history, amd
+names it as that and changes nothing, so your clone, which still holds the
+old history, is there to put it back. Branch protection on `main` stops a
+force push in the first place.
+
 ## The desktop board
 
 `amdui` opens the board in a window, across every registered repository at

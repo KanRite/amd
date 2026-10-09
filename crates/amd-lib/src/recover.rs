@@ -173,7 +173,7 @@ pub fn restore(board: &Board, removed: &Removed) -> Result<PathBuf> {
 
 /// `(id, stem)` when `path` is a ticket file (`NNN-slug.md`), not a board
 /// README, a group's `_group.md` or a template.
-fn ticket_file(path: &str) -> Option<(u32, String)> {
+pub(crate) fn ticket_file(path: &str) -> Option<(u32, String)> {
     let path = Path::new(path);
     if path.components().any(|c| c.as_os_str() == "templates") {
         return None;

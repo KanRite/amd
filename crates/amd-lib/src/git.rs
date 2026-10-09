@@ -457,6 +457,92 @@ pub fn ahead_behind(repo: &Path) -> Option<(u32, u32)> {
     }
 }
 
+/// The full name of the branch's upstream, e.g. `refs/remotes/origin/main`.
+pub fn upstream_ref(repo: &Path) -> Option<String> {
+    ask(repo, &["rev-parse", "--symbolic-full-name", "@{u}"]).filter(|name| !name.is_empty())
+}
+
+/// Whether `ancestor` is `descendant` or one of its ancestors.
+pub fn is_ancestor(repo: &Path, ancestor: &str, descendant: &str) -> bool {
+    ask(repo, &["merge-base", "--is-ancestor", ancestor, descendant]).is_some()
+}
+
+/// Where `refname` has pointed, newest first, from its reflog: up to
+/// `limit` commits, the current one first. Empty without a reflog.
+pub fn reflog(repo: &Path, refname: &str, limit: usize) -> Vec<String> {
+    ask(
+        repo,
+        &[
+            "reflog",
+            "show",
+            "--format=%H",
+            "-n",
+            &limit.to_string(),
+            refname,
+        ],
+    )
+    .map(|out| out.lines().map(str::to_string).collect())
+    .unwrap_or_default()
+}
+
+/// How many commits `rev-list` finds for `args` (e.g. `["A", "^B"]`).
+pub fn count_commits(repo: &Path, args: &[&str]) -> Option<u32> {
+    let mut all = vec!["rev-list", "--count"];
+    all.extend_from_slice(args);
+    ask(repo, &all)?.parse().ok()
+}
+
+/// Files under `path` that `to` no longer has but `from` did, renames not
+/// counted (a ticket moved between columns hasn't gone).
+pub fn deleted_between(repo: &Path, from: &str, to: &str, path: &Path) -> Vec<String> {
+    let Some(path) = path.to_str() else {
+        return Vec::new();
+    };
+    ask(
+        repo,
+        &[
+            "diff",
+            "-M",
+            "--name-only",
+            "--diff-filter=D",
+            from,
+            to,
+            "--",
+            path,
+        ],
+    )
+    .map(|out| out.lines().map(str::to_string).collect())
+    .unwrap_or_default()
+}
+
+/// `(short sha, author)` of each commit in `range` that deleted something
+/// under `path`, oldest first.
+pub fn deleting_commits(repo: &Path, range: &str, path: &Path) -> Vec<(String, String)> {
+    let Some(path) = path.to_str() else {
+        return Vec::new();
+    };
+    ask(
+        repo,
+        &[
+            "log",
+            "-M",
+            "--diff-filter=D",
+            "--reverse",
+            "--format=%h%x1f%an",
+            range,
+            "--",
+            path,
+        ],
+    )
+    .map(|out| {
+        out.lines()
+            .filter_map(|line| line.split_once('\u{1f}'))
+            .map(|(sha, who)| (sha.to_string(), who.to_string()))
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
 /// Whether amd's last [`fetch`] was under `seconds` ago (its marker's
 /// mtime), so a read right after another needn't go back to the network.
 pub fn fetched_within(repo: &Path, seconds: u64) -> bool {

@@ -35,6 +35,11 @@ use crate::transition::Event;
 /// A read fetches at most this often; a change always fetches.
 pub const READ_FETCH_SECS: u64 = 10;
 
+/// A catch-up that removes at least this many tickets says so (ticket 145):
+/// one person tidying up removes a few, someone trashing a board removes
+/// many.
+pub const MASS_REMOVAL: usize = 5;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Purpose {
     /// Listing: a stale view only warns, and a fetch under
@@ -101,20 +106,44 @@ pub fn catch_up(board: &Board, purpose: Purpose) -> Result<Vec<Event>> {
             ))]),
         }
     };
+    // Commits this clone had from origin that origin no longer has: its
+    // history was rewritten (ticket 145). Neither pushing them back nor
+    // dropping them is amd's call, so nothing happens until a person
+    // decides.
+    if ahead > 0
+        && let Some(lost) = rewritten(repo)
+    {
+        return stale(format!(
+            "origin's history was rewritten (a force push): {lost} commit{} this clone had \
+             from origin {} gone from it. This clone still has them, so don't reset it. \
+             Check with your team; to put them back, push this clone with \
+             `git push --force-with-lease origin HEAD` in {}",
+            plural(lost),
+            if lost == 1 { "is" } else { "are" },
+            repo.display()
+        ));
+    }
     match (ahead, behind) {
         (0, 0) => Ok(Vec::new()),
-        (0, behind) => match git::merge_ff_only(repo) {
-            Ok(()) => Ok(vec![Event::Info(format!(
-                "caught up: {behind} new change{} from origin",
-                plural(behind)
-            ))]),
-            Err(err) => stale(format!(
-                "{} is {behind} commit{} behind origin and can't fast-forward ({err:#}) — \
-                 commit or stash the local edits in it first",
-                repo.display(),
-                plural(behind)
-            )),
-        },
+        (0, behind) => {
+            let removed = removed_tickets(board);
+            match git::merge_ff_only(repo) {
+                Ok(()) => {
+                    let mut events = vec![Event::Info(format!(
+                        "caught up: {behind} new change{} from origin",
+                        plural(behind)
+                    ))];
+                    events.extend(removed);
+                    Ok(events)
+                }
+                Err(err) => stale(format!(
+                    "{} is {behind} commit{} behind origin and can't fast-forward ({err:#}) — \
+                     commit or stash the local edits in it first",
+                    repo.display(),
+                    plural(behind)
+                )),
+            }
+        }
         (ahead, 0) => match git::push(repo) {
             Ok(()) => Ok(vec![Event::Info(format!(
                 "pushed {ahead} earlier change{} that hadn't reached origin",
@@ -133,6 +162,59 @@ pub fn catch_up(board: &Board, purpose: Purpose) -> Result<Vec<Event>> {
             plural(behind)
         )),
     }
+}
+
+/// How many commits this clone had from origin that origin's history no
+/// longer contains, if any: some earlier position of the upstream (from
+/// its reflog) is still in this clone but not in the upstream now. Only a
+/// rewritten history (a force push) does that; ordinary pushes only add.
+fn rewritten(repo: &Path) -> Option<u32> {
+    let upstream = git::upstream_ref(repo)?;
+    git::reflog(repo, &upstream, 50)
+        .iter()
+        .skip(1)
+        .find(|old| git::is_ancestor(repo, old, "HEAD") && !git::is_ancestor(repo, old, "@{u}"))
+        .map(|old| {
+            git::count_commits(repo, &[old, "^@{u}"])
+                .unwrap_or(1)
+                .max(1)
+        })
+}
+
+/// A warning when catching up would remove [`MASS_REMOVAL`] tickets or more
+/// (ticket 145): how many, which, in which commits and by whom, and that
+/// `amd recover` brings them back. Read before the fast-forward.
+fn removed_tickets(board: &Board) -> Option<Event> {
+    let repo = board.repo_root();
+    let mut ids: Vec<String> = git::deleted_between(repo, "HEAD", "@{u}", &board.root)
+        .iter()
+        .filter_map(|path| crate::recover::ticket_file(path))
+        .map(|(id, _)| format!("{id:03}"))
+        .collect();
+    if ids.len() < MASS_REMOVAL {
+        return None;
+    }
+    let count = ids.len();
+    ids.sort();
+    let shown = if count > 8 {
+        format!("{}, …", ids[..8].join(", "))
+    } else {
+        ids.join(", ")
+    };
+    let commits = git::deleting_commits(repo, "HEAD..@{u}", &board.root);
+    let mut authors: Vec<&str> = Vec::new();
+    for (_, who) in &commits {
+        if !authors.contains(&who.as_str()) {
+            authors.push(who);
+        }
+    }
+    let shas: Vec<&str> = commits.iter().map(|(sha, _)| sha.as_str()).collect();
+    Some(Event::Warn(format!(
+        "origin removed {count} tickets ({shown}) in {} by {}. If that wasn't meant, \
+         `amd recover` lists them and brings them back",
+        shas.join(", "),
+        authors.join(", ")
+    )))
 }
 
 /// After a change was committed (from `pre`, the commit before it) and its
@@ -290,6 +372,81 @@ mod tests {
 
     fn board(repo: &Path) -> Board {
         Board::in_repo(repo)
+    }
+
+    /// Ticket 145: `a` pushes tickets 002..=007, `b` catches up.
+    fn six_more(a: &Path, b: &Path) {
+        for n in 2..=7 {
+            commit_file(a, &format!("{n:03}-t.md"), false);
+        }
+        git(a, &["push", "-q"]);
+        catch_up(&board(b), Purpose::Write).unwrap();
+    }
+
+    #[test]
+    fn a_catch_up_removing_many_tickets_says_so() {
+        let (_root, _origin, a, b) = two_clones();
+        six_more(&a, &b);
+        for n in 2..=7 {
+            git(&a, &["rm", "-q", &format!("tasks/backlog/{n:03}-t.md")]);
+        }
+        git(&a, &["commit", "-q", "-m", "trash"]);
+        git(&a, &["push", "-q"]);
+        let events = catch_up(&board(&b), Purpose::Write).unwrap();
+        assert!(
+            matches!(&events[..], [Event::Info(_), Event::Warn(text)]
+                if text.contains("origin removed 6 tickets (002, 003")
+                    && text.contains("by a")
+                    && text.contains("amd recover")),
+            "{events:?}"
+        );
+        // It still caught up: the removal is recoverable, not refused.
+        assert!(!b.join("tasks/backlog/002-t.md").exists());
+    }
+
+    #[test]
+    fn removing_a_few_tickets_is_ordinary() {
+        let (_root, _origin, a, b) = two_clones();
+        six_more(&a, &b);
+        git(&a, &["rm", "-q", "tasks/backlog/002-t.md"]);
+        git(&a, &["commit", "-q", "-m", "tidy"]);
+        git(&a, &["push", "-q"]);
+        let events = catch_up(&board(&b), Purpose::Write).unwrap();
+        assert!(matches!(&events[..], [Event::Info(_)]), "{events:?}");
+    }
+
+    #[test]
+    fn a_rewritten_history_is_named_and_nothing_is_pushed_or_reset() {
+        let (_root, origin, a, b) = two_clones();
+        commit_file(&a, "002-two.md", true);
+        commit_file(&a, "003-three.md", true);
+        catch_up(&board(&b), Purpose::Write).unwrap();
+        let before = git::head(&b);
+        // Someone with push access throws the last two commits away.
+        git(&a, &["reset", "-q", "--hard", "HEAD~2"]);
+        git(&a, &["push", "-q", "--force"]);
+
+        let err = catch_up(&board(&b), Purpose::Write)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("history was rewritten") && err.contains("2 commits"),
+            "{err}"
+        );
+        let events = catch_up(&board(&b), Purpose::Read).unwrap();
+        assert!(
+            matches!(&events[..], [Event::Warn(text)] if text.contains("rewritten")),
+            "{events:?}"
+        );
+        // b keeps its history, and origin isn't quietly given it back.
+        assert_eq!(git::head(&b), before);
+        let origin_head = Command::new("git")
+            .arg("--git-dir")
+            .arg(&origin)
+            .args(["rev-list", "--count", "main"])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&origin_head.stdout).trim(), "1");
     }
 
     #[test]
