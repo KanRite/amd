@@ -105,6 +105,16 @@ redundant. Their history is in git if it is ever wanted again.
 - `crates/amd-lib/src/project_trust.rs` — a per-machine, trust-on-first-use
   check that a board's declared `project` hasn't changed unexpectedly since
   `amd` last saw it.
+- `crates/amd-lib/src/recover.rs` — `amd recover` (ticket 144): tickets
+  removed from the board, found with `git log --diff-filter=D -M` (so a
+  move between columns isn't a removal), each read back from its removing
+  commit's parent. Listed with who removed it and when; "abandoned" when the
+  commit says `abandon` or this machine's archive holds it, else "deleted".
+  Only tickets not on the board now. `restore` writes one into the loose
+  backlog exactly as it was, keeping its id, and refuses if that number is
+  on the board. The CLI filters with `--by` and `--since` and restores
+  `<id>...` or `--all` in one auto-commit. A force push that rewrote the
+  remote's history is out of its reach (that's 145 and branch protection).
 - `crates/amd-lib/src/import.rs` — `amd import <path>`: reads a tasks
   directory tree, treating it as a read-only `Board` (`Board::at`), and
   copies each ticket into the current board — status kept, id renumbered

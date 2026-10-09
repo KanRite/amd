@@ -299,6 +299,23 @@ enum Cmd {
         #[arg(short = 't', long = "tag", value_name = "TAG")]
         tag: Option<String>,
     },
+    /// Bring back tickets that were deleted or abandoned. With no number,
+    /// list them: who removed each and when. Restored tickets go to the
+    /// backlog exactly as they were, in one commit
+    Recover {
+        /// Ticket numbers to restore
+        #[arg(value_name = "ID")]
+        ids: Vec<String>,
+        /// Restore every listed ticket (narrowed by --by and --since)
+        #[arg(long, conflicts_with = "ids")]
+        all: bool,
+        /// Only tickets removed by this person (name or email, any part)
+        #[arg(long, value_name = "WHO")]
+        by: Option<String>,
+        /// Only tickets removed on or after this date (YYYY-MM-DD)
+        #[arg(long, value_name = "DATE")]
+        since: Option<String>,
+    },
     /// Print a task
     Show {
         #[arg(value_name = "REF")]
@@ -847,7 +864,87 @@ fn run() -> Result<()> {
         Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
         Cmd::Log => cmd_log(&board),
+        Cmd::Recover {
+            ids,
+            all,
+            by,
+            since,
+        } => cmd_recover(&board, &ids, all, by.as_deref(), since.as_deref()),
     }
+}
+
+/// `amd recover` (ticket 144): list tickets removed from the board, or
+/// restore some into the backlog in one commit.
+fn cmd_recover(
+    board: &Board,
+    ids: &[String],
+    all: bool,
+    by: Option<&str>,
+    since: Option<&str>,
+) -> Result<()> {
+    use agile_md::recover;
+    if let Some(date) = since
+        && !(date.len() == 10 && date.as_bytes()[4] == b'-' && date.as_bytes()[7] == b'-')
+    {
+        bail!("--since takes a date as YYYY-MM-DD, not '{date}'");
+    }
+    let listed: Vec<recover::Removed> = recover::removed(board)?
+        .into_iter()
+        .filter(|r| by.is_none_or(|who| r.by(who)))
+        .filter(|r| since.is_none_or(|date| r.when.as_str() >= date))
+        .collect();
+
+    if ids.is_empty() && !all {
+        if listed.is_empty() {
+            println!("nothing to recover: no removed ticket is missing from the board");
+        }
+        for r in &listed {
+            let how = if r.abandoned { "abandoned" } else { "deleted" };
+            println!(
+                "{}  {}  {how} by {}  {}",
+                r.id_display(),
+                r.when,
+                r.author,
+                r.title
+            );
+        }
+        return Ok(());
+    }
+
+    let chosen: Vec<recover::Removed> = if all {
+        listed
+    } else {
+        let mut chosen = Vec::new();
+        for id in ids {
+            let number: u32 = id
+                .parse()
+                .with_context(|| format!("'{id}' isn't a ticket number"))?;
+            match listed.iter().find(|r| r.id == number) {
+                Some(r) => chosen.push(r.clone()),
+                None => bail!(
+                    "{number:03} isn't a removed ticket missing from the board (`amd recover` lists them)"
+                ),
+            }
+        }
+        chosen
+    };
+    if chosen.is_empty() {
+        println!("nothing to recover");
+        return Ok(());
+    }
+    let ids: Vec<String> = chosen.iter().map(|r| r.id_display()).collect();
+    let detail = if chosen.len() == 1 {
+        chosen[0].title.clone()
+    } else {
+        format!("{} tickets", chosen.len())
+    };
+    with_auto_commit(board, "recover", &ids.join(", "), &detail, || {
+        for r in &chosen {
+            recover::restore(board, r)?;
+            println!("recovered {} -> backlog/  {}", r.stem, r.title);
+        }
+        Ok(())
+    })
 }
 
 /// What `amd show` says about a ticket's lease, on stderr so the ticket on
@@ -1637,6 +1734,14 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
     let moves = |task: &Option<String>| if task.is_some() { Write } else { Read };
     match command {
         Cmd::Show { task: Some(_) } => Lookup,
+        // Listing what was removed reads; restoring writes.
+        Cmd::Recover { ids, all, .. } => {
+            if ids.is_empty() && !all {
+                Read
+            } else {
+                Write
+            }
+        }
         Cmd::Board { .. }
         | Cmd::Tag { .. }
         | Cmd::Tags { action: None }

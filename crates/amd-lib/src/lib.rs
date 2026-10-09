@@ -21,6 +21,7 @@ pub mod import;
 pub mod model;
 pub mod numbering;
 pub mod project_trust;
+pub mod recover;
 pub mod registry;
 pub mod richtext;
 pub mod settings;
