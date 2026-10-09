@@ -46,6 +46,7 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
         lock,
         lapsed,
         version,
+        authorship,
     } = doc;
     let path = match &epic {
         Some(name) => format!("{}/{name}/{file}", column.dir_name()),
@@ -230,6 +231,15 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
     view! {
         <Modal title=format!("Edit {path}") width="max-w-4xl">
             <LockBar lock lapsed version place file=lock_file />
+            // Who to ask about it (ticket 155).
+            {(!authorship.is_empty())
+                .then(|| {
+                    view! {
+                        <p class="text-xs text-slate-500" aria-label="Who created and last edited this ticket">
+                            {authorship.clone()}
+                        </p>
+                    }
+                })}
             {move || {
                 disk_notice
                     .get()

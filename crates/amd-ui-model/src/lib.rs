@@ -402,6 +402,9 @@ pub struct TicketDocument {
     /// and the save is refused if the ticket has changed since.
     #[serde(default)]
     pub version: String,
+    /// "created by … on …; last edited by … on …" (ticket 155), or empty.
+    #[serde(default)]
+    pub authorship: String,
 }
 
 /// What happened in git after a ticket change was written to disk.

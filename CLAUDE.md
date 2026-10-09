@@ -603,10 +603,19 @@ off**, ticket 141) to
   refuses an invalid one. `Task::priority()` reads a missing one as `low`;
   `amd set <ref> priority <value>` sets it (ticket 083).
 - `assignee` says who's doing it, empty by default: tickets are created now and
-  assigned later. There is deliberately **no second person field** — who created
-  a ticket is already in `git log --follow`, so a `reporter` would duplicate
-  history the tool is built on. It was briefly called `owner`; `Task::assignee`
-  still reads that key. **Picked from the project's `users`** (ticket
+  assigned later. It was briefly called `owner`; `Task::assignee` still reads
+  that key. **Who created it is stored; who last edited it isn't** (ticket
+  155, reversing an earlier "no second person field" rule): `created-by:
+  "Name <email>"` is written once at creation (`TaskContext.created_by`,
+  the built-in template; `Draft::write` fills it for a custom template via
+  `authorship::ensure_created_by`) and never changed. "Last edited by" is
+  read from git (`authorship::last_edited`: the latest commit changing the
+  file, a pure `R100` move not counting), because a stored copy would go
+  stale on every edit made outside amd. Names come from the users list by
+  email. A ticket from before 155 is credited from the first commit adding
+  its file name and gets the field on its next save (`transition::save_text`).
+  `amd show` prints `authorship::summary` on stderr; amdui's editor shows
+  it under the lock bar (`TicketDocument.authorship`). **Picked from the project's `users`** (ticket
   089): `amd new`'s form and a bare `amd assign <ref>` in a terminal open
   `form::assignee` (type-to-filter: nobody, `@me`, the users, someone
   else); amdui's editor has `AssigneePicker`, fed by `Board.users`/`me`.
@@ -699,7 +708,7 @@ off**, ticket 141) to
   `"` can't corrupt the block. Use it for every frontmatter value.
 - `TaskContext` is the contract with templates (`id`, `number`, `title`, `slug`,
   `branch_type`, `branch_name`, `owner`, `parent`, `parent_link`, `related`, `tags`, `created`, `timestamp`, `column`,
-  `author`, `email`, `board`, `template`, `extra`). Adding a field is additive;
+  `author`, `email`, `created_by`, `board`, `template`, `extra`). Adding a field is additive;
   renaming one breaks every user template — treat it as a public API.
 - Template errors are flattened by `render_error()` (message + line + cause
   chain + MiniJinja debug info); without that only the top line survives.

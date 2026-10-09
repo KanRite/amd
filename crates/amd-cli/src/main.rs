@@ -781,6 +781,10 @@ fn run() -> Result<()> {
             if let Some(line) = lock_note(&board, &task) {
                 eprintln!("{line}");
             }
+            // Who to ask about it (ticket 155), on stderr like the lock note.
+            if let Some(line) = agile_md::authorship::summary(&board, &task) {
+                eprintln!("{line}");
+            }
             Ok(())
         }
         Cmd::Edit { task } => {

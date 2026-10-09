@@ -1469,9 +1469,13 @@ assert "show says when your own lock has lapsed, and how to take it again" \
 assert "show says a lock in force is yours" \
   bash -c "cd '${lock_repo}' && '${AMD}' new 'Held now' --no-edit >/dev/null 2>&1 && '${AMD}' lock 4 >/dev/null \
     && '${AMD}' show 4 2>&1 >/dev/null | grep -q '^locked by you until '"
-assert "show adds nothing for a ticket with no lease, and stdout is just the file" \
-  bash -c "cd '${lock_repo}' && [ -z \"\$('${AMD}' show 1 2>&1 >/dev/null)\" ] \
+assert "show says no lock for a ticket with no lease, and stdout is just the file" \
+  bash -c "cd '${lock_repo}' && ! '${AMD}' show 1 2>&1 >/dev/null | grep -qi lock \
     && '${AMD}' show 4 2>/dev/null | cmp -s - tasks/backlog/004-held-now.md"
+assert "show says who created a ticket (ticket 155)" \
+  bash -c "cd '${lock_repo}' && '${AMD}' show 1 2>&1 >/dev/null | grep -q '^created by '"
+assert "a new ticket records created-by from git (ticket 155)" \
+  bash -c "cd '${lock_repo}' && grep -q '^created-by: \"' tasks/*/001-*.md"
 
 echo "pipes:"
 assert "the board survives a closed pipe" \

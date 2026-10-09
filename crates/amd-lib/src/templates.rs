@@ -95,6 +95,9 @@ pub struct TaskContext {
     pub author: String,
     /// `git config user.email`, or an empty string.
     pub email: String,
+    /// Who's creating it, `Name <email>`: their name from the project's
+    /// users list, else git's (ticket 155). Empty without a git email.
+    pub created_by: String,
     /// Board directory name (`tasks`).
     pub board: String,
     /// Name of the template being rendered.
@@ -356,6 +359,7 @@ pub fn example_context(board: &Board) -> TaskContext {
         column: "backlog".to_string(),
         author: "you".to_string(),
         email: String::new(),
+        created_by: "You <you@example.com>".to_string(),
         board: board.name(),
         template: DEFAULT_TEMPLATE.to_string(),
         extra: BTreeMap::new(),
@@ -436,6 +440,7 @@ mod tests {
             column: "todo".to_string(),
             author: "t".to_string(),
             email: "t@t.co".to_string(),
+            created_by: "t <t@t.co>".to_string(),
             board: "tasks".to_string(),
             template: "ticket".to_string(),
             extra: BTreeMap::new(),

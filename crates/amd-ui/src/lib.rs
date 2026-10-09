@@ -220,6 +220,7 @@ async fn open_ticket(place: Place, file: String) -> Result<TicketDocument> {
             lock: project.lock_of(&task),
             lapsed: project.lapsed_of(&task),
             version: task.hash().map_err(err)?.to_string(),
+            authorship: agile_md::authorship::summary(board, &task).unwrap_or_default(),
             content,
         })
     })
@@ -371,6 +372,7 @@ async fn create_ticket(
                 lock: None,
                 lapsed: None,
                 version: task.hash().map_err(err)?.to_string(),
+                authorship: agile_md::authorship::summary(board, &task).unwrap_or_default(),
                 content: std::fs::read_to_string(&task.path).map_err(|e| e.to_string())?,
             },
             sync,
