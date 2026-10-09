@@ -22,6 +22,7 @@ pub mod model;
 pub mod numbering;
 pub mod project_trust;
 pub mod registry;
+pub mod renumber;
 pub mod richtext;
 pub mod settings;
 pub mod sync;

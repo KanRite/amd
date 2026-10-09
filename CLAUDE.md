@@ -105,6 +105,16 @@ redundant. Their history is in git if it is ever wanted again.
 - `crates/amd-lib/src/project_trust.rs` — a per-machine, trust-on-first-use
   check that a board's declared `project` hasn't changed unexpectedly since
   `amd` last saw it.
+- `crates/amd-lib/src/renumber.rs` — `amd renumber [--keep T] [--apply]`
+  (ticket 146): tickets sharing a number (`local` numbering can clash when
+  clones create apart). The first committed keeps it, judged by commit
+  order of the first commit adding that file name anywhere on the board
+  (not `git log --follow`, which traces template-alike tickets back to the
+  first ticket); `--keep` overrides. Each other one gets the next number:
+  `git mv` plus its `id`, and `record_id`. Full `[[stem]]` links are
+  rewritten; a bare number in `parent`/`related` only when the moved
+  ticket's own `## Children`/`related` proves which ticket it meant, else
+  reported as ambiguous and left. Without `--apply` it only shows the plan.
 - `crates/amd-lib/src/import.rs` — `amd import <path>`: reads a tasks
   directory tree, treating it as a read-only `Board` (`Board::at`), and
   copies each ticket into the current board — status kept, id renumbered

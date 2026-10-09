@@ -1257,6 +1257,27 @@ assert "with no remote, a change is committed and nothing is pushed or complaine
     && git log -1 --pretty=%s | grep -q 'Local only'"
 rm -rf "${local_repo}"
 
+echo "renumber (ticket 146):"
+rn="$(mktemp -d)"
+( cd "${rn}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
+  && git config commit.gpgsign false \
+  && AMD_YES=1 "${AMD}" init renum --local-only >/dev/null 2>&1 \
+  && "${AMD}" new "First" --no-edit >/dev/null 2>&1 && "${AMD}" new "Second" --no-edit >/dev/null 2>&1 \
+  && sed -e 's/^title: .*/title: "Clashing"/' tasks/backlog/002-second.md > tasks/backlog/002-clashing.md \
+  && git add tasks/backlog/002-clashing.md && git commit -q -m "a second 002, made outside amd" )
+assert "amd renumber shows the plan and changes nothing" \
+  bash -c "cd '${rn}' && out=\$('${AMD}' renumber) && printf '%s\\n' \"\$out\" | grep -q '^002: 002-second keeps it' \
+    && printf '%s\\n' \"\$out\" | grep -q '002-clashing becomes 003' && test -f tasks/backlog/002-clashing.md"
+assert "amd renumber --apply gives the later one a new number, in one commit" \
+  bash -c "cd '${rn}' && '${AMD}' renumber --apply >/dev/null 2>&1 \
+    && test -f tasks/backlog/003-clashing.md && ! test -f tasks/backlog/002-clashing.md \
+    && grep -qx 'id: \"003\"' tasks/backlog/003-clashing.md \
+    && git log -1 --pretty=%s | grep -q '^renumber: 002' && [ -z \"\$(git status --porcelain --untracked-files=no)\" ] \
+    && '${AMD}' renumber | grep -q 'no two tickets share a number'"
+assert "the next new ticket doesn't reuse the moved number" \
+  bash -c "cd '${rn}' && '${AMD}' new 'Third' --no-edit 2>&1 | grep -q '004-third'"
+rm -rf "${rn}"
+
 echo "WIP limits (doing only, ticket 083):"
 wip_repo="$(mktemp -d)"
 ( cd "${wip_repo}" && git init -q && git config user.email t@t.co && git config user.name t \

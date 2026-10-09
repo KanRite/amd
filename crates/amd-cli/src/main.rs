@@ -299,6 +299,16 @@ enum Cmd {
         #[arg(short = 't', long = "tag", value_name = "TAG")]
         tag: Option<String>,
     },
+    /// Fix tickets that share a number: one keeps it (the first committed),
+    /// the others get new numbers. Shows the plan; --apply carries it out
+    Renumber {
+        /// Carry out the plan, in one commit
+        #[arg(long)]
+        apply: bool,
+        /// The ticket to keep its number (its name, or a unique part of it)
+        #[arg(long, value_name = "TICKET")]
+        keep: Option<String>,
+    },
     /// Print a task
     Show {
         #[arg(value_name = "REF")]
@@ -847,7 +857,46 @@ fn run() -> Result<()> {
         Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
         Cmd::Log => cmd_log(&board),
+        Cmd::Renumber { apply, keep } => cmd_renumber(&board, apply, keep.as_deref()),
     }
+}
+
+/// `amd renumber` (ticket 146): show, or with `--apply` fix, tickets that
+/// share a number.
+fn cmd_renumber(board: &Board, apply: bool, keep: Option<&str>) -> Result<()> {
+    use agile_md::renumber;
+    let clashes = renumber::plan(board, keep)?;
+    if clashes.is_empty() {
+        println!("no two tickets share a number");
+        return Ok(());
+    }
+    for clash in &clashes {
+        println!("{:03}: {} keeps it", clash.id, clash.keep.stem);
+        for (task, to) in &clash.moves {
+            println!("     {} becomes {to:03}", task.stem);
+        }
+    }
+    if !apply {
+        println!("(nothing changed; `amd renumber --apply` does this)");
+        return Ok(());
+    }
+    let ids: Vec<String> = clashes.iter().map(|c| format!("{:03}", c.id)).collect();
+    let report = with_auto_commit(board, "renumber", &ids.join(", "), "shared numbers", || {
+        renumber::apply(board, &clashes)
+    })?;
+    for (from, to) in &report.renamed {
+        println!("renamed {from} -> {to}");
+    }
+    for (ticket, what) in &report.updated {
+        println!("updated {ticket}: {what}");
+    }
+    if !report.ambiguous.is_empty() {
+        eprintln!("check these by hand: they could mean either ticket, so they were left alone");
+        for (ticket, what) in &report.ambiguous {
+            eprintln!("  {ticket}: {what}");
+        }
+    }
+    Ok(())
 }
 
 /// What `amd show` says about a ticket's lease, on stderr so the ticket on
@@ -1637,6 +1686,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
     let moves = |task: &Option<String>| if task.is_some() { Write } else { Read };
     match command {
         Cmd::Show { task: Some(_) } => Lookup,
+        Cmd::Renumber { apply: false, .. } => Read,
         Cmd::Board { .. }
         | Cmd::Tag { .. }
         | Cmd::Tags { action: None }
