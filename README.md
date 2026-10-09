@@ -67,6 +67,8 @@ amd show    publish               # print a task (id or slug substring)
 amd edit    1                     # open in $EDITOR
 amd abandon 1                     # take it off the board, into tasks/archive/ — and
                                    # delete its branch too, if it's still empty
+amd recover                       # tickets deleted or abandoned: who removed each, and when
+amd recover 1                     # bring one back into the backlog, exactly as it was
 amd renumber                      # two tickets with the same number: shows the fix
 amd renumber --apply              # ...and makes it, in one commit
 amd link    1 3                   # relate two tickets
