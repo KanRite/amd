@@ -1258,6 +1258,48 @@ assert "with no remote, a change is committed and nothing is pushed or complaine
     && git log -1 --pretty=%s | grep -q 'Local only'"
 rm -rf "${local_repo}"
 
+echo "my work (ticket 020):"
+mw="$(mktemp -d)"
+mw_bin="${mw}/bin"
+# Two projects in one folder and a third in another; Sam in all three. The
+# folders aren't under the temp directory's own name for scratch boards, so
+# put them under a home-like path inside it and point HOME there.
+mwh="${mw}/home"
+(
+  set -e
+  export XDG_CONFIG_HOME="${mw}/config" AMD_COMMIT=0 AMD_NO_BRANCH=1
+  for spec in "work/alpha" "work/beta" "other/gamma"; do
+    dir="${mwh}/${spec%/*}"; name="${spec#*/}"
+    mkdir -p "${dir}" && cd "${dir}"
+    git init -q -b main "${name}-tickets" && cd "${name}-tickets"
+    git config user.email sam@example.com && git config user.name "Sam Lee" && git config commit.gpgsign false
+    "${AMD}" init "${name}" --local-only >/dev/null 2>&1
+    "${AMD}" register >/dev/null 2>&1 || true
+    "${AMD}" new "${name} doing" -a "Sam Lee" --no-edit >/dev/null 2>&1
+    "${AMD}" set 1 priority high >/dev/null 2>&1
+    "${AMD}" todo 1 >/dev/null 2>&1 && "${AMD}" doing 1 >/dev/null 2>&1
+    "${AMD}" new "${name} todo" -a "Sam Lee" --no-edit >/dev/null 2>&1
+    "${AMD}" todo 2 >/dev/null 2>&1
+    "${AMD}" new "${name} backlog" -a "Sam Lee" --no-edit >/dev/null 2>&1
+    "${AMD}" new "${name} someone else" -a "Priya Shah" --no-edit >/dev/null 2>&1
+    "${AMD}" todo 4 >/dev/null 2>&1
+  done
+)
+in_mw() { (cd "${mwh}/work/alpha-tickets" && env XDG_CONFIG_HOME="${mw}/config" TMPDIR="${mw_bin}" "${AMD}" "$@"); }
+mkdir -p "${mw_bin}"
+assert "amd mine lists todo and doing across every project, high priority first" \
+  bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; out=\$(in_mw mine) \
+    && [ \"\$(printf '%s\\n' \"\$out\" | grep -c .)\" -eq 6 ] \
+    && printf '%s\\n' \"\$out\" | head -3 | grep -c 'doing  high' | grep -qx 3 \
+    && printf '%s\\n' \"\$out\" | grep -q 'gamma' && ! printf '%s\\n' \"\$out\" | grep -q 'backlog\\|someone else'"
+assert "amd mine --hide leaves a project out, --all brings it back, --unhide restores it" \
+  bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --hide beta >/dev/null \
+    && ! in_mw mine 2>/dev/null | grep -q beta && in_mw mine 2>&1 >/dev/null | grep -q '1 hidden project' \
+    && in_mw mine --all | grep -q beta && in_mw mine --unhide beta >/dev/null && in_mw mine | grep -q beta"
+assert "amd mine --json gives the same list for scripts" \
+  bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --json | grep -c '\"project\"' | grep -qx 6"
+rm -rf "${mw}"
+
 echo "renumber (ticket 146):"
 rn="$(mktemp -d)"
 ( cd "${rn}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
