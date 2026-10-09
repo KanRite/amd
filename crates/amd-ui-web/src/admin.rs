@@ -1,5 +1,7 @@
-//! The admin panel: which tasks directory the board shows, and the template
-//! that defines the standard ticket format.
+//! The admin panel: the project's own settings, shared with the team
+//! through the tickets repository (auto-commit, tags, the WIP limit, lock
+//! length, epics and sprints, the ticket template). Personal settings live
+//! in Preferences (`preferences.rs`, ticket 148).
 
 use amd_ui_model::TicketTemplate;
 use amd_ui_model::wip::WipLimits;
@@ -11,8 +13,6 @@ use crate::app::{Ctx, Modal};
 
 #[component]
 pub fn AdminPanel() -> impl IntoView {
-    let ctx = Ctx::get();
-    let dir = RwSignal::new(String::new());
     let template = RwSignal::new(None::<TicketTemplate>);
     let source = RwSignal::new(String::new());
     let preview = RwSignal::new(None::<Result<String, String>>);
@@ -38,28 +38,8 @@ pub fn AdminPanel() -> impl IntoView {
         });
     };
 
-    spawn_local(async move {
-        if let Ok(Some(d)) = api::tasks_dir().await {
-            dir.set(d);
-        }
-    });
     load_template();
 
-    let open_dir = move |_| {
-        let path = dir.get_untracked();
-        spawn_local(async move {
-            match api::set_tasks_dir(&path).await {
-                Ok(board) => {
-                    dir.set(board.tasks_dir.clone());
-                    ctx.board.set(Some(board));
-                    ctx.error.set(None);
-                    status.set(Some("Board opened.".into()));
-                    load_template();
-                }
-                Err(e) => status.set(Some(e)),
-            }
-        });
-    };
     let run_preview = move |_| {
         let src = source.get_untracked();
         spawn_local(async move { preview.set(Some(api::preview_template(&src).await)) });
@@ -106,26 +86,6 @@ pub fn AdminPanel() -> impl IntoView {
     view! {
         <Modal title="Admin".to_string() width="max-w-5xl">
             <div class="flex min-h-0 flex-col gap-4 overflow-y-auto">
-                <section class="flex flex-col gap-2">
-                    <h3 class="text-sm font-semibold">"Tasks directory"</h3>
-                    <div class="flex gap-2">
-                        <input
-                            type="text"
-                            aria-label="Tasks directory"
-                            placeholder="/path/to/project-tickets/tasks"
-                            class=format!("{field} flex-1 font-mono text-sm")
-                            prop:value=move || dir.get()
-                            on:input=move |ev| dir.set(event_target_value(&ev))
-                        />
-                        <button class=secondary on:click=open_dir>
-                            "Open"
-                        </button>
-                    </div>
-                    <p class="text-xs text-slate-500">
-                        "A directory holding backlog/, todo/, doing/ and done/. It is remembered for next time."
-                    </p>
-                </section>
-
                 <section class="flex flex-col gap-1">
                     <label class="flex items-center gap-2 text-sm font-semibold">
                         <input
@@ -153,8 +113,6 @@ pub fn AdminPanel() -> impl IntoView {
                 <WipAdmin />
 
                 <LeaseAdmin />
-
-                <AppearanceAdmin />
 
                 <EpicsAdmin />
 
@@ -331,106 +289,6 @@ fn EpicRow(repo: String, name: String, count: usize) -> impl IntoView {
 
 /// Your colour scheme: light, dark or follow the system, and an accent
 /// colour. Applied at once and saved in your own settings on this machine.
-#[component]
-fn AppearanceAdmin() -> impl IntoView {
-    use amd_ui_model::appearance::{Accent, Appearance, Theme};
-    let ctx = Ctx::get();
-    let problem = RwSignal::new(None::<String>);
-    let choose = move |change: Appearance| {
-        ctx.appearance.set(change);
-        spawn_local(async move {
-            match api::set_appearance(change).await {
-                Ok(_) => problem.set(None),
-                Err(e) => problem.set(Some(e)),
-            }
-        });
-    };
-    // Written out in full so Tailwind generates them.
-    let swatch = |accent: Accent| match accent {
-        Accent::Indigo => "bg-indigo-600",
-        Accent::Teal => "bg-teal-600",
-        Accent::Rose => "bg-rose-600",
-        Accent::Amber => "bg-amber-600",
-        Accent::Slate => "bg-slate-600",
-    };
-    view! {
-        <section class="flex flex-col gap-2">
-            <h3 class="text-sm font-semibold">"Appearance"</h3>
-            <div role="radiogroup" aria-label="Theme" class="flex flex-wrap gap-2">
-                {Theme::ALL
-                    .map(|theme| {
-                        let on = move || ctx.appearance.with(|a| a.theme == theme);
-                        view! {
-                            <button
-                                type="button"
-                                role="radio"
-                                aria-checked=move || on().to_string()
-                                class=move || {
-                                    if on() {
-                                        "rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white"
-                                    } else {
-                                        "rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
-                                    }
-                                }
-                                on:click=move |_| {
-                                    choose(Appearance { theme, ..ctx.appearance.get_untracked() })
-                                }
-                            >
-                                {theme.label()}
-                            </button>
-                        }
-                    })
-                    .collect_view()}
-            </div>
-            <div role="radiogroup" aria-label="Accent colour" class="flex flex-wrap items-center gap-3">
-                <span class="text-xs text-slate-500">"Accent"</span>
-                {Accent::ALL
-                    .map(|accent| {
-                        let on = move || ctx.appearance.with(|a| a.accent == accent);
-                        view! {
-                            <button
-                                type="button"
-                                role="radio"
-                                aria-checked=move || on().to_string()
-                                aria-label=accent.label()
-                                title=accent.label()
-                                class=move || {
-                                    format!(
-                                        "h-7 w-7 rounded-full {} {}",
-                                        swatch(accent),
-                                        if on() {
-                                            "ring-2 ring-offset-2 ring-slate-900 ring-offset-white dark:ring-white dark:ring-offset-slate-800"
-                                        } else {
-                                            "opacity-80 hover:opacity-100"
-                                        },
-                                    )
-                                }
-                                on:click=move |_| {
-                                    choose(Appearance { accent, ..ctx.appearance.get_untracked() })
-                                }
-                            ></button>
-                        }
-                    })
-                    .collect_view()}
-            </div>
-            <p class="text-xs text-slate-500">
-                "Saved in your own settings on this machine, and used again next time."
-            </p>
-            {move || {
-                problem
-                    .get()
-                    .map(|p| {
-                        view! {
-                            <p role="alert" class="text-xs font-medium text-red-700 dark:text-red-300">
-                                {p}
-                            </p>
-                        }
-                    })
-            }}
-        </section>
-    }
-}
-
 /// The board's WIP limit on doing: kept with the tickets in `.settings`,
 /// so the whole team works to the same one.
 #[component]

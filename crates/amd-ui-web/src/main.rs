@@ -8,6 +8,7 @@ mod app;
 mod board;
 mod dialog;
 mod editor;
+mod preferences;
 mod rich_dom;
 
 #[cfg(target_arch = "wasm32")]

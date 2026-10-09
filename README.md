@@ -268,10 +268,14 @@ disagree.
 - **Filters** across the top: repository, person, a search, the sort order,
   and Reset.
 - **New ticket**, **+ Sprint**, **+ Epic**; start a sprint from its box.
-- **Admin**: auto-commit, the WIP limit on doing, how long a lock lasts, the
-  ticket template (with a preview), renaming epics and sprints, and your
-  colour scheme — light, dark or the system's, with an accent colour —
-  remembered in `~/.config/agile-md/config`.
+- **Preferences**, your own settings on this machine, in
+  `~/.config/agile-md/config`: the colour scheme (light, dark or the
+  system's, with an accent colour), the zoom, and the board to open when
+  amdui starts outside a project.
+- **Admin**, the project's settings, shared with the team through the
+  tickets repository: auto-commit, tags, the WIP limit on doing, how long a
+  lock lasts, renaming epics and sprints, and the ticket template (with a
+  preview).
 - **Zoom** with **Ctrl +** and **Ctrl −**, and **Ctrl 0** back to 100%; the
   size is remembered on this machine (`ui.zoom`). F5 or Ctrl+R refreshes the
   board without losing your filters.
