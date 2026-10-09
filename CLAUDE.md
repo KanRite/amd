@@ -554,6 +554,17 @@ off**, ticket 141) to
       catch-up pushes it. **Note:** two clones bumping `next-id` to the
       *same* value rebase cleanly (identical change), which is exactly why
       the duplicate-id check exists.
+    - **Two warnings for a board being trashed** (ticket 145): a
+      fast-forward that removes `MASS_REMOVAL` (5) tickets or more still
+      happens (it's recoverable), with a warning naming the count, ids,
+      commits and authors and pointing at `amd recover`
+      (`removed_tickets`). And when commits this clone had from origin
+      are no longer in origin's history (`rewritten`: an earlier position
+      of the upstream, from its reflog, is in HEAD but not in `@{u}`), a
+      force push rewrote it: a Write refuses and a Read warns, naming it as
+      such, and nothing is pushed back or reset; the message points at
+      `git push --force-with-lease` for a person to decide. Checked only
+      when the clone is ahead, so an ordinary divergence never trips it.
     - `tests/test.sh` forces the race deterministically with a one-shot
       `pre-push` hook in clone B that makes clone A push first (`race()`,
       clearing git's per-repo env with `git rev-parse --local-env-vars`).
