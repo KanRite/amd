@@ -255,6 +255,44 @@ names it as that and changes nothing, so your clone, which still holds the
 old history, is there to put it back. Branch protection on `main` stops a
 force push in the first place.
 
+## Who can change the project's settings
+
+The project's settings (the WIP limit, lock length, tags, admins,
+repositories and the rest) live in the tickets repository's `.settings`,
+shared with the whole team. The ticket number counter is kept apart, in
+`.next-id`, so `.settings` changes only when someone changes a setting.
+
+**What amd does on its own.** The desktop board shows **Admin** only to the
+project's admins: people on the `admins` list in `.settings`
+(`admins = Alex Morgan <alex@example.com>, sam@example.com`), or with admin
+or maintain access to the tickets repository on GitHub (amd asks through the
+`gh` CLI when it's installed). That keeps settings out of everyone else's
+way, but it isn't a lock: anyone who can push to the tickets repository can
+still edit `.settings` by hand.
+
+**Enforcing it on GitHub.** To make GitHub itself refuse settings changes
+from anyone but admins, add a **push ruleset** to the tickets repository.
+GitHub then rejects any push that touches those files unless the pusher is
+on the bypass list, whatever tool they use. Ticket moves and new tickets
+don't touch them, so they're unaffected.
+
+1. In the tickets repository: **Settings → Rules → Rulesets → New ruleset →
+   New push ruleset**.
+2. Add the rule **Restrict file paths** with `.settings` and `.github/**`.
+3. Under **Bypass list**, add **Repository admin** and **Maintain**.
+4. Set enforcement to **Active** and save.
+
+GitHub only offers push rulesets on **private repositories on a paid plan**.
+They don't exist for public repositories at all (GitHub refuses with "Source
+public repos cannot have push rules"), and a private repository on the free
+plan gets "Upgrade to GitHub Pro" instead. Check GitHub's current rulesets
+documentation for which plans include them.
+
+When a push is refused, amd keeps the change in your clone and says the push
+failed; nothing is lost. Ask an admin to make the change, or undo yours with
+`git reset --hard origin/main` in the tickets repository once you've checked
+nothing else is waiting to be pushed.
+
 ## The desktop board
 
 `amdui` opens the board in a window, across every registered repository at
