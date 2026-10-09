@@ -9,6 +9,7 @@
 //! moving it live here; how that is asked for and how it is drawn belong to
 //! the front ends. See docs/adr/0004-one-library-two-interfaces.md.
 
+pub mod access;
 pub mod board;
 pub mod board_settings;
 pub mod branch;

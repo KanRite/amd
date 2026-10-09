@@ -275,7 +275,12 @@ disagree.
 - **Admin**, the project's settings, shared with the team through the
   tickets repository: auto-commit, tags, the WIP limit on doing, how long a
   lock lasts, renaming epics and sprints, and the ticket template (with a
-  preview).
+  preview). It's shown to the project's admins: anyone on its `admins` list
+  (`admins = Alex Morgan <alex@example.com>, sam@example.com` in the tickets
+  `.settings`), or with admin or maintain access to the tickets repository
+  on GitHub (asked through the `gh` CLI). When amd can't tell (no list, no
+  `gh`), Admin stays open. It's a convenience, not a lock: anyone who can
+  push to the tickets repository can still change `.settings`.
 - **Zoom** with **Ctrl +** and **Ctrl −**, and **Ctrl 0** back to 100%; the
   size is remembered on this machine (`ui.zoom`). F5 or Ctrl+R refreshes the
   board without losing your filters.

@@ -198,6 +198,26 @@ pub struct Board {
     /// Only listed tags may be put on a ticket (the project's `prevent-arbitrary-tags`, formerly `tags-only`).
     #[serde(default)]
     pub tags_only: bool,
+    /// Whether this person gets Admin (ticket 149), and why.
+    #[serde(default)]
+    pub admin: AdminAccess,
+}
+
+/// Whether to show Admin, and the note that says why (ticket 149).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdminAccess {
+    pub allowed: bool,
+    pub note: String,
+}
+
+impl Default for AdminAccess {
+    /// Open, as before ticket 149: never lock someone out on a guess.
+    fn default() -> Self {
+        AdminAccess {
+            allowed: true,
+            note: String::new(),
+        }
+    }
 }
 
 /// One of a project's tags and how much it's used.
@@ -659,6 +679,7 @@ mod assigned_tests {
             me: None,
             tags: Vec::new(),
             tags_only: false,
+            admin: AdminAccess::default(),
         };
         board.epics.push(Epic {
             repo: String::new(),

@@ -51,6 +51,7 @@ amd register ../acme-api
 
 # The team, and the project's tags.
 sed -i.bak '/^users *=/d' .settings && rm -f .settings.bak
+echo "admins = Alex Morgan <alex.morgan@example.com>" >> .settings
 echo "users = Alex Morgan <alex.morgan@example.com>, Priya Shah <priya.shah@example.com>, Sam Lee <sam.lee@example.com>, Jordan Reyes <jordan.reyes@example.com>" >> .settings
 for tag in BUG FEATURE UX API SECURITY PERFORMANCE DOCS MOBILE PAYMENTS ACCESSIBILITY; do amd tags add "${tag}"; done
 git add .settings && save "Team and tags"

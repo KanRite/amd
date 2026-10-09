@@ -92,6 +92,7 @@ pub const DEFAULT_WIP_LIMIT: u32 = 2;
 const REPOS: &str = "repos";
 const AUTO_COMMIT: &str = "commit";
 const USERS: &str = "users";
+const ADMINS: &str = "admins";
 const SYNC: &str = "sync";
 const TICKET_NUMBERING: &str = "ticket-numbering";
 const TAGS: &str = "tags";
@@ -133,6 +134,35 @@ impl std::fmt::Display for User {
 /// Parses a `users` value. Split on `>` rather than `,`, so a name with a
 /// comma in it ("Preece, Tim <t@example.com>") still parses; anything that
 /// isn't a `Name <email>` entry is skipped rather than failing the load.
+/// The emails in an `admins` value (ticket 149): `Name <email>` entries,
+/// as `users` holds them, or bare addresses, comma-separated, in any mix.
+/// Lowercased, as emails are compared.
+fn parse_admins(value: &str) -> Vec<String> {
+    let mut emails = Vec::new();
+    let mut rest = value;
+    while let Some(open) = rest.find('<') {
+        emails.extend(bare_emails(&rest[..open]));
+        let after = &rest[open + 1..];
+        let close = after.find('>').unwrap_or(after.len());
+        emails.push(after[..close].trim().to_lowercase());
+        rest = after.get(close + 1..).unwrap_or("");
+    }
+    emails.extend(bare_emails(rest));
+    emails.retain(|e| e.contains('@'));
+    emails.dedup();
+    emails
+}
+
+/// Comma-separated words that look like addresses; names without one are
+/// skipped (they belong to a `<email>` that follows).
+fn bare_emails(text: &str) -> Vec<String> {
+    text.split(',')
+        .map(str::trim)
+        .filter(|word| word.contains('@') && !word.contains(' '))
+        .map(str::to_lowercase)
+        .collect()
+}
+
 fn parse_users(value: &str) -> Vec<User> {
     value
         .split('>')
@@ -396,6 +426,15 @@ impl BoardSettings {
     }
 
     /// The project's users, in the order they joined.
+    /// Who may use Admin (ticket 149), by email; empty when the project
+    /// hasn't said, and then GitHub's own access decides (`access.rs`).
+    pub fn admins(&self) -> Vec<String> {
+        self.config
+            .get(ADMINS)
+            .map(parse_admins)
+            .unwrap_or_default()
+    }
+
     pub fn users(&self) -> Vec<User> {
         self.config.get(USERS).map(parse_users).unwrap_or_default()
     }
@@ -676,6 +715,18 @@ mod tests {
         let text = std::fs::read_to_string(board.repo_root().join(".settings")).unwrap();
         assert_eq!(text, "tags = FUTURE\nprevent-arbitrary-tags = on\n");
         assert!(load(&board).only_listed_tags());
+    }
+
+    #[test]
+    fn admins_are_read_as_emails_in_either_form() {
+        assert_eq!(
+            parse_admins(
+                "Alex Morgan <Alex@Example.com>, sam@example.com,Priya, Shah <priya@example.com>"
+            ),
+            ["alex@example.com", "sam@example.com", "priya@example.com"]
+        );
+        assert!(parse_admins("").is_empty());
+        assert!(parse_admins("nobody").is_empty());
     }
 
     #[test]

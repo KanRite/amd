@@ -245,13 +245,19 @@ pub fn App() -> impl IntoView {
                 >
                     "Preferences"
                 </button>
-                <button
-                    class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
-                    title="The project's settings, shared with the team"
-                    on:click=move |_| ctx.overlay.set(Some(Overlay::Admin))
-                >
-                    "Admin"
-                </button>
+                // Only for the project's admins (ticket 149): its admins list,
+                // or admin access on GitHub, or open when amd can't tell.
+                <Show when=move || {
+                    ctx.board.with(|b| b.as_ref().is_none_or(|b| b.admin.allowed))
+                }>
+                    <button
+                        class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                        title="The project's settings, shared with the team"
+                        on:click=move |_| ctx.overlay.set(Some(Overlay::Admin))
+                    >
+                        "Admin"
+                    </button>
+                </Show>
             </header>
 
             <FilterBar />

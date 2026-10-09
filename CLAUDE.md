@@ -1010,7 +1010,17 @@ changes):
   personal and per machine (`~/.config/agile-md/config`: colour scheme,
   zoom, board to open), never committed. Admin (`admin.rs`) is the
   project's settings in the tickets `.settings`, committed for the team.
-  Header: New ticket | Preferences | Admin. The colour scheme is `ui.theme`/
+  Header: New ticket | Preferences | Admin.
+- **Who sees Admin** (ticket 149, `crates/amd-lib/src/access.rs`): the
+  project's `admins` list (`board_settings::admins`, emails or `Name
+  <email>`), or admin/maintain on GitHub for the tickets repository's
+  `origin` (`gh api repos/<owner>/<repo> --jq .permissions`; amd's git is
+  SSH, which can't ask the API). Listed wins; with no list, GitHub decides;
+  with no list and no answer (no `gh`, offline, not GitHub) Admin is open,
+  with a note. amd-ui asks GitHub once per repository per session
+  (`boards::admin_access`) and carries `Board.admin {allowed, note}`; the
+  page hides the button and Admin shows the note. A convenience, not
+  enforcement: the CLI's settings commands aren't gated. The colour scheme is `ui.theme`/
   `ui.accent` in the same file.
 - **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
   download path checks a downloaded amdui's libraries on Linux

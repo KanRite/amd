@@ -86,6 +86,14 @@ pub fn AdminPanel() -> impl IntoView {
     view! {
         <Modal title="Admin".to_string() width="max-w-5xl">
             <div class="flex min-h-0 flex-col gap-4 overflow-y-auto">
+                // Who gets Admin and why (ticket 149).
+                {move || {
+                    Ctx::get()
+                        .board
+                        .with(|b| b.as_ref().map(|b| b.admin.note.clone()))
+                        .filter(|note| !note.is_empty())
+                        .map(|note| view! { <p class="text-xs text-slate-500">{note}</p> })
+                }}
                 <section class="flex flex-col gap-1">
                     <label class="flex items-center gap-2 text-sm font-semibold">
                         <input
