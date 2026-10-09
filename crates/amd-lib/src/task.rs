@@ -218,7 +218,7 @@ impl Task {
 
     /// Releases the lease if the current git identity holds it — lapsed or
     /// not — and leaves anyone else's alone (ticket 092: a ticket leaving
-    /// active work gives back the lease its move into todo/doing took).
+    /// active work gives back the lease its move into doing took, ticket 156).
     /// Returns whether it released anything. Someone else's lease, even a
     /// lapsed one, is never this function's to clear; `break_lease` is.
     pub fn release_if_mine(&self) -> Result<bool> {

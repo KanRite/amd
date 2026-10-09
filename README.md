@@ -267,8 +267,9 @@ disagree.
 
 - **A Backlogs column** of sprints, then epics, beside the four columns. Drag
   a card to the next column, or into and out of an epic or sprint; the move is
-  a `git mv`, committed and pushed like `amd`'s. Moving into todo or doing
-  locks the ticket for you.
+  a `git mv`, committed and pushed like `amd`'s. Moving into doing
+  locks the ticket for you, and moving it out again unlocks it: a ticket is
+  locked while it's being worked on.
 - **Click a ticket** to edit it: its fields as a form (title, assignee, branch
   type, tags, points, priority), its relationships (parent, children,
   related, and tickets that link to it), each a click away, and its body as

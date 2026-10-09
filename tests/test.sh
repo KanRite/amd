@@ -429,7 +429,7 @@ assert "B sees A's new ticket without a manual pull" \
   bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; in_b board --plain 2>/dev/null | grep -q 'From A'"
 assert "B's next ticket is numbered after A's, not alongside it" \
   bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; in_b new 'From B' --no-edit 2>/dev/null | grep -q 'created backlog/002-from-b.md'"
-in_a todo 1 --no-branch >/dev/null 2>&1
+in_a todo 1 --no-branch >/dev/null 2>&1 && in_a lock 1 >/dev/null 2>&1
 assert "B can't claim a ticket A holds, and says so with a non-zero exit" \
   bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; ! in_b doing 1 >/dev/null 2>&1 \
     && in_b doing 1 2>&1 | grep -q 'leased by a@t.co'"
@@ -1429,14 +1429,17 @@ assert "unlock --force breaks someone else's lease" \
   bash -c "cd '${lock_repo}' && git config user.email other@example.com && '${AMD}' unlock 1 --force | grep -q 'lease broken'"
 assert "the lease is gone after being broken" \
   bash -c "cd '${lock_repo}' && ! '${AMD}' show 1 | grep -q 'locked-by: \"t@t.co\"'"
-assert "amd todo auto-takes a now-free lease on entry" \
+# A ticket is locked exactly while it's in doing (ticket 156): todo only
+# means it's next. Leaving doing, or reaching done, backlog or the archive,
+# gives your own lease back (ticket 092); nobody else's is touched.
+assert "amd todo takes no lease (ticket 156)" \
   bash -c "cd '${lock_repo}' && git config user.email t@t.co && '${AMD}' todo 1 --no-branch >/dev/null \
-    && '${AMD}' show 1 | grep -q 'locked-by: \"t@t.co\"'"
-# Leaving active work gives the lease back (ticket 092): done, backlog and
-# abandon release your own; doing -> todo keeps it; nobody else's is touched.
-assert "doing -> todo keeps your lease" \
-  bash -c "cd '${lock_repo}' && '${AMD}' doing 1 >/dev/null 2>&1 && '${AMD}' todo 1 --no-branch >/dev/null 2>&1 \
-    && '${AMD}' show 1 | grep -q 'locked-by: \"t@t.co\"'"
+    && '${AMD}' show 1 | grep -q 'locked-by: \"\"'"
+assert "amd doing takes a now-free lease on entry" \
+  bash -c "cd '${lock_repo}' && '${AMD}' doing 1 >/dev/null 2>&1 && '${AMD}' show 1 | grep -q 'locked-by: \"t@t.co\"'"
+assert "doing -> todo gives your lease back (ticket 156)" \
+  bash -c "cd '${lock_repo}' && '${AMD}' todo 1 --no-branch >/dev/null 2>&1 \
+    && '${AMD}' show 1 | grep -q 'locked-by: \"\"'"
 assert "amd done releases your lease" \
   bash -c "cd '${lock_repo}' && '${AMD}' doing 1 >/dev/null 2>&1 && '${AMD}' done 1 >/dev/null 2>&1 \
     && '${AMD}' show 1 | grep -q 'locked-by: \"\"' && '${AMD}' show 1 | grep -q 'locked-until: \"\"'"
@@ -1444,7 +1447,8 @@ assert "...in the same commit as the move" \
   bash -c "cd '${lock_repo}' && git show HEAD --name-status | grep -q 'done/001-lockable-ticket.md' \
     && git show HEAD:tasks/done/001-lockable-ticket.md | grep -q 'locked-by: \"\"'"
 ( cd "${lock_repo}" && "${AMD}" new "Handed back" --no-edit >/dev/null 2>&1 && "${AMD}" new "Dropped" --no-edit >/dev/null 2>&1 \
-  && "${AMD}" todo 2 --no-branch >/dev/null 2>&1 && "${AMD}" todo 3 --no-branch >/dev/null 2>&1 )
+  && "${AMD}" todo 2 --no-branch >/dev/null 2>&1 && "${AMD}" todo 3 --no-branch >/dev/null 2>&1 \
+  && "${AMD}" lock 2 >/dev/null 2>&1 && "${AMD}" lock 3 >/dev/null 2>&1 )
 assert "moving back to the backlog releases your lease" \
   bash -c "cd '${lock_repo}' && '${AMD}' show 2 | grep -q 'locked-by: \"t@t.co\"' \
     && '${AMD}' backlog 2 >/dev/null 2>&1 && '${AMD}' show 2 | grep -q 'locked-by: \"\"'"
