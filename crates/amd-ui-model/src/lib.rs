@@ -219,6 +219,10 @@ pub struct Board {
     /// Whether this person gets Admin (ticket 149), and why.
     #[serde(default)]
     pub admin: AdminAccess,
+    /// The documents repository every project shares (ticket 129); empty
+    /// when the project names none.
+    #[serde(default)]
+    pub shared_documents: String,
 }
 
 /// Whether to show Admin, and the note that says why (ticket 149).
@@ -416,6 +420,39 @@ pub struct SyncReport {
     pub pushed: bool,
     /// Why it was not committed or pushed, when it should have been.
     pub warning: Option<String>,
+}
+
+/// A project's documents repository (ticket 129): its own, or the one every
+/// project shares.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocSource {
+    /// The repository's name.
+    pub name: String,
+    /// The one every project shares, not the project's own.
+    pub shared: bool,
+    /// Whether it's cloned on this machine; when not, `documents` is empty.
+    pub cloned: bool,
+    pub documents: Vec<DocEntry>,
+}
+
+/// One document in a [`DocSource`].
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocEntry {
+    /// Relative to the repository, `/` between parts.
+    pub path: String,
+    pub title: String,
+}
+
+/// A document, rendered for reading.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenderedDoc {
+    /// The repository it's in.
+    pub source: String,
+    pub path: String,
+    /// HTML made by amdui from the markdown: raw HTML in the document is
+    /// shown as text, a link to another document is `#doc:<path>`, a link
+    /// amd won't follow is `#`, and images are inlined as data.
+    pub html: String,
 }
 
 /// The landing page (ticket 020): your work across every project on this
@@ -754,6 +791,7 @@ mod assigned_tests {
             tags: Vec::new(),
             tags_only: false,
             admin: AdminAccess::default(),
+            shared_documents: String::new(),
         };
         board.epics.push(Epic {
             repo: String::new(),

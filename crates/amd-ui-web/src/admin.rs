@@ -1,6 +1,7 @@
 //! The admin panel: the project's own settings, shared with the team
 //! through the tickets repository (auto-commit, tags, the WIP limit, lock
-//! length, epics and sprints, the ticket template). Personal settings live
+//! length, epics and sprints, the shared documents repository, the ticket
+//! template). Personal settings live
 //! in Preferences (`preferences.rs`, ticket 148).
 
 use amd_ui_model::TicketTemplate;
@@ -121,6 +122,8 @@ pub fn AdminPanel() -> impl IntoView {
                 <WipAdmin />
 
                 <LeaseAdmin />
+
+                <DocumentsAdmin />
 
                 <EpicsAdmin />
 
@@ -604,6 +607,67 @@ fn TagsAdmin() -> impl IntoView {
 
 /// How long a ticket lock lasts on the board: kept with the tickets in
 /// `.settings` (`lease-hours`), a team decision like the WIP limit.
+/// The documents repository every project shares (ticket 129), shown in
+/// Documents beside the project's own.
+#[component]
+fn DocumentsAdmin() -> impl IntoView {
+    let ctx = Ctx::get();
+    let saved = move || {
+        ctx.board.with(|b| {
+            b.as_ref()
+                .map(|b| b.shared_documents.clone())
+                .unwrap_or_default()
+        })
+    };
+    let name = RwSignal::new(saved());
+    let note = RwSignal::new(None::<String>);
+    let busy = RwSignal::new(false);
+    let save = move |_| {
+        let value = name.get_untracked().trim().to_string();
+        busy.set(true);
+        spawn_local(async move {
+            match api::set_shared_documents(&value).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    note.set(Some(if value.is_empty() {
+                        "No shared documents repository.".into()
+                    } else {
+                        format!("Documents shows {value} beside the project's own.")
+                    }));
+                    ctx.reload();
+                }
+                Err(e) => note.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
+    let field = "flex-1 rounded border border-slate-300 bg-slate-50 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900";
+    let button = "rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50";
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Shared documents"</h3>
+            <p class="text-xs text-slate-500">
+                "A documents repository every project reads, such as the organisation's standards, shown in Documents beside this project's own. Its name, as cloned beside the project's repositories. Leave it empty for none."
+            </p>
+            <div class="flex items-center gap-2">
+                <input
+                    class=field
+                    aria-label="Shared documents repository"
+                    placeholder="e.g. acme-documents"
+                    prop:value=move || name.get()
+                    on:input=move |ev| name.set(event_target_value(&ev))
+                />
+                <button class=button disabled=move || busy.get() on:click=save>
+                    "Save"
+                </button>
+            </div>
+            <Show when=move || note.with(Option::is_some)>
+                <p class="text-xs text-slate-600 dark:text-slate-300">{move || note.get().unwrap_or_default()}</p>
+            </Show>
+        </section>
+    }
+}
+
 #[component]
 fn LeaseAdmin() -> impl IntoView {
     let ctx = Ctx::get();

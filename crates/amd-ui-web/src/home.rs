@@ -43,14 +43,21 @@ pub fn HomeView(home: RwSignal<Option<Result<Home, String>>>) -> impl IntoView {
     }
 }
 
-/// Opens `root`'s project on the board, then, if given, one of its tickets.
-fn open(ctx: Ctx, root: String, ticket: Option<(String, amd_ui_model::Column, String)>) {
+/// Opens `root`'s project at `view` (its board or its documents), then,
+/// if given, one of its tickets.
+fn open(
+    ctx: Ctx,
+    root: String,
+    view: View,
+    ticket: Option<(String, amd_ui_model::Column, String)>,
+) {
     spawn_local(async move {
         match api::set_tasks_dir(&root).await {
             Ok(board) => {
                 ctx.board.set(Some(board));
+                ctx.document.set(None);
                 ctx.error.set(None);
-                ctx.view.set(View::Board);
+                ctx.view.set(view);
                 if let Some((repo, column, file)) = ticket {
                     ctx.open_ticket(
                         Place {
@@ -100,7 +107,7 @@ fn MyWork(work: Vec<WorkItem>, me: String) -> impl IntoView {
                                     type="button"
                                     class="flex w-full items-baseline gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:border-accent-400 dark:border-slate-700 dark:bg-slate-800"
                                     title="Open this ticket on its board"
-                                    on:click=move |_| open(ctx, root.clone(), Some(target.clone()))
+                                    on:click=move |_| open(ctx, root.clone(), View::Board, Some(target.clone()))
                                 >
                                     <span class=format!("rounded px-1.5 text-xs font-medium {tone}")>{priority.clone()}</span>
                                     <span class="w-12 text-xs uppercase text-slate-500">{w.column.dir_name()}</span>
@@ -145,6 +152,7 @@ fn Projects(
     };
     let row = move |(p, show_dir): (HomeProject, bool)| {
         let root = p.root.clone();
+        let docs = p.root.clone();
         let flip = p.root.clone();
         let hide = !p.hidden;
         view! {
@@ -153,10 +161,18 @@ fn Projects(
                     type="button"
                     class="flex-1 text-left font-medium hover:underline"
                     title="Open this project's board"
-                    on:click=move |_| open(ctx, root.clone(), None)
+                    on:click=move |_| open(ctx, root.clone(), View::Board, None)
                 >
                     {p.name.clone()}
                     {show_dir.then(|| view! { <span class="ml-2 text-xs font-normal text-slate-500">{p.dir.clone()}</span> })}
+                </button>
+                <button
+                    type="button"
+                    class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                    title="Read this project's documents"
+                    on:click=move |_| open(ctx, docs.clone(), View::Documents, None)
+                >
+                    "Documents"
                 </button>
                 <button
                     type="button"

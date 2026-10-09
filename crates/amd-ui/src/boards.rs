@@ -170,6 +170,7 @@ impl Project {
             tags,
             tags_only: settings.only_listed_tags(),
             admin: admin_access(&self.repos[0].1),
+            shared_documents: settings.shared_documents().unwrap_or_default(),
         })
     }
 

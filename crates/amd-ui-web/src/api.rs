@@ -358,3 +358,39 @@ struct HiddenArgs<'a> {
 pub async fn set_project_hidden(root: &str, hidden: bool) -> Result<(), String> {
     call("set_project_hidden", &HiddenArgs { root, hidden }).await
 }
+
+/// The project's documents repositories and their documents (ticket 129).
+pub async fn list_documents() -> Result<Vec<amd_ui_model::DocSource>, String> {
+    call("list_documents", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct DocArgs<'a> {
+    source: &'a str,
+    path: &'a str,
+}
+
+/// A document, rendered for reading.
+pub async fn read_document(source: &str, path: &str) -> Result<amd_ui_model::RenderedDoc, String> {
+    call("read_document", &DocArgs { source, path }).await
+}
+
+#[derive(Serialize)]
+struct UrlArgs<'a> {
+    url: &'a str,
+}
+
+/// Opens a web or mail link outside amdui.
+pub async fn open_external(url: &str) -> Result<(), String> {
+    call("open_external", &UrlArgs { url }).await
+}
+
+#[derive(Serialize)]
+struct SharedArgs<'a> {
+    name: &'a str,
+}
+
+/// Names the documents repository every project shares; empty clears it.
+pub async fn set_shared_documents(name: &str) -> Result<SyncReport, String> {
+    call("set_shared_documents", &SharedArgs { name }).await
+}

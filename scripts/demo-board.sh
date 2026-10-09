@@ -2,7 +2,8 @@
 # Builds a demo project for screenshots (ticket 147): a fictional online shop,
 # "Acme", with a board that shows everything amd does — every column, an epic,
 # a running sprint, assignees, priorities, points, tags, a draft, locks,
-# related tickets and two code repositories. Every name is made up and every
+# related tickets, two code repositories, and documents (the project's own
+# and a shared handbook). Every name is made up and every
 # address is @example.com, so a screenshot shows nobody's real data.
 #
 #   scripts/demo-board.sh [DIR]      # default: ./agile-md-demo
@@ -141,6 +142,87 @@ for f in tasks/*/[0-9]*.md tasks/backlog/*/[0-9]*.md; do
   sed -i.bak "s/^created: .*/created: \"${date}\"/" "${f}" && rm -f "${f}.bak"
 done
 git add -A tasks && save "Spread creation dates"
+
+# Documents (ticket 129): the project's own, and a handbook every project
+# shares, named in the project's settings.
+for r in acme-documents acme-handbook; do repo "${r}"; done
+mkdir -p "${DIR}/acme-documents/adr" "${DIR}/acme-documents/rfc" "${DIR}/acme-documents/docs/img" "${DIR}/acme-handbook"
+cat > "${DIR}/acme-documents/README.md" <<'MD'
+# Acme engineering
+
+How the Acme shop is built, and why. Decisions are in [adr/](adr/0001-one-page-checkout.md),
+proposals in [rfc/](rfc/0001-payment-retries.md), and how-tos in [docs/](docs/releasing.md).
+
+- [x] Storefront on the new checkout
+- [ ] Payment retries
+- [ ] Gift cards (being shaped)
+MD
+cat > "${DIR}/acme-documents/adr/0001-one-page-checkout.md" <<'MD'
+# ADR 0001: One-page checkout
+
+**Status:** accepted
+
+## Context
+
+Customers drop out between the address and payment steps. Each step is a page load on a slow phone.
+
+## Decision
+
+Checkout becomes one page: basket, address, delivery and payment, each a section that opens in turn.
+
+## Consequences
+
+- Fewer page loads, and the total stays in view.
+- Address lookup ([RFC 0001](../rfc/0001-payment-retries.md) depends on it) moves into the API.
+MD
+cat > "${DIR}/acme-documents/rfc/0001-payment-retries.md" <<'MD'
+# RFC 0001: Retry failed card payments
+
+A card payment that fails for a temporary reason is retried, so the customer isn't asked twice.
+
+| Decline code | Retry? | After |
+|---|---|---|
+| `insufficient_funds` | no | — |
+| `processing_error` | yes | 30 s |
+| `issuer_unavailable` | yes | 2 min |
+
+```text
+attempt 1 ──fail──▶ wait ──▶ attempt 2 ──fail──▶ tell the customer
+```
+
+> Never retry a payment the customer cancelled.
+MD
+cat > "${DIR}/acme-documents/docs/img/release.svg" <<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="70" font-family="sans-serif" font-size="14">
+  <rect x="5" y="15" width="110" height="40" rx="6" fill="#e0e7ff" stroke="#4f46e5"/><text x="60" y="40" text-anchor="middle">merge</text>
+  <rect x="155" y="15" width="110" height="40" rx="6" fill="#e0e7ff" stroke="#4f46e5"/><text x="210" y="40" text-anchor="middle">tag vX.Y.Z</text>
+  <rect x="305" y="15" width="110" height="40" rx="6" fill="#dcfce7" stroke="#16a34a"/><text x="360" y="40" text-anchor="middle">release</text>
+  <path d="M115 35h40M265 35h40" stroke="#334155" stroke-width="2"/>
+</svg>
+SVG
+cat > "${DIR}/acme-documents/docs/releasing.md" <<'MD'
+# Releasing
+
+![How a release happens](img/release.svg)
+
+1. Merge to `main`.
+2. Tag it: `git tag -a v1.4.0`.
+3. The release workflow builds and publishes it.
+
+See the [handbook](https://example.com/handbook) for the review rules.
+MD
+cat > "${DIR}/acme-handbook/README.md" <<'MD'
+# The Acme handbook
+
+Shared by every Acme project.
+
+## Code review
+
+- Every change goes through a pull request.
+- One approval; two for anything touching payments.
+MD
+for r in acme-documents acme-handbook; do git -C "${DIR}/${r}" add -A && git -C "${DIR}/${r}" commit -q -m "Documents"; done
+amd shared-documents acme-handbook
 
 cat <<EOF
 Demo board ready: ${DIR}

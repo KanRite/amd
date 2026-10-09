@@ -392,10 +392,20 @@ enum Cmd {
         command: Option<GroupCmd>,
     },
     /// Set doing/'s WIP limit. 0 turns it off; an absent or unparsable
-    /// setting defaults to 1
+    /// setting defaults to 2
     WipLimit {
         #[arg(value_name = "N")]
         limit: u32,
+    },
+    /// The documents repository every project shares, shown in amdui's
+    /// Documents beside the project's own. No name says which it is
+    SharedDocuments {
+        /// The repository's name, as cloned beside the project's
+        #[arg(value_name = "REPOSITORY")]
+        name: Option<String>,
+        /// Name none
+        #[arg(long, conflicts_with = "name")]
+        clear: bool,
     },
     /// Register a repository — declares its name for the whole project
     /// (shared, git-tracked) and its path on this machine (local only)
@@ -740,6 +750,7 @@ fn run() -> Result<()> {
             unreachable!("handled above")
         }
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
+        Cmd::SharedDocuments { name, clear } => cmd_shared_documents(&board, name, clear),
         Cmd::Register { .. } | Cmd::Deregister { .. } => unreachable!("handled above"),
         Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
         Cmd::New(args) => cmd_new(&board, args),
@@ -1507,6 +1518,31 @@ fn cmd_wip_limit(board: &Board, limit: u32) -> Result<()> {
     Ok(())
 }
 
+/// Names the documents repository every project shares (ticket 129), or
+/// clears it, committed and pushed like any setting; with neither, says
+/// which it is.
+fn cmd_shared_documents(board: &Board, name: Option<String>, clear: bool) -> Result<()> {
+    if name.is_none() && !clear {
+        match board_settings::load(board).shared_documents() {
+            Some(name) => println!("{name}"),
+            None => eprintln!("no shared documents repository (amd shared-documents <name>)"),
+        }
+        return Ok(());
+    }
+    let name = name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+    let what = name.clone().unwrap_or_else(|| "cleared".to_string());
+    with_auto_commit(board, "settings", "shared-documents", &what, || {
+        let mut settings = board_settings::load(board);
+        settings.set_shared_documents(name.as_deref())?;
+        settings.save(board)
+    })?;
+    match name {
+        Some(name) => println!("shared documents: {name}"),
+        None => println!("no shared documents repository"),
+    }
+    Ok(())
+}
+
 /// Carries settings still kept in the project's documents repository into
 /// the tickets `.settings`, once, committed and pushed (ticket 111). Silent
 /// once everything is across.
@@ -1913,6 +1949,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::Register { .. }
         | Cmd::Clone { .. }
         | Cmd::WipLimit { .. }
+        | Cmd::SharedDocuments { .. }
         | Cmd::Group {
             command: None | Some(GroupCmd::List),
         } => Read,

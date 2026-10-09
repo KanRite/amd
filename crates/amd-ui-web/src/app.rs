@@ -25,6 +25,8 @@ use crate::preferences::PreferencesPanel;
 pub enum View {
     Home,
     Board,
+    /// The project's documents (ticket 129).
+    Documents,
 }
 
 /// Which overlay, if any, is open over the board.
@@ -90,6 +92,8 @@ pub struct Ctx {
     /// Bumped whenever the board is refreshed because the files changed (or
     /// the user asked): an open editor checks its ticket then (ticket 091).
     pub disk_tick: RwSignal<u64>,
+    /// The document open in Documents (ticket 129): repository and path.
+    pub document: RwSignal<crate::documents::Open>,
 }
 
 impl Ctx {
@@ -210,6 +214,7 @@ pub fn App() -> impl IntoView {
         zoom: RwSignal::new(amd_ui_model::zoom::DEFAULT),
         system_dark: RwSignal::new(false),
         disk_tick: RwSignal::new(0),
+        document: RwSignal::new(None),
     };
     provide_context(ctx);
     ctx.reload();
@@ -226,6 +231,8 @@ pub fn App() -> impl IntoView {
     };
 
     let tasks_dir = move || ctx.board.with(|b| b.as_ref().map(|b| b.tasks_dir.clone()));
+    // Changes only when another project opens, not on every reload.
+    let project_dir = Memo::new(move |_| tasks_dir());
     // The project's own name (ticket 087), until a board is open.
     let project = move || {
         ctx.board.with(|b| {
@@ -253,6 +260,7 @@ pub fn App() -> impl IntoView {
                                 "⌂ Home"
                             </button>
                             <ProjectSwitcher project=project />
+                            <ViewTabs />
                         }
                     }
                 >
@@ -313,7 +321,7 @@ pub fn App() -> impl IntoView {
                 </Show>
             </header>
 
-            <Show when=move || !on_home()>
+            <Show when=move || ctx.view.get() == View::Board>
                 <FilterBar />
             </Show>
 
@@ -344,9 +352,15 @@ pub fn App() -> impl IntoView {
             </Show>
 
             <main class="min-h-0 flex-1">
-                <Show when=on_home fallback=|| view! { <BoardView /> }>
-                    <crate::home::HomeView home=ctx.home />
-                </Show>
+                {move || match ctx.view.get() {
+                    View::Home => view! { <crate::home::HomeView home=ctx.home /> }.into_any(),
+                    View::Board => view! { <BoardView /> }.into_any(),
+                    // Started afresh for each project (ticket 129).
+                    View::Documents => {
+                        project_dir.track();
+                        view! { <crate::documents::DocumentsView /> }.into_any()
+                    }
+                }}
             </main>
 
             {move || match ctx.overlay.get() {
@@ -362,6 +376,35 @@ pub fn App() -> impl IntoView {
                 }
                 None => ().into_any(),
             }}
+        </div>
+    }
+}
+
+/// Board | Documents (ticket 129): the two sides of an open project.
+#[component]
+fn ViewTabs() -> impl IntoView {
+    let ctx = Ctx::get();
+    let tab = move |label: &'static str, view: View| {
+        let current = move || ctx.view.get() == view;
+        view! {
+            <button
+                type="button"
+                role="tab"
+                aria-selected=move || current().to_string()
+                class="px-3 py-1.5 text-sm hover:bg-slate-100 dark:hover:bg-slate-700"
+                class=("bg-accent-100", current)
+                class=("font-medium", current)
+                class=("dark:bg-accent-900", current)
+                on:click=move |_| ctx.view.set(view)
+            >
+                {label}
+            </button>
+        }
+    };
+    view! {
+        <div role="tablist" class="flex overflow-hidden rounded border border-slate-300 dark:border-slate-600">
+            {tab("Board", View::Board)}
+            {tab("Documents", View::Documents)}
         </div>
     }
 }
@@ -801,6 +844,7 @@ fn ProjectSwitcher(project: impl Fn() -> String + Send + Sync + Copy + 'static) 
             match api::use_project(&name).await {
                 Ok(board) => {
                     ctx.board.set(Some(board));
+                    ctx.document.set(None);
                     ctx.error.set(None);
                 }
                 Err(e) => ctx.error.set(Some(e)),

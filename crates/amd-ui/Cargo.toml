@@ -36,6 +36,9 @@ tauri-build.workspace = true
 agile-md.workspace = true
 amd-ui-model.workspace = true
 anyhow.workspace = true
+base64.workspace = true
+# The documents reader renders markdown to HTML (ticket 129).
+pulldown-cmark = { workspace = true, features = ["html"] }
 serde.workspace = true
 serde_json.workspace = true
 tauri.workspace = true
