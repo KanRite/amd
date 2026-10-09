@@ -1257,6 +1257,30 @@ assert "with no remote, a change is committed and nothing is pushed or complaine
     && git log -1 --pretty=%s | grep -q 'Local only'"
 rm -rf "${local_repo}"
 
+echo "recover (ticket 144):"
+rv="$(mktemp -d)"
+( cd "${rv}" && git init -q -b main && git config user.email sam@example.com && git config user.name Sam \
+  && git config commit.gpgsign false \
+  && AMD_YES=1 "${AMD}" init recover --local-only >/dev/null 2>&1 \
+  && for t in One Two Three; do "${AMD}" new "${t}" --no-edit >/dev/null 2>&1; done \
+  && cp tasks/backlog/001-one.md "${rv}.one" && cp tasks/backlog/002-two.md "${rv}.two" \
+  && "${AMD}" abandon 1 >/dev/null 2>&1 && "${AMD}" abandon 2 >/dev/null 2>&1 )
+assert "amd recover lists abandoned tickets with who and when" \
+  bash -c "cd '${rv}' && out=\$('${AMD}' recover) && printf '%s\\n' \"\$out\" | grep -qE '^001  [0-9-]+ [0-9:]+  abandoned by Sam  One\$' \
+    && printf '%s\\n' \"\$out\" | grep -q '^002 ' && ! printf '%s\\n' \"\$out\" | grep -q '^003 '"
+assert "a ticket still on the board can't be recovered" \
+  bash -c "cd '${rv}' && ! '${AMD}' recover 3 >/dev/null 2>&1"
+assert "amd recover <id> brings one back into the backlog, exactly as it was" \
+  bash -c "cd '${rv}' && '${AMD}' recover 1 | grep -q 'recovered 001-one' \
+    && cmp -s tasks/backlog/001-one.md '${rv}.one' && git log -1 --pretty=%s | grep -q '^recover: 001'"
+assert "amd recover --all --by restores the rest in one commit" \
+  bash -c "cd '${rv}' && before=\$(git rev-list --count HEAD) && '${AMD}' recover --all --by sam >/dev/null \
+    && [ \$((\$(git rev-list --count HEAD) - before)) -eq 1 ] \
+    && cmp -s tasks/backlog/002-two.md '${rv}.two' && '${AMD}' recover | grep -q 'nothing to recover'"
+assert "--since needs a date" \
+  bash -c "cd '${rv}' && '${AMD}' recover --since yesterday 2>&1 | grep -q 'YYYY-MM-DD'"
+rm -rf "${rv}" "${rv}.one" "${rv}.two"
+
 echo "WIP limits (doing only, ticket 083):"
 wip_repo="$(mktemp -d)"
 ( cd "${wip_repo}" && git init -q && git config user.email t@t.co && git config user.name t \
