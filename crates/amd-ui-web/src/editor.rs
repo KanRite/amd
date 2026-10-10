@@ -876,9 +876,12 @@ fn TagPicker(
         ctx.board
             .with(|b| b.as_ref().is_some_and(|b| b.tags.iter().any(|t| t.listed)))
     };
-    // What's offered: the list, or with no list the tags in use.
+    let tags_only = move || ctx.board.with(|b| b.as_ref().is_some_and(|b| b.tags_only));
+    // What's offered: the list (the built-ins at least); only with
+    // arbitrary tags allowed and nothing listed, the tags in use (ticket
+    // 167).
     let known = move || {
-        if has_list() {
+        if has_list() || tags_only() {
             return listed();
         }
         ctx.board.with(|b| {
@@ -887,7 +890,7 @@ fn TagPicker(
                 .unwrap_or_default()
         })
     };
-    let only = move || ctx.board.with(|b| b.as_ref().is_some_and(|b| b.tags_only)) && has_list();
+    let only = tags_only;
     let options = move || {
         let query = typed.get().trim().to_uppercase();
         let have: Vec<String> = current().iter().map(|t| t.to_uppercase()).collect();

@@ -602,7 +602,7 @@ fn TagsAdmin() -> impl IntoView {
                     })
             }}
             <p class="text-xs text-slate-500">
-                "Tags are always UPPERCASE. A tag can only be removed once no ticket on the project's boards carries it. With \"Prevent arbitrary tags\" on (the default), only these tags can be used; off, any tag can be typed, and ones not on the list are flagged. With no list, any tag goes. Saved with the tickets, in .settings, and committed and pushed."
+                "Tags are always UPPERCASE. A tag can only be removed once no ticket on the project's boards carries it. With \"Prevent arbitrary tags\" on (the default), only these tags can be used; off, any tag can be typed, and ones not on the list are flagged. DRAFT and TRIAGE are always on it, so with nothing else listed only they can be used. Saved with the tickets, in .settings, and committed and pushed."
             </p>
         </section>
     }

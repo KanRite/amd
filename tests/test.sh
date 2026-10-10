@@ -594,8 +594,12 @@ tg_env="XDG_CONFIG_HOME=${tg}/config AMD_NO_INPUT=1"
   env ${tg_env} "${AMD}" init tags --local-only >/dev/null 2>&1
 )
 tgb="${tg}/tags-tickets"
-assert "with no list, amd tags says so" \
-  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags | grep -q 'no tag list'"
+assert "with nothing listed, amd tags says only the built-ins are there" \
+  bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags | grep -q 'only the built-in DRAFT and TRIAGE'"
+assert "...and a new ticket can't carry any other tag (ticket 167)" \
+  bash -c "cd '${tgb}' && ! env ${tg_env} '${AMD}' new 'Unlisted' -t misc --no-edit 2>/dev/null \
+    && env ${tg_env} '${AMD}' new 'Unlisted' -t misc --no-edit 2>&1 | grep -q \"not on the project's tag list: MISC\" \
+    && ! ls tasks/backlog/*-unlisted.md 2>/dev/null"
 assert "amd tags add saves the tag in UPPERCASE in .settings" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags add ' future ' | grep -qx 'added FUTURE' && grep -qx 'tags = FUTURE' .settings"
 assert "...refuses one already listed, ignoring case" \
@@ -641,6 +645,9 @@ assert "amd ready takes it out of draft, and then it moves on" \
 assert "amd tag DRAFT lists the drafts" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' new 'Second draft' --draft --no-edit >/dev/null 2>&1 \
     && env ${tg_env} '${AMD}' tag DRAFT | grep -q 'Second draft'"
+assert "amd tags shows the built-ins on their own line, not as unlisted" \
+  bash -c "cd '${tgb}' && out=\$(env ${tg_env} '${AMD}' tags) && printf '%s\\n' \"\$out\" | grep -q '^built in: DRAFT ([0-9]*), TRIAGE (0)\$' \
+    && ! printf '%s\\n' \"\$out\" | grep -q 'not listed: .*DRAFT'"
 assert "DRAFT is built in: it can't be added to or removed from the list" \
   bash -c "cd '${tgb}' && ! env ${tg_env} '${AMD}' tags add draft 2>/dev/null \
     && env ${tg_env} '${AMD}' tags remove DRAFT 2>&1 | grep -q 'built in'"
@@ -860,6 +867,9 @@ assert "...and refuses a repository that isn't declared" \
 rm -rf "${st}"
 
 echo "create:"
+# Tags have to be listed before use (ticket 167): only DRAFT and TRIAGE
+# are there to begin with.
+"${AMD}" tags add x >/dev/null && "${AMD}" tags add y >/dev/null
 "${AMD}" new "First task" >/dev/null
 "${AMD}" new "Second task" -t x -t y >/dev/null
 git add -A; git commit -qm seed
@@ -1172,7 +1182,7 @@ assert "a ticket with no branch carries the list too" \
 echo "set:"
 work="$(mktemp -d)"
 ( cd "${work}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init gadgets --local-only >/dev/null \
+  && AMD_YES=1 "${AMD}" init gadgets --local-only >/dev/null && "${AMD}" tags add urgent >/dev/null \
   && "${AMD}" new "First" >/dev/null && "${AMD}" new "Second" >/dev/null )
 assert "set points sizes a ticket" \
   bash -c "cd '${work}' && '${AMD}' set 001 points 5 | grep -q 'sized 5' && grep -q '^points: \"5\"\$' tasks/backlog/001-first.md"

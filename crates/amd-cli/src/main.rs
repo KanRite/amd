@@ -1806,7 +1806,9 @@ fn cmd_tags(board: &Board, action: Option<TagsAction>) -> Result<()> {
             let listed = settings.tags();
             let counts = agile_md::model::tag_counts(&boards)?;
             if listed.is_empty() {
-                println!("no tag list for this project; `amd tags add <TAG>` starts one");
+                println!(
+                    "nothing listed yet: only the built-in DRAFT and TRIAGE; `amd tags add <TAG>` adds one"
+                );
             }
             for tag in &listed {
                 let n = counts.get(tag).copied().unwrap_or(0);
@@ -1814,20 +1816,23 @@ fn cmd_tags(board: &Board, action: Option<TagsAction>) -> Result<()> {
             }
             let unlisted: Vec<String> = counts
                 .iter()
-                .filter(|(tag, _)| !listed.contains(tag))
+                .filter(|(tag, _)| !listed.contains(tag) && !task::is_reserved_tag(tag))
                 .map(|(tag, n)| format!("{tag} ({n})"))
                 .collect();
-            if !listed.is_empty() && !unlisted.is_empty() {
+            if !unlisted.is_empty() {
                 println!("in use but not listed: {}", unlisted.join(", "));
             }
-            if !listed.is_empty() {
-                let only = if settings.only_listed_tags() {
-                    "on (arbitrary tags are prevented)"
-                } else {
-                    "off (arbitrary tags are allowed, with a warning)"
-                };
-                println!("only listed tags: {only}");
-            }
+            let built_in: Vec<String> = task::RESERVED_TAGS
+                .iter()
+                .map(|tag| format!("{tag} ({})", counts.get(*tag).copied().unwrap_or(0)))
+                .collect();
+            println!("built in: {}", built_in.join(", "));
+            let only = if settings.only_listed_tags() {
+                "on (arbitrary tags are prevented)"
+            } else {
+                "off (arbitrary tags are allowed, with a warning)"
+            };
+            println!("only listed tags: {only}");
             Ok(())
         }
         Some(TagsAction::Add { tag }) => {
@@ -2260,11 +2265,13 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         args.related
     };
 
-    // Offered from the project's tag list when it has one, else from the
-    // tags already in use (ticket 122). Saved in uppercase either way.
-    let listed = board_settings::load(board).tags();
+    // Offered from the project's tag list; only with arbitrary tags allowed
+    // and nothing listed, from the tags already in use (tickets 122, 167).
+    // Saved in uppercase either way.
+    let settings = board_settings::load(board);
+    let listed = settings.tags();
     let tags = if full_form {
-        let known = if listed.is_empty() {
+        let known = if listed.is_empty() && !settings.only_listed_tags() {
             board.tags()?
         } else {
             listed
