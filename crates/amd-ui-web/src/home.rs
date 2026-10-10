@@ -51,7 +51,7 @@ pub fn HomeView(home: RwSignal<Option<Result<Home, String>>>) -> impl IntoView {
 }
 
 /// The landing page's top bar (ticket 168): the current project, a picker
-/// to change it, and its Documents, ADRs, Ideas and Shared, each greyed out
+/// to change it, its Board (172), and its Documents, ADRs, Ideas and Shared, each greyed out
 /// when that repository isn't cloned here. Choosing another project makes
 /// it current (and remembered) without leaving the landing page.
 #[component]
@@ -132,6 +132,23 @@ pub fn HomeBar() -> impl IntoView {
                 }
             </For>
         </select>
+        // Its board, as clicking its name under Projects does (ticket 172).
+        <button
+            type="button"
+            class=small
+            title=move || match current() {
+                None => "Choose a project first".to_string(),
+                Some(p) => format!("Open {}'s board", p.name),
+            }
+            disabled=move || current().is_none()
+            on:click=move |_| {
+                if let Some(p) = current() {
+                    open(ctx, p.root, View::Board, None);
+                }
+            }
+        >
+            "Board"
+        </button>
         {doc_button("Documents", "docs", "Read this project's documents (docs/)")}
         {doc_button("ADRs", "adr", "Read this project's decisions and proposals (adr/)")}
         {doc_button("Ideas", "ideas", "Read this project's ideas (ideas/)")}
