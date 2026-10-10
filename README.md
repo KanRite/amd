@@ -286,7 +286,23 @@ import goes on a new `chore/import-documents-…` branch from the default
 branch, is pushed, and a pull request is opened with `gh` when the
 repository is on GitHub (otherwise amd prints what's left to do). Your
 clone goes back to the branch it was on. From inside the project,
-`--project` isn't needed. `--dry-run` works for both kinds.
+`--project` isn't needed. `--dry-run` works for every kind.
+
+`amd import issues [REPO]` brings a repository's open GitHub issues into
+the backlog, tagged `TRIAGE`, so they get sorted like any other new work
+(it reads them with `gh`):
+
+```
+amd import issues --dry-run            # every declared repository on GitHub
+amd import issues acme/web --label bug # one repository, one label
+```
+
+Each ticket links back to its issue and carries the issue's text. A
+label becomes a tag when it's on the project's tag list; any other is
+named in the ticket's notes. An issue is only ever imported once: run it
+again and only new issues come in, and abandoning a `TRIAGE` ticket turns
+its issue down for good. Admin in amdui has the same, under "Import
+GitHub issues".
 
 ## Working together, and getting tickets back
 

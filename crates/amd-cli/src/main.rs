@@ -234,21 +234,29 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<TagsAction>,
     },
-    /// Import tickets or documents. `amd import tickets <PATH>`: a tasks
-    /// tree, status kept, ids renumbered, links remapped within the batch,
-    /// same-titled tickets flagged DUPLICATE (a bare `amd import <PATH>` is
-    /// the same). `amd import documents [PATH]`: a tree of documents (here,
-    /// by default) into the project's documents repository, on a new
-    /// branch with a pull request
+    /// Import tickets, documents or GitHub issues. `amd import tickets
+    /// <PATH>`: a tasks tree, status kept, ids renumbered, links remapped
+    /// within the batch, same-titled tickets flagged DUPLICATE (a bare `amd
+    /// import <PATH>` is the same). `amd import documents [PATH]`: a tree of
+    /// documents (here, by default) into the project's documents repository,
+    /// on a new branch with a pull request. `amd import issues [REPO]`: open
+    /// GitHub issues into the backlog, tagged TRIAGE, each issue only ever
+    /// once (needs `gh`)
     Import {
-        /// `tickets` or `documents`; or, on its own, a tasks tree's path
+        /// `tickets`, `documents` or `issues`; or, on its own, a tasks
+        /// tree's path
         #[arg(value_name = "TYPE|PATH")]
         first: String,
         /// The tree to import: for tickets, the directory holding
         /// backlog/todo/doing/done; for documents, any folder (default: the
-        /// current directory)
-        #[arg(value_name = "PATH")]
+        /// current directory). For issues, the repository: owner/repo or
+        /// one the project declares (default: every declared repository on
+        /// GitHub)
+        #[arg(value_name = "PATH|REPO")]
         path: Option<PathBuf>,
+        /// Issues: only those carrying this GitHub label
+        #[arg(long, value_name = "LABEL")]
+        label: Option<String>,
         /// Preview what would happen without writing anything
         #[arg(long)]
         dry_run: bool,
@@ -742,9 +750,13 @@ fn run() -> Result<()> {
         dry_run,
         into,
         project,
+        label,
     } = &command
         && first == "documents"
     {
+        if label.is_some() {
+            bail!("--label is for `amd import issues`");
+        }
         return cmd_import_documents(
             path.as_deref(),
             *dry_run,
@@ -792,6 +804,7 @@ fn run() -> Result<()> {
         Cmd::Import {
             first,
             path,
+            label,
             dry_run,
             into,
             project,
@@ -799,12 +812,21 @@ fn run() -> Result<()> {
             if into.is_some() || project.is_some() {
                 bail!("--into and --project are for `amd import documents`");
             }
+            if first == "issues" {
+                let repo = path.map(|p| p.display().to_string());
+                return cmd_import_issues(&board, repo.as_deref(), label.as_deref(), dry_run);
+            }
+            if label.is_some() {
+                bail!("--label is for `amd import issues`");
+            }
             let path = match (first.as_str(), path) {
                 ("tickets", Some(path)) => path,
                 ("tickets", None) => bail!("usage: amd import tickets <PATH>"),
                 (_, None) => PathBuf::from(first),
                 (_, Some(_)) => {
-                    bail!("amd import takes `tickets <PATH>` or `documents [PATH]`, not {first:?}")
+                    bail!(
+                        "amd import takes `tickets <PATH>`, `documents [PATH]` or `issues [REPO]`, not {first:?}"
+                    )
                 }
             };
             cmd_import(&board, &path, dry_run)
@@ -1983,6 +2005,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
     match command {
         Cmd::Show { task: Some(_) } => Lookup,
         Cmd::Renumber { apply: false, .. } => Read,
+        Cmd::Import { dry_run: true, .. } => Read,
         // Listing what was removed reads; restoring writes.
         Cmd::Recover { ids, all, .. } => {
             if ids.is_empty() && !all {
@@ -2158,7 +2181,9 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     // `--draft` already said so, or the tags already carry it.
     let mut tags = tags;
     let draft = args.draft
-        || tags.iter().any(|t| task::is_reserved_tag(t))
+        || tags
+            .iter()
+            .any(|t| task::normalize_tag(t) == task::DRAFT_TAG)
         || (full_form && form::confirm("Save as a draft?")?);
     if draft {
         tags.push(task::DRAFT_TAG.to_string());
@@ -2293,6 +2318,39 @@ fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {
         line.push_str(" — nothing written");
     }
     println!("{line}");
+    Ok(())
+}
+
+/// `amd import issues [REPO]` (ticket 158): open GitHub issues into the
+/// loose backlog, tagged TRIAGE, in one auto-commit. An issue imported
+/// before, even one whose ticket has since gone, is skipped.
+fn cmd_import_issues(
+    board: &Board,
+    repo: Option<&str>,
+    label: Option<&str>,
+    dry_run: bool,
+) -> Result<()> {
+    use agile_md::import_issues;
+    let targets = import_issues::targets(board, repo)?;
+    let plan = import_issues::plan(board, &targets, label)?;
+    let done = if dry_run || plan.new.is_empty() {
+        plan.new.clone()
+    } else {
+        let slugs: Vec<&str> = targets.iter().map(|t| t.slug.as_str()).collect();
+        let detail = format!("{} from {}", plan.new.len(), slugs.join(", "));
+        let (done, warning) =
+            transition::with_auto_commit(board, "import", "issues", &detail, || {
+                import_issues::apply(board, &plan)
+            })?;
+        if let Some(warning) = warning {
+            eprintln!("amd: {warning}");
+        }
+        done
+    };
+    for planned in &done {
+        println!("{}", planned.line());
+    }
+    println!("{}", plan.summary(dry_run));
     Ok(())
 }
 

@@ -394,3 +394,28 @@ struct SharedArgs<'a> {
 pub async fn set_shared_documents(name: &str) -> Result<SyncReport, String> {
     call("set_shared_documents", &SharedArgs { name }).await
 }
+
+#[derive(Serialize)]
+struct IssuesArgs<'a> {
+    repo: &'a str,
+    label: &'a str,
+    preview: bool,
+}
+
+/// Imports open GitHub issues into the backlog, tagged TRIAGE (ticket 158),
+/// or with `preview` only says what it would import.
+pub async fn import_issues(
+    repo: &str,
+    label: &str,
+    preview: bool,
+) -> Result<amd_ui_model::IssueImport, String> {
+    call(
+        "import_issues",
+        &IssuesArgs {
+            repo,
+            label,
+            preview,
+        },
+    )
+    .await
+}

@@ -699,10 +699,15 @@ pub fn normalize_tag(tag: &str) -> String {
 /// the backlog, and can't go into a sprint, until the tag is taken off.
 pub const DRAFT_TAG: &str = "DRAFT";
 
+/// The tag an imported GitHub issue arrives with (ticket 158): new work
+/// nobody has looked at yet. Unlike DRAFT it holds nothing back; taking it
+/// off is what triaging a ticket means.
+pub const TRIAGE_TAG: &str = "TRIAGE";
+
 /// Tags the tool itself gives a meaning to. They're always allowed, even
 /// when a project only allows its listed tags, always offered, and can't be
 /// taken off the project's list.
-pub const RESERVED_TAGS: [&str; 1] = [DRAFT_TAG];
+pub const RESERVED_TAGS: [&str; 2] = [DRAFT_TAG, TRIAGE_TAG];
 
 /// Whether `tag` is one of [`RESERVED_TAGS`] (ignoring case).
 pub fn is_reserved_tag(tag: &str) -> bool {

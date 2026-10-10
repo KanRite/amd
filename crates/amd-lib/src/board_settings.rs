@@ -764,13 +764,18 @@ mod tests {
     }
 
     #[test]
-    fn draft_is_built_in_and_always_allowed() {
+    fn draft_and_triage_are_built_in_and_always_allowed() {
         let dir = tempfile::tempdir().unwrap();
         let mut settings = load(&board(dir.path()));
         assert!(settings.add_tag("draft").is_err(), "built in, not listed");
+        assert!(settings.add_tag("triage").is_err(), "built in, not listed");
         settings.add_tag("FUTURE").unwrap();
         settings.set_only_listed_tags(true);
-        let tags = vec!["draft".to_string(), "FUTURE".to_string()];
+        let tags = vec![
+            "draft".to_string(),
+            "Triage".to_string(),
+            "FUTURE".to_string(),
+        ];
         assert_eq!(settings.check_tags(&tags).unwrap(), None);
     }
 
