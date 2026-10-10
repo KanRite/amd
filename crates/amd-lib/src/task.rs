@@ -780,7 +780,7 @@ pub const PRIORITIES: [&str; 3] = ["low", "medium", "high"];
 /// The priority of a new ticket, and of one that doesn't say.
 pub const DEFAULT_PRIORITY: &str = "low";
 
-fn validate_priority(priority: &str) -> Result<()> {
+pub(crate) fn validate_priority(priority: &str) -> Result<()> {
     if PRIORITIES.contains(&priority) {
         return Ok(());
     }

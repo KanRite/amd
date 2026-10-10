@@ -223,6 +223,9 @@ pub struct Board {
     /// when the project names none.
     #[serde(default)]
     pub shared_documents: String,
+    /// The priority an imported GitHub issue starts at (ticket 158).
+    #[serde(default)]
+    pub triage_priority: String,
 }
 
 /// Whether to show Admin, and the note that says why (ticket 149).
@@ -803,6 +806,7 @@ mod assigned_tests {
             tags_only: false,
             admin: AdminAccess::default(),
             shared_documents: String::new(),
+            triage_priority: String::new(),
         };
         board.epics.push(Epic {
             repo: String::new(),

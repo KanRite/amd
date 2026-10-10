@@ -87,6 +87,8 @@ pub struct Planned {
     pub tags: Vec<String>,
     /// Labels the project doesn't list, named in the notes instead.
     pub dropped: Vec<String>,
+    /// The project's `triage-priority`: what the ticket starts at.
+    pub priority: String,
 }
 
 impl Planned {
@@ -95,16 +97,17 @@ impl Planned {
         source_of(&self.target.slug, self.issue.number)
     }
 
-    /// `#12 -> 160 "Title" (owner/repo) [TRIAGE, BUG]`: one line of what an
-    /// import did, the same in `amd` and amdui.
+    /// `#12 -> 160 "Title" (owner/repo) [TRIAGE, BUG] low`: one line of
+    /// what an import did, the same in `amd` and amdui.
     pub fn line(&self) -> String {
         let mut line = format!(
-            "#{} -> {} \"{}\" ({}) [{}]",
+            "#{} -> {} \"{}\" ({}) [{}] {}",
             self.issue.number,
             self.id,
             self.title,
             self.target.slug,
-            self.tags.join(", ")
+            self.tags.join(", "),
+            self.priority
         );
         if !self.dropped.is_empty() {
             line.push_str(&format!(
@@ -347,7 +350,9 @@ pub fn plan_with(
     fetch: impl Fn(&str, Option<&str>) -> Result<Vec<Issue>>,
 ) -> Result<Plan> {
     let seen = imported_sources(board)?;
-    let listed = board_settings::load(board).tags();
+    let settings = board_settings::load(board);
+    let listed = settings.tags();
+    let priority = settings.triage_priority();
     let mut next = board.next_id()?;
     let mut plan = Plan::default();
     for target in targets {
@@ -370,6 +375,7 @@ pub fn plan_with(
                 title,
                 tags,
                 dropped,
+                priority: priority.clone(),
                 issue,
             });
             next += 1;
@@ -421,6 +427,7 @@ pub fn apply(board: &Board, plan: &Plan) -> Result<Vec<Planned>> {
         done_one.id = draft.id.clone();
         let text = with_notes(&draft.body, &notes(planned));
         let text = task::set_meta(&text, SOURCE_KEY, &format!("{:?}", planned.source()))?;
+        let text = task::set_meta(&text, "priority", &format!("{:?}", planned.priority))?;
         draft.write(board, Some(text))?;
         done.push(done_one);
     }
@@ -615,6 +622,25 @@ mod tests {
         let after = plan_with(&board, &web(), None, canned).unwrap();
         assert!(after.new.is_empty());
         assert_eq!(after.already, 3);
+    }
+
+    #[test]
+    fn tickets_start_at_the_projects_triage_priority() {
+        let (_dir, board) = board();
+        let mut settings = board_settings::load(&board);
+        assert_eq!(settings.triage_priority(), "low", "low unless set");
+        settings.set_triage_priority("High").unwrap();
+        settings.save(&board).unwrap();
+        let plan = plan_with(&board, &web(), None, canned).unwrap();
+        assert!(
+            plan.new[0].line().ends_with("[TRIAGE] high"),
+            "{}",
+            plan.new[0].line()
+        );
+        apply(&board, &plan).unwrap();
+        for task in board.tasks().unwrap() {
+            assert_eq!(task.priority(), "high");
+        }
     }
 
     #[test]

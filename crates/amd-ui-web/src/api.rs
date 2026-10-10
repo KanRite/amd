@@ -396,6 +396,16 @@ pub async fn set_shared_documents(name: &str) -> Result<SyncReport, String> {
 }
 
 #[derive(Serialize)]
+struct PriorityArgs<'a> {
+    priority: &'a str,
+}
+
+/// Sets the priority imported GitHub issues start at (ticket 158).
+pub async fn set_triage_priority(priority: &str) -> Result<SyncReport, String> {
+    call("set_triage_priority", &PriorityArgs { priority }).await
+}
+
+#[derive(Serialize)]
 struct IssuesArgs<'a> {
     repo: &'a str,
     label: &'a str,

@@ -75,7 +75,7 @@ redundant. Their history is in git if it is ever wanted again.
   `Name <email>, …`, git's own identity shape, parsed on `>` so a comma in
   a name survives; email is the identity) live here. **So does every other
   board setting** (ticket 111): `project`, `repos`, `wip-limit`,
-  `lease-hours`, `ticket-numbering`, `sync`. Ticket 057 had moved some of
+  `lease-hours`, `ticket-numbering`, `sync`, `triage-priority`. Ticket 057 had moved some of
   them into `{project}-documents/.settings/` so they'd be PR-reviewed, but
   a change there only reached the team once a documents PR merged, and the
   copies drifted (agile-md's registered repos sat uncommitted in documents
@@ -177,7 +177,9 @@ redundant. Their history is in git if it is ever wanted again.
   the files on disk, archive included, so abandoning a TRIAGE ticket turns
   the issue down for good. `plan_with` takes the fetch as a closure, so it's
   tested without GitHub; `tests/test.sh` puts a fake `gh` on `PATH`. One
-  auto-commit per run (`import: issues "N from slugs"`).
+  auto-commit per run (`import: issues "N from slugs"`). Tickets start at
+  the project's `triage-priority` (tickets `.settings`, `low` unless set;
+  `amd triage-priority [p]`, the dropdown in Admin's import section).
 - `crates/amd-cli/src/main.rs` — the `amd` binary: clap CLI and command handlers; it also owns
   `form.rs`, `value.rs`, `completions.rs` and `init.rs`, which are CLI-only.
 - `crates/amd-cli/src/init.rs` — `amd init <project>`: finds or creates

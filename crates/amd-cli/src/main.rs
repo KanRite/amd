@@ -419,6 +419,12 @@ enum Cmd {
         #[arg(value_name = "N")]
         limit: u32,
     },
+    /// The priority a ticket made from a GitHub issue starts at (`amd
+    /// import issues`): low, medium or high. No value says which it is
+    TriagePriority {
+        #[arg(value_name = "PRIORITY")]
+        priority: Option<String>,
+    },
     /// The documents repository every project shares, shown in amdui's
     /// Documents beside the project's own. No name says which it is
     SharedDocuments {
@@ -795,6 +801,7 @@ fn run() -> Result<()> {
         }
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
         Cmd::SharedDocuments { name, clear } => cmd_shared_documents(&board, name, clear),
+        Cmd::TriagePriority { priority } => cmd_triage_priority(&board, priority),
         Cmd::Register { .. } | Cmd::Deregister { .. } => unreachable!("handled above"),
         Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
         Cmd::New(args) => cmd_new(&board, args),
@@ -1616,6 +1623,23 @@ fn cmd_shared_documents(board: &Board, name: Option<String>, clear: bool) -> Res
     Ok(())
 }
 
+/// Sets the priority imported GitHub issues start at (ticket 158),
+/// committed and pushed like any setting; with no value, says which it is.
+fn cmd_triage_priority(board: &Board, priority: Option<String>) -> Result<()> {
+    let Some(priority) = priority else {
+        println!("{}", board_settings::load(board).triage_priority());
+        return Ok(());
+    };
+    let priority = priority.trim().to_lowercase();
+    with_auto_commit(board, "settings", "triage-priority", &priority, || {
+        let mut settings = board_settings::load(board);
+        settings.set_triage_priority(&priority)?;
+        settings.save(board)
+    })?;
+    println!("imported issues start at priority {priority}");
+    Ok(())
+}
+
 /// Carries settings still kept in the project's documents repository into
 /// the tickets `.settings`, once, committed and pushed (ticket 111). Silent
 /// once everything is across.
@@ -2024,6 +2048,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::Clone { .. }
         | Cmd::WipLimit { .. }
         | Cmd::SharedDocuments { .. }
+        | Cmd::TriagePriority { .. }
         | Cmd::Group {
             command: None | Some(GroupCmd::List),
         } => Read,

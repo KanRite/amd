@@ -301,8 +301,9 @@ Each ticket links back to its issue and carries the issue's text. A
 label becomes a tag when it's on the project's tag list; any other is
 named in the ticket's notes. An issue is only ever imported once: run it
 again and only new issues come in, and abandoning a `TRIAGE` ticket turns
-its issue down for good. Admin in amdui has the same, under "Import
-GitHub issues".
+its issue down for good. New tickets start at the project's triage
+priority, `low` unless `amd triage-priority medium` (or Admin) says
+otherwise. Admin in amdui has the same, under "Import GitHub issues".
 
 ## Working together, and getting tickets back
 

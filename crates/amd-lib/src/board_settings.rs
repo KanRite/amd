@@ -99,6 +99,8 @@ const TICKET_NUMBERING: &str = "ticket-numbering";
 const TAGS: &str = "tags";
 /// The documents repository every project shares (ticket 129).
 const SHARED_DOCUMENTS: &str = "shared-documents";
+/// The priority an imported GitHub issue's ticket starts at (ticket 158).
+const TRIAGE_PRIORITY: &str = "triage-priority";
 const TAGS_ONLY: &str = "prevent-arbitrary-tags";
 /// `prevent-arbitrary-tags`' name until ticket 141. Still read, and renamed
 /// the next time the setting is written.
@@ -567,6 +569,26 @@ impl BoardSettings {
         Ok(())
     }
 
+    /// The priority a ticket made from a GitHub issue starts at (ticket
+    /// 158): `triage-priority`, else [`DEFAULT_PRIORITY`](crate::task::DEFAULT_PRIORITY).
+    /// An unknown value reads as the default rather than failing an import.
+    pub fn triage_priority(&self) -> String {
+        self.config
+            .get(TRIAGE_PRIORITY)
+            .map(|p| p.trim().to_lowercase())
+            .filter(|p| crate::task::PRIORITIES.contains(&p.as_str()))
+            .unwrap_or_else(|| crate::task::DEFAULT_PRIORITY.to_string())
+    }
+
+    /// Sets [`triage_priority`](Self::triage_priority); one of
+    /// [`PRIORITIES`](crate::task::PRIORITIES), or an error naming them.
+    pub fn set_triage_priority(&mut self, priority: &str) -> Result<()> {
+        let priority = priority.trim().to_lowercase();
+        crate::task::validate_priority(&priority)?;
+        self.config.set(TRIAGE_PRIORITY, &priority);
+        Ok(())
+    }
+
     pub fn set_only_listed_tags(&mut self, on: bool) {
         self.config.rename_key(TAGS_ONLY_OLD, TAGS_ONLY);
         self.config.set(TAGS_ONLY, if on { "on" } else { "off" });
@@ -777,6 +799,17 @@ mod tests {
             "FUTURE".to_string(),
         ];
         assert_eq!(settings.check_tags(&tags).unwrap(), None);
+    }
+
+    #[test]
+    fn the_triage_priority_is_low_unless_set_and_only_a_real_priority() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut settings = load(&board(dir.path()));
+        assert_eq!(settings.triage_priority(), "low");
+        settings.set_triage_priority(" Medium ").unwrap();
+        assert_eq!(settings.triage_priority(), "medium");
+        assert!(settings.set_triage_priority("urgent").is_err());
+        assert_eq!(settings.triage_priority(), "medium");
     }
 
     #[test]

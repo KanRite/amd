@@ -671,8 +671,8 @@ gi_env="XDG_CONFIG_HOME=${gi}/config AMD_NO_INPUT=1 GH_LOG=${gi}/gh.log PATH=${g
 gib="${gi}/issues-tickets"
 assert "amd import issues --dry-run lists what it would import and writes nothing" \
   bash -c "cd '${gib}' && out=\$(env ${gi_env} '${AMD}' import issues acme/web --dry-run) \
-    && printf '%s\\n' \"\$out\" | grep -q '#2 -> 001 \"Dark mode\" (acme/web) \[TRIAGE\]' \
-    && printf '%s\\n' \"\$out\" | grep -q '#4 -> 002 \"Checkout button overlaps\" (acme/web) \[TRIAGE, BUG\], labels not on the tag list: needs-info' \
+    && printf '%s\\n' \"\$out\" | grep -q '#2 -> 001 \"Dark mode\" (acme/web) \[TRIAGE\] low\$' \
+    && printf '%s\\n' \"\$out\" | grep -q '#4 -> 002 \"Checkout button overlaps\" (acme/web) \[TRIAGE, BUG\] low, labels not on the tag list: needs-info' \
     && printf '%s\\n' \"\$out\" | grep -q 'would import 2 issues — nothing written' \
     && ! ls tasks/backlog/*.md 2>/dev/null | grep -v README"
 assert "...a real run makes TRIAGE tickets with their source, in one commit" \
@@ -698,6 +698,12 @@ assert "TRIAGE is built in: it can't be added to or removed from the list" \
     && env ${gi_env} '${AMD}' tags remove TRIAGE 2>&1 | grep -q 'built in'"
 assert "a TRIAGE ticket isn't a draft" \
   bash -c "cd '${gib}' && env ${gi_env} AMD_NO_BRANCH=1 '${AMD}' todo 2 >/dev/null 2>&1 && ls tasks/todo/002-* >/dev/null"
+assert "amd triage-priority sets what imported tickets start at, and refuses a made-up one" \
+  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' triage-priority | grep -qx low \
+    && ! env ${gi_env} '${AMD}' triage-priority urgent 2>/dev/null \
+    && env ${gi_env} '${AMD}' triage-priority High | grep -q 'start at priority high' \
+    && grep -qx 'triage-priority = high' .settings \
+    && env ${gi_env} '${AMD}' import issues acme/other --dry-run | grep -q '\[TRIAGE\] high'"
 assert "with no repository on GitHub, it asks for owner/repo" \
   bash -c "cd '${gib}' && env ${gi_env} '${AMD}' import issues 2>&1 | grep -q 'amd import issues owner/repo'"
 rm -rf "${gi}"

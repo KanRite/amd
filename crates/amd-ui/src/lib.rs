@@ -603,6 +603,19 @@ async fn set_shared_documents(state: Tauri<'_, AppState>, name: String) -> Resul
     .await
 }
 
+/// The priority an imported GitHub issue starts at (ticket 158).
+#[tauri::command]
+async fn set_triage_priority(state: Tauri<'_, AppState>, priority: String) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let priority = priority.trim().to_lowercase();
+        save_setting(board, &format!("triage-priority {priority}"), |s| {
+            s.set_triage_priority(&priority)
+        })
+    })
+    .await
+}
+
 /// Brings a repository's open GitHub issues into the backlog, tagged
 /// TRIAGE (ticket 158), as `amd import issues` does; `preview` only says
 /// what it would do. `repo` empty means every declared repository on
@@ -1091,6 +1104,7 @@ pub fn run() {
             set_tags_only,
             set_shared_documents,
             import_issues,
+            set_triage_priority,
             list_documents,
             read_document,
             open_external,
