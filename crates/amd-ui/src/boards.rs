@@ -171,6 +171,7 @@ impl Project {
             tags_only: settings.only_listed_tags(),
             admin: admin_access(&self.repos[0].1),
             shared_documents: settings.shared_documents().unwrap_or_default(),
+            triage_priority: settings.triage_priority(),
         })
     }
 

@@ -223,6 +223,9 @@ pub struct Board {
     /// when the project names none.
     #[serde(default)]
     pub shared_documents: String,
+    /// The priority an imported GitHub issue starts at (ticket 158).
+    #[serde(default)]
+    pub triage_priority: String,
 }
 
 /// Whether to show Admin, and the note that says why (ticket 149).
@@ -250,7 +253,7 @@ pub struct TagUse {
     pub count: usize,
     /// On the project's tag list (Admin), as opposed to only in use.
     pub listed: bool,
-    /// Built into the tool (ticket 114: DRAFT): always offered and allowed,
+    /// Built into the tool (DRAFT, ticket 114; TRIAGE, 158): always offered and allowed,
     /// never on the project's list, never removable.
     #[serde(default)]
     pub reserved: bool,
@@ -420,6 +423,17 @@ pub struct SyncReport {
     pub pushed: bool,
     /// Why it was not committed or pushed, when it should have been.
     pub warning: Option<String>,
+}
+
+/// What importing GitHub issues did, or would do (ticket 158).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueImport {
+    /// One line per issue: `#12 -> 160 "Title" (owner/repo) [TRIAGE, BUG]`.
+    pub lines: Vec<String>,
+    /// `imported 2 issues, 1 already imported`, or the preview's version.
+    pub summary: String,
+    /// The commit, after a real import that brought something in.
+    pub sync: Option<SyncReport>,
 }
 
 /// A project's documents repository (ticket 129): its own, or the one every
@@ -792,6 +806,7 @@ mod assigned_tests {
             tags_only: false,
             admin: AdminAccess::default(),
             shared_documents: String::new(),
+            triage_priority: String::new(),
         };
         board.epics.push(Epic {
             repo: String::new(),

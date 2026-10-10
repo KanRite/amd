@@ -75,7 +75,7 @@ redundant. Their history is in git if it is ever wanted again.
   `Name <email>, …`, git's own identity shape, parsed on `>` so a comma in
   a name survives; email is the identity) live here. **So does every other
   board setting** (ticket 111): `project`, `repos`, `wip-limit`,
-  `lease-hours`, `ticket-numbering`, `sync`. Ticket 057 had moved some of
+  `lease-hours`, `ticket-numbering`, `sync`, `triage-priority`. Ticket 057 had moved some of
   them into `{project}-documents/.settings/` so they'd be PR-reviewed, but
   a change there only reached the team once a documents PR merged, and the
   copies drifted (agile-md's registered repos sat uncommitted in documents
@@ -148,8 +148,8 @@ redundant. Their history is in git if it is ever wanted again.
   computes and reports everything without writing or spending an id.
 - `crates/amd-lib/src/import_documents.rs` — `amd import documents
   [PATH] [--into DIR] [--project NAME] [--dry-run]` (ticket 079; `amd
-  import` takes `tickets <PATH>` or `documents [PATH]`, and a bare path is
-  still tickets). `plan` mirrors the tree: markdown, plus files a document
+  import` takes `tickets <PATH>`, `documents [PATH]` or `issues [REPO]`,
+  and a bare path is still tickets). `plan` mirrors the tree: markdown, plus files a document
   links to or shows inside the tree (a link scan, not a parser), hidden
   files skipped, symlinks not followed; an existing destination is a
   clash, skipped and listed, never overwritten. It refuses the documents
@@ -163,6 +163,23 @@ redundant. Their history is in git if it is ever wanted again.
   resolves through the registry (scratch boards included, unlike My
   work), else `Board::discover()`. The target is
   `documents::sources`' own repository.
+- `crates/amd-lib/src/import_issues.rs` — `amd import issues [REPO]
+  [--label L] [--dry-run]` (ticket 158), and Admin's "Import GitHub
+  issues": open issues from `gh issue list --json` into the loose backlog
+  through `Draft` (so template, `created-by`, priority and the counter
+  behave as in `amd new`), tagged `TRIAGE` plus each label the project
+  lists (the others are named in the notes, so a label never fails an
+  import), with `source: "github:owner/repo#N"`. `targets`: `owner/repo`,
+  or a declared name cloned here; none given, every declared repository
+  cloned here with a github.com `origin`, else the board's own repository.
+  **An issue is imported once, ever**: `imported_sources` reads every
+  `source:` line ever added in the board's history (`git log -p -G`) plus
+  the files on disk, archive included, so abandoning a TRIAGE ticket turns
+  the issue down for good. `plan_with` takes the fetch as a closure, so it's
+  tested without GitHub; `tests/test.sh` puts a fake `gh` on `PATH`. One
+  auto-commit per run (`import: issues "N from slugs"`). Tickets start at
+  the project's `triage-priority` (tickets `.settings`, `low` unless set;
+  `amd triage-priority [p]`, the dropdown in Admin's import section).
 - `crates/amd-cli/src/main.rs` — the `amd` binary: clap CLI and command handlers; it also owns
   `form.rs`, `value.rs`, `completions.rs` and `init.rs`, which are CLI-only.
 - `crates/amd-cli/src/init.rs` — `amd init <project>`: finds or creates
@@ -415,6 +432,10 @@ off**, ticket 141) to
   ticket, and `amd_ui_model::epic::draft_rule` refuses the drag. Named
   commands win over epic names, so an epic called `draft` or `ready` is
   reached through `amd group`/`amd set epic` instead.
+  **TRIAGE** (`task::TRIAGE_TAG`, ticket 158) is the other reserved tag:
+  what an imported GitHub issue arrives with. It holds nothing back (any
+  move is fine); taking it off is triaging. Check for DRAFT itself, not
+  `is_reserved_tag`, when deciding whether a ticket is a draft.
 - **Tag filtering**: `amd tag <tag>` lists every ticket carrying `<tag>`,
   across every column, via `Board::tasks_tagged()`/`Task::has_tag()`. Every
   listing form also takes `--tag <tag>` to narrow it down: `amd board`,

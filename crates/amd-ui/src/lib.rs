@@ -603,6 +603,68 @@ async fn set_shared_documents(state: Tauri<'_, AppState>, name: String) -> Resul
     .await
 }
 
+/// The priority an imported GitHub issue starts at (ticket 158).
+#[tauri::command]
+async fn set_triage_priority(state: Tauri<'_, AppState>, priority: String) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let priority = priority.trim().to_lowercase();
+        save_setting(board, &format!("triage-priority {priority}"), |s| {
+            s.set_triage_priority(&priority)
+        })
+    })
+    .await
+}
+
+/// Brings a repository's open GitHub issues into the backlog, tagged
+/// TRIAGE (ticket 158), as `amd import issues` does; `preview` only says
+/// what it would do. `repo` empty means every declared repository on
+/// GitHub; `label` empty means every issue.
+#[tauri::command]
+async fn import_issues(
+    state: Tauri<'_, AppState>,
+    repo: String,
+    label: String,
+    preview: bool,
+) -> Result<amd_ui_model::IssueImport> {
+    use agile_md::import_issues as issues;
+    let some = |s: &str| Some(s.trim().to_string()).filter(|s| !s.is_empty());
+    let (repo, label) = (some(&repo), some(&label));
+    let run = move |p: &Project| -> Result<amd_ui_model::IssueImport> {
+        let board = &p.repos[0].1;
+        let targets = issues::targets(board, repo.as_deref()).map_err(err)?;
+        let plan = issues::plan(board, &targets, label.as_deref()).map_err(err)?;
+        if preview || plan.new.is_empty() {
+            return Ok(amd_ui_model::IssueImport {
+                lines: plan.new.iter().map(issues::Planned::line).collect(),
+                summary: plan.summary(preview),
+                sync: None,
+            });
+        }
+        let slugs: Vec<&str> = targets.iter().map(|t| t.slug.as_str()).collect();
+        let detail = format!("{} from {}", plan.new.len(), slugs.join(", "));
+        let (done, warning) =
+            transition::with_auto_commit(board, "import", "issues", &detail, || {
+                issues::apply(board, &plan)
+            })
+            .map_err(err)?;
+        Ok(amd_ui_model::IssueImport {
+            lines: done.iter().map(issues::Planned::line).collect(),
+            summary: plan.summary(false),
+            sync: Some(report(
+                board,
+                transition::commit_message("import", "issues", &detail),
+                warning,
+            )),
+        })
+    };
+    if preview {
+        blocking(move || run(&Project::open()?)).await
+    } else {
+        change(&state, run).await
+    }
+}
+
 /// The project's documents repositories and what's in them (ticket 129):
 /// its own, then the shared one. One not cloned here is listed empty.
 #[tauri::command]
@@ -1041,6 +1103,8 @@ pub fn run() {
             remove_tag,
             set_tags_only,
             set_shared_documents,
+            import_issues,
+            set_triage_priority,
             list_documents,
             read_document,
             open_external,
@@ -1134,7 +1198,8 @@ mod tests {
             .iter()
             .map(|t| (t.name.clone(), t.count, t.listed, t.reserved))
             .collect();
-        // DRAFT is built in (ticket 114): always there, never listed.
+        // DRAFT and TRIAGE are built in (tickets 114, 158): always there,
+        // never listed.
         assert_eq!(
             uses,
             [
@@ -1142,6 +1207,7 @@ mod tests {
                 ("FUTURE".to_string(), 1, true, false),
                 ("MISC".to_string(), 1, false, false),
                 ("OLD".to_string(), 0, true, false),
+                ("TRIAGE".to_string(), 0, false, true),
             ]
         );
         assert!(summary.tags_only);

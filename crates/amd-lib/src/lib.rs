@@ -22,6 +22,7 @@ pub mod git;
 pub mod group;
 pub mod import;
 pub mod import_documents;
+pub mod import_issues;
 pub mod model;
 pub mod my_work;
 pub mod numbering;

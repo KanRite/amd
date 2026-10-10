@@ -125,6 +125,8 @@ pub fn AdminPanel() -> impl IntoView {
 
                 <DocumentsAdmin />
 
+                <IssuesAdmin />
+
                 <EpicsAdmin />
 
                 <section class="flex flex-col gap-2">
@@ -594,7 +596,7 @@ fn TagsAdmin() -> impl IntoView {
                         view! {
                             <p class="text-xs text-slate-500">
                                 "Built in: " {built_in.join(", ")}
-                                ". DRAFT keeps a ticket in the backlog until it's removed; it's always allowed and can't be removed."
+                                ". DRAFT keeps a ticket in the backlog until it's removed; TRIAGE marks an imported GitHub issue nobody has sorted yet. Both are always allowed and can't be removed."
                             </p>
                         }
                     })
@@ -665,6 +667,121 @@ fn DocumentsAdmin() -> impl IntoView {
             <Show when=move || note.with(Option::is_some)>
                 <p class="text-xs text-slate-600 dark:text-slate-300">{move || note.get().unwrap_or_default()}</p>
             </Show>
+        </section>
+    }
+}
+
+/// Open GitHub issues into the backlog, tagged TRIAGE (ticket 158): Preview
+/// says what would come in, Import brings it in as one commit.
+#[component]
+fn IssuesAdmin() -> impl IntoView {
+    let ctx = Ctx::get();
+    let repo = RwSignal::new(String::new());
+    let label = RwSignal::new(String::new());
+    let result = RwSignal::new(None::<Result<amd_ui_model::IssueImport, String>>);
+    let busy = RwSignal::new(false);
+    let saved_priority = move || {
+        ctx.board.with(|b| {
+            b.as_ref()
+                .map(|b| b.triage_priority.clone())
+                .filter(|p| !p.is_empty())
+                .unwrap_or_else(|| "low".to_string())
+        })
+    };
+    let priority_note = RwSignal::new(None::<String>);
+    let set_priority = move |priority: String| {
+        spawn_local(async move {
+            match api::set_triage_priority(&priority).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    priority_note.set(Some(format!("Imported issues start at {priority}.")));
+                    ctx.reload();
+                }
+                Err(e) => priority_note.set(Some(e)),
+            }
+        });
+    };
+    let run = move |preview: bool| {
+        busy.set(true);
+        spawn_local(async move {
+            let outcome =
+                api::import_issues(&repo.get_untracked(), &label.get_untracked(), preview).await;
+            if let Ok(done) = &outcome
+                && let Some(sync) = done.sync.clone()
+            {
+                ctx.report(sync);
+                ctx.reload();
+            }
+            result.set(Some(outcome));
+            busy.set(false);
+        });
+    };
+    let field = "flex-1 rounded border border-slate-300 bg-slate-50 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900";
+    let secondary = "rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700";
+    let primary = "rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50";
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Import GitHub issues"</h3>
+            <p class="text-xs text-slate-500">
+                "Open issues come into the backlog tagged TRIAGE, with a link back to the issue. A label becomes a tag when it's on the tag list. An issue is only ever imported once: abandon its ticket to turn it down. Reads GitHub through the gh CLI."
+            </p>
+            <div class="flex flex-wrap items-center gap-2">
+                <input
+                    class=field
+                    aria-label="Repository to import issues from"
+                    placeholder="every declared repository on GitHub, or owner/repo"
+                    prop:value=move || repo.get()
+                    on:input=move |ev| repo.set(event_target_value(&ev))
+                />
+                <input
+                    class=format!("{field} max-w-48")
+                    aria-label="Only issues with this label"
+                    placeholder="any label"
+                    prop:value=move || label.get()
+                    on:input=move |ev| label.set(event_target_value(&ev))
+                />
+                <button class=secondary disabled=move || busy.get() on:click=move |_| run(true)>
+                    "Preview"
+                </button>
+                <button class=primary disabled=move || busy.get() on:click=move |_| run(false)>
+                    "Import"
+                </button>
+            </div>
+            <label class="flex items-center gap-2 text-sm">
+                "New tickets start at priority"
+                <select
+                    class="rounded border border-slate-300 bg-slate-50 px-2 py-1 text-sm appearance-none dark:border-slate-600 dark:bg-slate-900"
+                    aria-label="Priority imported issues start at"
+                    prop:value=saved_priority
+                    on:change=move |ev| set_priority(event_target_value(&ev))
+                >
+                    {amd_ui_model::ticket::PRIORITIES
+                        .iter()
+                        .map(|p| view! { <option value=*p selected=move || saved_priority() == *p>{*p}</option> })
+                        .collect_view()}
+                </select>
+            </label>
+            <Show when=move || priority_note.with(Option::is_some)>
+                <p class="text-xs text-slate-600 dark:text-slate-300">{move || priority_note.get().unwrap_or_default()}</p>
+            </Show>
+            {move || {
+                result
+                    .get()
+                    .map(|outcome| match outcome {
+                        Ok(done) => {
+                            view! {
+                                <div class="flex flex-col gap-1 text-xs">
+                                    <ul class="flex flex-col gap-0.5 font-mono">
+                                        {done.lines.into_iter().map(|line| view! { <li>{line}</li> }).collect_view()}
+                                    </ul>
+                                    <p class="text-slate-600 dark:text-slate-300">{done.summary}</p>
+                                </div>
+                            }
+                                .into_any()
+                        }
+                        Err(e) => view! { <p class="text-xs text-red-700 dark:text-red-300">{e}</p> }.into_any(),
+                    })
+            }}
         </section>
     }
 }

@@ -646,6 +646,68 @@ assert "DRAFT is built in: it can't be added to or removed from the list" \
     && env ${tg_env} '${AMD}' tags remove DRAFT 2>&1 | grep -q 'built in'"
 rm -rf "${tg}"
 
+echo "GitHub issues into the backlog (ticket 158):"
+# A fake gh on PATH: records its arguments and prints two open issues.
+gi="$(mktemp -d)"
+mkdir -p "${gi}/bin"
+cat > "${gi}/bin/gh" <<'GH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${GH_LOG:?}"
+cat <<'JSON'
+[{"number": 4, "title": "Checkout button overlaps", "body": "On small phones.", "labels": [{"name": "bug"}, {"name": "needs-info"}],
+  "url": "https://github.com/acme/web/issues/4", "author": {"login": "sam"}},
+ {"number": 2, "title": "Dark mode", "body": "", "labels": [], "url": "https://github.com/acme/web/issues/2", "author": {"login": "jo"}}]
+JSON
+GH
+chmod +x "${gi}/bin/gh"
+gi_env="XDG_CONFIG_HOME=${gi}/config AMD_NO_INPUT=1 GH_LOG=${gi}/gh.log PATH=${gi}/bin:${PATH}"
+(
+  set -e
+  cd "${gi}" && git init -q -b main issues-tickets && cd issues-tickets
+  git config user.email t@t.co && git config user.name t && git config commit.gpgsign false
+  env ${gi_env} "${AMD}" init issues --local-only >/dev/null 2>&1
+  env ${gi_env} "${AMD}" tags add bug >/dev/null
+)
+gib="${gi}/issues-tickets"
+assert "amd import issues --dry-run lists what it would import and writes nothing" \
+  bash -c "cd '${gib}' && out=\$(env ${gi_env} '${AMD}' import issues acme/web --dry-run) \
+    && printf '%s\\n' \"\$out\" | grep -q '#2 -> 001 \"Dark mode\" (acme/web) \[TRIAGE\] low\$' \
+    && printf '%s\\n' \"\$out\" | grep -q '#4 -> 002 \"Checkout button overlaps\" (acme/web) \[TRIAGE, BUG\] low, labels not on the tag list: needs-info' \
+    && printf '%s\\n' \"\$out\" | grep -q 'would import 2 issues — nothing written' \
+    && ! ls tasks/backlog/*.md 2>/dev/null | grep -v README"
+assert "...a real run makes TRIAGE tickets with their source, in one commit" \
+  bash -c "cd '${gib}' && before=\$(git rev-list --count HEAD 2>/dev/null || echo 0) \
+    && env ${gi_env} '${AMD}' import issues acme/web | grep -q 'imported 2 issues' \
+    && grep -q '^tags: \[TRIAGE,BUG\]' tasks/backlog/002-checkout-button-overlaps.md \
+    && grep -q '^source: \"github:acme/web#4\"' tasks/backlog/002-checkout-button-overlaps.md \
+    && grep -q 'Labels not on the project.s tag list: needs-info' tasks/backlog/002-checkout-button-overlaps.md \
+    && grep -q 'On small phones.' tasks/backlog/002-checkout-button-overlaps.md \
+    && [ \"\$(git rev-list --count HEAD)\" = \$((before + 1)) ] \
+    && git log -1 --format=%s | grep -q 'import: issues \"2 from acme/web\"'"
+assert "...a second run imports nothing" \
+  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' import issues acme/web | grep -q 'nothing new to import, 2 already imported'"
+assert "...nor once its ticket is abandoned" \
+  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' abandon 1 >/dev/null 2>&1 && rm -rf tasks/archive \
+    && env ${gi_env} '${AMD}' import issues acme/web | grep -q '2 already imported' && ! ls tasks/backlog/003-* 2>/dev/null"
+assert "--label is passed to gh, and refused for other imports" \
+  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' import issues acme/web --label bug --dry-run >/dev/null \
+    && tail -1 '${gi}/gh.log' | grep -q -- '--repo acme/web .*--label bug' \
+    && env ${gi_env} '${AMD}' import tickets . --label bug 2>&1 | grep -q 'for .amd import issues.'"
+assert "TRIAGE is built in: it can't be added to or removed from the list" \
+  bash -c "cd '${gib}' && ! env ${gi_env} '${AMD}' tags add triage 2>/dev/null \
+    && env ${gi_env} '${AMD}' tags remove TRIAGE 2>&1 | grep -q 'built in'"
+assert "a TRIAGE ticket isn't a draft" \
+  bash -c "cd '${gib}' && env ${gi_env} AMD_NO_BRANCH=1 '${AMD}' todo 2 >/dev/null 2>&1 && ls tasks/todo/002-* >/dev/null"
+assert "amd triage-priority sets what imported tickets start at, and refuses a made-up one" \
+  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' triage-priority | grep -qx low \
+    && ! env ${gi_env} '${AMD}' triage-priority urgent 2>/dev/null \
+    && env ${gi_env} '${AMD}' triage-priority High | grep -q 'start at priority high' \
+    && grep -qx 'triage-priority = high' .settings \
+    && env ${gi_env} '${AMD}' import issues acme/other --dry-run | grep -q '\[TRIAGE\] high'"
+assert "with no repository on GitHub, it asks for owner/repo" \
+  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' import issues 2>&1 | grep -q 'amd import issues owner/repo'"
+rm -rf "${gi}"
+
 echo "the registry is scoped by project directory (ticket 095):"
 # Two folders, each with a project called p: p-tickets and p-code. Both
 # p-codes are registered on this machine; each board must use its own.

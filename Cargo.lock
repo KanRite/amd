@@ -16,6 +16,7 @@ dependencies = [
  "deunicode",
  "minijinja",
  "serde",
+ "serde_json",
  "tempfile",
  "time",
 ]
