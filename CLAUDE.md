@@ -1095,6 +1095,10 @@ changes):
   group's column. The editor says where it is under its title
   (`amd_ui_model::epic::where_it_is`: `acme-api › Backlog › Sprint s12
   (started)`, or `Doing · from epic checkout` from its `epic:` label).
+- **The running sprint in the header** (ticket 165): `ActiveSprints`,
+  after the Board | Documents tabs, shows a badge per started sprint
+  (`Board.epics`, kind Sprint, `started`); a click goes to the board and
+  opens its column (`ctx.open_epic`).
 - **Which board a project opens**: `Board::discover()` from the launch directory; from
   outside any project (a desktop launcher starts in `$HOME`) it goes to the
   directory remembered as `ui.board` in `~/.config/agile-md/config`, which

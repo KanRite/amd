@@ -285,6 +285,7 @@ pub fn App() -> impl IntoView {
                             </button>
                             <ProjectSwitcher project=project />
                             <ViewTabs />
+                            <ActiveSprints />
                         }
                     }
                 >
@@ -401,6 +402,53 @@ pub fn App() -> impl IntoView {
                 None => ().into_any(),
             }}
         </div>
+    }
+}
+
+/// The sprints running now (ticket 165), beside the tabs: each a badge
+/// with its name and length that opens its column on the board. Nothing
+/// when no sprint is started.
+#[component]
+fn ActiveSprints() -> impl IntoView {
+    use amd_ui_model::epic::GroupKind;
+    let ctx = Ctx::get();
+    let running = move || {
+        ctx.board.with(|b| {
+            b.as_ref()
+                .map(|b| {
+                    b.epics
+                        .iter()
+                        .filter(|e| e.kind == GroupKind::Sprint && e.started)
+                        .map(|e| (e.repo.clone(), e.name.clone(), e.days))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        })
+    };
+    view! {
+        <For each=running key=|s| s.clone() let:sprint>
+            {
+                let (repo, name, days) = sprint;
+                let open = (repo.clone(), name.clone());
+                let length = if days == 0 { String::new() } else { format!(" · {days} days") };
+                view! {
+                    <button
+                        type="button"
+                        class="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded border border-lime-600 bg-lime-50/70 px-2 py-1 text-sm hover:bg-lime-100 dark:bg-lime-950/40 dark:hover:bg-lime-900/60"
+                        title=format!("Sprint {name} is running{length}. Open it on the board")
+                        on:click=move |_| {
+                            ctx.view.set(View::Board);
+                            ctx.open_epic.set(Some(open.clone()));
+                        }
+                    >
+                        <span class="rounded bg-lime-700 px-1.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                            "Sprint"
+                        </span>
+                        <span class="font-medium">{name.clone()}</span>
+                    </button>
+                }
+            }
+        </For>
     }
 }
 
