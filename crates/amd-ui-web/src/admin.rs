@@ -679,6 +679,14 @@ fn IssuesAdmin() -> impl IntoView {
     let repo = RwSignal::new(String::new());
     let label = RwSignal::new(String::new());
     let result = RwSignal::new(None::<Result<amd_ui_model::IssueImport, String>>);
+    let result_node = NodeRef::<leptos::html::Div>::new();
+    Effect::new(move |_| {
+        if result.with(Option::is_some)
+            && let Some(el) = result_node.get()
+        {
+            el.scroll_into_view_with_bool(false);
+        }
+    });
     let busy = RwSignal::new(false);
     let saved_priority = move || {
         ctx.board.with(|b| {
@@ -747,6 +755,29 @@ fn IssuesAdmin() -> impl IntoView {
                     "Import"
                 </button>
             </div>
+            // What Preview or Import found, right under their buttons
+            // (ticket 166), and scrolled to: the panel scrolls, and the
+            // buttons can sit at its bottom edge.
+            <div node_ref=result_node>
+                {move || {
+                    result
+                        .get()
+                        .map(|outcome| match outcome {
+                            Ok(done) => {
+                                view! {
+                                    <div class="flex flex-col gap-1">
+                                        <ul class="flex flex-col gap-0.5 font-mono text-xs">
+                                            {done.lines.into_iter().map(|line| view! { <li>{line}</li> }).collect_view()}
+                                        </ul>
+                                        <p class="text-sm text-slate-700 dark:text-slate-200">{done.summary}</p>
+                                    </div>
+                                }
+                                    .into_any()
+                            }
+                            Err(e) => view! { <p class="text-sm text-red-700 dark:text-red-300">{e}</p> }.into_any(),
+                        })
+                }}
+            </div>
             <label class="flex items-center gap-2 text-sm">
                 "New tickets start at priority"
                 <select
@@ -764,24 +795,6 @@ fn IssuesAdmin() -> impl IntoView {
             <Show when=move || priority_note.with(Option::is_some)>
                 <p class="text-xs text-slate-600 dark:text-slate-300">{move || priority_note.get().unwrap_or_default()}</p>
             </Show>
-            {move || {
-                result
-                    .get()
-                    .map(|outcome| match outcome {
-                        Ok(done) => {
-                            view! {
-                                <div class="flex flex-col gap-1 text-xs">
-                                    <ul class="flex flex-col gap-0.5 font-mono">
-                                        {done.lines.into_iter().map(|line| view! { <li>{line}</li> }).collect_view()}
-                                    </ul>
-                                    <p class="text-slate-600 dark:text-slate-300">{done.summary}</p>
-                                </div>
-                            }
-                                .into_any()
-                        }
-                        Err(e) => view! { <p class="text-xs text-red-700 dark:text-red-300">{e}</p> }.into_any(),
-                    })
-            }}
         </section>
     }
 }
