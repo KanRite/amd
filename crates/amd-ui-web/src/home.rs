@@ -50,6 +50,117 @@ pub fn HomeView(home: RwSignal<Option<Result<Home, String>>>) -> impl IntoView {
     }
 }
 
+/// The landing page's top bar (ticket 168): the current project, a picker
+/// to change it, and its Documents, ADRs, Ideas and Shared, each greyed out
+/// when that repository isn't cloned here. Choosing another project makes
+/// it current (and remembered) without leaving the landing page.
+#[component]
+pub fn HomeBar() -> impl IntoView {
+    let ctx = Ctx::get();
+    let home = ctx.home;
+    let data = move || home.with(|h| h.as_ref().and_then(|h| h.as_ref().ok()).cloned());
+    let current = move || {
+        data().and_then(|h| {
+            let root = h.current.clone();
+            h.projects.into_iter().find(|p| p.root == root)
+        })
+    };
+    let choose = move |root: String| {
+        spawn_local(async move {
+            match api::set_tasks_dir(&root).await {
+                Ok(board) => {
+                    ctx.board.set(Some(board));
+                    crate::home::load_home(home);
+                }
+                Err(e) => ctx.error.set(Some(e)),
+            }
+        });
+    };
+    let small = "rounded border border-slate-300 px-2.5 py-1.5 text-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:border-slate-600 dark:hover:bg-slate-700";
+    let doc_button = move |label: &'static str, folder: &'static str, help: &'static str| {
+        let available = move || current().is_some_and(|p| p.documents);
+        let title = move || match current() {
+            None => "Choose a project first".to_string(),
+            Some(p) if !p.documents => format!("{}-documents isn't cloned on this machine", p.name),
+            Some(_) => help.to_string(),
+        };
+        view! {
+            <button
+                type="button"
+                class=small
+                title=title
+                disabled=move || !available()
+                on:click=move |_| {
+                    if let Some(p) = current() {
+                        open_documents(ctx, p.root, false, folder);
+                    }
+                }
+            >
+                {label}
+            </button>
+        }
+    };
+    let shared_title = move || match current() {
+        None => "Choose a project first".to_string(),
+        Some(p) => match (p.shared, p.shared_cloned) {
+            (Some(name), true) => format!("Read {name}, the documents every project shares"),
+            (Some(name), false) => format!("{name} isn't cloned on this machine"),
+            (None, _) => {
+                "This project names no shared documents (Admin → Shared documents)".to_string()
+            }
+        },
+    };
+    view! {
+        <select
+            class="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm font-medium appearance-none dark:border-slate-600 dark:bg-slate-800"
+            aria-label="Current project"
+            title="The current project: its documents are a click away, and it's the board amdui opens"
+            on:change=move |ev| choose(event_target_value(&ev))
+        >
+            <Show when=move || current().is_none()>
+                <option value="" selected=true>"Choose a project"</option>
+            </Show>
+            <For
+                each=move || data().map(|h| h.projects).unwrap_or_default()
+                key=|p| p.root.clone()
+                let:p
+            >
+                {
+                    let root = p.root.clone();
+                    let selected = move || current().is_some_and(|c| c.root == root);
+                    view! { <option value=p.root.clone() selected=selected>{p.name.clone()}</option> }
+                }
+            </For>
+        </select>
+        {doc_button("Documents", "docs", "Read this project's documents (docs/)")}
+        {doc_button("ADRs", "adr", "Read this project's decisions and proposals (adr/)")}
+        {doc_button("Ideas", "ideas", "Read this project's ideas (ideas/)")}
+        <button
+            type="button"
+            class=small
+            title=shared_title
+            disabled=move || !current().is_some_and(|p| p.shared_cloned)
+            on:click=move |_| {
+                if let Some(p) = current() {
+                    open_documents(ctx, p.root, true, "");
+                }
+            }
+        >
+            "Shared"
+        </button>
+    }
+}
+
+/// Opens `root`'s documents at one folder (ticket 168): `docs`, `adr` or
+/// `ideas` of its own repository, or the shared repository.
+fn open_documents(ctx: Ctx, root: String, shared: bool, folder: &str) {
+    ctx.doc_scope.set(Some(amd_ui_model::DocScope {
+        shared,
+        folder: folder.to_string(),
+    }));
+    open(ctx, root, View::Documents, None);
+}
+
 /// Opens `root`'s project at `view` (its board or its documents), then,
 /// if given, one of its tickets.
 fn open(
@@ -73,6 +184,9 @@ fn open(
         }
     });
 }
+
+/// How many tickets to pick are listed before "Show all" (ticket 171).
+const PICK_SHOWN: usize = 5;
 
 #[component]
 fn MyWork(
@@ -101,6 +215,13 @@ fn MyWork(
         "Nothing in todo or doing is assigned to you.".to_string()
     };
     let rows = if empty { to_pick } else { work };
+    // Work to pick can run long (every unassigned ticket at the top
+    // priority), pushing Projects off the page: the first few, then Show
+    // all (ticket 171). Your own work is always listed in full.
+    let total = rows.len();
+    let long = picking && total > PICK_SHOWN;
+    let show_all = RwSignal::new(false);
+    let rows = StoredValue::new(rows);
     view! {
         <section aria-labelledby="my-work" class="flex flex-col gap-2">
             <div class="flex items-baseline justify-between gap-3">
@@ -120,7 +241,28 @@ fn MyWork(
             <Show when=move || empty>
                 <p class="text-sm text-slate-500">{note.clone()}</p>
             </Show>
-            <ul class="flex flex-col gap-1.5">{rows.into_iter().map(work_row).collect_view()}</ul>
+            <ul class="flex flex-col gap-1.5">
+                {move || {
+                    let limit = if long && !show_all.get() { PICK_SHOWN } else { total };
+                    rows.get_value().into_iter().take(limit).map(work_row).collect_view()
+                }}
+            </ul>
+            <Show when=move || long>
+                <button
+                    type="button"
+                    class="self-start text-sm text-slate-500 hover:underline"
+                    aria-expanded=move || show_all.get().to_string()
+                    on:click=move |_| show_all.update(|s| *s = !*s)
+                >
+                    {move || {
+                        if show_all.get() {
+                            format!("Show the first {PICK_SHOWN}")
+                        } else {
+                            format!("Show all ({total})")
+                        }
+                    }}
+                </button>
+            </Show>
         </section>
     }
 }
@@ -182,7 +324,6 @@ fn Projects(
     };
     let row = move |(p, show_dir): (HomeProject, bool)| {
         let root = p.root.clone();
-        let docs = p.root.clone();
         let flip = p.root.clone();
         let hide = !p.hidden;
         view! {
@@ -195,14 +336,6 @@ fn Projects(
                 >
                     {p.name.clone()}
                     {show_dir.then(|| view! { <span class="ml-2 text-xs font-normal text-slate-500">{p.dir.clone()}</span> })}
-                </button>
-                <button
-                    type="button"
-                    class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
-                    title="Read this project's documents"
-                    on:click=move |_| open(ctx, docs.clone(), View::Documents, None)
-                >
-                    "Documents"
                 </button>
                 <button
                     type="button"

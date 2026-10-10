@@ -1,6 +1,6 @@
 //! Branch protection on `main`, via `gh api` — the same shell-out philosophy
 //! `git.rs` already states for git itself, extended to the forge (see
-//! `rfc/0004-reducing-forge-specific-dependencies.md` in `agile-md-documents`).
+//! `adr/rfc/0004-reducing-forge-specific-dependencies.md` in `agile-md-documents`).
 //!
 //! Protection needs the branch to exist first, so this is only ever called
 //! once a repository has its first commit pushed.

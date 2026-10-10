@@ -199,7 +199,7 @@ redundant. Their history is in git if it is ever wanted again.
   `<project>-documents` (via `gh`, as siblings under the current
   directory), clones each, scaffolds them and registers both locally.
   Tickets gets the board;
-  documents gets `adr/`, `rfc/`, `docs/`, `README.md` and `CHANGELOG.md`
+  documents gets `adr/adr/`, `adr/rfc/`, `docs/`, `ideas/`, `README.md` and `CHANGELOG.md`
   — no settings (ticket 111: they all live in the tickets `.settings`). Each repository gets its own branch
   protection tier via `github.rs`'s `protect_main()` — tickets: blocks
   force-push/deletion only; documents: additionally requires one approving
@@ -605,8 +605,8 @@ off**, ticket 141) to
     undeclaring a repository (`amd register`, `register --remove`,
     `deregister`). Not in scope: this machine's registry alone (a
     `deregister` of a repository that's only registered here),
-    `{project}-documents` (a different repository entirely, PR-reviewed by
-    design, never auto-committed).
+    `{project}-documents` (a different repository; ADR 0007 moves documents
+    to direct pushes too, but amd doesn't write to them yet).
   - **Sync with the remote** (ticket 102, `crates/amd-lib/src/sync.rs`).
     Before it, nothing fetched or pulled, and a rejected push only warned:
     the multi-user suite (076) proved duplicate ids, a lease claimed twice
@@ -1024,7 +1024,7 @@ changes):
 - **Next round of epic/sprint design, not built yet**: sprint backfill, a
   `Closed` state, and burn-up reporting into the documents repo are
   designed in `agile-md-documents`'
-  `rfc/0005-sprint-backfill-closing-and-burn-up-reporting.md` — including
+  `adr/rfc/0005-sprint-backfill-closing-and-burn-up-reporting.md` — including
   one question it deliberately leaves open (whether a running sprint's
   `todo` is a gate on the existing column or a nested one). Nothing below
   describes any of that; it isn't shipped.
@@ -1106,7 +1106,7 @@ changes):
   (`amd_ui_model::epic::where_it_is`: `acme-api › Backlog › Sprint s12
   (started)`, or `Doing · from epic checkout` from its `epic:` label).
 - **The running sprint in the header** (ticket 165): `ActiveSprints`,
-  after the Board | Documents tabs, shows a badge per started sprint
+  after the project name, shows a badge per started sprint
   (`Board.epics`, kind Sprint, `started`); a click goes to the board and
   opens its column (`ctx.open_epic`).
 - **Which board a project opens**: `Board::discover()` from the launch directory; from
@@ -1129,9 +1129,17 @@ changes):
   page hides the button and Admin shows the note. A convenience, not
   enforcement: the CLI's settings commands aren't gated. The colour scheme is `ui.theme`/
   `ui.accent` in the same file.
-- **Documents** (ticket 129, `crates/amd-lib/src/documents.rs`): Board |
-  Documents tabs in a project's header (`View::Documents`), and Documents
-  on each landing-page project row. `documents::sources` finds the
+- **Documents** (ticket 129, `crates/amd-lib/src/documents.rs`):
+  `View::Documents`, reached from each landing-page project row's
+  **Documents / ADRs / Ideas / Shared** buttons (ticket 168), which set
+  `ctx.doc_scope` (`amd_ui_model::DocScope`: own or shared repository, and
+  a folder, `docs`, `adr` or `ideas`; `DocScope::holds`), so the sidebar
+  lists only that folder until "Show everything". Buttons are greyed out
+  when the repository isn't cloned (`HomeProject.documents`,
+  `shared`/`shared_cloned`). The board has no tabs: a "Board" button
+  shows only while documents are open. A documents repository is laid
+  out `adr/adr/` (ADRs), `adr/rfc/` (RFCs), `docs/`, `ideas/`
+  (`init.rs`'s `DOCUMENTS_FOLDERS`). `documents::sources` finds the
   project's `{project}-documents` (sibling first, else the registry's
   `find_near`) and the shared one the tickets `.settings` names
   (`shared-documents`, `amd shared-documents`, Admin's "Shared
@@ -1143,8 +1151,12 @@ changes):
   another document becomes `#doc:<path>`, web/mail links stay and the page
   hands them to `open_external` (`xdg-open`/`open`, http(s)/mailto only),
   anything else becomes `#`, and relative images are inlined as data URLs
-  (the CSP allows `data:` images only). Read only: editing is a branch and
-  a PR (138). The demo board has `acme-documents` and a shared
+  (the CSP allows `data:` images only). Read only for now. **Documents
+  are pushed straight to main, with git as their history**
+  (agile-md-documents' ADR 0007, 2026-10-10, superseding the PR review
+  RFC 0003 asked for): editing in place (138), a History panel with
+  Restore (169) and `amd import documents` pushing directly (170) build
+  on that. The demo board has `acme-documents` and a shared
   `acme-handbook`.
 - **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
   download path checks a downloaded amdui's libraries on Linux

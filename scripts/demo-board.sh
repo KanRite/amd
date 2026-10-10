@@ -146,18 +146,21 @@ git add -A tasks && save "Spread creation dates"
 # Documents (ticket 129): the project's own, and a handbook every project
 # shares, named in the project's settings.
 for r in acme-documents acme-handbook; do repo "${r}"; done
-mkdir -p "${DIR}/acme-documents/adr" "${DIR}/acme-documents/rfc" "${DIR}/acme-documents/docs/img" "${DIR}/acme-handbook"
+# The documents layout (ticket 168): adr/adr, adr/rfc, docs, ideas.
+mkdir -p "${DIR}/acme-documents/adr/adr" "${DIR}/acme-documents/adr/rfc" "${DIR}/acme-documents/docs/img" \
+  "${DIR}/acme-documents/ideas" "${DIR}/acme-handbook"
 cat > "${DIR}/acme-documents/README.md" <<'MD'
 # Acme engineering
 
-How the Acme shop is built, and why. Decisions are in [adr/](adr/0001-one-page-checkout.md),
-proposals in [rfc/](rfc/0001-payment-retries.md), and how-tos in [docs/](docs/releasing.md).
+How the Acme shop is built, and why. Decisions are in [adr/adr/](adr/adr/0001-one-page-checkout.md),
+proposals in [adr/rfc/](adr/rfc/0001-payment-retries.md), how-tos in [docs/](docs/releasing.md),
+and ideas not yet worked into a ticket in [ideas/](ideas/loyalty-points.md).
 
 - [x] Storefront on the new checkout
 - [ ] Payment retries
 - [ ] Gift cards (being shaped)
 MD
-cat > "${DIR}/acme-documents/adr/0001-one-page-checkout.md" <<'MD'
+cat > "${DIR}/acme-documents/adr/adr/0001-one-page-checkout.md" <<'MD'
 # ADR 0001: One-page checkout
 
 **Status:** accepted
@@ -175,7 +178,7 @@ Checkout becomes one page: basket, address, delivery and payment, each a section
 - Fewer page loads, and the total stays in view.
 - Address lookup ([RFC 0001](../rfc/0001-payment-retries.md) depends on it) moves into the API.
 MD
-cat > "${DIR}/acme-documents/rfc/0001-payment-retries.md" <<'MD'
+cat > "${DIR}/acme-documents/adr/rfc/0001-payment-retries.md" <<'MD'
 # RFC 0001: Retry failed card payments
 
 A card payment that fails for a temporary reason is retried, so the customer isn't asked twice.
@@ -191,6 +194,12 @@ attempt 1 ──fail──▶ wait ──▶ attempt 2 ──fail──▶ tell 
 ```
 
 > Never retry a payment the customer cancelled.
+MD
+cat > "${DIR}/acme-documents/ideas/loyalty-points.md" <<'MD'
+# Loyalty points
+
+Customers earn a point per pound spent and redeem 100 points for £1 off. Worth an RFC once gift cards
+(ticket 013) are out of draft: both touch the basket total.
 MD
 cat > "${DIR}/acme-documents/docs/img/release.svg" <<'SVG'
 <svg xmlns="http://www.w3.org/2000/svg" width="420" height="70" font-family="sans-serif" font-size="14">

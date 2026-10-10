@@ -101,6 +101,10 @@ pub struct Ctx {
     pub disk_tick: RwSignal<u64>,
     /// The document open in Documents (ticket 129): repository and path.
     pub document: RwSignal<crate::documents::Open>,
+    /// What the Documents view shows (ticket 168): one folder of the
+    /// project's own or the shared repository, set by the landing page's
+    /// buttons; `None` is everything.
+    pub doc_scope: RwSignal<Option<amd_ui_model::DocScope>>,
 }
 
 impl Ctx {
@@ -239,6 +243,7 @@ pub fn App() -> impl IntoView {
         system_dark: RwSignal::new(false),
         disk_tick: RwSignal::new(0),
         document: RwSignal::new(None),
+        doc_scope: RwSignal::new(None),
     };
     provide_context(ctx);
     ctx.reload();
@@ -315,6 +320,11 @@ pub fn App() -> impl IntoView {
                 >
                     "↻"
                 </button>
+                // The current project and its documents, beside Preferences
+                // (ticket 168).
+                <Show when=on_home>
+                    <crate::home::HomeBar />
+                </Show>
                 <Show when=move || !on_home()>
                     <button
                         class="whitespace-nowrap rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
@@ -452,32 +462,23 @@ fn ActiveSprints() -> impl IntoView {
     }
 }
 
-/// Board | Documents (ticket 129): the two sides of an open project.
+/// The way back to the board from Documents (tickets 129, 168).
 #[component]
 fn ViewTabs() -> impl IntoView {
+    // Documents is reached from the landing page's buttons (ticket 168), so
+    // the board has no tabs: only the way back while documents are open.
     let ctx = Ctx::get();
-    let tab = move |label: &'static str, view: View| {
-        let current = move || ctx.view.get() == view;
-        view! {
+    view! {
+        <Show when=move || ctx.view.get() == View::Documents>
             <button
                 type="button"
-                role="tab"
-                aria-selected=move || current().to_string()
-                class="px-3 py-1.5 text-sm hover:bg-slate-100 dark:hover:bg-slate-700"
-                class=("bg-accent-100", current)
-                class=("font-medium", current)
-                class=("dark:bg-accent-900", current)
-                on:click=move |_| ctx.view.set(view)
+                class="rounded border border-slate-300 px-2.5 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                title="Back to this project's board"
+                on:click=move |_| ctx.view.set(View::Board)
             >
-                {label}
+                "Board"
             </button>
-        }
-    };
-    view! {
-        <div role="tablist" class="flex overflow-hidden rounded border border-slate-300 dark:border-slate-600">
-            {tab("Board", View::Board)}
-            {tab("Documents", View::Documents)}
-        </div>
+        </Show>
     }
 }
 

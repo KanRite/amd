@@ -2,7 +2,7 @@
 //! *and* documents repositories, or (`--local-only`) just scaffold the
 //! board here.
 //!
-//! Two sibling repositories, not one (`rfc/0003-ticket-repository-topology-and-team-collaboration.md`
+//! Two sibling repositories, not one (`adr/rfc/0003-ticket-repository-topology-and-team-collaboration.md`
 //! in `agile-md-documents`): `{project}-tickets` behaves exactly as it
 //! always has — a board, direct pushes, no PR. `{project}-documents` is
 //! new — ADRs, RFCs and docs — PR-reviewed. (Board settings live in the
@@ -108,8 +108,8 @@ fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf
     Ok(target)
 }
 
-/// Creates or connects `{project}-documents`: `adr/`, `rfc/`, `docs/`,
-/// `README.md` and `CHANGELOG.md`. No settings: they all live in the tickets
+/// Creates or connects `{project}-documents`: `adr/adr/`, `adr/rfc/`,
+/// `docs/`, `ideas/`, `README.md` and `CHANGELOG.md` (ticket 168). No settings: they all live in the tickets
 /// repository (ticket 111). Registered, same as tickets.
 fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf> {
     let target = base.join(format!("{project}-documents"));
@@ -189,13 +189,18 @@ fn warn_if_protection_unavailable(full_name: &str, outcome: github::ProtectionOu
     }
 }
 
-/// `adr/`, `rfc/`, `docs/`, `README.md`, an empty `CHANGELOG.md` header, and
+/// `adr/adr/` (decisions), `adr/rfc/` (proposals), `docs/`, `ideas/`
+/// (ticket 168), `README.md`, an empty `CHANGELOG.md` header, and
 /// a `.settings/` directory carrying just the declared `project` — the
 /// three fields ticket 057 also moves here (`repos`/`wip-limit`/
 /// `lease-hours`) are left for a team to set later via a PR, not written
 /// with defaults up front.
+/// A documents repository's folders (ticket 168), each kept with a
+/// `.gitkeep` until it has documents.
+const DOCUMENTS_FOLDERS: [&str; 4] = ["adr/adr", "adr/rfc", "docs", "ideas"];
+
 fn scaffold_documents(target: &Path, project: &str) -> Result<()> {
-    for dir in ["adr", "rfc", "docs"] {
+    for dir in DOCUMENTS_FOLDERS {
         std::fs::create_dir_all(target.join(dir))
             .with_context(|| format!("creating {}/{dir}", target.display()))?;
         std::fs::write(target.join(dir).join(".gitkeep"), "")?;
@@ -204,7 +209,13 @@ fn scaffold_documents(target: &Path, project: &str) -> Result<()> {
     if !readme.exists() {
         std::fs::write(
             &readme,
-            format!("# {project} documents\n\nADRs, RFCs and docs for {project}.\n"),
+            format!(
+                "# {project} documents\n\nADRs, RFCs, docs and ideas for {project}.\n\n\
+                 - `adr/adr/`: architecture decision records, numbered.\n\
+                 - `adr/rfc/`: requests for comments, the proposals decisions come from.\n\
+                 - `docs/`: notes and how-tos.\n\
+                 - `ideas/`: ideas not yet worked into a ticket or an RFC.\n"
+            ),
         )?;
     }
     let changelog = target.join("CHANGELOG.md");
@@ -391,13 +402,13 @@ mod tests {
     }
 
     #[test]
-    fn scaffold_documents_creates_the_three_directories_and_files() {
+    fn scaffold_documents_creates_the_folders_and_files() {
         let dir = tempfile::tempdir().unwrap();
         let target = dir.path().join("proj-documents");
         std::fs::create_dir_all(&target).unwrap();
         scaffold_documents(&target, "proj").unwrap();
 
-        for sub in ["adr", "rfc", "docs"] {
+        for sub in DOCUMENTS_FOLDERS {
             assert!(target.join(sub).is_dir(), "{sub} missing");
         }
         assert!(target.join("README.md").exists());

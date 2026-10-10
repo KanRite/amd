@@ -994,14 +994,30 @@ async fn home() -> Result<amd_ui_model::Home> {
             include_unassigned,
             projects: my_work::projects()
                 .into_iter()
-                .map(|p| amd_ui_model::HomeProject {
-                    name: p.name,
-                    root: p.root.display().to_string(),
-                    dir: p.dir.display().to_string(),
-                    hidden: p.hidden,
+                .map(|p| {
+                    // Which documents buttons can work here (ticket 168).
+                    use agile_md::documents::{Kind, sources};
+                    let docs = sources(&agile_md::board::Board::in_repo(&p.root));
+                    let own = docs.iter().find(|d| d.kind == Kind::Own);
+                    let shared = docs.iter().find(|d| d.kind == Kind::Shared);
+                    amd_ui_model::HomeProject {
+                        name: p.name,
+                        root: p.root.display().to_string(),
+                        dir: p.dir.display().to_string(),
+                        hidden: p.hidden,
+                        documents: own.is_some_and(|d| d.root.is_some()),
+                        shared: shared.map(|d| d.name.clone()),
+                        shared_cloned: shared.is_some_and(|d| d.root.is_some()),
+                    }
                 })
                 .collect(),
             me: me.map(|(email, _)| email).unwrap_or_default(),
+            // The project open in this process: what the launch directory
+            // found, or the last one opened (ticket 168).
+            current: Project::open()
+                .ok()
+                .map(|p| p.repos[0].1.repo_root().display().to_string())
+                .unwrap_or_default(),
         })
     })
     .await
