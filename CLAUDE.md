@@ -1088,6 +1088,13 @@ changes):
   board, ⌂ Home goes back. It's the shell documents (129), ideas (131) and
   collaboration (138) are meant to join. "You" is git's identity in each
   board's own repository, falling back to the global one.
+- **Where a ticket is** (ticket 163): `Ctx::open_ticket` sets `ctx.focus`
+  (repository, file); that card gets a ring and is scrolled into view once
+  (`ctx.focus_scroll`, so a reload doesn't pull the board back), a folded
+  column unfolds, and a backlog ticket in an epic or sprint opens that
+  group's column. The editor says where it is under its title
+  (`amd_ui_model::epic::where_it_is`: `acme-api › Backlog › Sprint s12
+  (started)`, or `Doing · from epic checkout` from its `epic:` label).
 - **Which board a project opens**: `Board::discover()` from the launch directory; from
   outside any project (a desktop launcher starts in `$HOME`) it goes to the
   directory remembered as `ui.board` in `~/.config/agile-md/config`, which

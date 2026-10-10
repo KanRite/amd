@@ -52,6 +52,34 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
         Some(name) => format!("{}/{name}/{file}", column.dir_name()),
         None => format!("{}/{file}", column.dir_name()),
     };
+    // Where it is (ticket 163): the repository when the board shows more
+    // than one, the column, and its epic or sprint, filed or labelled.
+    let label = amd_ui_model::parse_frontmatter(&content).epic;
+    let location = {
+        let (repo, epic) = (repo.clone(), epic.clone());
+        move || {
+            ctx.board.with(|b| {
+                let b = b.as_ref();
+                let many = b.is_some_and(|b| b.repos.len() > 1);
+                let name = epic.clone().unwrap_or_else(|| label.trim().to_string());
+                let group = (!name.is_empty()).then(|| {
+                    let found =
+                        b.and_then(|b| b.epics.iter().find(|e| e.repo == repo && e.name == name));
+                    (
+                        name.clone(),
+                        found.map(|e| e.kind).unwrap_or_default(),
+                        found.is_some_and(|e| e.started),
+                    )
+                });
+                amd_ui_model::epic::where_it_is(
+                    many.then_some(repo.as_str()),
+                    column,
+                    group.as_ref().map(|(n, k, s)| (n.as_str(), *k, *s)),
+                    epic.is_some(),
+                )
+            })
+        }
+    };
     let place = StoredValue::new(Place { repo, column, epic });
     let lock_file = StoredValue::new(file.clone());
     // The ticket's lock, kept current as it is locked and unlocked here.
@@ -230,6 +258,9 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
 
     view! {
         <Modal title=format!("Edit {path}") width="max-w-4xl">
+            <p class="text-sm font-medium text-accent-800 dark:text-accent-200" aria-label="Where this ticket is">
+                {location}
+            </p>
             <LockBar lock lapsed version place file=lock_file />
             // Who to ask about it (ticket 155).
             {(!authorship.is_empty())
