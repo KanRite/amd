@@ -282,7 +282,7 @@ pub fn App() -> impl IntoView {
                     fallback=move || {
                         view! {
                             <button
-                                class="rounded border border-slate-300 px-2.5 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                                class="whitespace-nowrap rounded border border-slate-300 px-2.5 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
                                 title="Back to My work and your projects"
                                 on:click=go_home
                             >

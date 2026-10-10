@@ -277,6 +277,8 @@ pub struct Version {
 pub struct Restored {
     /// The commit message.
     pub message: String,
+    /// Nothing left to push: pushed, or no remote to push to (as a board
+    /// with no remote is never said to be behind, ticket 142).
     pub pushed: bool,
     /// Why it wasn't pushed, when it should have been.
     pub warning: Option<String>,
@@ -413,7 +415,7 @@ pub fn restore(root: &Path, relative: &str, commit: &str) -> Result<Restored> {
     if !remote || warning.is_some() {
         return Ok(Restored {
             message,
-            pushed: false,
+            pushed: !remote,
             warning,
         });
     }
@@ -581,7 +583,8 @@ mod tests {
             "{}",
             done.message
         );
-        assert!(!done.pushed, "nowhere to push");
+        assert!(done.pushed, "no remote: nothing left to push");
+        assert_eq!(done.warning, None);
         assert_eq!(
             fs::read_to_string(root.join("adr/adr/0001-x.md")).unwrap(),
             "# X\n\nfirst\n"
