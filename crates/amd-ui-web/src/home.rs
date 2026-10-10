@@ -84,6 +84,9 @@ fn open(
     });
 }
 
+/// How many tickets to pick are listed before "Show all" (ticket 171).
+const PICK_SHOWN: usize = 5;
+
 #[component]
 fn MyWork(
     work: Vec<WorkItem>,
@@ -111,6 +114,13 @@ fn MyWork(
         "Nothing in todo or doing is assigned to you.".to_string()
     };
     let rows = if empty { to_pick } else { work };
+    // Work to pick can run long (every unassigned ticket at the top
+    // priority), pushing Projects off the page: the first few, then Show
+    // all (ticket 171). Your own work is always listed in full.
+    let total = rows.len();
+    let long = picking && total > PICK_SHOWN;
+    let show_all = RwSignal::new(false);
+    let rows = StoredValue::new(rows);
     view! {
         <section aria-labelledby="my-work" class="flex flex-col gap-2">
             <div class="flex items-baseline justify-between gap-3">
@@ -130,7 +140,28 @@ fn MyWork(
             <Show when=move || empty>
                 <p class="text-sm text-slate-500">{note.clone()}</p>
             </Show>
-            <ul class="flex flex-col gap-1.5">{rows.into_iter().map(work_row).collect_view()}</ul>
+            <ul class="flex flex-col gap-1.5">
+                {move || {
+                    let limit = if long && !show_all.get() { PICK_SHOWN } else { total };
+                    rows.get_value().into_iter().take(limit).map(work_row).collect_view()
+                }}
+            </ul>
+            <Show when=move || long>
+                <button
+                    type="button"
+                    class="self-start text-sm text-slate-500 hover:underline"
+                    aria-expanded=move || show_all.get().to_string()
+                    on:click=move |_| show_all.update(|s| *s = !*s)
+                >
+                    {move || {
+                        if show_all.get() {
+                            format!("Show the first {PICK_SHOWN}")
+                        } else {
+                            format!("Show all ({total})")
+                        }
+                    }}
+                </button>
+            </Show>
         </section>
     }
 }
