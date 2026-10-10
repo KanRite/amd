@@ -33,6 +33,28 @@ use agile_md::registry::Registry;
 use agile_md::templates::{DEFAULT_TEMPLATE, TEMPLATE_SUFFIX, Templates};
 use agile_md::{board_settings, branch, git, task, templates, transition};
 
+/// `amd import --help`'s examples and what each kind does (ticket 162).
+const IMPORT_HELP: &str = "\
+Kinds:
+  tickets    Copies another board's tickets into this one. Each keeps its
+             column, gets a fresh number, and keeps parent and related links
+             within the batch; a title already on this board is tagged
+             DUPLICATE. The source board is never changed.
+  documents  Copies a folder of documents into the project's documents
+             repository on a new branch, pushes it and opens a pull request
+             (on GitHub). A file already there is skipped, never overwritten.
+  issues     Brings open GitHub issues into the backlog, tagged TRIAGE, at
+             the project's triage priority (amd triage-priority). An issue is
+             only ever imported once. Needs the GitHub CLI, gh.
+
+Examples:
+  amd import tickets ../old-project/tasks --dry-run
+  amd import ../old-project/tasks                    # the same: a bare path is tickets
+  amd import documents ~/notes --project acme --into archive
+  amd import issues acme/web --label bug
+
+--dry-run shows what would happen and writes nothing, for every kind.";
+
 const AFTER_HELP: &str = "\
 A <REF> is a task id (e.g. 7 or 007) or a unique slug substring. Leave it out
 of `amd new` in a terminal and amd fills in a form; leave it out of a
@@ -182,9 +204,10 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// Create or connect this project's dedicated tickets and documents
-    /// repositories ({project}-tickets, {project}-documents), recording you
-    /// as one of its users
+    /// Create a project's tickets and documents repositories
+    ///
+    /// Creates or connects {project}-tickets and {project}-documents and
+    /// records you as one of the project's users
     Init {
         /// The project's declared identity — cannot be changed once set
         #[arg(value_name = "PROJECT")]
@@ -198,8 +221,10 @@ enum Cmd {
         #[arg(long, value_name = "ORG")]
         org: Option<String>,
     },
-    /// Join an existing project: clone its tickets and documents
-    /// repositories here over plain git and add you to its users
+    /// Join an existing project
+    ///
+    /// Clones its tickets and documents repositories here over plain git
+    /// and adds you to its users
     Join {
         /// The project to join, as `amd init` named it
         #[arg(value_name = "PROJECT")]
@@ -209,8 +234,9 @@ enum Cmd {
         #[arg(long, value_name = "ORG")]
         org: Option<String>,
     },
-    /// List the projects in this folder and which one amd uses, or switch
-    /// with `amd project use <name>`
+    /// List the projects in this folder, or switch between them
+    ///
+    /// Shows which one amd uses; `amd project use <name>` switches
     Project {
         #[command(subcommand)]
         action: Option<ProjectAction>,
@@ -228,43 +254,38 @@ enum Cmd {
         #[arg(value_name = "TAG")]
         tag: String,
     },
-    /// The project's tag list: with no action, every listed tag and how many
-    /// tickets carry it. Tags are always UPPERCASE
+    /// Show or change the project's tag list
+    ///
+    /// With no action, every listed tag and how many tickets carry it. Tags
+    /// are always UPPERCASE
     Tags {
         #[command(subcommand)]
         action: Option<TagsAction>,
     },
-    /// Import tickets, documents or GitHub issues. `amd import tickets
-    /// <PATH>`: a tasks tree, status kept, ids renumbered, links remapped
-    /// within the batch, same-titled tickets flagged DUPLICATE (a bare `amd
-    /// import <PATH>` is the same). `amd import documents [PATH]`: a tree of
-    /// documents (here, by default) into the project's documents repository,
-    /// on a new branch with a pull request. `amd import issues [REPO]`: open
-    /// GitHub issues into the backlog, tagged TRIAGE, each issue only ever
-    /// once (needs `gh`)
+    /// Import tickets from another board, documents, or GitHub issues
+    #[command(after_help = IMPORT_HELP)]
     Import {
-        /// `tickets`, `documents` or `issues`; or, on its own, a tasks
-        /// tree's path
-        #[arg(value_name = "TYPE|PATH")]
+        /// What to import: `tickets`, `documents` or `issues`. A path on its
+        /// own is a tickets import from that board
+        #[arg(value_name = "KIND")]
         first: String,
-        /// The tree to import: for tickets, the directory holding
-        /// backlog/todo/doing/done; for documents, any folder (default: the
-        /// current directory). For issues, the repository: owner/repo or
-        /// one the project declares (default: every declared repository on
-        /// GitHub)
-        #[arg(value_name = "PATH|REPO")]
+        /// Where from. tickets: a board's tasks directory (the one holding
+        /// backlog/ todo/ doing/ done/). documents: a folder (default: the
+        /// current directory). issues: owner/repo or a repository the
+        /// project declares (default: every declared repository on GitHub)
+        #[arg(value_name = "FROM")]
         path: Option<PathBuf>,
-        /// Issues: only those carrying this GitHub label
+        /// issues: only issues with this GitHub label
         #[arg(long, value_name = "LABEL")]
         label: Option<String>,
         /// Preview what would happen without writing anything
         #[arg(long)]
         dry_run: bool,
-        /// Documents: put the tree under this folder of the documents
+        /// documents: put the tree under this folder of the documents
         /// repository (default: its root)
         #[arg(long, value_name = "DIR")]
         into: Option<String>,
-        /// Documents: the project to import into, when you aren't inside it
+        /// documents: the project to import into, when you aren't inside it
         #[arg(long, value_name = "NAME")]
         project: Option<String>,
     },
@@ -276,8 +297,9 @@ enum Cmd {
         #[arg(short = 't', long = "tag", value_name = "TAG")]
         tag: Option<String>,
     },
-    /// Move a task into todo/, or list it with no ref — entering todo/
-    /// creates or switches to the ticket's branch
+    /// Move a task into todo/, or list it with no ref
+    ///
+    /// Entering todo/ creates or switches to the ticket's branch
     Todo {
         #[arg(value_name = "REF")]
         task: Option<String>,
@@ -322,8 +344,10 @@ enum Cmd {
         #[arg(short = 't', long = "tag", value_name = "TAG")]
         tag: Option<String>,
     },
-    /// Fix tickets that share a number: one keeps it (the first committed),
-    /// the others get new numbers. Shows the plan; --apply carries it out
+    /// Fix tickets that share a number
+    ///
+    /// One keeps it (the first committed), the others get new numbers.
+    /// Shows the plan; --apply carries it out
     Renumber {
         /// Carry out the plan, in one commit
         #[arg(long)]
@@ -332,9 +356,10 @@ enum Cmd {
         #[arg(long, value_name = "TICKET")]
         keep: Option<String>,
     },
-    /// Bring back tickets that were deleted or abandoned. With no number,
-    /// list them: who removed each and when. Restored tickets go to the
-    /// backlog exactly as they were, in one commit
+    /// Bring back deleted or abandoned tickets
+    ///
+    /// With no number, lists them: who removed each and when. Restored
+    /// tickets go to the backlog exactly as they were, in one commit
     Recover {
         /// Ticket numbers to restore
         #[arg(value_name = "ID")]
@@ -359,8 +384,10 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: Option<String>,
     },
-    /// Assign a ticket: no name picks from the project's users in a
-    /// terminal (and unassigns elsewhere)
+    /// Assign a ticket to someone
+    ///
+    /// With no name, picks from the project's users in a terminal (and
+    /// unassigns elsewhere)
     Assign {
         #[arg(value_name = "REF")]
         task: String,
@@ -376,8 +403,10 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: String,
     },
-    /// Make a ticket a draft: it's tagged DRAFT and stays in the backlog
-    /// (and out of sprints) until `amd ready` takes it out of draft
+    /// Make a ticket a draft
+    ///
+    /// It's tagged DRAFT and stays in the backlog (and out of sprints) until
+    /// `amd ready` takes it out of draft
     Draft {
         #[arg(value_name = "REF")]
         task: String,
@@ -419,14 +448,18 @@ enum Cmd {
         #[arg(value_name = "N")]
         limit: u32,
     },
-    /// The priority a ticket made from a GitHub issue starts at (`amd
-    /// import issues`): low, medium or high. No value says which it is
+    /// Show or set the priority imported GitHub issues start at
+    ///
+    /// low, medium or high, for tickets `amd import issues` makes. With no
+    /// value, says which it is
     TriagePriority {
         #[arg(value_name = "PRIORITY")]
         priority: Option<String>,
     },
-    /// The documents repository every project shares, shown in amdui's
-    /// Documents beside the project's own. No name says which it is
+    /// Show or set the documents repository every project shares
+    ///
+    /// Shown in amdui's Documents beside the project's own. With no name,
+    /// says which it is
     SharedDocuments {
         /// The repository's name, as cloned beside the project's
         #[arg(value_name = "REPOSITORY")]
@@ -435,8 +468,10 @@ enum Cmd {
         #[arg(long, conflicts_with = "name")]
         clear: bool,
     },
-    /// Register a repository — declares its name for the whole project
-    /// (shared, git-tracked) and its path on this machine (local only)
+    /// Add a repository to the project
+    ///
+    /// Declares its name for the whole project (shared, git-tracked) and
+    /// its path on this machine (local only)
     Register {
         #[arg(value_name = "PATH")]
         path: Option<String>,
@@ -450,8 +485,10 @@ enum Cmd {
         #[arg(long, value_name = "NAME", conflicts_with = "path")]
         remove: Option<String>,
     },
-    /// Clone a repository the project declares but this machine hasn't got,
-    /// beside the tickets repository, and register it. No name lists them
+    /// Clone a repository the project declares that isn't here yet
+    ///
+    /// Clones it beside the tickets repository and registers it. With no
+    /// name, lists the ones missing
     Clone {
         #[arg(value_name = "NAME", conflicts_with = "all")]
         name: Option<String>,
@@ -459,10 +496,12 @@ enum Cmd {
         #[arg(long)]
         all: bool,
     },
-    /// Take a repository off the project for everyone: off its declared list
-    /// (committed and pushed), so it leaves the repository lists unless a
-    /// ticket names it, and off this machine. One that's only registered here
-    /// just loses that. The clone itself is left alone
+    /// Take a repository off the project
+    ///
+    /// For everyone: off its declared list (committed and pushed), so it
+    /// leaves the repository lists unless a ticket names it, and off this
+    /// machine. One that's only registered here just loses that. The clone
+    /// itself is left alone
     Deregister {
         #[arg(value_name = "NAME")]
         name: String,
@@ -482,12 +521,14 @@ enum Cmd {
         #[arg(long)]
         one_way: bool,
     },
-    /// Open the desktop board across every registered repository (same window
-    /// as the `amdui` command)
+    /// Open the desktop board
+    ///
+    /// The same window as the `amdui` command
     Gui,
-    /// Your work: todo and doing tickets assigned to you, across every
-    /// project on this machine, highest priority first. Read as this
-    /// machine last saw each board
+    /// List your todo and doing tickets across every project
+    ///
+    /// Highest priority first, read as this machine last saw each board.
+    /// With nothing assigned to you, offers work to pick instead
     Mine {
         /// Include projects you've hidden
         #[arg(long)]
@@ -525,9 +566,11 @@ enum Cmd {
         #[command(subcommand)]
         command: Option<TemplateCmd>,
     },
-    /// Show board transitions from git history: date, time, action, id,
-    /// title, sha. Reads paths and rename status only, never the commit
-    /// message, so it works over history from before this existed too
+    /// Show the board's history of moves
+    ///
+    /// From git: date, time, action, id, title, sha. Reads paths and rename
+    /// status only, never the commit message, so it works over history from
+    /// before this existed too
     Log,
     /// Move a task into an epic, or list it with no ref — checked against
     /// the board's current epics (the four columns and `abandon` are their
