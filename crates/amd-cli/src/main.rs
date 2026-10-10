@@ -41,8 +41,8 @@ Kinds:
              within the batch; a title already on this board is tagged
              DUPLICATE. The source board is never changed.
   documents  Copies a folder of documents into the project's documents
-             repository on a new branch, pushes it and opens a pull request
-             (on GitHub). A file already there is skipped, never overwritten.
+             repository, committed on its main branch and pushed. A file
+             already there is skipped, never overwritten.
   issues     Brings open GitHub issues into the backlog, tagged TRIAGE, at
              the project's triage priority (amd triage-priority). An issue is
              only ever imported once. Needs the GitHub CLI, gh.
@@ -2458,8 +2458,9 @@ fn cmd_import_issues(
 }
 
 /// `amd import documents [PATH]` (ticket 079): the tree at `path` (here by
-/// default) into the project's documents repository, on a new branch,
-/// pushed, with a pull request. `--dry-run` only shows the plan.
+/// default) into the project's documents repository, committed on its
+/// default branch and pushed (ADR 0007, ticket 170). `--dry-run` only shows
+/// the plan.
 fn cmd_import_documents(
     path: Option<&Path>,
     dry_run: bool,
@@ -2524,26 +2525,22 @@ fn cmd_import_documents(
     let files = if count == 1 { "file" } else { "files" };
     if dry_run {
         println!(
-            "would import {count} {files} into {} on a new branch — nothing written",
+            "would import {count} {files} into {} — nothing written",
             own.name
         );
         return Ok(());
     }
+    // Straight to main, pushed (ADR 0007, ticket 170).
     let outcome = agile_md::import_documents::apply(&plan)?;
     println!(
-        "imported {count} {files} into {} on {} (from {})",
-        own.name, outcome.branch, outcome.base
+        "imported {count} {files} into {} on {}{}",
+        own.name,
+        outcome.branch,
+        if outcome.pushed { ", pushed" } else { "" }
     );
-    if let Some(address) = &outcome.pull_request {
-        println!("pull request: {address}");
-    }
     if let Some(warning) = &outcome.warning {
         eprintln!("amd: {warning}");
     }
-    for step in &outcome.still_to_do {
-        println!("still to do: {step}");
-    }
-    eprintln!("{} is back on {}", own.name, outcome.back_on);
     Ok(())
 }
 

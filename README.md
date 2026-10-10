@@ -287,17 +287,17 @@ repository:
 ```
 cd ~/old-notes
 amd import documents --project acme --dry-run   # what would be added
-amd import documents --project acme             # branch, commit, push, pull request
+amd import documents --project acme             # commit on main and push
 ```
 
 The folder is mirrored as it is (or under `--into <dir>`): every markdown
 file, and every picture or other file a document links to. Hidden files
 and folders are left out. A file the repository already has is never
-overwritten; it's skipped and listed. Documents are reviewed, so the
-import goes on a new `chore/import-documents-…` branch from the default
-branch, is pushed, and a pull request is opened with `gh` when the
-repository is on GitHub (otherwise amd prints what's left to do). Your
-clone goes back to the branch it was on. From inside the project,
+overwritten; it's skipped and listed. Documents are pushed straight to
+main, with git as their history, so the import catches up with origin,
+commits on the main branch and pushes; amdui's History can undo any of
+it. It refuses a clone with uncommitted changes, one that isn't on its
+main branch, and one that has diverged from origin. From inside the project,
 `--project` isn't needed. `--dry-run` works for every kind.
 
 `amd import issues [REPO]` brings a repository's open GitHub issues into
