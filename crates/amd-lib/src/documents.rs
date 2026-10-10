@@ -382,20 +382,7 @@ pub fn restore(root: &Path, relative: &str, commit: &str) -> Result<Restored> {
         bail!("{relative} has changes that aren't committed; commit or discard them first");
     }
     let remote = git::remote_url(root).is_some();
-    let mut warning = None;
-    if remote {
-        match git::fetch(root) {
-            Err(_) => warning = Some("couldn't reach origin; restored locally".to_string()),
-            Ok(()) => match git::ahead_behind(root) {
-                Some((0, behind)) if behind > 0 => git::merge_ff_only(root)?,
-                Some((ahead, behind)) if ahead > 0 && behind > 0 => bail!(
-                    "{} has diverged from origin; pull and sort that out first",
-                    root.display()
-                ),
-                _ => {}
-            },
-        }
-    }
+    let warning = catch_up(root)?.map(|w| format!("{w}; restored locally"));
     let version = history(root, relative, usize::MAX)?
         .into_iter()
         .find(|v| v.commit.starts_with(commit) || commit.starts_with(&v.short))
@@ -419,16 +406,7 @@ pub fn restore(root: &Path, relative: &str, commit: &str) -> Result<Restored> {
             warning,
         });
     }
-    let pushed = git::push(root).or_else(|first| {
-        // Origin moved since the fetch: replay the restore on top, once.
-        if git::fetch(root).is_ok() && git::rebase_upstream(root).unwrap_or(false) {
-            git::push(root)
-        } else {
-            let _ = git::rebase_abort(root);
-            Err(first)
-        }
-    });
-    Ok(match pushed {
+    Ok(match push_or_replay(root) {
         Ok(()) => Restored {
             message,
             pushed: true,
@@ -439,6 +417,44 @@ pub fn restore(root: &Path, relative: &str, commit: &str) -> Result<Restored> {
             pushed: false,
             warning: Some(format!("committed, but couldn't push: {e:#}")),
         },
+    })
+}
+
+/// Brings a documents repository in step with origin before a change is
+/// written to it (tickets 169, 170): fetch, then fast-forward when only
+/// behind; refused when it has diverged. `Ok(Some(warning))` when origin
+/// can't be reached (the change can still be made locally); nothing to do
+/// without a remote. The documents side of `sync::catch_up`, which is about
+/// boards.
+pub fn catch_up(root: &Path) -> Result<Option<String>> {
+    if git::remote_url(root).is_none() {
+        return Ok(None);
+    }
+    if git::fetch(root).is_err() {
+        return Ok(Some("couldn't reach origin".to_string()));
+    }
+    match git::ahead_behind(root) {
+        Some((0, behind)) if behind > 0 => git::merge_ff_only(root)?,
+        Some((ahead, behind)) if ahead > 0 && behind > 0 => bail!(
+            "{} has diverged from origin; pull and sort that out first",
+            root.display()
+        ),
+        _ => {}
+    }
+    Ok(None)
+}
+
+/// Pushes a documents repository's new commit; if origin moved since the
+/// fetch, replays it on top once (`rebase @{u}`) and pushes again. A
+/// conflict is backed out and the first error returned, the commit kept.
+pub fn push_or_replay(root: &Path) -> Result<()> {
+    git::push(root).or_else(|first| {
+        if git::fetch(root).is_ok() && git::rebase_upstream(root).unwrap_or(false) {
+            git::push(root)
+        } else {
+            let _ = git::rebase_abort(root);
+            Err(first)
+        }
     })
 }
 

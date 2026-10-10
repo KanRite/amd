@@ -1642,15 +1642,20 @@ assert "amd import documents --dry-run lists the files and writes nothing" \
     && grep -q 'skipped adr/0001-x.md: already in proj-documents' <<<\"\${out}\" \
     && ! grep -q 'unused.png\|obsidian' <<<\"\${out}\" \
     && test \"\$(git -C '${dm}/proj-documents' branch --list | wc -l)\" = 1"
-assert "amd import documents commits on a new branch, pushes it, and goes back to main" \
-  bash -c "cd '${dm}/old' && env ${dm_env} '${AMD}' import documents --project proj >/dev/null 2>&1 \
-    && b=\"\$(git -C '${dm}/proj-documents' branch --list 'chore/import-documents-*' | tr -d ' *')\" && test -n \"\${b}\" \
-    && test \"\$(git -C '${dm}/proj-documents' branch --show-current)\" = main \
-    && ! test -e '${dm}/proj-documents/README.md' \
-    && git -C '${dm}/proj-documents' show \"\${b}:adr/0002-y.md\" | grep -q '# Y' \
-    && git -C '${dm}/proj-documents' show \"\${b}:img/d.png\" >/dev/null \
-    && git -C '${dm}/proj-documents' show \"\${b}:adr/0001-x.md\" | grep -q 'Already here' \
-    && git -C '${dm}/origin-documents.git' rev-parse --verify -q \"\${b}\" >/dev/null"
+assert "amd import documents commits on main and pushes it, no branch or pull request (ticket 170)" \
+  bash -c "cd '${dm}/old' && out=\"\$(env ${dm_env} '${AMD}' import documents --project proj 2>&1)\" \
+    && grep -q 'imported 3 files into proj-documents on main, pushed' <<<\"\${out}\" \
+    && test -z \"\$(git -C '${dm}/proj-documents' branch --list 'chore/*')\" \
+    && test -e '${dm}/proj-documents/README.md' \
+    && git -C '${dm}/origin-documents.git' show main:adr/0002-y.md | grep -q '# Y' \
+    && git -C '${dm}/origin-documents.git' show main:img/d.png >/dev/null \
+    && git -C '${dm}/origin-documents.git' show main:adr/0001-x.md | grep -q 'Already here' \
+    && git -C '${dm}/origin-documents.git' log -1 --format=%s main | grep -q '^docs: import 3 files from old'"
+assert "...and refuses a documents clone that isn't on its main branch" \
+  bash -c "git -C '${dm}/proj-documents' remote set-head origin main \
+    && git -C '${dm}/proj-documents' switch -q -c elsewhere && echo '# Z' > '${dm}/old/adr/0003-z.md' \
+    && cd '${dm}/old' && env ${dm_env} '${AMD}' import documents --project proj 2>&1 | grep -q 'not main; switch to main first' \
+    && git -C '${dm}/proj-documents' switch -q main && rm '${dm}/old/adr/0003-z.md'"
 assert "...from inside the project it needs no --project, and --into puts the tree in a folder" \
   bash -c "cd '${dm}/proj-tickets' && env ${dm_env} '${AMD}' import documents '${dm}/old' --into archive/old --dry-run 2>&1 \
     | grep -q 'would add archive/old/adr/0001-x.md'"

@@ -166,11 +166,12 @@ redundant. Their history is in git if it is ever wanted again.
   files skipped, symlinks not followed; an existing destination is a
   clash, skipped and listed, never overwritten. It refuses the documents
   repository itself, a folder inside it, or one holding it. `apply`
-  refuses a clone with uncommitted tracked changes or a detached HEAD,
-  fetches, branches `chore/import-documents-<UTC stamp>` from
-  `origin/HEAD` (else `origin/<current>`, else the current branch),
-  commits, pushes, opens a PR with `gh` only when `origin` is on
-  github.com (else prints what's left), and switches back. Handled before
+  refuses a clone with uncommitted tracked changes, a detached HEAD, or a
+  branch other than `origin/HEAD`'s, then (ticket 170, ADR 0007: straight
+  to main) `documents::catch_up` (fetch, fast-forward, refuse diverged),
+  commits, and `documents::push_or_replay` (one `rebase @{u}` replay); a
+  failed push keeps the commit and warns. It used to make a
+  `chore/import-documents-…` branch and open a PR with `gh`. Handled before
   `ensure_board()` so it never offers to create a board; `--project`
   resolves through the registry (scratch boards included, unlike My
   work), else `Board::discover()`. The target is
@@ -1165,8 +1166,8 @@ changes):
   amdui: `document_history` (20), `read_document_version`,
   `restore_document` (under the `writing` mutex); the reader's History
   button, `HistoryPanel`, and an old version's banner with Restore.
-  Editing in place (138) and `amd import documents` pushing directly
-  (170) still to come. The demo board has `acme-documents` and a shared
+  `catch_up`/`push_or_replay` are shared with `amd import documents`
+  (170). Editing in place (138) is still to come. The demo board has `acme-documents` and a shared
   `acme-handbook`.
 - **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
   download path checks a downloaded amdui's libraries on Linux

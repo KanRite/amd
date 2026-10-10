@@ -1,5 +1,5 @@
 //! `amd import documents [PATH]` (ticket 079): copies a tree of documents
-//! into the project's documents repository for review.
+//! into the project's documents repository.
 //!
 //! The tree is mirrored as it is (under `--into <dir>` when given): every
 //! markdown file, and every file a document links to or shows (a picture, a
@@ -8,16 +8,15 @@
 //! overwritten; it's skipped and listed. Names and numbers are kept, so
 //! links inside the tree still work.
 //!
-//! Documents are reviewed through pull requests, so nothing lands on the
-//! branch you're on: the files are committed on a new
-//! `chore/import-documents-…` branch from the default branch, pushed, and a
-//! pull request opened with `gh` when the repository is on GitHub. Your
-//! clone is put back on the branch it was on.
+//! Documents are pushed straight to main, with git as their history
+//! (agile-md-documents' ADR 0007, ticket 170): the files are committed on
+//! the repository's default branch, after catching up with origin, and
+//! pushed. It used to make a `chore/import-documents-…` branch and open a
+//! pull request.
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 
@@ -41,20 +40,14 @@ pub struct Plan {
 /// What an import did in git.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outcome {
-    /// The branch the files were committed on.
+    /// The branch the files were committed on: the default branch.
     pub branch: String,
-    /// The branch the import was made from (the default branch).
-    pub base: String,
-    /// Whether the branch reached `origin`.
+    /// The commit's message.
+    pub message: String,
+    /// Nothing left to push: pushed, or no origin to push to.
     pub pushed: bool,
-    /// The pull request's address, when one was opened.
-    pub pull_request: Option<String>,
-    /// What's left for a person to do, as commands, when amd couldn't.
-    pub still_to_do: Vec<String>,
-    /// Why amd couldn't push or open the pull request, if it couldn't.
+    /// Why it wasn't pushed, when it should have been.
     pub warning: Option<String>,
-    /// The branch the clone is back on.
-    pub back_on: String,
 }
 
 /// Works out what importing `source` into the documents repository `repo`
@@ -248,112 +241,48 @@ pub fn apply(plan: &Plan) -> Result<Outcome> {
             repo.display()
         );
     }
-    let Some(original) = git::current_branch(repo) else {
+    let Some(branch) = git::current_branch(repo) else {
         bail!("{} isn't on a branch; check one out first", repo.display());
     };
-    let origin = git::remote_url(repo);
-    if origin.is_some() {
-        // Best effort: an import offline still makes its branch.
-        let _ = git::fetch(repo);
+    // Straight to main (ADR 0007): only from the default branch, so an
+    // import can't land on whatever branch the clone happens to be on.
+    if let Some(default) = default_branch(repo)
+        && default != branch
+    {
+        bail!(
+            "{} is on {branch}, not {default}; switch to {default} first",
+            repo.display()
+        );
     }
-    let base = default_base(repo, &original, origin.is_some());
-    let branch = new_branch_name(repo);
-    git::checked(repo, &["switch", "-c", &branch, &base])?;
-
-    let committed = copy_and_commit(plan);
-    if let Err(e) = committed {
-        // Leave the files where they can be seen, on the branch.
-        return Err(e.context(format!("the import stopped on branch {branch}")));
-    }
-
-    let base_branch = base.strip_prefix("origin/").unwrap_or(&base).to_string();
-    let mut outcome = Outcome {
-        branch: branch.clone(),
-        base: base_branch.clone(),
-        pushed: false,
-        pull_request: None,
-        still_to_do: Vec::new(),
-        warning: None,
-        back_on: original.clone(),
-    };
-    match &origin {
-        None => {
-            outcome.warning = Some("the repository has no origin to push to".into());
-            outcome
-                .still_to_do
-                .push(format!("git -C {} push -u origin {branch}", repo.display()));
-        }
-        Some(url) => match git::checked(repo, &["push", "-u", "origin", &branch]) {
-            Err(e) => {
-                outcome.warning = Some(format!("{e:#}"));
-                outcome
-                    .still_to_do
-                    .push(format!("git -C {} push -u origin {branch}", repo.display()));
-                outcome
-                    .still_to_do
-                    .push(pr_command(repo, &branch, &base_branch));
-            }
-            Ok(_) => {
-                outcome.pushed = true;
-                if url.contains("github.com") {
-                    match open_pull_request(plan, &branch, &base_branch) {
-                        Ok(address) => outcome.pull_request = Some(address),
-                        Err(e) => {
-                            outcome.warning = Some(format!("{e:#}"));
-                            outcome
-                                .still_to_do
-                                .push(pr_command(repo, &branch, &base_branch));
-                        }
-                    }
-                } else {
-                    outcome.still_to_do.push(format!(
-                        "open a pull request from {branch} into {base_branch}"
-                    ));
-                }
-            }
+    let offline = crate::documents::catch_up(repo)?;
+    copy_and_commit(plan)?;
+    let message = commit_message(plan);
+    let remote = git::remote_url(repo).is_some();
+    let (pushed, warning) = match (remote, offline) {
+        (false, _) => (true, None),
+        (true, Some(w)) => (
+            false,
+            Some(format!("{w}; committed locally, push it later")),
+        ),
+        (true, None) => match crate::documents::push_or_replay(repo) {
+            Ok(()) => (true, None),
+            Err(e) => (false, Some(format!("committed, but couldn't push: {e:#}"))),
         },
-    }
-    git::checked(repo, &["switch", &original])
-        .with_context(|| format!("going back to {original}; the import is on {branch}"))?;
-    Ok(outcome)
+    };
+    Ok(Outcome {
+        branch,
+        message,
+        pushed,
+        warning,
+    })
 }
 
-/// Where the import branches from: the remote's default branch when it
-/// says, else the remote's copy of the current branch, else the current
-/// branch.
-fn default_base(repo: &Path, current: &str, has_origin: bool) -> String {
-    if has_origin {
-        if let Ok(head) = git::checked(repo, &["rev-parse", "--abbrev-ref", "origin/HEAD"])
-            && head.starts_with("origin/")
-        {
-            return head;
-        }
-        let tracking = format!("origin/{current}");
-        if git::checked(repo, &["rev-parse", "--verify", "--quiet", &tracking]).is_ok() {
-            return tracking;
-        }
-    }
-    current.to_string()
-}
-
-fn new_branch_name(repo: &Path) -> String {
-    let stamp = time::OffsetDateTime::now_utc();
-    let base = format!(
-        "chore/import-documents-{:04}{:02}{:02}-{:02}{:02}{:02}",
-        stamp.year(),
-        u8::from(stamp.month()),
-        stamp.day(),
-        stamp.hour(),
-        stamp.minute(),
-        stamp.second()
-    );
-    let mut name = base.clone();
-    let mut n = 2;
-    while git::branch_exists(repo, &name) {
-        name = format!("{base}-{n}");
-        n += 1;
-    }
-    name
+/// The remote's default branch (`origin/HEAD`), when it says.
+fn default_branch(repo: &Path) -> Option<String> {
+    git::checked(repo, &["rev-parse", "--abbrev-ref", "origin/HEAD"])
+        .ok()?
+        .strip_prefix("origin/")
+        .map(str::to_string)
 }
 
 fn copy_and_commit(plan: &Plan) -> Result<()> {
@@ -388,55 +317,6 @@ fn commit_message(plan: &Plan) -> String {
         if count == 1 { "" } else { "s" },
         source_name(plan)
     )
-}
-
-fn pr_body(plan: &Plan) -> String {
-    let mut body = format!(
-        "Imported with `amd import documents` from `{}`.\n\n",
-        plan.source.display()
-    );
-    for (_, to) in &plan.copies {
-        body.push_str(&format!("- `{to}`\n"));
-    }
-    if !plan.clashes.is_empty() {
-        body.push_str("\nAlready in the repository, so left out:\n\n");
-        for clash in &plan.clashes {
-            body.push_str(&format!("- `{clash}`\n"));
-        }
-    }
-    body
-}
-
-fn pr_command(repo: &Path, branch: &str, base: &str) -> String {
-    format!(
-        "(cd {} && gh pr create --head {branch} --base {base} --fill)",
-        repo.display()
-    )
-}
-
-fn open_pull_request(plan: &Plan, branch: &str, base: &str) -> Result<String> {
-    let out = Command::new("gh")
-        .current_dir(&plan.repo)
-        .args(["pr", "create", "--head", branch, "--base", base, "--title"])
-        .arg(commit_message(plan))
-        .arg("--body")
-        .arg(pr_body(plan))
-        .stdin(Stdio::null())
-        .output()
-        .context("running gh pr create (is gh installed?)")?;
-    if !out.status.success() {
-        let detail = String::from_utf8_lossy(&out.stderr);
-        bail!(
-            "gh pr create failed: {}",
-            detail.lines().last().unwrap_or_default()
-        );
-    }
-    Ok(String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .last()
-        .unwrap_or_default()
-        .trim()
-        .to_string())
 }
 
 #[cfg(test)]
