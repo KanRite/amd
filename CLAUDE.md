@@ -390,8 +390,11 @@ redundant. Their history is in git if it is ever wanted again.
   holds only settings and a rule limiting who may change it (151) never
   stops anyone creating tickets; a board from before still has a `next-id`
   key in `.settings`, or the oldest a `<board>/.next-id` file, and the
-  first time a number is handed out the highest of them moves into the
-  counter file and the old places are cleared) and one past the highest id
+  first time a number is recorded the highest of them moves into the
+  counter file and the old places are cleared — in `record_id`
+  (`migrate_counter`), never while `next_id` works a number out, which
+  runs before auto-commit's snapshot and on dry runs, so the `.settings`
+  change was never committed (ticket 164)) and one past the highest id
   in the columns. The counter is the
   authority — it remembers ids whose tickets have gone, archived or deleted,
   which no scan can — and the scan is the safety net, so a lost or badly
