@@ -40,7 +40,7 @@
 //!   change automatically — the audit trail for a dedicated, board-only
 //!   `{project}-tickets` repository, which has nothing else in it for a
 //!   change to ride in on (`agile-md-documents`'
-//!   `adr/0006-auto-commit-for-dedicated-tickets-repos.md`). Absent or
+//!   `adr/adr/0006-auto-commit-for-dedicated-tickets-repos.md`). Absent or
 //!   unparsable means **on** — the opposite default from every other
 //!   setting here, deliberately: this feature's whole job is broken until
 //!   it's active, so off-by-default would ship it in a state where the
@@ -205,7 +205,7 @@ pub fn path(board: &Board) -> std::path::PathBuf {
 
 /// Where `{project}-documents`'s old `.settings/` directory can be found for
 /// this board, if at all — only ever read now, by `migrate_from_documents`. Sibling-path derivation first — the standing
-/// `rfc/0003` layout, `{project}-tickets` next to `{project}-documents` —
+/// `adr/rfc/0003` layout, `{project}-tickets` next to `{project}-documents` —
 /// so this works even on a machine that's never run `amd register`. Falls
 /// back to a **project-scoped** registry lookup, `{project}-documents`,
 /// using this board's own (possibly stale, pre-migration) locally recorded

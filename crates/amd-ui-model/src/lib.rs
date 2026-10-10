@@ -499,6 +499,35 @@ pub struct HomeProject {
     pub dir: String,
     /// Left out of My work by you.
     pub hidden: bool,
+    /// Whether its own documents repository is cloned here (ticket 168):
+    /// Documents, ADRs and Ideas are greyed out when not.
+    #[serde(default)]
+    pub documents: bool,
+    /// The shared documents repository it names, if any.
+    #[serde(default)]
+    pub shared: Option<String>,
+    /// Whether that shared repository is cloned here.
+    #[serde(default)]
+    pub shared_cloned: bool,
+}
+
+/// Which documents the Documents view shows (ticket 168): the project's
+/// own repository or the shared one, and a folder in it (`docs`, `adr`,
+/// `ideas`), or everything when empty.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocScope {
+    pub shared: bool,
+    pub folder: String,
+}
+
+impl DocScope {
+    /// Whether `path` (relative to the repository) is inside the folder.
+    pub fn holds(&self, path: &str) -> bool {
+        self.folder.is_empty()
+            || path
+                .strip_prefix(self.folder.as_str())
+                .is_some_and(|rest| rest.starts_with('/'))
+    }
 }
 
 /// One ticket in My work.
@@ -828,5 +857,18 @@ mod assigned_tests {
             tickets: vec![ticket("Alice")],
         });
         assert_eq!(board.assignees(), ["Alice", "claude", "mrdoodles"]);
+    }
+
+    #[test]
+    fn a_doc_scope_holds_its_folder_only() {
+        let adr = DocScope {
+            shared: false,
+            folder: "adr".into(),
+        };
+        assert!(adr.holds("adr/adr/0001-x.md"));
+        assert!(adr.holds("adr/rfc/0002-y.md"));
+        assert!(!adr.holds("adrift.md"));
+        assert!(!adr.holds("docs/adr.md"));
+        assert!(DocScope::default().holds("anything/at/all.md"));
     }
 }

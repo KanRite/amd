@@ -87,7 +87,8 @@ assert "amd init <project> works from a plain, non-git directory" \
 assert "the found-locally tickets repo's own board records the project" \
   bash -c "grep -q '^project = widgets\$' '${plain_dir}/widgets-tickets/.settings'"
 assert "the found-locally documents repo is scaffolded, not a board" \
-  bash -c "test -d '${plain_dir}/widgets-documents/adr' \
+  bash -c "test -d '${plain_dir}/widgets-documents/adr/adr' -a -d '${plain_dir}/widgets-documents/adr/rfc' \
+    && test -d '${plain_dir}/widgets-documents/docs' -a -d '${plain_dir}/widgets-documents/ideas' \
     && test ! -d '${plain_dir}/widgets-documents/tasks' \
     && test ! -e '${plain_dir}/widgets-documents/.settings'"
 assert "init records you as the first user of a found-locally project" \

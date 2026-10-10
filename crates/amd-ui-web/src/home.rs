@@ -50,6 +50,16 @@ pub fn HomeView(home: RwSignal<Option<Result<Home, String>>>) -> impl IntoView {
     }
 }
 
+/// Opens `root`'s documents at one folder (ticket 168): `docs`, `adr` or
+/// `ideas` of its own repository, or the shared repository.
+fn open_documents(ctx: Ctx, root: String, shared: bool, folder: &str) {
+    ctx.doc_scope.set(Some(amd_ui_model::DocScope {
+        shared,
+        folder: folder.to_string(),
+    }));
+    open(ctx, root, View::Documents, None);
+}
+
 /// Opens `root`'s project at `view` (its board or its documents), then,
 /// if given, one of its tickets.
 fn open(
@@ -182,8 +192,53 @@ fn Projects(
     };
     let row = move |(p, show_dir): (HomeProject, bool)| {
         let root = p.root.clone();
-        let docs = p.root.clone();
         let flip = p.root.clone();
+        // Documents, ADRs and Ideas open folders of the project's own
+        // documents repository; Shared, the one every project shares.
+        // Greyed out when that repository isn't cloned here (ticket 168).
+        let small = "rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:border-slate-600 dark:hover:bg-slate-700";
+        let doc_button = |label: &'static str, folder: &'static str, help: &'static str| {
+            let root = p.root.clone();
+            let available = p.documents;
+            let title = if available {
+                help.to_string()
+            } else {
+                format!("{}-documents isn't cloned on this machine", p.name)
+            };
+            view! {
+                <button
+                    type="button"
+                    class=small
+                    title=title
+                    disabled=!available
+                    on:click=move |_| open_documents(ctx, root.clone(), false, folder)
+                >
+                    {label}
+                </button>
+            }
+        };
+        let shared_button = {
+            let root = p.root.clone();
+            let available = p.shared_cloned;
+            let title = match (&p.shared, available) {
+                (Some(name), true) => format!("Read {name}, the documents every project shares"),
+                (Some(name), false) => format!("{name} isn't cloned on this machine"),
+                (None, _) => {
+                    "This project names no shared documents (Admin → Shared documents)".to_string()
+                }
+            };
+            view! {
+                <button
+                    type="button"
+                    class=small
+                    title=title
+                    disabled=!available
+                    on:click=move |_| open_documents(ctx, root.clone(), true, "")
+                >
+                    "Shared"
+                </button>
+            }
+        };
         let hide = !p.hidden;
         view! {
             <li class="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
@@ -196,14 +251,10 @@ fn Projects(
                     {p.name.clone()}
                     {show_dir.then(|| view! { <span class="ml-2 text-xs font-normal text-slate-500">{p.dir.clone()}</span> })}
                 </button>
-                <button
-                    type="button"
-                    class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
-                    title="Read this project's documents"
-                    on:click=move |_| open(ctx, docs.clone(), View::Documents, None)
-                >
-                    "Documents"
-                </button>
+                {doc_button("Documents", "docs", "Read this project's documents (docs/)")}
+                {doc_button("ADRs", "adr", "Read this project's decisions and proposals (adr/)")}
+                {doc_button("Ideas", "ideas", "Read this project's ideas (ideas/)")}
+                {shared_button}
                 <button
                     type="button"
                     class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"

@@ -1,5 +1,6 @@
 //! Documents (ticket 129): the project's documents repository and the one
-//! every project shares, listed by folder on the left and read on the right.
+//! every project shares, listed by folder on the left and read on the right;
+//! from the landing page, one folder of one of them (ticket 168).
 //! Reading only: a document changes through a pull request.
 //!
 //! The reader shows HTML amdui renders (`amd-ui`'s `documents.rs`), in which
@@ -25,6 +26,26 @@ pub fn DocumentsView() -> impl IntoView {
     let doc = RwSignal::new(None::<Result<RenderedDoc, String>>);
     let open = ctx.document;
 
+    // Only the scope's repository and folder (ticket 168), or everything.
+    let shown = Memo::new(move |_| {
+        let scope = ctx.doc_scope.get();
+        sources.with(|s| {
+            s.clone().map(|r| {
+                r.map(|list| match &scope {
+                    None => list,
+                    Some(scope) => list
+                        .into_iter()
+                        .filter(|src| src.shared == scope.shared)
+                        .map(|mut src| {
+                            src.documents.retain(|d| scope.holds(&d.path));
+                            src
+                        })
+                        .collect(),
+                })
+            })
+        })
+    });
+
     let load_list = move || {
         spawn_local(async move { sources.set(Some(api::list_documents().await)) });
     };
@@ -38,7 +59,7 @@ pub fn DocumentsView() -> impl IntoView {
             spawn_local(async move { doc.set(Some(api::read_document(&source, &path).await)) });
         }
         None => {
-            let first = sources.with(|s| {
+            let first = shown.with(|s| {
                 let s = s.as_ref()?.as_ref().ok()?;
                 let source = s.iter().find(|s| !s.documents.is_empty())?;
                 let readme = source
@@ -112,7 +133,33 @@ pub fn DocumentsView() -> impl IntoView {
                 aria-label="Documents"
                 class="w-72 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-800"
             >
-                {move || match sources.get() {
+                {move || {
+                    ctx.doc_scope
+                        .get()
+                        .map(|scope| {
+                            let what = if scope.folder.is_empty() {
+                                "Shared documents".to_string()
+                            } else {
+                                format!("Only {}/", scope.folder)
+                            };
+                            view! {
+                                <div class="mb-3 flex items-center justify-between gap-2 px-2 text-xs text-slate-500">
+                                    <span>{what}</span>
+                                    <button
+                                        type="button"
+                                        class="hover:underline"
+                                        on:click=move |_| {
+                                            ctx.doc_scope.set(None);
+                                            ctx.document.set(None);
+                                        }
+                                    >
+                                        "Show everything"
+                                    </button>
+                                </div>
+                            }
+                        })
+                }}
+                {move || match shown.get() {
                     None => view! { <p class="text-slate-500">"Loading…"</p> }.into_any(),
                     Some(Err(e)) => {
                         view! { <p role="alert" class="text-red-700 dark:text-red-300">{e}</p> }
