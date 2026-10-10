@@ -320,6 +320,11 @@ pub fn App() -> impl IntoView {
                 >
                     "↻"
                 </button>
+                // The current project and its documents, beside Preferences
+                // (ticket 168).
+                <Show when=on_home>
+                    <crate::home::HomeBar />
+                </Show>
                 <Show when=move || !on_home()>
                     <button
                         class="whitespace-nowrap rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"

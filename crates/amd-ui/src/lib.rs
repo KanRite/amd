@@ -1012,6 +1012,12 @@ async fn home() -> Result<amd_ui_model::Home> {
                 })
                 .collect(),
             me: me.map(|(email, _)| email).unwrap_or_default(),
+            // The project open in this process: what the launch directory
+            // found, or the last one opened (ticket 168).
+            current: Project::open()
+                .ok()
+                .map(|p| p.repos[0].1.repo_root().display().to_string())
+                .unwrap_or_default(),
         })
     })
     .await

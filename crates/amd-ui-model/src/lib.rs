@@ -487,6 +487,11 @@ pub struct Home {
     pub projects: Vec<HomeProject>,
     /// Who "you" is (git's `user.email`); empty when git doesn't say.
     pub me: String,
+    /// The project amdui has open, and remembers for next time, by its
+    /// board repository's path (`HomeProject.root`); empty when none
+    /// (ticket 168: the top bar's picker and documents buttons act on it).
+    #[serde(default)]
+    pub current: String,
 }
 
 /// A project on the landing page.
