@@ -767,6 +767,22 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
         column,
         epic,
     });
+    // The ticket last opened (ticket 163): outlined, and scrolled into view
+    // when it becomes the one, so a jump from My work shows where it is.
+    let focused = {
+        let key = (repo.clone(), file.clone());
+        Memo::new(move |_| ctx.focus.with(|f| f.as_ref() == Some(&key)))
+    };
+    let node = NodeRef::<leptos::html::Li>::new();
+    Effect::new(move |_| {
+        if focused.get()
+            && ctx.focus_scroll.get()
+            && let Some(el) = node.get()
+        {
+            el.scroll_into_view_with_bool(false);
+            ctx.focus_scroll.set(false);
+        }
+    });
     let drag_file = file.clone();
     let is_dragging = {
         let file = file.clone();
@@ -778,14 +794,17 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
 
     view! {
         <li
+            node_ref=node
             draggable=if held { "false" } else { "true" }
             tabindex="0"
+            aria-current=move || focused.get().then_some("true")
             class=move || {
                 format!(
-                    "{} rounded-md border border-slate-200 bg-white p-2.5 text-sm shadow-sm hover:border-accent-400 focus:outline-2 focus:outline-accent-500 dark:border-slate-700 dark:bg-slate-900 {} {}",
+                    "{} rounded-md border border-slate-200 bg-white p-2.5 text-sm shadow-sm hover:border-accent-400 focus:outline-2 focus:outline-accent-500 dark:border-slate-700 dark:bg-slate-900 {} {} {}",
                     if held { "cursor-pointer" } else { "cursor-grab" },
                     if is_dragging() { "opacity-50" } else { "" },
                     if draft { "border-dashed border-amber-400 dark:border-amber-500" } else { "" },
+                    if focused.get() { "ring-2 ring-accent-500" } else { "" },
                 )
             }
             on:dragstart=move |ev: DragEvent| {

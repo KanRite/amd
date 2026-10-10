@@ -67,6 +67,13 @@ pub struct Ctx {
     /// name), shown as a column of its own beside it (ticket 109). One at
     /// a time.
     pub open_epic: RwSignal<Option<(String, String)>>,
+    /// The ticket last opened, as (repository, file name) (ticket 163): its
+    /// card is outlined and scrolled into view, so after jumping to it from
+    /// My work you can see where it is. Kept until another ticket opens.
+    pub focus: RwSignal<Option<(String, String)>>,
+    /// Whether the focused card still has to be scrolled to: once per
+    /// opening, so a reload doesn't keep pulling the board back to it.
+    pub focus_scroll: RwSignal<bool>,
     /// The ticket being dragged: its file name and where it came from.
     pub dragging: RwSignal<Option<(String, Place)>>,
     /// How every column and epic is ordered (the Sort dropdown).
@@ -113,6 +120,21 @@ impl Ctx {
 
     /// Opens a ticket in the editor.
     pub fn open_ticket(self, place: Place, file: String) {
+        // Where it is on the board (ticket 163): its card is outlined, and
+        // one filed in an epic or sprint has that group's column opened.
+        // A folded column is unfolded, so the card is there to see.
+        self.focus.set(Some((place.repo.clone(), file.clone())));
+        self.focus_scroll.set(true);
+        if place.column == Column::Backlog
+            && let Some(group) = &place.epic
+        {
+            self.open_epic
+                .set(Some((place.repo.clone(), group.clone())));
+        } else {
+            self.collapsed.update(|c| {
+                c.remove(&place.column);
+            });
+        }
         spawn_local(async move {
             match api::open_ticket(&place, &file).await {
                 Ok(doc) => self.overlay.set(Some(Overlay::Editor(doc))),
@@ -203,6 +225,8 @@ pub fn App() -> impl IntoView {
         collapsed: RwSignal::new(BTreeSet::new()),
         epics_collapsed: RwSignal::new(false),
         open_epic: RwSignal::new(None),
+        focus: RwSignal::new(None),
+        focus_scroll: RwSignal::new(false),
         dragging: RwSignal::new(None),
         sort: RwSignal::new(SortOrder::default()),
         search: RwSignal::new(String::new()),

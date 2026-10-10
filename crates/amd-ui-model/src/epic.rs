@@ -203,6 +203,40 @@ fn fnv1a(text: &str) -> u64 {
     })
 }
 
+/// Where a ticket is, said in a line (ticket 163): `acme-api › Backlog ›
+/// Sprint s12 (started)`, or `Doing · from epic checkout` for one that has
+/// moved on from its group. `repo` is named only when there's more than one
+/// board in view; `group` is the epic or sprint (filed in its folder when
+/// `filed`, else only labelled), with its kind and whether it's started.
+pub fn where_it_is(
+    repo: Option<&str>,
+    column: Column,
+    group: Option<(&str, GroupKind, bool)>,
+    filed: bool,
+) -> String {
+    let mut out = String::new();
+    if let Some(repo) = repo.filter(|r| !r.is_empty()) {
+        out.push_str(repo);
+        out.push_str(" › ");
+    }
+    out.push_str(column.title());
+    if let Some((name, kind, started)) = group {
+        let kind = match kind {
+            GroupKind::Epic => "epic",
+            GroupKind::Sprint => "sprint",
+        };
+        let started = if started { " (started)" } else { "" };
+        if filed {
+            let mut kind = kind.to_string();
+            kind[..1].make_ascii_uppercase();
+            out.push_str(&format!(" › {kind} {name}{started}"));
+        } else {
+            out.push_str(&format!(" · from {kind} {name}{started}"));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,5 +389,28 @@ mod tests {
             &here,
             &Place::column(Column::Todo).in_repo("amd-tickets")
         ));
+    }
+
+    #[test]
+    fn where_a_ticket_is_reads_as_a_path() {
+        assert_eq!(where_it_is(None, Column::Doing, None, false), "Doing");
+        assert_eq!(
+            where_it_is(
+                Some("acme-api"),
+                Column::Backlog,
+                Some(("s12", GroupKind::Sprint, true)),
+                true
+            ),
+            "acme-api › Backlog › Sprint s12 (started)"
+        );
+        assert_eq!(
+            where_it_is(
+                Some(""),
+                Column::Done,
+                Some(("checkout", GroupKind::Epic, false)),
+                false
+            ),
+            "Done · from epic checkout"
+        );
     }
 }
