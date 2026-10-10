@@ -596,7 +596,7 @@ fn TagsAdmin() -> impl IntoView {
                         view! {
                             <p class="text-xs text-slate-500">
                                 "Built in: " {built_in.join(", ")}
-                                ". DRAFT keeps a ticket in the backlog until it's removed; TRIAGE marks an imported GitHub issue nobody has sorted yet. Both are always allowed and can't be removed."
+                                ". A ticket tagged DRAFT remains in the backlog until the DRAFT tag is removed. TRIAGE marks an imported GitHub issue nobody has sorted yet. Both are always allowed, and neither can be taken off the list."
                             </p>
                         }
                     })
