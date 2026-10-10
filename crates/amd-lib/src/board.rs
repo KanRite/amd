@@ -272,15 +272,27 @@ impl Board {
         self.root.join(COUNTER)
     }
 
-    /// What the next id should be, if something on disk says so. The
-    /// counter file first; a board from before ticket 150 has a `next-id`
-    /// key in `.settings` instead, and an older one `<board>/.next-id`. The
-    /// first time either is seen, the highest value found moves into the
-    /// counter file and the old places are cleared, so it happens once per
-    /// board and never hands out a number twice. Only reached on the way to
-    /// handing out a number, so the migration lands in that command's own
-    /// commit.
+    /// What the next id should be, if something on disk says so: the
+    /// highest of the counter file, a `next-id` key in `.settings` (a board
+    /// from before ticket 150) and `<board>/.next-id` (an older one). Reads
+    /// only: working out a number must change nothing, because it happens
+    /// before a command's auto-commit snapshot (ticket 164), and on a dry
+    /// run. [`migrate_counter`](Self::migrate_counter) moves them.
     fn stored_next_id(&self) -> Option<u32> {
+        let current = read_counter(&self.counter_path());
+        let in_settings = crate::board_settings::load(self).next_id();
+        let legacy = read_counter(&self.legacy_counter_path());
+        [current, in_settings, legacy].into_iter().flatten().max()
+    }
+
+    /// [`stored_next_id`](Self::stored_next_id), with the old places moved
+    /// into the counter file and cleared: the highest value found wins, so
+    /// it happens once per board and never hands out a number twice. Called
+    /// when a number is recorded, which is after the snapshot, so the
+    /// `.settings` change lands in that command's own commit (ticket 164;
+    /// it used to happen while the number was worked out, and was never
+    /// committed).
+    fn migrate_counter(&self) -> Option<u32> {
         let current = read_counter(&self.counter_path());
         let mut settings = crate::board_settings::load(self);
         let in_settings = settings.next_id();
@@ -778,7 +790,7 @@ impl Board {
     /// drafted — an abandoned draft should leave no gap.
     pub(crate) fn local_record_id(&self, used: u32) -> Result<()> {
         let next = used.saturating_add(1);
-        if self.stored_next_id().is_some_and(|stored| stored >= next) {
+        if self.migrate_counter().is_some_and(|stored| stored >= next) {
             return Ok(());
         }
         self.write_counter(next)
@@ -1904,17 +1916,22 @@ mod tests {
         settings.save(&board).unwrap();
 
         assert_eq!(board.next_id().unwrap(), 12);
+        // Working out a number changes nothing (ticket 164): it happens
+        // before the command's auto-commit snapshot.
+        assert!(!board.counter_path().exists());
+        assert_eq!(crate::board_settings::load(&board).next_id(), Some(12));
+
+        touch(&board, "012-twelve.md");
+        board.record_id(12).unwrap();
         assert_eq!(
             fs::read_to_string(board.counter_path()).unwrap().trim(),
-            "12"
+            "13"
         );
         assert_eq!(
             crate::board_settings::load(&board).next_id(),
             None,
-            "the key leaves .settings once it's moved"
+            "the key leaves .settings once a number is recorded"
         );
-        touch(&board, "012-twelve.md");
-        board.record_id(12).unwrap();
         assert_eq!(board.next_id().unwrap(), 13);
     }
 
@@ -1930,8 +1947,11 @@ mod tests {
         settings.save(&board).unwrap();
         fs::write(board.legacy_counter_path(), "6\n").unwrap();
         assert_eq!(board.next_id().unwrap(), 9);
+        touch(&board, "009-nine.md");
+        board.record_id(9).unwrap();
         assert!(!board.legacy_counter_path().exists());
         assert_eq!(crate::board_settings::load(&board).next_id(), None);
+        assert_eq!(board.next_id().unwrap(), 10);
     }
 
     #[test]
@@ -1944,16 +1964,20 @@ mod tests {
         fs::write(board.legacy_counter_path(), "9\n").unwrap();
 
         assert_eq!(board.next_id().unwrap(), 9);
+        assert!(
+            board.legacy_counter_path().exists(),
+            "reading moves nothing"
+        );
+        touch(&board, "009-nine.md");
+        board.record_id(9).unwrap();
         assert_eq!(
             fs::read_to_string(board.counter_path()).unwrap().trim(),
-            "9"
+            "10"
         );
         assert!(
             !board.legacy_counter_path().exists(),
             "the legacy file should be gone once migrated, not kept around forever"
         );
-        touch(&board, "009-nine.md");
-        board.record_id(9).unwrap();
         assert_eq!(board.next_id().unwrap(), 10);
     }
 

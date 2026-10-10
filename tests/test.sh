@@ -1318,6 +1318,28 @@ assert "amd log renders a transition with a real sha" \
   bash -c "cd '${commit_repo}' && '${AMD}' log | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}  add .*[0-9a-f]{7,}\$'"
 rm -rf "${commit_repo}"
 
+# Ticket 164: a board from before ticket 150, with its counter in
+# .settings. The first new ticket moves it to .next-id, and that change
+# has to be in the same commit, not left uncommitted.
+old_board="$(mktemp -d)"
+( cd "${old_board}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
+  && git config commit.gpgsign false \
+  && AMD_COMMIT=0 AMD_YES=1 "${AMD}" init oldstyle --local-only >/dev/null 2>&1 \
+  && rm .next-id && printf 'next-id = 5\n' >> .settings \
+  && git add -A && git commit -q -m 'ticket 164 setup: a board from before ticket 150' )
+assert "on a board with its counter in .settings, amd new commits the move too, leaving nothing behind" \
+  bash -c "cd '${old_board}' && '${AMD}' new 'After the move' --no-edit >/dev/null 2>&1 \
+    && test -f tasks/backlog/005-after-the-move.md \
+    && [ -z \"\$(git status --porcelain)\" ] \
+    && git show --stat --pretty=format: HEAD | grep -q '.settings' \
+    && git show --stat --pretty=format: HEAD | grep -q '.next-id' \
+    && ! grep -q '^next-id' .settings && [ \"\$(cat .next-id)\" = 6 ]"
+assert "...and a dry run that works out numbers changes nothing" \
+  bash -c "cd '${old_board}' && git checkout -q HEAD~1 -- .settings && rm .next-id \
+    && git add -A && git commit -q -m 'ticket 164 setup: old style again' \
+    && '${AMD}' import tickets tasks --dry-run >/dev/null 2>&1 && [ -z \"\$(git status --porcelain)\" ]"
+rm -rf "${old_board}"
+
 # Ticket 142: a board with no remote commits, and doesn't try to push.
 local_repo="$(mktemp -d)"
 ( cd "${local_repo}" && git init -q && git config user.email t@t.co && git config user.name t \
