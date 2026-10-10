@@ -962,24 +962,36 @@ async fn home() -> Result<amd_ui_model::Home> {
             }
             None => Vec::new(),
         };
+        // Nothing to do (ticket 160): work to pick from the backlogs, and
+        // any hidden project it's in shown again before the list is read.
+        let include_unassigned = my_work::include_unassigned();
+        let to_pick = match &me {
+            Some((email, name)) if work.is_empty() => {
+                let pick = my_work::to_pick(email, name.as_deref(), include_unassigned);
+                my_work::show_projects_of(&pick).map_err(err)?;
+                pick
+            }
+            _ => Vec::new(),
+        };
+        let convert = |w: my_work::WorkItem| amd_ui_model::WorkItem {
+            project: w.project,
+            project_root: w.project_root.display().to_string(),
+            repo: w.repo,
+            column: agile_md::board::Column::parse(&w.column)
+                .map(boards::from_column)
+                .unwrap_or(amd_ui_model::Column::Todo),
+            id: w.id,
+            file: format!("{}.md", w.stem),
+            title: w.title,
+            priority: w.priority,
+            points: w.points,
+            created: w.created,
+            folder: w.folder,
+        };
         Ok(amd_ui_model::Home {
-            work: work
-                .into_iter()
-                .map(|w| amd_ui_model::WorkItem {
-                    project: w.project,
-                    project_root: w.project_root.display().to_string(),
-                    repo: w.repo,
-                    column: agile_md::board::Column::parse(&w.column)
-                        .map(boards::from_column)
-                        .unwrap_or(amd_ui_model::Column::Todo),
-                    id: w.id,
-                    file: format!("{}.md", w.stem),
-                    title: w.title,
-                    priority: w.priority,
-                    points: w.points,
-                    created: w.created,
-                })
-                .collect(),
+            work: work.into_iter().map(convert).collect(),
+            to_pick: to_pick.into_iter().map(convert).collect(),
+            include_unassigned,
             projects: my_work::projects()
                 .into_iter()
                 .map(|p| amd_ui_model::HomeProject {
@@ -1000,6 +1012,13 @@ async fn home() -> Result<amd_ui_model::Home> {
 #[tauri::command]
 async fn set_project_hidden(root: String, hidden: bool) -> Result<()> {
     blocking(move || agile_md::my_work::set_hidden(Path::new(&root), hidden).map_err(err)).await
+}
+
+/// My work's "Include unassigned tickets" (ticket 160), remembered in your
+/// own config on this machine.
+#[tauri::command]
+async fn set_include_unassigned(on: bool) -> Result<()> {
+    blocking(move || agile_md::my_work::set_include_unassigned(on).map_err(err)).await
 }
 
 /// Switches to another project in the same folder (ticket 093): records
@@ -1083,6 +1102,7 @@ pub fn run() {
             load_board,
             home,
             set_project_hidden,
+            set_include_unassigned,
             board_fingerprint,
             sync_board,
             ticket_version,

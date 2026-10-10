@@ -359,6 +359,11 @@ pub async fn set_project_hidden(root: &str, hidden: bool) -> Result<(), String> 
     call("set_project_hidden", &HiddenArgs { root, hidden }).await
 }
 
+/// My work's "Include unassigned tickets" (ticket 160).
+pub async fn set_include_unassigned(on: bool) -> Result<(), String> {
+    call("set_include_unassigned", &OnArgs { on }).await
+}
+
 /// The project's documents repositories and their documents (ticket 129).
 pub async fn list_documents() -> Result<Vec<amd_ui_model::DocSource>, String> {
     call("list_documents", &NoArgs {}).await

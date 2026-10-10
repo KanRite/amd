@@ -14,6 +14,15 @@
 //! Assignees are stored as names, so "you" is your git email, looked up in
 //! each project's users list for the name the team knows you by, plus your
 //! git `user.name`. Read on demand, never cached: the markdown is the truth.
+//!
+//! **Nothing to do** (ticket 160): when none of that is yours, [`to_pick`]
+//! offers work you could take from every project, hidden ones included:
+//! with "include unassigned" on (the default), unassigned todo and doing
+//! tickets first, then backlog tickets unassigned or yours; off, only
+//! backlog tickets assigned to you. From the backlog, all the high-priority
+//! ones, else all the medium, else the low.
+//! A hidden project with something to pick is shown again
+//! ([`show_projects_of`]), since that's where the work is.
 
 use std::path::{Path, PathBuf};
 
@@ -27,6 +36,8 @@ use crate::settings::Config;
 
 /// Where the hidden projects are kept, in agile-md's own per-machine config.
 const HIDDEN: &str = "ui.hidden-projects";
+/// Whether work to pick includes unassigned tickets (ticket 160).
+const UNASSIGNED: &str = "ui.include-unassigned";
 
 /// One project on this machine.
 #[derive(Clone, Debug, Serialize)]
@@ -60,6 +71,9 @@ pub struct WorkItem {
     pub created: String,
     /// The epic or sprint it belongs to, by its `epic:` label.
     pub epic: String,
+    /// The backlog folder it's filed in (an epic or sprint), which a front
+    /// end needs to find it there; `None` outside the backlog.
+    pub folder: Option<String>,
 }
 
 /// How to order My work.
@@ -186,13 +200,161 @@ fn names_for(board: &Board, email: &str, fallback: Option<&str>) -> Vec<String> 
 /// use a different email per organisation, as leases already allow), else
 /// `email`/`name`. A board that can't be read is skipped, not fatal.
 pub fn my_work(email: &str, name: Option<&str>, include_hidden: bool, sort: Sort) -> Vec<WorkItem> {
+    let mut items = Vec::new();
+    each_board(include_hidden, email, name, |project, repo, board, mine| {
+        for column in [Column::Todo, Column::Doing] {
+            let Ok(tasks) = board.tasks_in(column) else {
+                continue;
+            };
+            for task in tasks {
+                let assignee = task.assignee().unwrap_or_default().to_lowercase();
+                if !assignee.is_empty() && mine.contains(&assignee) {
+                    items.push(item(project, repo, &task));
+                }
+            }
+        }
+    });
+    sort_items(&mut items, sort);
+    items
+}
+
+/// Work you could pick up when nothing is yours (ticket 160), from every
+/// project, hidden ones included, never a draft (a draft can't leave the
+/// backlog) or a ticket locked by someone else.
+///
+/// With `unassigned`: unassigned todo and doing tickets first, highest
+/// priority then oldest; failing those, backlog tickets that are
+/// unassigned or yours. Without: only backlog tickets assigned to you.
+/// Backlog tickets come only from the highest priority there is any of:
+/// every high one, else every medium, else every low; oldest first.
+pub fn to_pick(email: &str, name: Option<&str>, unassigned: bool) -> Vec<WorkItem> {
+    let mut started = Vec::new();
+    let mut backlog = Vec::new();
+    each_board(true, email, name, |project, repo, board, mine| {
+        let me = git::config(board.repo_root(), "user.email").unwrap_or_else(|| email.to_string());
+        for column in [Column::Todo, Column::Doing, Column::Backlog] {
+            if column != Column::Backlog && !unassigned {
+                continue;
+            }
+            let Ok(tasks) = board.tasks_in(column) else {
+                continue;
+            };
+            for task in tasks {
+                let assignee = task.assignee().unwrap_or_default();
+                // In todo and doing, only work nobody has taken: your own
+                // there is already My work.
+                if column != Column::Backlog && !assignee.trim().is_empty() {
+                    continue;
+                }
+                let lock = task.lease_active().then(|| task.locked_by()).flatten();
+                if pickable(
+                    &assignee,
+                    task.is_draft(),
+                    lock.as_deref(),
+                    mine,
+                    &me,
+                    unassigned,
+                ) {
+                    let found = item(project, repo, &task);
+                    if column == Column::Backlog {
+                        backlog.push(found);
+                    } else {
+                        started.push(found);
+                    }
+                }
+            }
+        }
+    });
+    if !started.is_empty() {
+        sort_items(&mut started, Sort::Priority);
+        return started;
+    }
+    top_tier(backlog)
+}
+
+/// Whether a ticket can be offered to you: yours (`mine`, lowercased) or,
+/// with `unassigned`, nobody's; not a draft; and not under a lease someone
+/// else holds (`lock`, the holder of a lease in force; `me`, your email).
+fn pickable(
+    assignee: &str,
+    draft: bool,
+    lock: Option<&str>,
+    mine: &[String],
+    me: &str,
+    unassigned: bool,
+) -> bool {
+    let assignee = assignee.trim().to_lowercase();
+    let free = (unassigned && assignee.is_empty()) || mine.contains(&assignee);
+    let locked_by_other = lock.is_some_and(|who| !who.eq_ignore_ascii_case(me));
+    free && !draft && !locked_by_other
+}
+
+/// Whether work to pick includes tickets nobody is assigned to (ticket
+/// 160): `ui.include-unassigned` in your own config, on unless set off.
+pub fn include_unassigned() -> bool {
+    !matches!(
+        Config::load()
+            .get(UNASSIGNED)
+            .map(|v| v.trim().to_lowercase())
+            .as_deref(),
+        Some("off" | "false" | "0" | "no")
+    )
+}
+
+/// Sets [`include_unassigned`], on this machine only.
+pub fn set_include_unassigned(on: bool) -> anyhow::Result<()> {
+    let mut config = Config::load();
+    config.set(UNASSIGNED, if on { "on" } else { "off" });
+    config.save()
+}
+
+/// Every item of the highest priority there is any of, oldest first.
+fn top_tier(items: Vec<WorkItem>) -> Vec<WorkItem> {
+    for priority in ["high", "medium", "low"] {
+        let mut tier: Vec<WorkItem> = items
+            .iter()
+            .filter(|w| w.priority == priority)
+            .cloned()
+            .collect();
+        if !tier.is_empty() {
+            sort_items(&mut tier, Sort::Age);
+            return tier;
+        }
+    }
+    Vec::new()
+}
+
+/// Shows again every hidden project `items` come from (ticket 160): work
+/// to pick is in it, so it's back on the landing page and in My work.
+/// Returns the names of the projects shown again.
+pub fn show_projects_of(items: &[WorkItem]) -> anyhow::Result<Vec<String>> {
+    let hidden = hidden();
+    let mut shown = Vec::new();
+    for item in items {
+        if hidden.contains(&item.project_root) && !shown.contains(&item.project) {
+            set_hidden(&item.project_root, false)?;
+            shown.push(item.project.clone());
+        }
+    }
+    Ok(shown)
+}
+
+/// Calls `f` once for every board of every project on this machine (hidden
+/// ones only with `include_hidden`) with the names "you" go by there. "You"
+/// is git's identity in each board's own repository (people use a different
+/// email per organisation, as leases already allow), else `email`/`name`.
+/// A repository two projects declare is visited once.
+fn each_board(
+    include_hidden: bool,
+    email: &str,
+    name: Option<&str>,
+    mut f: impl FnMut(&Project, &str, &Board, &[String]),
+) {
     let registry = Registry::load();
     let projects = projects_in(&registry, &hidden());
     let mut seen: Vec<PathBuf> = Vec::new();
-    let mut items = Vec::new();
     for project in projects.iter().filter(|p| include_hidden || !p.hidden) {
         for (repo, board) in boards_of(project, &registry) {
-            // A repository two projects declare is read once.
             if seen.contains(&board.root) {
                 continue;
             }
@@ -203,37 +365,29 @@ pub fn my_work(email: &str, name: Option<&str>, include_hidden: bool, sort: Sort
                 Some(e) => names_for(&board, e, repo_name.as_deref()),
                 None => names_for(&board, email, name),
             };
-            for column in [Column::Todo, Column::Doing] {
-                let Ok(tasks) = board.tasks_in(column) else {
-                    continue;
-                };
-                for task in tasks {
-                    let assignee = task.assignee().unwrap_or_default().to_lowercase();
-                    if assignee.is_empty() || !mine.contains(&assignee) {
-                        continue;
-                    }
-                    items.push(WorkItem {
-                        project: project.name.clone(),
-                        project_root: project.root.clone(),
-                        repo: repo.clone(),
-                        column: column.to_string(),
-                        id: task.id_display(),
-                        stem: task.stem.clone(),
-                        title: task.title(),
-                        priority: task.priority(),
-                        points: task.points().unwrap_or_default(),
-                        created: task
-                            .meta("created")
-                            .map(|c| c.trim().trim_matches('"').to_string())
-                            .unwrap_or_default(),
-                        epic: task.epic_meta().unwrap_or_default(),
-                    });
-                }
-            }
+            f(project, &repo, &board, &mine);
         }
     }
-    sort_items(&mut items, sort);
-    items
+}
+
+fn item(project: &Project, repo: &str, task: &crate::task::Task) -> WorkItem {
+    WorkItem {
+        project: project.name.clone(),
+        project_root: project.root.clone(),
+        repo: repo.to_string(),
+        column: task.column.to_string(),
+        id: task.id_display(),
+        stem: task.stem.clone(),
+        title: task.title(),
+        priority: task.priority(),
+        points: task.points().unwrap_or_default(),
+        created: task
+            .meta("created")
+            .map(|c| c.trim().trim_matches('"').to_string())
+            .unwrap_or_default(),
+        epic: task.epic_meta().unwrap_or_default(),
+        folder: task.epic.clone(),
+    }
 }
 
 /// Orders My work. Ties fall back to oldest, then project and id, so the
@@ -298,6 +452,7 @@ mod tests {
             points: points.into(),
             created: created.into(),
             epic: String::new(),
+            folder: None,
         }
     }
 
@@ -328,6 +483,53 @@ mod tests {
         ];
         sort_items(&mut items, Sort::Points);
         assert_eq!(ids(&items), ["003", "002", "001"]);
+    }
+
+    #[test]
+    fn only_the_highest_priority_there_is_is_offered() {
+        let all = vec![
+            item("low", "2026-01-01", "", "001"),
+            item("medium", "2026-03-01", "", "002"),
+            item("medium", "2026-02-01", "", "003"),
+        ];
+        assert_eq!(
+            ids(&top_tier(all.clone())),
+            ["003", "002"],
+            "no high: the mediums, oldest first"
+        );
+        let mut with_high = all.clone();
+        with_high.push(item("high", "", "", "004"));
+        assert_eq!(ids(&top_tier(with_high)), ["004"]);
+        assert_eq!(ids(&top_tier(vec![item("low", "", "", "005")])), ["005"]);
+        assert!(top_tier(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn unassigned_or_mine_and_not_a_draft_or_locked_by_someone_else() {
+        let mine = vec!["sam lee".to_string(), "sam@x.co".to_string()];
+        let me = "sam@x.co";
+        assert!(pickable("", false, None, &mine, me, true));
+        assert!(pickable("Sam Lee", false, None, &mine, me, false));
+        assert!(
+            !pickable("", false, None, &mine, me, false),
+            "unassigned left out"
+        );
+        assert!(
+            !pickable("Jo", false, None, &mine, me, true),
+            "someone else's"
+        );
+        assert!(
+            !pickable("", true, None, &mine, me, true),
+            "a draft can't leave the backlog"
+        );
+        assert!(
+            !pickable("", false, Some("jo@x.co"), &mine, me, true),
+            "locked by Jo"
+        );
+        assert!(
+            pickable("", false, Some("SAM@x.co"), &mine, me, true),
+            "my own lock"
+        );
     }
 
     #[test]

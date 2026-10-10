@@ -1,6 +1,7 @@
 //! The landing page (ticket 020): where amdui opens. Your work across every
 //! project on this machine, highest priority first, a click away from its
-//! ticket; and the projects, each a click away from its board. It's the home
+//! ticket (or, with nothing to do, backlog tickets to pick, ticket 160);
+//! and the projects, each a click away from its board. It's the home
 //! that documents, ideas and collaboration will join.
 
 use amd_ui_model::epic::Place;
@@ -33,7 +34,13 @@ pub fn HomeView(home: RwSignal<Option<Result<Home, String>>>) -> impl IntoView {
                 }
                 Some(Ok(h)) => {
                     view! {
-                        <MyWork work=h.work.clone() me=h.me.clone() />
+                        <MyWork
+                            work=h.work.clone()
+                            to_pick=h.to_pick.clone()
+                            me=h.me.clone()
+                            include_unassigned=h.include_unassigned
+                            home=home
+                        />
                         <Projects projects=h.projects.clone() home=home />
                     }
                         .into_any()
@@ -49,7 +56,7 @@ fn open(
     ctx: Ctx,
     root: String,
     view: View,
-    ticket: Option<(String, amd_ui_model::Column, String)>,
+    ticket: Option<(String, amd_ui_model::Column, Option<String>, String)>,
 ) {
     spawn_local(async move {
         match api::set_tasks_dir(&root).await {
@@ -58,15 +65,8 @@ fn open(
                 ctx.document.set(None);
                 ctx.error.set(None);
                 ctx.view.set(view);
-                if let Some((repo, column, file)) = ticket {
-                    ctx.open_ticket(
-                        Place {
-                            repo,
-                            column,
-                            epic: None,
-                        },
-                        file,
-                    );
+                if let Some((repo, column, epic, file)) = ticket {
+                    ctx.open_ticket(Place { repo, column, epic }, file);
                 }
             }
             Err(e) => ctx.error.set(Some(e)),
@@ -75,54 +75,84 @@ fn open(
 }
 
 #[component]
-fn MyWork(work: Vec<WorkItem>, me: String) -> impl IntoView {
+fn MyWork(
+    work: Vec<WorkItem>,
+    to_pick: Vec<WorkItem>,
+    me: String,
+    include_unassigned: bool,
+    home: RwSignal<Option<Result<Home, String>>>,
+) -> impl IntoView {
     let ctx = Ctx::get();
+    let set_unassigned = move |on: bool| {
+        spawn_local(async move {
+            match api::set_include_unassigned(on).await {
+                Ok(()) => load_home(home),
+                Err(e) => ctx.error.set(Some(e)),
+            }
+        });
+    };
     let empty = work.is_empty();
+    let picking = empty && !to_pick.is_empty();
     let note = if me.is_empty() {
         "git has no user.email, so amd can't tell which tickets are yours.".to_string()
+    } else if picking {
+        "Nothing in todo or doing is assigned to you. Work to pick:".to_string()
     } else {
         "Nothing in todo or doing is assigned to you.".to_string()
     };
+    let rows = if empty { to_pick } else { work };
     view! {
         <section aria-labelledby="my-work" class="flex flex-col gap-2">
-            <h2 id="my-work" class="text-lg font-semibold">"My work"</h2>
+            <div class="flex items-baseline justify-between gap-3">
+                <h2 id="my-work" class="text-lg font-semibold">"My work"</h2>
+                <label
+                    class="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300"
+                    title="With nothing assigned to you: unassigned todo and doing tickets first, then unassigned backlog tickets by priority"
+                >
+                    <input
+                        type="checkbox"
+                        prop:checked=include_unassigned
+                        on:change=move |ev| set_unassigned(event_target_checked(&ev))
+                    />
+                    "Include unassigned tickets"
+                </label>
+            </div>
             <Show when=move || empty>
                 <p class="text-sm text-slate-500">{note.clone()}</p>
             </Show>
-            <ul class="flex flex-col gap-1.5">
-                {work
-                    .into_iter()
-                    .map(|w| {
-                        let target = (w.repo.clone(), w.column, w.file.clone());
-                        let root = w.project_root.clone();
-                        let priority = w.priority.clone();
-                        let tone = match priority.as_str() {
-                            "high" => "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
-                            "medium" => "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
-                            _ => "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200",
-                        };
-                        view! {
-                            <li>
-                                <button
-                                    type="button"
-                                    class="flex w-full items-baseline gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:border-accent-400 dark:border-slate-700 dark:bg-slate-800"
-                                    title="Open this ticket on its board"
-                                    on:click=move |_| open(ctx, root.clone(), View::Board, Some(target.clone()))
-                                >
-                                    <span class=format!("rounded px-1.5 text-xs font-medium {tone}")>{priority.clone()}</span>
-                                    <span class="w-12 text-xs uppercase text-slate-500">{w.column.dir_name()}</span>
-                                    <span class="font-mono text-xs text-slate-500">{w.id.clone()}</span>
-                                    <span class="flex-1 font-medium">{w.title.clone()}</span>
-                                    {(!w.points.is_empty())
-                                        .then(|| view! { <span class="font-mono text-xs text-slate-500">{format!("{} pts", w.points)}</span> })}
-                                    <span class="text-xs text-slate-500">{w.project.clone()}</span>
-                                </button>
-                            </li>
-                        }
-                    })
-                    .collect_view()}
-            </ul>
+            <ul class="flex flex-col gap-1.5">{rows.into_iter().map(work_row).collect_view()}</ul>
         </section>
+    }
+}
+
+/// One ticket on the landing page: a click opens it on its board.
+fn work_row(w: WorkItem) -> impl IntoView {
+    let ctx = Ctx::get();
+    let target = (w.repo.clone(), w.column, w.folder.clone(), w.file.clone());
+    let root = w.project_root.clone();
+    let priority = w.priority.clone();
+    let tone = match priority.as_str() {
+        "high" => "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
+        "medium" => "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+        _ => "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200",
+    };
+    view! {
+        <li>
+            <button
+                type="button"
+                class="flex w-full items-baseline gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-sm hover:border-accent-400 dark:border-slate-700 dark:bg-slate-800"
+                title="Open this ticket on its board"
+                on:click=move |_| open(ctx, root.clone(), View::Board, Some(target.clone()))
+            >
+                <span class=format!("rounded px-1.5 text-xs font-medium {tone}")>{priority.clone()}</span>
+                <span class="w-16 text-xs uppercase text-slate-500">{w.column.dir_name()}</span>
+                <span class="font-mono text-xs text-slate-500">{w.id.clone()}</span>
+                <span class="flex-1 font-medium">{w.title.clone()}</span>
+                {(!w.points.is_empty())
+                    .then(|| view! { <span class="font-mono text-xs text-slate-500">{format!("{} pts", w.points)}</span> })}
+                <span class="text-xs text-slate-500">{w.project.clone()}</span>
+            </button>
+        </li>
     }
 }
 

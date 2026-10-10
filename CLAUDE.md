@@ -126,7 +126,19 @@ redundant. Their history is in git if it is ever wanted again.
   isn't listed (else one person's git name would match another's tickets).
   Sorted by priority then oldest (`Sort::{Priority, Age, Points}`). Read
   on demand, no cache, no fetching. `amd mine` (CLI, works from anywhere)
-  prints it; the desktop board's landing page shows it.
+  prints it; the desktop board's landing page shows it. **With nothing
+  to do** (ticket 160), `to_pick` offers work from every project, hidden
+  ones included, never a draft or a ticket leased by someone else
+  (`pickable`). With `ui.include-unassigned` on (the default; My work's
+  checkbox, `amd mine --unassigned`/`--no-unassigned`): unassigned todo
+  and doing tickets first, by priority; failing those, backlog tickets
+  unassigned or yours. Off: only backlog tickets assigned to you. From
+  the backlog, only the top priority tier there is (`top_tier`: all high,
+  else all medium, else all low), oldest first. TRIAGE tickets count. `show_projects_of` takes a hidden project
+  with work to pick off `ui.hidden-projects` for good; `amd mine` and
+  amdui's `home` both call it. `WorkItem.folder` carries a backlog
+  ticket's epic folder so the page can open it. `--json` still prints
+  only My work.
 - `crates/amd-lib/src/recover.rs` — `amd recover` (ticket 144): tickets
   removed from the board, found with `git log --diff-filter=D -M` (so a
   move between columns isn't a removal), each read back from its removing

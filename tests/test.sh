@@ -1370,6 +1370,63 @@ assert "amd mine --json gives the same list for scripts" \
   bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --json | grep -c '\"project\"' | grep -qx 6"
 rm -rf "${mw}"
 
+echo "work to pick when there's nothing to do (ticket 160):"
+# Sam has nothing in todo or doing. alpha: an unassigned todo ticket; in
+# the backlog a low unassigned ticket, a medium for Priya, a high draft and
+# a low one of Sam's. beta (hidden): a medium unassigned one and a high one
+# locked by Priya.
+wp="$(mktemp -d)"
+wph="${wp}/home"
+(
+  set -e
+  export XDG_CONFIG_HOME="${wp}/config" AMD_COMMIT=0 AMD_NO_BRANCH=1
+  mkdir -p "${wph}/work" && cd "${wph}/work"
+  for name in alpha beta; do
+    git init -q -b main "${name}-tickets"
+    ( cd "${name}-tickets" && git config user.email sam@example.com && git config user.name "Sam Lee" \
+      && "${AMD}" init "${name}" --local-only >/dev/null 2>&1 && "${AMD}" register >/dev/null 2>&1 || true )
+  done
+  cd alpha-tickets
+  "${AMD}" new "Alpha low" --no-edit >/dev/null 2>&1
+  "${AMD}" new "Alpha medium for Priya" -a "Priya Shah" --no-edit >/dev/null 2>&1 && "${AMD}" set 2 priority medium >/dev/null 2>&1
+  "${AMD}" new "Alpha high draft" --draft --no-edit >/dev/null 2>&1 && "${AMD}" set 3 priority high >/dev/null 2>&1
+  "${AMD}" new "Alpha todo nobody" --no-edit >/dev/null 2>&1 && "${AMD}" todo 4 >/dev/null 2>&1
+  "${AMD}" new "Alpha mine" -a "Sam Lee" --no-edit >/dev/null 2>&1
+  cd ../beta-tickets
+  "${AMD}" new "Beta medium" --no-edit >/dev/null 2>&1 && "${AMD}" set 1 priority medium >/dev/null 2>&1
+  "${AMD}" new "Beta high locked" --no-edit >/dev/null 2>&1 && "${AMD}" set 2 priority high >/dev/null 2>&1
+  f="$(ls tasks/backlog/002-*.md)"
+  sed -i -e 's/^locked-by: .*/locked-by: "priya@example.com"/' -e 's/^locked-until: .*/locked-until: "2099-01-01T00:00:00Z"/' "${f}"
+)
+in_wp() { (cd "${wph}/work/alpha-tickets" && env XDG_CONFIG_HOME="${wp}/config" TMPDIR="${wp}/bin" "${AMD}" "$@"); }
+mkdir -p "${wp}/bin"
+in_wp mine --hide beta >/dev/null
+assert "(beta starts hidden)" bash -c "grep '^ui.hidden-projects' '${wp}/config/agile-md/config' | grep -q beta-tickets"
+assert "with nothing to do, unassigned todo and doing work comes first" \
+  bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; out=\$(in_wp mine 2>&1) \
+    && printf '%s\\n' \"\$out\" | grep -q 'todo .*Alpha todo nobody' && ! printf '%s\\n' \"\$out\" | grep -q 'backlog'"
+(cd "${wph}/work/alpha-tickets" && env XDG_CONFIG_HOME="${wp}/config" AMD_COMMIT=0 "${AMD}" assign 4 "Priya Shah" >/dev/null 2>&1)
+assert "failing that, the backlog's highest priority it can take, from a hidden project too" \
+  bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; out=\$(in_wp mine 2>&1) \
+    && printf '%s\\n' \"\$out\" | grep -q 'work to pick' \
+    && printf '%s\\n' \"\$out\" | grep -q 'backlog  medium .*beta .*Beta medium' \
+    && printf '%s\\n' \"\$out\" | grep -q \"beta has work to pick, so it's back in your work\" \
+    && ! printf '%s\\n' \"\$out\" | grep -q 'Alpha low\\|Priya\\|draft\\|locked'"
+assert "...and the hidden project it found work in is shown again" \
+  bash -c "! grep '^ui.hidden-projects' '${wp}/config/agile-md/config' | grep -q beta-tickets"
+assert "a high one it can take wins over every medium" \
+  bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; (cd '${wph}/work/alpha-tickets' && env XDG_CONFIG_HOME='${wp}/config' AMD_COMMIT=0 '${AMD}' set 1 priority high >/dev/null) \
+    && out=\$(in_wp mine) && printf '%s\\n' \"\$out\" | grep -q 'Alpha low' && ! printf '%s\\n' \"\$out\" | grep -q 'Beta medium'"
+assert "--no-unassigned offers only backlog tickets assigned to you, and is remembered" \
+  bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; out=\$(in_wp mine --no-unassigned) \
+    && printf '%s\\n' \"\$out\" | grep -q 'Alpha mine' && ! printf '%s\\n' \"\$out\" | grep -q 'Alpha low' \
+    && grep -qx 'ui.include-unassigned = off' '${wp}/config/agile-md/config' \
+    && in_wp mine | grep -q 'Alpha mine' && in_wp mine --unassigned | grep -q 'Alpha low'"
+assert "once something is yours, it's back to My work alone" \
+  bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; (cd '${wph}/work/alpha-tickets' && env XDG_CONFIG_HOME='${wp}/config' AMD_COMMIT=0 AMD_NO_BRANCH=1 '${AMD}' assign 1 @me >/dev/null && env XDG_CONFIG_HOME='${wp}/config' AMD_COMMIT=0 AMD_NO_BRANCH=1 '${AMD}' todo 1 >/dev/null 2>&1) \
+    && out=\$(in_wp mine) && ! printf '%s\\n' \"\$out\" | grep -q 'work to pick' && printf '%s\\n' \"\$out\" | grep -q 'todo .*Alpha low'"
+rm -rf "${wp}"
+
 echo "renumber (ticket 146):"
 rn="$(mktemp -d)"
 ( cd "${rn}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
