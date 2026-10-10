@@ -467,6 +467,23 @@ pub struct RenderedDoc {
     /// shown as text, a link to another document is `#doc:<path>`, a link
     /// amd won't follow is `#`, and images are inlined as data.
     pub html: String,
+    /// Set when this is an earlier version of the document, not the
+    /// current one (ticket 169).
+    #[serde(default)]
+    pub version: Option<DocVersion>,
+}
+
+/// One version of a document, from git (ticket 169).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocVersion {
+    pub commit: String,
+    pub short: String,
+    pub author: String,
+    /// `YYYY-MM-DD HH:MM`.
+    pub date: String,
+    pub subject: String,
+    /// The document's path at that commit.
+    pub path: String,
 }
 
 /// The landing page (ticket 020): your work across every project on this

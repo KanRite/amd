@@ -381,6 +381,55 @@ pub async fn read_document(source: &str, path: &str) -> Result<amd_ui_model::Ren
 }
 
 #[derive(Serialize)]
+struct VersionArgs<'a> {
+    source: &'a str,
+    path: &'a str,
+    commit: &'a str,
+}
+
+/// A document's last versions, newest first (ticket 169).
+pub async fn document_history(
+    source: &str,
+    path: &str,
+) -> Result<Vec<amd_ui_model::DocVersion>, String> {
+    call("document_history", &DocArgs { source, path }).await
+}
+
+/// An earlier version of a document, rendered for reading.
+pub async fn read_document_version(
+    source: &str,
+    path: &str,
+    commit: &str,
+) -> Result<amd_ui_model::RenderedDoc, String> {
+    call(
+        "read_document_version",
+        &VersionArgs {
+            source,
+            path,
+            commit,
+        },
+    )
+    .await
+}
+
+/// Puts a document back as it was at `commit`, as a new commit, pushed.
+pub async fn restore_document(
+    source: &str,
+    path: &str,
+    commit: &str,
+) -> Result<SyncReport, String> {
+    call(
+        "restore_document",
+        &VersionArgs {
+            source,
+            path,
+            commit,
+        },
+    )
+    .await
+}
+
+#[derive(Serialize)]
 struct UrlArgs<'a> {
     url: &'a str,
 }

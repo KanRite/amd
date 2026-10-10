@@ -1,14 +1,15 @@
 //! Documents (ticket 129): the project's documents repository and the one
 //! every project shares, listed by folder on the left and read on the right;
 //! from the landing page, one folder of one of them (ticket 168).
-//! Reading only: a document changes through a pull request.
+//! Each document has a History panel (ticket 169): its versions from git,
+//! any of them readable, and Restore, which puts one back as a new commit.
 //!
 //! The reader shows HTML amdui renders (`amd-ui`'s `documents.rs`), in which
 //! nothing runs: raw HTML is text, images are inlined. Clicks on its links
 //! are caught here, so nothing navigates the window — `#doc:` links open in
 //! the reader, web and mail links in the system's browser or mail program.
 
-use amd_ui_model::{DocSource, RenderedDoc};
+use amd_ui_model::{DocSource, DocVersion, RenderedDoc};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
@@ -25,6 +26,53 @@ pub fn DocumentsView() -> impl IntoView {
     let sources = RwSignal::new(None::<Result<Vec<DocSource>, String>>);
     let doc = RwSignal::new(None::<Result<RenderedDoc, String>>);
     let open = ctx.document;
+    // The open document's History panel (ticket 169): its versions, whether
+    // it's showing, and what a Restore said when it failed.
+    let history = RwSignal::new(None::<Result<Vec<DocVersion>, String>>);
+    let show_history = RwSignal::new(false);
+    let restore_note = RwSignal::new(None::<String>);
+    let load_history = move || {
+        if let Some((source, path)) = open.get_untracked() {
+            spawn_local(async move {
+                history.set(Some(api::document_history(&source, &path).await));
+            });
+        }
+    };
+    // Another document: back to its current version, panel closed.
+    Effect::new(move |_| {
+        open.track();
+        show_history.set(false);
+        history.set(None);
+        restore_note.set(None);
+    });
+    let view_version = move |commit: Option<String>| {
+        let Some((source, path)) = open.get_untracked() else {
+            return;
+        };
+        restore_note.set(None);
+        spawn_local(async move {
+            let read = match commit {
+                Some(commit) => api::read_document_version(&source, &path, &commit).await,
+                None => api::read_document(&source, &path).await,
+            };
+            doc.set(Some(read));
+        });
+    };
+    let restore = move |commit: String| {
+        let Some((source, path)) = open.get_untracked() else {
+            return;
+        };
+        spawn_local(async move {
+            match api::restore_document(&source, &path, &commit).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    doc.set(Some(api::read_document(&source, &path).await));
+                    history.set(Some(api::document_history(&source, &path).await));
+                }
+                Err(e) => restore_note.set(Some(e)),
+            }
+        });
+    };
 
     // Only the scope's repository and folder (ticket 168), or everything.
     let shown = Memo::new(move |_| {
@@ -191,9 +239,62 @@ pub fn DocumentsView() -> impl IntoView {
                     }
                     Some(Ok(d)) => {
                         let place = format!("{} / {}", d.source, d.path);
+                        let banner = d.version.clone().map(|v| {
+                            let commit = v.commit.clone();
+                            view! {
+                                <div
+                                    role="status"
+                                    class="mb-4 flex flex-wrap items-center gap-3 rounded border border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-100"
+                                >
+                                    <span class="flex-1">
+                                        {format!("The version of {} by {} ({}).", v.date, v.author, v.short)}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        class="rounded bg-accent-600 px-3 py-1 text-sm font-medium text-white hover:bg-accent-500"
+                                        on:click=move |_| restore(commit.clone())
+                                    >
+                                        "Restore this version"
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="hover:underline"
+                                        on:click=move |_| view_version(None)
+                                    >
+                                        "Back to the current version"
+                                    </button>
+                                </div>
+                            }
+                        });
+                        let showing = d.version.as_ref().map(|v| v.commit.clone());
                         view! {
                             <div class="mx-auto max-w-4xl p-8">
-                                <p class="mb-4 font-mono text-xs text-slate-500">{place}</p>
+                                <div class="mb-4 flex items-center gap-3">
+                                    <p class="flex-1 font-mono text-xs text-slate-500">{place}</p>
+                                    <button
+                                        type="button"
+                                        class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                                        aria-expanded=move || show_history.get().to_string()
+                                        on:click=move |_| {
+                                            let opening = !show_history.get_untracked();
+                                            show_history.set(opening);
+                                            if opening {
+                                                load_history();
+                                            }
+                                        }
+                                    >
+                                        "History"
+                                    </button>
+                                </div>
+                                <Show when=move || show_history.get()>
+                                    <HistoryPanel history showing=showing.clone() view_version />
+                                </Show>
+                                {move || {
+                                    restore_note
+                                        .get()
+                                        .map(|e| view! { <p role="alert" class="mb-3 text-sm text-red-700 dark:text-red-300">{e}</p> })
+                                }}
+                                {banner}
                                 <div class="doc" inner_html=d.html on:click=on_click></div>
                             </div>
                         }
@@ -202,6 +303,66 @@ pub fn DocumentsView() -> impl IntoView {
                 }}
             </article>
         </div>
+    }
+}
+
+/// A document's versions, newest first (ticket 169): the first is the
+/// current one; any other opens read-only in the reader, with Restore.
+#[component]
+fn HistoryPanel(
+    history: RwSignal<Option<Result<Vec<DocVersion>, String>>>,
+    showing: Option<String>,
+    view_version: impl Fn(Option<String>) + Copy + Send + Sync + 'static,
+) -> impl IntoView {
+    view! {
+        <section
+            aria-label="History"
+            class="mb-4 rounded border border-slate-200 bg-white p-2 text-sm dark:border-slate-700 dark:bg-slate-800"
+        >
+            {move || match history.get() {
+                None => view! { <p class="px-2 text-xs text-slate-500">"Reading the history…"</p> }.into_any(),
+                Some(Err(e)) => view! { <p role="alert" class="px-2 text-xs text-red-700 dark:text-red-300">{e}</p> }.into_any(),
+                Some(Ok(list)) => {
+                    let showing = showing.clone();
+                    view! {
+                        <ul class="flex flex-col">
+                            {list
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, v)| {
+                                    let current = i == 0;
+                                    let here = match &showing {
+                                        Some(c) => *c == v.commit,
+                                        None => current,
+                                    };
+                                    let commit = v.commit.clone();
+                                    view! {
+                                        <li>
+                                            <button
+                                                type="button"
+                                                class="flex w-full items-baseline gap-3 rounded px-2 py-1 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+                                                class=("bg-accent-100", here)
+                                                class=("dark:bg-accent-900", here)
+                                                title=format!("{} ({})", v.subject, v.short)
+                                                on:click=move |_| {
+                                                    view_version(if current { None } else { Some(commit.clone()) })
+                                                }
+                                            >
+                                                <span class="font-mono text-xs text-slate-500">{v.date.clone()}</span>
+                                                <span class="text-xs">{v.author.clone()}</span>
+                                                <span class="flex-1 truncate">{v.subject.clone()}</span>
+                                                {current.then(|| view! { <span class="text-xs text-slate-500">"current"</span> })}
+                                            </button>
+                                        </li>
+                                    }
+                                })
+                                .collect_view()}
+                        </ul>
+                    }
+                        .into_any()
+                }
+            }}
+        </section>
     }
 }
 

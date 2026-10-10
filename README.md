@@ -388,12 +388,16 @@ disagree.
   this machine). **⌂ Home** in a board's header comes back. "You" is git's
   identity in each project's own repository, so a different email per
   organisation works.
-- **Board | Documents**: a project's documents beside its board. The left
-  lists every markdown file in the project's `{project}-documents`
-  repository by folder, titled by its first heading, and the right reads
-  one: tables, code, task lists and pictures from the repository. Links
-  between documents open in the reader; web links open in your browser.
-  Reading only, for now: documents change through pull requests. A
+- **Documents**: a project's documents, from the landing page's top bar
+  (Documents, ADRs, Ideas, Shared). The left lists the markdown files in
+  the project's `{project}-documents` repository by folder (`adr/adr`,
+  `adr/rfc`, `docs`, `ideas`), titled by their first heading, and the right
+  reads one: tables, code, task lists and pictures from the repository.
+  Links between documents open in the reader; web links open in your
+  browser. **History** on any document lists its versions from git; open
+  one to read it, and **Restore this version** puts it back as a new
+  commit, pushed, so a restore can itself be undone. Documents are pushed
+  straight to main rather than reviewed in pull requests. A
   documents repository the whole organisation shares (standards, the
   handbook) can sit beside it: name it in Admin, or with
   `amd shared-documents <repository>`, and clone it next to the project's

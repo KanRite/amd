@@ -703,18 +703,103 @@ async fn list_documents() -> Result<Vec<amd_ui_model::DocSource>> {
 #[tauri::command]
 async fn read_document(source: String, path: String) -> Result<amd_ui_model::RenderedDoc> {
     blocking(move || {
-        let project = Project::open()?;
-        let root = agile_md::documents::sources(&project.repos[0].1)
-            .into_iter()
-            .find(|s| s.name == source)
-            .ok_or_else(|| format!("{source} isn't one of this project's documents repositories"))?
-            .root
-            .ok_or_else(|| format!("{source} isn't cloned on this machine"))?;
+        let root = documents_root(&source)?;
         let text = agile_md::documents::read(&root, &path).map_err(err)?;
         Ok(amd_ui_model::RenderedDoc {
             html: documents::render(&root, &path, &text),
             source,
             path,
+            version: None,
+        })
+    })
+    .await
+}
+
+/// Where the documents repository `source` (the project's own or the
+/// shared one) is cloned; an error for any other name, or one not cloned.
+fn documents_root(source: &str) -> Result<PathBuf> {
+    let project = Project::open()?;
+    agile_md::documents::sources(&project.repos[0].1)
+        .into_iter()
+        .find(|s| s.name == source)
+        .ok_or_else(|| format!("{source} isn't one of this project's documents repositories"))?
+        .root
+        .ok_or_else(|| format!("{source} isn't cloned on this machine"))
+}
+
+fn doc_version(v: agile_md::documents::Version) -> amd_ui_model::DocVersion {
+    amd_ui_model::DocVersion {
+        commit: v.commit,
+        short: v.short,
+        author: v.author,
+        date: v.date,
+        subject: v.subject,
+        path: v.path,
+    }
+}
+
+/// The last 20 versions of a document, newest first (ticket 169).
+#[tauri::command]
+async fn document_history(source: String, path: String) -> Result<Vec<amd_ui_model::DocVersion>> {
+    blocking(move || {
+        let root = documents_root(&source)?;
+        Ok(agile_md::documents::history(&root, &path, 20)
+            .map_err(err)?
+            .into_iter()
+            .map(doc_version)
+            .collect())
+    })
+    .await
+}
+
+/// An earlier version of a document, rendered for the reader against
+/// today's tree (images, links) (ticket 169).
+#[tauri::command]
+async fn read_document_version(
+    source: String,
+    path: String,
+    commit: String,
+) -> Result<amd_ui_model::RenderedDoc> {
+    blocking(move || {
+        let root = documents_root(&source)?;
+        let version = agile_md::documents::history(&root, &path, usize::MAX)
+            .map_err(err)?
+            .into_iter()
+            .find(|v| v.commit == commit)
+            .ok_or_else(|| format!("{commit} isn't a version of {path}"))?;
+        let text = agile_md::documents::read_version(&root, &version.path, &version.commit)
+            .map_err(err)?;
+        Ok(amd_ui_model::RenderedDoc {
+            html: documents::render(&root, &path, &text),
+            source,
+            path,
+            version: Some(doc_version(version)),
+        })
+    })
+    .await
+}
+
+/// Puts a document back as it was at `commit`, as a new commit, pushed
+/// (ticket 169; ADR 0007). Serialised with every other write.
+#[tauri::command]
+async fn restore_document(
+    state: Tauri<'_, AppState>,
+    source: String,
+    path: String,
+    commit: String,
+) -> Result<SyncReport> {
+    let writing = Arc::clone(&state.writing);
+    blocking(move || {
+        let _guard = writing
+            .lock()
+            .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
+        let root = documents_root(&source)?;
+        let done = agile_md::documents::restore(&root, &path, &commit).map_err(err)?;
+        Ok(SyncReport {
+            committed: true,
+            pushed: done.pushed,
+            warning: done.warning,
+            message: done.message,
         })
     })
     .await
@@ -1142,6 +1227,9 @@ pub fn run() {
             import_issues,
             set_triage_priority,
             list_documents,
+            document_history,
+            read_document_version,
+            restore_document,
             read_document,
             open_external,
             auto_commit,
