@@ -429,6 +429,13 @@ redundant. Their history is in git if it is ever wanted again.
   (`board_settings::{tags, add_tag, remove_tag}`), with `prevent-arbitrary-tags` (formerly `tags-only`, still read and renamed on the next write; Admin's "Prevent arbitrary tags", **on unless set to
 off**, ticket 141) to
   refuse unlisted tags (`check_tags`: a warning, or an error when on).
+  **Every list starts with the built-ins** (DRAFT, TRIAGE; ticket 167):
+  a project that has listed nothing else allows only those while the
+  setting is on (it used to allow any tag with no list), the form and
+  `TagPicker` offer the list, and `amd tags` prints a `built in:` line
+  rather than counting them as unlisted. Ticket 167 also re-cased and
+  listed the tags in use on agile-md and fantastic-tools once, by hand
+  (lite-actions' tickets weren't committed, so it was left).
   `model::remove_unused_tag` refuses a tag any ticket on the project's
   boards carries (`model::tag_counts`, archive excluded), so removing one
   never changes a ticket. CLI: `amd tags [add|remove|only on|off]`, and

@@ -596,13 +596,13 @@ fn TagsAdmin() -> impl IntoView {
                         view! {
                             <p class="text-xs text-slate-500">
                                 "Built in: " {built_in.join(", ")}
-                                ". DRAFT keeps a ticket in the backlog until it's removed; TRIAGE marks an imported GitHub issue nobody has sorted yet. Both are always allowed and can't be removed."
+                                ". A ticket tagged DRAFT remains in the backlog until the DRAFT tag is removed. TRIAGE marks an imported GitHub issue nobody has sorted yet. Both are always allowed, and neither can be taken off the list."
                             </p>
                         }
                     })
             }}
             <p class="text-xs text-slate-500">
-                "Tags are always UPPERCASE. A tag can only be removed once no ticket on the project's boards carries it. With \"Prevent arbitrary tags\" on (the default), only these tags can be used; off, any tag can be typed, and ones not on the list are flagged. With no list, any tag goes. Saved with the tickets, in .settings, and committed and pushed."
+                "Tags are always UPPERCASE. A tag can only be removed once no ticket on the project's boards carries it. With \"Prevent arbitrary tags\" on (the default), only these tags can be used; off, any tag can be typed, and ones not on the list are flagged. DRAFT and TRIAGE are always on it, so with nothing else listed only they can be used. Saved with the tickets, in .settings, and committed and pushed."
             </p>
         </section>
     }

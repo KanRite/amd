@@ -103,7 +103,7 @@ rest:
 | `branch-name` | automatic | `<branch-type>/<title>`, empty without a branch type |
 | `parent`      | optional | the ticket this sits under, any depth |
 | `related`     | optional | ids of tickets this depends on |
-| `tags`        | optional | always UPPERCASE; from the project's tag list if it has one |
+| `tags`        | optional | always UPPERCASE; from the project's tag list (DRAFT and TRIAGE are always on it) |
 | `created`     | automatic | the date |
 | `created-by`  | automatic | who made it, `Name <email>`; never changes |
 
@@ -114,11 +114,13 @@ between columns doesn't count), so an edit made in any editor is credited
 to the right person. A ticket made before `created-by` existed is credited
 from git, and gets the field the next time it's saved.
 
-**Tags** are always UPPERCASE, so they stand out. A project can keep a tag
+**Tags** are always UPPERCASE, so they stand out. Each project keeps a tag
 list (Admin in the desktop board, or `amd tags`), saved in the tickets
-repository's `.settings`. The editor then offers it as a sorted dropdown, and
-a tag that isn't on it is refused: "Prevent arbitrary tags" is on by
-default. Turn it off (`amd tags only off`) to allow other tags, which `amd
+repository's `.settings`. Every list starts with the built-in DRAFT and
+TRIAGE; add the project's own with `amd tags add`. The editor offers the
+list as a sorted dropdown, and a tag that isn't on it is refused: "Prevent
+arbitrary tags" is on by default, so a new project allows only DRAFT and
+TRIAGE until you add more. Turn it off (`amd tags only off`) to allow other tags, which `amd
 new` then only warns about and the editor shows dashed. A tag can only be removed from
 the list once no ticket carries it. Matching ignores case, so a ticket written
 before tags were uppercase still matches.

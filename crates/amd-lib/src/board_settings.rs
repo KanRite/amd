@@ -595,13 +595,13 @@ impl BoardSettings {
     }
 
     /// Checks a ticket's tags against the list: `Ok(None)` when they're all
-    /// listed (or there's no list), `Ok(Some(warning))` naming the unlisted
-    /// ones, or an error naming them when only listed tags are allowed.
+    /// listed or built in, `Ok(Some(warning))` naming the unlisted ones, or
+    /// an error naming them when only listed tags are allowed. Every
+    /// project's list starts with the built-in tags (DRAFT, TRIAGE), so a
+    /// project that has listed nothing else allows only those while
+    /// arbitrary tags are prevented (ticket 167; it used to allow any tag).
     pub fn check_tags(&self, tags: &[String]) -> Result<Option<String>> {
         let listed = self.tags();
-        if listed.is_empty() {
-            return Ok(None);
-        }
         let unlisted: Vec<String> = crate::task::normalize_tags(tags)
             .into_iter()
             .filter(|tag| !listed.contains(tag) && !crate::task::is_reserved_tag(tag))
@@ -817,10 +817,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut settings = load(&board(dir.path()));
         let tags = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // Nothing listed: only the built-ins (ticket 167), so another tag
+        // is refused while arbitrary tags are prevented (the default)...
+        assert!(settings.check_tags(&tags(&["anything"])).is_err());
         assert_eq!(
-            settings.check_tags(&tags(&["anything"])).unwrap(),
-            None,
-            "no list, any tag"
+            settings.check_tags(&tags(&["draft", "triage"])).unwrap(),
+            None
         );
 
         settings.add_tag("FUTURE").unwrap();
