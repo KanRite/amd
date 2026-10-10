@@ -1,8 +1,10 @@
 //! A project's documents (ticket 129): the `{project}-documents` repository
 //! `amd init` makes beside the tickets one (ADRs, RFCs, docs), and one
 //! documents repository shared by every project, named in the project's
-//! `.settings` (`shared-documents`). Read only: documents are reviewed
-//! through pull requests, so writing one is a branch and a PR, not a save.
+//! `.settings` (`shared-documents`). Documents are pushed straight to main
+//! with git as their history (agile-md-documents' ADR 0007): [`history`]
+//! lists a document's versions, [`read_version`] reads one, and
+//! [`restore`] writes it back as a new commit and pushes it (ticket 169).
 //!
 //! Every read is confined to its repository: a path is relative, made of
 //! plain names (no `..`, no root), and must still be inside the repository
@@ -16,6 +18,7 @@ use anyhow::{Context, Result, bail};
 use crate::board::Board;
 use crate::board_settings;
 use crate::current_project;
+use crate::git;
 use crate::registry::{self, Registry};
 
 /// The largest file amd reads for the reader: documents and the images
@@ -255,6 +258,188 @@ pub fn join_link(from: &str, link: &str) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join("/"))
 }
 
+/// One version of a document, from git (ticket 169).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Version {
+    pub commit: String,
+    pub short: String,
+    pub author: String,
+    pub email: String,
+    /// `YYYY-MM-DD HH:MM`, the commit's date.
+    pub date: String,
+    pub subject: String,
+    /// The document's path at that commit: it may since have been renamed.
+    pub path: String,
+}
+
+/// What [`restore`] did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Restored {
+    /// The commit message.
+    pub message: String,
+    pub pushed: bool,
+    /// Why it wasn't pushed, when it should have been.
+    pub warning: Option<String>,
+}
+
+/// The document `relative`'s versions, newest first, at most `limit`:
+/// `git log --follow`, so its history carries on across a rename (such as
+/// `adr/` becoming `adr/adr/`).
+pub fn history(root: &Path, relative: &str, limit: usize) -> Result<Vec<Version>> {
+    resolve(root, relative)?;
+    // Capped at git's own largest count: `usize::MAX` means every version.
+    let limit = format!("-n{}", limit.clamp(1, i32::MAX as usize));
+    let out = git::checked(
+        root,
+        &[
+            "log",
+            "--follow",
+            &limit,
+            "--date=format:%Y-%m-%d %H:%M",
+            "--format=%x1e%H%x1f%h%x1f%an%x1f%ae%x1f%ad%x1f%s",
+            "--name-only",
+            "--",
+            relative,
+        ],
+    )?;
+    Ok(parse_history(&out))
+}
+
+/// Reads `git log`'s output as [`history`] asks for it: each commit starts
+/// with a record separator, its fields split by unit separators, then the
+/// name of the file at that commit.
+fn parse_history(out: &str) -> Vec<Version> {
+    out.split('\u{1e}')
+        .filter_map(|record| {
+            let mut lines = record.lines().filter(|l| !l.trim().is_empty());
+            let fields: Vec<&str> = lines.next()?.split('\u{1f}').collect();
+            let path = lines.next()?.trim().to_string();
+            let [commit, short, author, email, date, subject] = fields[..] else {
+                return None;
+            };
+            Some(Version {
+                commit: commit.to_string(),
+                short: short.to_string(),
+                author: author.to_string(),
+                email: email.to_string(),
+                date: date.to_string(),
+                subject: subject.to_string(),
+                path,
+            })
+        })
+        .collect()
+}
+
+/// The text of `path` as it was at `commit`.
+pub fn read_version(root: &Path, path: &str, commit: &str) -> Result<String> {
+    if commit.len() < 4 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        bail!("{commit:?} isn't a commit");
+    }
+    if !is_markdown(path)
+        || !Path::new(path)
+            .components()
+            .all(|part| matches!(part, Component::Normal(_)))
+    {
+        bail!("{path:?} isn't a document in the repository");
+    }
+    let size = git::checked(root, &["cat-file", "-s", &format!("{commit}:{path}")])?;
+    if size.trim().parse::<u64>().unwrap_or(u64::MAX) > MAX_FILE {
+        bail!("{path} at {commit} is too big to show");
+    }
+    // Exactly as stored: `git::checked` trims, which would lose trailing
+    // newlines and make an unchanged document look changed.
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["show", &format!("{commit}:{path}")])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .context("running git show")?;
+    if !out.status.success() {
+        bail!(
+            "reading {path} at {commit}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    String::from_utf8(out.stdout).with_context(|| format!("{path} at {commit} isn't UTF-8 text"))
+}
+
+/// Puts the document `relative` back as it was at `commit`: its text then,
+/// written to its path now, committed as a new commit and pushed (so a
+/// restore can be undone the same way). Refused when the document has
+/// uncommitted changes, when the clone has diverged from origin, and when
+/// there's nothing to restore. A push that fails after the commit keeps the
+/// commit and says why, as auto-commit does.
+///
+/// A small sync of its own rather than `sync::catch_up`, which is about
+/// boards: tickets, duplicate ids, board settings.
+pub fn restore(root: &Path, relative: &str, commit: &str) -> Result<Restored> {
+    let full = resolve(root, relative)?;
+    let dirty = git::checked(root, &["status", "--porcelain", "--", relative])?;
+    if !dirty.trim().is_empty() {
+        bail!("{relative} has changes that aren't committed; commit or discard them first");
+    }
+    let remote = git::remote_url(root).is_some();
+    let mut warning = None;
+    if remote {
+        match git::fetch(root) {
+            Err(_) => warning = Some("couldn't reach origin; restored locally".to_string()),
+            Ok(()) => match git::ahead_behind(root) {
+                Some((0, behind)) if behind > 0 => git::merge_ff_only(root)?,
+                Some((ahead, behind)) if ahead > 0 && behind > 0 => bail!(
+                    "{} has diverged from origin; pull and sort that out first",
+                    root.display()
+                ),
+                _ => {}
+            },
+        }
+    }
+    let version = history(root, relative, usize::MAX)?
+        .into_iter()
+        .find(|v| v.commit.starts_with(commit) || commit.starts_with(&v.short))
+        .with_context(|| format!("{commit} isn't a version of {relative}"))?;
+    let old = read_version(root, &version.path, &version.commit)?;
+    let now = fs::read_to_string(&full).unwrap_or_default();
+    if old == now {
+        bail!("{relative} is already as it was at {}", version.short);
+    }
+    fs::write(&full, &old).with_context(|| format!("writing {relative}"))?;
+    let message = format!(
+        "restore: {relative} to {} ({}, {})",
+        version.short, version.date, version.author
+    );
+    let paths = std::collections::BTreeSet::from([PathBuf::from(relative)]);
+    git::commit_paths_locally(root, &message, &paths)?;
+    if !remote || warning.is_some() {
+        return Ok(Restored {
+            message,
+            pushed: false,
+            warning,
+        });
+    }
+    let pushed = git::push(root).or_else(|first| {
+        // Origin moved since the fetch: replay the restore on top, once.
+        if git::fetch(root).is_ok() && git::rebase_upstream(root).unwrap_or(false) {
+            git::push(root)
+        } else {
+            let _ = git::rebase_abort(root);
+            Err(first)
+        }
+    });
+    Ok(match pushed {
+        Ok(()) => Restored {
+            message,
+            pushed: true,
+            warning: None,
+        },
+        Err(e) => Restored {
+            message,
+            pushed: false,
+            warning: Some(format!("committed, but couldn't push: {e:#}")),
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,5 +505,142 @@ mod tests {
                 .unwrap();
             assert!(read(&root, "link.md").is_err());
         }
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("git")
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+
+    fn identify(dir: &Path) {
+        git_in(dir, &["config", "user.email", "t@t.co"]);
+        git_in(dir, &["config", "user.name", "Tim"]);
+        git_in(dir, &["config", "commit.gpgsign", "false"]);
+    }
+
+    /// A documents repository whose `adr/0001-x.md` went through three
+    /// versions, the last after a move to `adr/adr/`.
+    fn documents() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("p-documents");
+        fs::create_dir_all(root.join("adr")).unwrap();
+        git_in(&root, &["init", "-q", "-b", "main"]);
+        identify(&root);
+        fs::write(root.join("adr/0001-x.md"), "# X\n\nfirst\n").unwrap();
+        git_in(&root, &["add", "-A"]);
+        git_in(&root, &["commit", "-qm", "one"]);
+        fs::write(root.join("adr/0001-x.md"), "# X\n\nsecond\n").unwrap();
+        git_in(&root, &["commit", "-qam", "two"]);
+        fs::create_dir_all(root.join("adr/adr")).unwrap();
+        git_in(&root, &["mv", "adr/0001-x.md", "adr/adr/0001-x.md"]);
+        git_in(&root, &["commit", "-qm", "move"]);
+        fs::write(root.join("adr/adr/0001-x.md"), "# X\n\nthird\n").unwrap();
+        git_in(&root, &["commit", "-qam", "three"]);
+        (dir, root)
+    }
+
+    #[test]
+    fn history_is_newest_first_and_follows_a_move() {
+        let (_dir, root) = documents();
+        let versions = history(&root, "adr/adr/0001-x.md", 20).unwrap();
+        let subjects: Vec<&str> = versions.iter().map(|v| v.subject.as_str()).collect();
+        assert_eq!(subjects, ["three", "move", "two", "one"]);
+        assert_eq!(versions[0].path, "adr/adr/0001-x.md");
+        assert_eq!(versions[3].path, "adr/0001-x.md", "its name then");
+        assert_eq!(versions[0].author, "Tim");
+        assert_eq!(history(&root, "adr/adr/0001-x.md", 2).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn an_old_version_reads_back_exactly() {
+        let (_dir, root) = documents();
+        let one = &history(&root, "adr/adr/0001-x.md", 20).unwrap()[3];
+        assert_eq!(
+            read_version(&root, &one.path, &one.commit).unwrap(),
+            "# X\n\nfirst\n"
+        );
+        assert!(read_version(&root, &one.path, "HEAD; rm -rf /").is_err());
+        assert!(read_version(&root, "../x.md", &one.commit).is_err());
+    }
+
+    #[test]
+    fn restore_writes_the_old_text_as_a_new_commit() {
+        let (_dir, root) = documents();
+        let one = history(&root, "adr/adr/0001-x.md", 20).unwrap()[3].clone();
+        let done = restore(&root, "adr/adr/0001-x.md", &one.short).unwrap();
+        assert!(
+            done.message.starts_with("restore: adr/adr/0001-x.md to "),
+            "{}",
+            done.message
+        );
+        assert!(!done.pushed, "nowhere to push");
+        assert_eq!(
+            fs::read_to_string(root.join("adr/adr/0001-x.md")).unwrap(),
+            "# X\n\nfirst\n"
+        );
+        let after = history(&root, "adr/adr/0001-x.md", 20).unwrap();
+        assert_eq!(after.len(), 5);
+        assert!(after[0].subject.starts_with("restore:"));
+        // Nothing to restore now, and local edits are never overwritten.
+        assert!(restore(&root, "adr/adr/0001-x.md", &one.short).is_err());
+        fs::write(root.join("adr/adr/0001-x.md"), "edited\n").unwrap();
+        let err = restore(&root, "adr/adr/0001-x.md", &after[1].short).unwrap_err();
+        assert!(err.to_string().contains("aren't committed"), "{err}");
+    }
+
+    #[test]
+    fn restore_pushes_and_replays_onto_a_moved_origin() {
+        let (dir, root) = documents();
+        let origin = dir.path().join("origin.git");
+        git_in(
+            dir.path(),
+            &[
+                "init",
+                "-q",
+                "--bare",
+                "-b",
+                "main",
+                origin.to_str().unwrap(),
+            ],
+        );
+        git_in(
+            &root,
+            &["remote", "add", "origin", origin.to_str().unwrap()],
+        );
+        git_in(&root, &["push", "-q", "-u", "origin", "main"]);
+        // Someone else changes another document after this clone fetched.
+        let other = dir.path().join("other");
+        git_in(
+            dir.path(),
+            &[
+                "clone",
+                "-q",
+                origin.to_str().unwrap(),
+                other.to_str().unwrap(),
+            ],
+        );
+        identify(&other);
+        fs::write(other.join("README.md"), "# P\n").unwrap();
+        git_in(&other, &["add", "-A"]);
+        git_in(&other, &["commit", "-qm", "readme"]);
+        git_in(&other, &["push", "-q"]);
+
+        let two = history(&root, "adr/adr/0001-x.md", 20).unwrap()[2].clone();
+        let done = restore(&root, "adr/adr/0001-x.md", &two.commit).unwrap();
+        assert!(done.pushed, "{:?}", done.warning);
+        git_in(&other, &["pull", "-q"]);
+        assert_eq!(
+            fs::read_to_string(other.join("adr/adr/0001-x.md")).unwrap(),
+            "# X\n\nsecond\n"
+        );
+        assert!(root.join("README.md").exists(), "caught up first");
     }
 }

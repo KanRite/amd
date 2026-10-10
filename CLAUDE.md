@@ -1151,12 +1151,22 @@ changes):
   another document becomes `#doc:<path>`, web/mail links stay and the page
   hands them to `open_external` (`xdg-open`/`open`, http(s)/mailto only),
   anything else becomes `#`, and relative images are inlined as data URLs
-  (the CSP allows `data:` images only). Read only for now. **Documents
-  are pushed straight to main, with git as their history**
-  (agile-md-documents' ADR 0007, 2026-10-10, superseding the PR review
-  RFC 0003 asked for): editing in place (138), a History panel with
-  Restore (169) and `amd import documents` pushing directly (170) build
-  on that. The demo board has `acme-documents` and a shared
+  (the CSP allows `data:` images only). **Documents are pushed straight
+  to main, with git as their history** (agile-md-documents' ADR 0007,
+  2026-10-10, superseding the PR review RFC 0003 asked for). **History
+  and Restore** (ticket 169): `documents::history` (`git log --follow`, so
+  across renames; each `Version` carries the path at that commit),
+  `read_version` (`git show`, byte-exact, commit must be hex),
+  `restore` (refuses a dirty file, a diverged clone and "nothing to
+  restore"; fetches and fast-forwards first; commits only that path as
+  `restore: <path> to <short> (<date>, <author>)`; pushes, replaying once
+  with `rebase @{u}` if origin moved; a failed push keeps the commit and
+  warns). Its own small sync, not `sync::catch_up`, which is about boards.
+  amdui: `document_history` (20), `read_document_version`,
+  `restore_document` (under the `writing` mutex); the reader's History
+  button, `HistoryPanel`, and an old version's banner with Restore.
+  Editing in place (138) and `amd import documents` pushing directly
+  (170) still to come. The demo board has `acme-documents` and a shared
   `acme-handbook`.
 - **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
   download path checks a downloaded amdui's libraries on Linux
