@@ -261,6 +261,16 @@ project out on this machine (`--unhide` puts it back, `--all` shows
 everything); scratch boards under the temporary directory are never
 listed. It reads each board as this machine last saw it.
 
+With nothing in todo or doing, it offers work to pick instead (never a
+draft, or a ticket locked by someone else). With unassigned tickets
+included (the landing page's "Include unassigned tickets" checkbox, on
+by default; `amd mine --unassigned`/`--no-unassigned` set it), that's
+unassigned todo and doing tickets first; failing those, backlog tickets
+that are unassigned or yours: every high-priority one there is, else
+every medium, else every low, oldest first. Without, only backlog tickets
+assigned to you. Hidden projects are searched too, and one with work to
+pick is shown again.
+
 ## Bringing in existing work
 
 `amd import tickets <PATH>` copies another board's tickets into this one

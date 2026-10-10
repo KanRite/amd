@@ -475,6 +475,14 @@ pub struct RenderedDoc {
 pub struct Home {
     /// Your todo and doing tickets, highest priority first, then oldest.
     pub work: Vec<WorkItem>,
+    /// When `work` is empty, backlog tickets you could pick (ticket 160):
+    /// the highest priority there is any of, oldest first.
+    #[serde(default)]
+    pub to_pick: Vec<WorkItem>,
+    /// Whether work to pick includes unassigned tickets (My work's
+    /// checkbox, remembered on this machine).
+    #[serde(default)]
+    pub include_unassigned: bool,
     /// Every project on this machine, by name; hidden ones marked.
     pub projects: Vec<HomeProject>,
     /// Who "you" is (git's `user.email`); empty when git doesn't say.
@@ -509,6 +517,9 @@ pub struct WorkItem {
     pub priority: String,
     pub points: String,
     pub created: String,
+    /// The backlog folder (epic or sprint) it's filed in, to find it there.
+    #[serde(default)]
+    pub folder: Option<String>,
 }
 
 /// A newly created ticket and what happened when it was recorded.

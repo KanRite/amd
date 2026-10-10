@@ -505,6 +505,14 @@ enum Cmd {
         /// Put a hidden project back
         #[arg(long, value_name = "PROJECT")]
         unhide: Option<String>,
+        /// With nothing to do, also offer unassigned tickets (todo and
+        /// doing first, then the backlog); remembered on this machine
+        #[arg(long, conflicts_with = "no_unassigned")]
+        unassigned: bool,
+        /// With nothing to do, offer only backlog tickets assigned to you;
+        /// remembered on this machine
+        #[arg(long)]
+        no_unassigned: bool,
     },
     /// Print a shell completion script (bash, zsh, fish, …)
     Completions {
@@ -744,8 +752,13 @@ fn run() -> Result<()> {
         json,
         hide,
         unhide,
+        unassigned,
+        no_unassigned,
     } = &command
     {
+        if *unassigned || *no_unassigned {
+            agile_md::my_work::set_include_unassigned(*unassigned)?;
+        }
         return cmd_mine(*all, sort, *json, hide.as_deref(), unhide.as_deref());
     }
     // Documents go into the project's documents repository, from wherever
@@ -1174,10 +1187,7 @@ fn cmd_mine(
         println!("{}", serde_json::to_string_pretty(&items)?);
         return Ok(());
     }
-    if items.is_empty() {
-        println!("nothing in todo or doing is assigned to you");
-    }
-    for item in &items {
+    let line = |item: &my_work::WorkItem| {
         let points = if item.points.is_empty() {
             "      ".to_string()
         } else {
@@ -1187,6 +1197,24 @@ fn cmd_mine(
             "{:<5}  {:<6}  {}  {:<16}  {}  {}",
             item.column, item.priority, points, item.project, item.id, item.title
         );
+    };
+    items.iter().for_each(line);
+    // Nothing to do (ticket 160): work you could take (unassigned todo and
+    // doing first, when unassigned work is included, then the backlog's
+    // highest priority), and any hidden project it's in shown again.
+    let mut projects = projects;
+    if items.is_empty() {
+        let pick = my_work::to_pick(&email, name.as_deref(), my_work::include_unassigned());
+        if pick.is_empty() {
+            println!("nothing in todo or doing is assigned to you, and nothing to pick");
+        } else {
+            println!("nothing in todo or doing is assigned to you — work to pick:");
+            pick.iter().for_each(line);
+            for shown in my_work::show_projects_of(&pick)? {
+                eprintln!("{shown} has work to pick, so it's back in your work");
+            }
+            projects = my_work::projects();
+        }
     }
     let hidden = projects.iter().filter(|p| p.hidden).count();
     if hidden > 0 && !all {
