@@ -7,7 +7,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
-use crate::app::{Ctx, Modal, zoom_to};
+use crate::app::{Ctx, Modal, ModalClose, zoom_to};
 
 #[component]
 pub fn PreferencesPanel() -> impl IntoView {
@@ -18,6 +18,7 @@ pub fn PreferencesPanel() -> impl IntoView {
                 <ZoomSection />
                 <BoardSection />
             </div>
+            <ModalClose />
         </Modal>
     }
 }

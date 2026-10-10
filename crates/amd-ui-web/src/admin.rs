@@ -10,7 +10,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
-use crate::app::{Ctx, Modal};
+use crate::app::{Ctx, Modal, ModalClose};
 
 #[component]
 pub fn AdminPanel() -> impl IntoView {
@@ -173,6 +173,7 @@ pub fn AdminPanel() -> impl IntoView {
                     </div>
                 </section>
             </div>
+            <ModalClose />
         </Modal>
     }
 }

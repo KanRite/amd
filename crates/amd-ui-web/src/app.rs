@@ -537,6 +537,24 @@ pub fn Modal(
     }
 }
 
+/// A Close button at the foot of a dialog that has no action of its own to
+/// end on (ticket 159): Preferences and Admin save as you go, and Escape
+/// alone left a mouse user with no visible way out.
+#[component]
+pub fn ModalClose() -> impl IntoView {
+    let ctx = Ctx::get();
+    view! {
+        <div class="flex justify-end">
+            <button
+                class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                on:click=move |_| ctx.close_overlay()
+            >
+                "Close"
+            </button>
+        </div>
+    }
+}
+
 /// The last commit the board made, in the header: "Pushed …" once it is on
 /// origin, "Committed …" if it only got as far as the local repository.
 #[component]
