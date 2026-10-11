@@ -461,23 +461,32 @@ pub fn App() -> impl IntoView {
 fn ActiveSprints() -> impl IntoView {
     use amd_ui_model::epic::GroupKind;
     let ctx = Ctx::get();
+    // The open project's running sprints, only while its board is on
+    // screen (ticket 183): never on Home, Documents or Ideas, and keyed by
+    // project so another project's sprint can't linger.
     let running = move || {
+        if ctx.view.get() != View::Board {
+            return Vec::new();
+        }
         ctx.board.with(|b| {
             b.as_ref()
                 .map(|b| {
                     b.epics
                         .iter()
                         .filter(|e| e.kind == GroupKind::Sprint && e.started)
-                        .map(|e| (e.repo.clone(), e.name.clone(), e.days))
+                        .map(|e| (b.tasks_dir.clone(), e.repo.clone(), e.name.clone(), e.days))
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default()
         })
     };
+    // In a container of its own, so the badges go with it when the header
+    // changes, rather than staying behind as loose siblings.
     view! {
+        <div class="flex shrink-0 items-center gap-2">
         <For each=running key=|s| s.clone() let:sprint>
             {
-                let (repo, name, days) = sprint;
+                let (_, repo, name, days) = sprint;
                 let open = (repo.clone(), name.clone());
                 let length = if days == 0 { String::new() } else { format!(" · {days} days") };
                 view! {
@@ -498,6 +507,7 @@ fn ActiveSprints() -> impl IntoView {
                 }
             }
         </For>
+        </div>
     }
 }
 
