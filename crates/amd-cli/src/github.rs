@@ -25,44 +25,28 @@ pub enum ProtectionOutcome {
     Unavailable,
 }
 
-/// Sets `main`'s branch protection on `full_name` (`owner/repo`).
+/// Sets `main`'s branch protection on `full_name` (`owner/repo`): a
+/// force-push or a deletion of `main` is blocked, and an ordinary direct
+/// push is untouched (`required_pull_request_reviews` unset). It runs with
+/// `enforce_admins: true`: without it the repository's owner, also a GitHub
+/// admin on it, could simply bypass it.
 ///
-/// Both tiers block a force-push or a deletion of `main`, and both run with
-/// `enforce_admins: true` — without it, the repository's own owner (who is
-/// also a GitHub admin on it) could simply bypass whichever tier is set,
-/// which would make either one symbolic rather than real.
-///
-/// `require_review` selects the tier: `false` (the tickets repository)
-/// leaves `required_pull_request_reviews` unset entirely, so an ordinary
-/// direct push is completely unaffected — only history-rewriting and
-/// deletion are blocked. `true` (the documents repository) additionally
-/// requires one approving review. `require_last_push_approval` is
-/// deliberately never set: that combination is what previously made a solo
-/// pusher's own PRs permanently unmergeable elsewhere in this org — a solo
-/// human (or an agent acting for them) self-approving is still a real PR
-/// with a real diff, just not a second person's review.
-pub fn protect_main(full_name: &str, require_review: bool) -> Result<ProtectionOutcome> {
-    let body = if require_review {
-        r#"{
-            "required_status_checks": null,
-            "enforce_admins": true,
-            "required_pull_request_reviews": {
-                "required_approving_review_count": 1
-            },
-            "restrictions": null,
-            "allow_force_pushes": false,
-            "allow_deletions": false
-        }"#
-    } else {
-        r#"{
-            "required_status_checks": null,
-            "enforce_admins": true,
-            "required_pull_request_reviews": null,
-            "restrictions": null,
-            "allow_force_pushes": false,
-            "allow_deletions": false
-        }"#
-    };
+/// **One tier, for tickets and documents alike** (ticket 174). Documents
+/// used to also require an approving review, which made sense while they
+/// were PR-reviewed; since agile-md-documents' ADR 0007 they're pushed
+/// straight to main like tickets, and a review rule would reject every one
+/// of those pushes on a plan that enforces it. `require_last_push_approval`
+/// is never set either: that's what once made a solo pusher's own PRs
+/// permanently unmergeable elsewhere in this org.
+pub fn protect_main(full_name: &str) -> Result<ProtectionOutcome> {
+    let body = r#"{
+        "required_status_checks": null,
+        "enforce_admins": true,
+        "required_pull_request_reviews": null,
+        "restrictions": null,
+        "allow_force_pushes": false,
+        "allow_deletions": false
+    }"#;
 
     let mut child = Command::new("gh")
         .args([

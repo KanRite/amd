@@ -4,11 +4,11 @@
 //!
 //! Two sibling repositories, not one (`adr/rfc/0003-ticket-repository-topology-and-team-collaboration.md`
 //! in `agile-md-documents`): `{project}-tickets` behaves exactly as it
-//! always has — a board, direct pushes, no PR. `{project}-documents` is
-//! new — ADRs, RFCs and docs — PR-reviewed. (Board settings live in the
-//! tickets repository, ticket 111.) One repository can't
-//! carry both policies at once, since GitHub branch protection is
-//! repository-wide, not path-scoped.
+//! always has — a board, direct pushes, no PR. `{project}-documents` holds
+//! ADRs, RFCs, docs and ideas, pushed straight to main too since
+//! agile-md-documents' ADR 0007 (it was PR-reviewed before). (Board
+//! settings live in the tickets repository, ticket 111.) Both get the same
+//! branch protection: no force-push or deletion of main (ticket 174).
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -64,8 +64,8 @@ pub fn run(project: String, local_only: bool, org: Option<String>) -> Result<()>
 }
 
 /// Creates or connects `{project}-tickets`, scaffolds the board, registers
-/// it, and — for a freshly created repository — sets
-/// its (lighter) branch protection tier. Unchanged in behaviour from
+/// it, and — for a freshly created repository — protects its main branch
+/// (as documents is, ticket 174). Unchanged in behaviour from
 /// before this repository had a documents sibling; only pulled out of
 /// `run()` so both repositories share the same creation path.
 fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf> {
@@ -101,7 +101,7 @@ fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf
     if created_new {
         git::commit_all(&target, &format!("Initialise {project} tickets board"))?;
         git::push(&target)?;
-        warn_if_protection_unavailable(&full_name, github::protect_main(&full_name, false)?);
+        warn_if_protection_unavailable(&full_name, github::protect_main(&full_name)?);
     }
 
     register(&target)?;
@@ -129,7 +129,7 @@ fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<PathB
     if created_new {
         git::commit_all(&target, &format!("Initialise {project} documents"))?;
         git::push(&target)?;
-        warn_if_protection_unavailable(&full_name, github::protect_main(&full_name, true)?);
+        warn_if_protection_unavailable(&full_name, github::protect_main(&full_name)?);
     }
 
     register(&target)?;
@@ -182,9 +182,8 @@ fn warn_if_protection_unavailable(full_name: &str, outcome: github::ProtectionOu
     if let github::ProtectionOutcome::Unavailable = outcome {
         eprintln!(
             "warning: {full_name} has no branch protection — GitHub Pro is required for a \
-             private repository on this plan. Direct pushes still work; nothing beyond a \
-             force-push or deletion is blocked, and (for documents) review is a convention \
-             for now, not something GitHub enforces yet."
+             private repository on this plan. Direct pushes still work; only a force-push \
+             or deletion of main would have been blocked."
         );
     }
 }

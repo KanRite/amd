@@ -210,19 +210,19 @@ redundant. Their history is in git if it is ever wanted again.
   directory), clones each, scaffolds them and registers both locally.
   Tickets gets the board;
   documents gets `adr/adr/`, `adr/rfc/`, `docs/`, `ideas/`, `README.md` and `CHANGELOG.md`
-  — no settings (ticket 111: they all live in the tickets `.settings`). Each repository gets its own branch
-  protection tier via `github.rs`'s `protect_main()` — tickets: blocks
-  force-push/deletion only; documents: additionally requires one approving
-  review — both `enforce_admins: true` so the owner can't silently bypass
-  it, neither ever sets `require_last_push_approval` (that combination is
-  what previously made a solo pusher's own PRs permanently unmergeable
-  elsewhere in this org). **This org's repos are private on the free
+  — no settings (ticket 111: they all live in the tickets `.settings`). Both
+  repositories get **the same** branch protection via `github.rs`'s
+  `protect_main()`: force-push and deletion of main blocked, direct pushes
+  untouched, `enforce_admins: true` so the owner can't silently bypass it,
+  never `require_last_push_approval` (that combination is what previously
+  made a solo pusher's own PRs permanently unmergeable elsewhere in this
+  org). **Documents used to also require one approving review; ticket 174
+  dropped it**, since ADR 0007 pushes documents straight to main and a
+  review rule would reject every such push where GitHub enforces it. **This org's repos are private on the free
   plan**, where GitHub's branch-protection API (both the classic endpoint
   and the newer rulesets one) returns `403 Upgrade to GitHub Pro` for
   *any* payload — `protect_main` treats that as `ProtectionOutcome::Unavailable`,
-  not an error, and `init` just warns; review on documents is a human
-  convention until the org upgrades or the repos go public, not something
-  GitHub enforces yet. **Refuses to run from inside an existing git
+  not an error, and `init` just warns. **Refuses to run from inside an existing git
   repository** — a guard, not an inference: an earlier version tried
   placing the new repos as siblings of whatever repo you happened to be
   standing in, which was a real source of confusion. `--local-only` is the
