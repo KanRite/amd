@@ -342,7 +342,7 @@ pub fn App() -> impl IntoView {
                 <Show when=move || ctx.view.get() == View::Board>
                     <button
                         class="whitespace-nowrap rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
-                        disabled=move || ctx.board.with(Option::is_none)
+                        disabled=move || ctx.board.with(|b| b.as_ref().is_none_or(|b| b.archived))
                         on:click=move |_| ctx.overlay.set(Some(Overlay::NewTicket))
                     >
                         "New ticket"
@@ -383,6 +383,25 @@ pub fn App() -> impl IntoView {
                     <button class="underline" on:click=move |_| ctx.error.set(None)>
                         "Dismiss"
                     </button>
+                </div>
+            </Show>
+
+            // An archived project only reads (ticket 157).
+            <Show when=move || {
+                !on_home() && ctx.board.with(|b| b.as_ref().is_some_and(|b| b.archived))
+            }>
+                <div
+                    role="status"
+                    class="flex items-center gap-3 bg-slate-200 px-4 py-2 text-sm text-slate-800 dark:bg-slate-700 dark:text-slate-100"
+                >
+                    <span class="flex-1">
+                        "This project is archived: you can read it, but nothing can be changed until it's unarchived."
+                    </span>
+                    <Show when=move || ctx.board.with(|b| b.as_ref().is_some_and(|b| b.admin.allowed))>
+                        <button class="underline" on:click=move |_| ctx.overlay.set(Some(Overlay::Admin))>
+                            "Unarchive in Admin"
+                        </button>
+                    </Show>
                 </div>
             </Show>
 

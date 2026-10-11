@@ -49,6 +49,8 @@ pub struct Project {
     pub dir: PathBuf,
     /// Left out of My work by you (`ui.hidden-projects`).
     pub hidden: bool,
+    /// Archived for everyone (ticket 157): never in My work or work to pick.
+    pub archived: bool,
 }
 
 /// A ticket in My work.
@@ -104,6 +106,7 @@ fn projects_in(registry: &Registry, hidden: &[PathBuf]) -> Vec<Project> {
             name: current_project::project_name(&e.root),
             dir: registry::project_dir_of(&e.root),
             hidden: hidden.iter().any(|h| h == &e.root),
+            archived: crate::archive::is_archived(&Board::in_repo(&e.root)),
             root: e.root.clone(),
         })
         .collect();
@@ -353,7 +356,10 @@ fn each_board(
     let registry = Registry::load();
     let projects = projects_in(&registry, &hidden());
     let mut seen: Vec<PathBuf> = Vec::new();
-    for project in projects.iter().filter(|p| include_hidden || !p.hidden) {
+    for project in projects
+        .iter()
+        .filter(|p| !p.archived && (include_hidden || !p.hidden))
+    {
         for (repo, board) in boards_of(project, &registry) {
             if seen.contains(&board.root) {
                 continue;

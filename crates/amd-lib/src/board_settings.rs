@@ -104,6 +104,8 @@ const TRIAGE_PRIORITY: &str = "triage-priority";
 /// Whether amdui's landing page pulls in the project's GitHub issues
 /// (ticket 173).
 const IMPORT_ISSUES: &str = "import-issues";
+/// The project is archived (ticket 157): read-only for amd until unarchived.
+const ARCHIVED: &str = "archived";
 const TAGS_ONLY: &str = "prevent-arbitrary-tags";
 /// `prevent-arbitrary-tags`' name until ticket 141. Still read, and renamed
 /// the next time the setting is written.
@@ -588,6 +590,27 @@ impl BoardSettings {
     pub fn set_import_issues(&mut self, on: bool) {
         self.config
             .set(IMPORT_ISSUES, if on { "on" } else { "off" });
+    }
+
+    /// Whether the project is archived (ticket 157): `archived`, off unless
+    /// set on. amd and amdui refuse changes to an archived project.
+    pub fn archived(&self) -> bool {
+        matches!(
+            self.config
+                .get(ARCHIVED)
+                .map(|v| v.trim().to_lowercase())
+                .as_deref(),
+            Some("on" | "true" | "1" | "yes")
+        )
+    }
+
+    /// Sets [`archived`](Self::archived); off removes the key.
+    pub fn set_archived(&mut self, on: bool) {
+        if on {
+            self.config.set(ARCHIVED, "on");
+        } else {
+            self.config.remove(ARCHIVED);
+        }
     }
 
     /// The priority a ticket made from a GitHub issue starts at (ticket

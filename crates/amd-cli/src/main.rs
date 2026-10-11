@@ -239,9 +239,10 @@ enum Cmd {
         #[arg(long, value_name = "ORG")]
         org: Option<String>,
     },
-    /// List the projects in this folder, or switch between them
+    /// List the projects in this folder, switch between them, or archive one
     ///
-    /// Shows which one amd uses; `amd project use <name>` switches
+    /// Shows which one amd uses; `amd project use <name>` switches, and
+    /// `amd project archive|unarchive [name] [--github]` puts one away
     Project {
         #[command(subcommand)]
         action: Option<ProjectAction>,
@@ -747,6 +748,26 @@ enum ProjectAction {
         #[arg(value_name = "NAME")]
         name: Option<String>,
     },
+    /// Archive a project: read-only for amd, and off My work, until it's
+    /// unarchived. Committed for the whole team
+    Archive {
+        /// The project (default: the current one)
+        #[arg(value_name = "NAME")]
+        name: Option<String>,
+        /// Also archive its repositories on GitHub (`gh repo archive`): the
+        /// tickets and documents repositories and every declared one
+        #[arg(long)]
+        github: bool,
+    },
+    /// Bring an archived project back
+    Unarchive {
+        /// The project (default: the current one)
+        #[arg(value_name = "NAME")]
+        name: Option<String>,
+        /// Also unarchive its repositories on GitHub (`gh repo unarchive`)
+        #[arg(long)]
+        github: bool,
+    },
 }
 
 fn run() -> Result<()> {
@@ -789,6 +810,7 @@ fn run() -> Result<()> {
     {
         let board = register_board(path.as_deref(), project.as_deref(), remove.as_deref())?;
         agile_md::project_trust::check(&board)?;
+        agile_md::archive::ensure_writable(&board)?;
         migrate_settings(&board)?;
         return match remove {
             Some(name) => cmd_unregister(&board, &name),
@@ -800,6 +822,7 @@ fn run() -> Result<()> {
     if let Cmd::Deregister { name, project } = command {
         let board = register_board(None, project.as_deref(), Some(&name))?;
         agile_md::project_trust::check(&board)?;
+        agile_md::archive::ensure_writable(&board)?;
         migrate_settings(&board)?;
         return cmd_deregister(&board, &name);
     }
@@ -841,6 +864,10 @@ fn run() -> Result<()> {
         return match action {
             None => project::list(),
             Some(ProjectAction::Use { name }) => project::use_project(name),
+            Some(ProjectAction::Archive { name, github }) => project::archive(name, true, github),
+            Some(ProjectAction::Unarchive { name, github }) => {
+                project::archive(name, false, github)
+            }
         };
     }
 
@@ -848,6 +875,10 @@ fn run() -> Result<()> {
     // Notices if this board's declared project identity has silently
     // changed since amd last saw it — see project_trust.rs.
     agile_md::project_trust::check(&board)?;
+    // An archived project only reads (ticket 157).
+    if changes_board(&command) {
+        agile_md::archive::ensure_writable(&board)?;
+    }
     // In step with the remote before anything else (ticket 102): a change
     // never lands on a stale clone, and a listing shows teammates' work.
     for event in agile_md::sync::catch_up(&board, sync_purpose(&command))? {
@@ -2105,6 +2136,23 @@ fn resolve_assignee(repo: &Path, who: Option<&str>) -> String {
     }
 }
 
+/// Whether `command` changes the project, which an archived one refuses
+/// (ticket 157): everything [`sync_purpose`] calls a write, plus the
+/// settings commands it reads for, when they're given a value.
+fn changes_board(command: &Cmd) -> bool {
+    sync_purpose(command) == agile_md::sync::Purpose::Write
+        || matches!(
+            command,
+            Cmd::WipLimit { .. }
+                | Cmd::TriagePriority { priority: Some(_) }
+                | Cmd::SharedDocuments { name: Some(_), .. }
+                | Cmd::SharedDocuments { clear: true, .. }
+                | Cmd::Templates {
+                    command: Some(TemplateCmd::Eject { .. })
+                }
+        )
+}
+
 /// Whether `command` changes the board (catch up strictly first, refusing a
 /// clone that can't be brought up to date) or only looks at it (catch up if
 /// it's cheap, and warn rather than refuse). A destination verb or an epic
@@ -2566,6 +2614,17 @@ fn cmd_import_documents(path: Option<&Path>, dry_run: bool) -> Result<()> {
             "run amd import documents from inside a documents repository, in the folder the files should go into (e.g. cd acme-documents/docs)"
         );
     };
+    // Not into an archived project's documents (ticket 157).
+    if !dry_run
+        && let Ok(board) = Board::discover()
+        && name(&repo)
+            == format!(
+                "{}-documents",
+                agile_md::current_project::project_name(board.repo_root())
+            )
+    {
+        agile_md::archive::ensure_writable(&board)?;
+    }
     let here = here.canonicalize().unwrap_or(here);
     let root = repo.canonicalize().unwrap_or(repo);
     let into = here

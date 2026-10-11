@@ -57,7 +57,10 @@ async fn change<T: Send + 'static>(
         // In step with the remote before any change (ticket 102): never
         // write on a stale clone. A clone that can't be brought up to date
         // refuses the change; no network only warns, so is ignored here.
-        for (_, board) in &Project::open()?.repos {
+        let project = Project::open()?;
+        // An archived project only reads (ticket 157).
+        agile_md::archive::ensure_writable(&project.repos[0].1).map_err(err)?;
+        for (_, board) in &project.repos {
             agile_md::sync::catch_up(board, agile_md::sync::Purpose::Write).map_err(err)?;
             // Settings still in a documents repository come across, once
             // (ticket 111).
@@ -627,6 +630,9 @@ async fn pull_issues(state: Tauri<'_, AppState>) -> Result<Vec<SyncReport>> {
             .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
         let mut reports = Vec::new();
         for project in agile_md::my_work::projects() {
+            if project.archived {
+                continue;
+            }
             {
                 let mut seen = pulled.lock().map_err(|_| "restart amdui".to_string())?;
                 if seen
@@ -895,6 +901,18 @@ async fn doc_change(
             .lock()
             .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
         let root = documents_root(&source)?;
+        // Not the documents of an archived project (ticket 157); a shared
+        // repository belongs to no one project.
+        let project = Project::open()?;
+        let board = &project.repos[0].1;
+        if source
+            == format!(
+                "{}-documents",
+                agile_md::current_project::project_name(board.repo_root())
+            )
+        {
+            agile_md::archive::ensure_writable(board).map_err(err)?;
+        }
         let (path, done) = change(&root).map_err(err)?;
         Ok(amd_ui_model::DocChange {
             sync: SyncReport {
@@ -1345,6 +1363,7 @@ async fn home() -> Result<amd_ui_model::Home> {
                         documents: own.is_some_and(|d| d.root.is_some()),
                         shared: shared.map(|d| d.name.clone()),
                         shared_cloned: shared.is_some_and(|d| d.root.is_some()),
+                        archived: p.archived,
                     }
                 })
                 .collect(),
@@ -1356,6 +1375,48 @@ async fn home() -> Result<amd_ui_model::Home> {
                 .map(|p| p.repos[0].1.repo_root().display().to_string())
                 .unwrap_or_default(),
         })
+    })
+    .await
+}
+
+/// Archives a project, or brings it back (ticket 157), with `github` its
+/// repositories on GitHub too. Works on any project on this machine, from
+/// the landing page as well as from inside it, so it doesn't go through
+/// [`change`], which refuses an archived project.
+#[tauri::command]
+async fn set_project_archived(
+    state: Tauri<'_, AppState>,
+    root: String,
+    on: bool,
+    github: bool,
+) -> Result<SyncReport> {
+    let writing = Arc::clone(&state.writing);
+    blocking(move || {
+        let _guard = writing
+            .lock()
+            .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
+        // A repository's root (the landing page) or its board (Admin).
+        let board = match Board::in_repo(Path::new(&root)) {
+            board if board.root.is_dir() => board,
+            _ => Board::at(PathBuf::from(&root)),
+        };
+        agile_md::sync::catch_up(&board, agile_md::sync::Purpose::Write).map_err(err)?;
+        let events =
+            agile_md::archive::set_archived(&board, on, github, &mut agile_md::archive::gh)
+                .map_err(err)?;
+        let mut info = Vec::new();
+        let mut warnings = Vec::new();
+        for event in events {
+            match event {
+                Event::Info(text) => info.push(text),
+                Event::Warn(text) => warnings.push(text),
+            }
+        }
+        Ok(report(
+            &board,
+            info.join("; "),
+            (!warnings.is_empty()).then(|| warnings.join("; ")),
+        ))
     })
     .await
 }
@@ -1455,6 +1516,7 @@ pub fn run() {
             load_board,
             home,
             set_project_hidden,
+            set_project_archived,
             set_include_unassigned,
             board_fingerprint,
             sync_board,

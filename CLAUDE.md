@@ -101,6 +101,24 @@ redundant. Their history is in git if it is ever wanted again.
   use [name]`); `amdui` reads `Board.projects` and calls `use_project`, which
   writes the same file and moves the process to the folder so the file —
   not whichever tickets repo it was launched in — decides.
+- `crates/amd-lib/src/archive.rs` — archiving a project (ticket 157):
+  `archived = on` in the tickets `.settings`, auto-committed like any
+  setting. An archived project only reads: the CLI's `run()` refuses a
+  command `changes_board` calls a change (every `sync_purpose` Write, plus
+  the settings commands given a value; `register`/`deregister` and `amd
+  import documents` into its own documents check too), and amdui's
+  `change()` and `doc_change` refuse (`ensure_writable`). It's off My work,
+  work to pick and the issue pull (`my_work::Project.archived`). `amd
+  project archive|unarchive [name] [--github]`, Admin's "Archive this
+  project", the landing page's "Archived (N)" fold with Unarchive, and a
+  banner on the board; `set_project_archived` doesn't go through
+  `change()`. `--github` runs `gh repo archive|unarchive --yes` on the
+  tickets repository, the project's own documents and each declared
+  repository (`github_repos`; never the shared documents). **Order
+  matters**, since GitHub refuses pushes to an archived repository:
+  archive pushes the setting first, then archives (skipped, with a
+  warning, if the push didn't land); unarchive unarchives first, then
+  pushes. A `gh` failure is a warning.
 - `crates/amd-lib/src/project_trust.rs` — a per-machine, trust-on-first-use
   check that a board's declared `project` hasn't changed unexpectedly since
   `amd` last saw it.

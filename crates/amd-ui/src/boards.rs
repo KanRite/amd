@@ -173,6 +173,7 @@ impl Project {
             shared_documents: settings.shared_documents().unwrap_or_default(),
             triage_priority: settings.triage_priority(),
             import_issues: settings.import_issues(),
+            archived: settings.archived(),
         })
     }
 
