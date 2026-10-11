@@ -1955,8 +1955,8 @@ enum TagsAction {
 /// Lists the project's tags with how many tickets on its boards carry each,
 /// or changes the list. Every change is committed like any other setting.
 fn cmd_tags(board: &Board, action: Option<TagsAction>) -> Result<()> {
-    let repos = agile_md::model::load_repos()?;
-    let boards: Vec<&Board> = repos.repos.iter().map(|r| &r.board).collect();
+    let repos = agile_md::model::find_repos()?;
+    let boards: Vec<&Board> = repos.repos.iter().map(|(_, _, board)| board).collect();
     match action {
         None => {
             let settings = board_settings::load(board);

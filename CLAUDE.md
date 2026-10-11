@@ -1136,7 +1136,11 @@ changes):
   `cargo tauri dev -- --no-default-features` in `crates/amd-ui` serves the
   page live from `trunk serve` instead.
 - **It follows the files** (ticket 091). The page asks `board_fingerprint`
-  every second: `model::fingerprint` hashes each board file's relative
+  every second. Like every command it opens the project with
+  `Project::open`, which uses `model::find_repos` — the boards only, **no
+  ticket read** (ticket 184: it used `load_repos`, which read every ticket
+  into cards and dropped them, 941 file opens a second on agile-md); use
+  `load_repos` only where the cards are wanted. Then: `model::fingerprint` hashes each board file's relative
   path, size and mtime (columns, epic and sprint folders, `.settings`; not
   `archive/`) across every loaded repo. When the fingerprint changes, the
   page calls `ctx.refresh()`: a reload, plus a bump of `ctx.disk_tick`. So
