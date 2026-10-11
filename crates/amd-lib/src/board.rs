@@ -1007,6 +1007,19 @@ fn cleanup_branch(repo: &Path, name: &str) -> Option<String> {
     Some(name.to_string())
 }
 
+/// Whether `repo` holds a board that counts as a project (ticket 175): a
+/// `backlog/`, which every board since v4 has, or a declared `project`.
+/// An old v3 board left in a code repository (todo/doing/done, nothing
+/// declared) doesn't, so it's never offered or picked as a project.
+fn is_project_board(repo: &Path) -> bool {
+    let tasks = repo.join(dir_name());
+    tasks.join(Column::Backlog.to_string()).is_dir()
+        || (tasks.is_dir()
+            && crate::board_settings::load(&Board::in_repo(repo))
+                .project()
+                .is_some())
+}
+
 pub(crate) fn project_siblings(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir) else {
         return Vec::new();
@@ -1014,7 +1027,7 @@ pub(crate) fn project_siblings(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = entries
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
-        .filter(|path| path.join(".git").is_dir() && path.join(dir_name()).is_dir())
+        .filter(|path| path.join(".git").is_dir() && is_project_board(path))
         .collect();
     found.sort();
     found
@@ -2058,6 +2071,25 @@ mod tests {
         // A board-shaped directory that isn't a git repository.
         board_at(&dir.path().join("board-but-no-git"));
         assert!(project_siblings(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn an_old_board_in_a_code_repo_is_not_a_project() {
+        let dir = tempfile::tempdir().unwrap();
+        project_child(dir.path(), "acme-tickets");
+        // A v3 board: todo/doing/done only, nothing declared.
+        let old = dir.path().join("versioning-tests");
+        fs::create_dir_all(old.join(".git")).unwrap();
+        for column in ["todo", "doing", "done"] {
+            fs::create_dir_all(old.join("tasks").join(column)).unwrap();
+        }
+        assert_eq!(
+            project_siblings(dir.path()),
+            vec![dir.path().join("acme-tickets")]
+        );
+        // Declaring a project makes it one, backlog or not.
+        fs::write(old.join(".settings"), "project = versioning\n").unwrap();
+        assert_eq!(project_siblings(dir.path()).len(), 2);
     }
 
     #[test]

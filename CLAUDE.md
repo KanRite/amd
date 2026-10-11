@@ -1115,6 +1115,14 @@ changes):
   group's column. The editor says where it is under its title
   (`amd_ui_model::epic::where_it_is`: `acme-api › Backlog › Sprint s12
   (started)`, or `Doing · from epic checkout` from its `epic:` label).
+- **Which project is current** (ticket 175): a sibling only counts as a
+  project with a `tasks/backlog/` or a declared `project`
+  (`board::is_project_board`), so an old v3 board left in a code repo is
+  never offered or picked. The landing page's top bar prefers the project
+  whose board was on screen (`ctx.board.tasks_dir`), else `Home.current`,
+  so going Home keeps it; and `App` clears `ctx.document` whenever the
+  shown board changes, so the reader never re-reads another project's
+  document.
 - **The running sprint in the header** (ticket 165): `ActiveSprints`,
   after the project name, shows a badge per started sprint
   (`Board.epics`, kind Sprint, `started`); a click goes to the board and

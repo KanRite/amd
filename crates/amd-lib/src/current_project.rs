@@ -197,7 +197,7 @@ mod tests {
     fn repo_with_board(parent: &Path, name: &str) -> PathBuf {
         let repo = parent.join(name);
         fs::create_dir_all(repo.join(".git")).unwrap();
-        fs::create_dir_all(repo.join("tasks")).unwrap();
+        fs::create_dir_all(repo.join("tasks/backlog")).unwrap();
         repo
     }
 
