@@ -494,3 +494,146 @@ pub async fn import_issues(
     )
     .await
 }
+
+// ---- Changing documents (ticket 176)
+
+#[derive(Serialize)]
+struct ArchiveArgs<'a> {
+    source: &'a str,
+    path: &'a str,
+    on: bool,
+}
+
+/// Marks a document archived, or not.
+pub async fn archive_document(
+    source: &str,
+    path: &str,
+    on: bool,
+) -> Result<amd_ui_model::DocChange, String> {
+    call("archive_document", &ArchiveArgs { source, path, on }).await
+}
+
+#[derive(Serialize)]
+struct FolderArgs<'a> {
+    source: &'a str,
+    parent: &'a str,
+    name: &'a str,
+}
+
+/// Makes a folder inside `parent` (empty for the top).
+pub async fn create_document_folder(
+    source: &str,
+    parent: &str,
+    name: &str,
+) -> Result<amd_ui_model::DocChange, String> {
+    call(
+        "create_document_folder",
+        &FolderArgs {
+            source,
+            parent,
+            name,
+        },
+    )
+    .await
+}
+
+#[derive(Serialize)]
+struct DeleteFolderArgs<'a> {
+    source: &'a str,
+    folder: &'a str,
+}
+
+/// Removes an empty folder.
+pub async fn delete_document_folder(
+    source: &str,
+    folder: &str,
+) -> Result<amd_ui_model::DocChange, String> {
+    call(
+        "delete_document_folder",
+        &DeleteFolderArgs { source, folder },
+    )
+    .await
+}
+
+#[derive(Serialize)]
+struct MoveDocArgs<'a> {
+    source: &'a str,
+    path: &'a str,
+    folder: &'a str,
+}
+
+/// Moves a document into `folder` (empty for the top), links kept working.
+pub async fn move_document(
+    source: &str,
+    path: &str,
+    folder: &str,
+) -> Result<amd_ui_model::DocChange, String> {
+    call(
+        "move_document",
+        &MoveDocArgs {
+            source,
+            path,
+            folder,
+        },
+    )
+    .await
+}
+
+#[derive(Serialize)]
+struct NewDocArgs<'a> {
+    source: &'a str,
+    folder: &'a str,
+    title: &'a str,
+}
+
+/// Makes a new document titled `title` in `folder`.
+pub async fn create_document(
+    source: &str,
+    folder: &str,
+    title: &str,
+) -> Result<amd_ui_model::DocChange, String> {
+    call(
+        "create_document",
+        &NewDocArgs {
+            source,
+            folder,
+            title,
+        },
+    )
+    .await
+}
+
+/// A document's text for editing.
+pub async fn open_document_for_edit(
+    source: &str,
+    path: &str,
+) -> Result<amd_ui_model::DocEdit, String> {
+    call("open_document_for_edit", &DocArgs { source, path }).await
+}
+
+#[derive(Serialize)]
+struct SaveDocArgs<'a> {
+    source: &'a str,
+    path: &'a str,
+    text: &'a str,
+    version: &'a str,
+}
+
+/// Saves an edited document, unless it changed since it was opened.
+pub async fn save_document(
+    source: &str,
+    path: &str,
+    text: &str,
+    version: &str,
+) -> Result<amd_ui_model::DocChange, String> {
+    call(
+        "save_document",
+        &SaveDocArgs {
+            source,
+            path,
+            text,
+            version,
+        },
+    )
+    .await
+}

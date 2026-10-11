@@ -403,8 +403,15 @@ disagree.
   Links between documents open in the reader; web links open in your
   browser. **History** on any document lists its versions from git; open
   one to read it, and **Restore this version** puts it back as a new
-  commit, pushed, so a restore can itself be undone. Documents are pushed
-  straight to main rather than reviewed in pull requests. A
+  commit, pushed, so a restore can itself be undone. A document is
+  read-only until **Edit**, which edits it as rich text (or as Markdown,
+  when it has tables or images that rich text can't keep). **＋doc** on a
+  folder makes a new document (numbered, in `adr/adr` and `adr/rfc`);
+  **＋folder** makes a folder, and an empty one can be deleted. **Archive**
+  marks a document as kept for the record: it shows muted, with a badge.
+  Drag a document onto a folder, or use **Move…**, to move it; links to it
+  are rewritten so they keep working. Every change is pushed straight to
+  main rather than reviewed in pull requests. A
   documents repository the whole organisation shares (standards, the
   handbook) can sit beside it: name it in Admin, or with
   `amd shared-documents <repository>`, and clone it next to the project's

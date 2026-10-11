@@ -771,6 +771,11 @@ async fn list_documents() -> Result<Vec<amd_ui_model::DocSource>> {
                     .as_deref()
                     .and_then(|root| agile_md::documents::list(root).ok())
                     .unwrap_or_default();
+                let folders = source
+                    .root
+                    .as_deref()
+                    .map(agile_md::documents_edit::folders)
+                    .unwrap_or_default();
                 amd_ui_model::DocSource {
                     shared: source.kind == agile_md::documents::Kind::Shared,
                     cloned: source.root.is_some(),
@@ -780,8 +785,10 @@ async fn list_documents() -> Result<Vec<amd_ui_model::DocSource>> {
                         .map(|d| amd_ui_model::DocEntry {
                             path: d.path,
                             title: d.title,
+                            archived: d.archived,
                         })
                         .collect(),
+                    folders,
                 }
             })
             .collect())
@@ -799,6 +806,7 @@ async fn read_document(source: String, path: String) -> Result<amd_ui_model::Ren
         let text = agile_md::documents::read(&root, &path).map_err(err)?;
         Ok(amd_ui_model::RenderedDoc {
             html: documents::render(&root, &path, &text),
+            archived: agile_md::documents_edit::is_archived(&text),
             source,
             path,
             version: None,
@@ -863,10 +871,162 @@ async fn read_document_version(
             .map_err(err)?;
         Ok(amd_ui_model::RenderedDoc {
             html: documents::render(&root, &path, &text),
+            archived: agile_md::documents_edit::is_archived(&text),
             source,
             path,
             version: Some(doc_version(version)),
         })
+    })
+    .await
+}
+
+/// Runs a documents-repository change under the write lock and reports it
+/// (ticket 176).
+async fn doc_change(
+    state: &Tauri<'_, AppState>,
+    source: String,
+    change: impl FnOnce(&Path) -> anyhow::Result<(Option<String>, agile_md::documents::Restored)>
+    + Send
+    + 'static,
+) -> Result<amd_ui_model::DocChange> {
+    let writing = Arc::clone(&state.writing);
+    blocking(move || {
+        let _guard = writing
+            .lock()
+            .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
+        let root = documents_root(&source)?;
+        let (path, done) = change(&root).map_err(err)?;
+        Ok(amd_ui_model::DocChange {
+            sync: SyncReport {
+                committed: true,
+                pushed: done.pushed,
+                warning: done.warning,
+                message: done.message,
+            },
+            path,
+        })
+    })
+    .await
+}
+
+/// Marks a document archived, or not (ticket 176).
+#[tauri::command]
+async fn archive_document(
+    state: Tauri<'_, AppState>,
+    source: String,
+    path: String,
+    on: bool,
+) -> Result<amd_ui_model::DocChange> {
+    doc_change(&state, source, move |root| {
+        Ok((
+            None,
+            agile_md::documents_edit::set_archived(root, &path, on)?,
+        ))
+    })
+    .await
+}
+
+/// Makes a folder in a documents repository (ticket 176).
+#[tauri::command]
+async fn create_document_folder(
+    state: Tauri<'_, AppState>,
+    source: String,
+    parent: String,
+    name: String,
+) -> Result<amd_ui_model::DocChange> {
+    doc_change(&state, source, move |root| {
+        Ok((
+            None,
+            agile_md::documents_edit::create_folder(root, &parent, &name)?,
+        ))
+    })
+    .await
+}
+
+/// Removes an empty folder from a documents repository (ticket 176).
+#[tauri::command]
+async fn delete_document_folder(
+    state: Tauri<'_, AppState>,
+    source: String,
+    folder: String,
+) -> Result<amd_ui_model::DocChange> {
+    doc_change(&state, source, move |root| {
+        Ok((
+            None,
+            agile_md::documents_edit::delete_folder(root, &folder)?,
+        ))
+    })
+    .await
+}
+
+/// Moves a document into a folder, its links kept working (ticket 176).
+#[tauri::command]
+async fn move_document(
+    state: Tauri<'_, AppState>,
+    source: String,
+    path: String,
+    folder: String,
+) -> Result<amd_ui_model::DocChange> {
+    doc_change(&state, source, move |root| {
+        let (to, done) = agile_md::documents_edit::move_document(root, &path, &folder)?;
+        Ok((Some(to), done))
+    })
+    .await
+}
+
+/// Makes a new document titled `title` in `folder` (ticket 176).
+#[tauri::command]
+async fn create_document(
+    state: Tauri<'_, AppState>,
+    source: String,
+    folder: String,
+    title: String,
+) -> Result<amd_ui_model::DocChange> {
+    doc_change(&state, source, move |root| {
+        let (path, done) = agile_md::documents_edit::create_document(root, &folder, &title)?;
+        Ok((Some(path), done))
+    })
+    .await
+}
+
+/// A document's text for editing: its frontmatter apart, the body, its
+/// version, and what (if anything) keeps it out of rich text (ticket 176).
+#[tauri::command]
+async fn open_document_for_edit(source: String, path: String) -> Result<amd_ui_model::DocEdit> {
+    blocking(move || {
+        let root = documents_root(&source)?;
+        let text = agile_md::documents::read(&root, &path).map_err(err)?;
+        let (front, body) = agile_md::documents_edit::split_frontmatter(&text);
+        Ok(amd_ui_model::DocEdit {
+            version: agile_md::documents_edit::version(&text),
+            frontmatter: front.unwrap_or_default().to_string(),
+            unsupported: amd_ui_model::rich::unsupported(body)
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
+            body: body.to_string(),
+            source,
+            path,
+        })
+    })
+    .await
+}
+
+/// Saves an edited document, unless it changed since it was opened
+/// (ticket 176).
+#[tauri::command]
+async fn save_document(
+    state: Tauri<'_, AppState>,
+    source: String,
+    path: String,
+    text: String,
+    version: String,
+) -> Result<amd_ui_model::DocChange> {
+    doc_change(&state, source, move |root| {
+        Ok((
+            None,
+            agile_md::documents_edit::save(root, &path, &text, &version)?,
+        ))
     })
     .await
 }
@@ -1324,6 +1484,13 @@ pub fn run() {
             document_history,
             read_document_version,
             restore_document,
+            archive_document,
+            create_document_folder,
+            delete_document_folder,
+            move_document,
+            create_document,
+            open_document_for_edit,
+            save_document,
             read_document,
             open_external,
             auto_commit,

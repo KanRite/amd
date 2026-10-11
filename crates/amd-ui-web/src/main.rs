@@ -12,6 +12,7 @@ mod editor;
 mod home;
 mod preferences;
 mod rich_dom;
+mod rich_editor;
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
