@@ -45,6 +45,33 @@ pub struct ListItem {
 
 // ---------------------------------------------------------------- markdown → model
 
+/// What in `markdown` the rich editor can't keep (ticket 176): tables,
+/// images, raw HTML, footnotes. Empty when it can be edited as rich text
+/// without losing anything; otherwise the names of what it holds, for the
+/// note that says why it opens as Markdown.
+pub fn unsupported(markdown: &str) -> Vec<&'static str> {
+    let mut opts = Options::empty();
+    opts.insert(Options::ENABLE_TABLES);
+    opts.insert(Options::ENABLE_FOOTNOTES);
+    opts.insert(Options::ENABLE_STRIKETHROUGH);
+    opts.insert(Options::ENABLE_TASKLISTS);
+    let mut found: Vec<&'static str> = Vec::new();
+    for event in Parser::new_ext(markdown, opts) {
+        let what = match event {
+            Event::Start(Tag::Table(_)) => "tables",
+            Event::Start(Tag::Image { .. }) => "images",
+            Event::Html(_) | Event::InlineHtml(_) => "HTML",
+            Event::Start(Tag::FootnoteDefinition(_)) | Event::FootnoteReference(_) => "footnotes",
+            Event::Start(Tag::Strikethrough) => "struck-through text",
+            _ => continue,
+        };
+        if !found.contains(&what) {
+            found.push(what);
+        }
+    }
+    found
+}
+
 /// Parses a ticket body (no frontmatter) into blocks.
 pub fn parse_markdown(markdown: &str) -> Vec<Block> {
     let mut opts = Options::empty();
@@ -630,5 +657,14 @@ mod tests {
             Inline::Text("c".into()),
         ])];
         assert_eq!(to_markdown(&blocks), "a **b** c\n");
+    }
+
+    #[test]
+    fn what_the_rich_editor_cant_keep_is_named() {
+        assert!(unsupported("# T\n\n- a\n- [ ] b\n\n> q\n\n`c` **b** [l](x.md)\n").is_empty());
+        assert_eq!(unsupported("| a | b |\n|---|---|\n| 1 | 2 |\n"), ["tables"]);
+        assert_eq!(unsupported("![p](p.png)\n"), ["images"]);
+        assert_eq!(unsupported("<div>x</div>\n"), ["HTML"]);
+        assert_eq!(unsupported("x[^1]\n\n[^1]: n\n"), ["footnotes"]);
     }
 }

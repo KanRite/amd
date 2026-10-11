@@ -1184,7 +1184,21 @@ changes):
   `restore_document` (under the `writing` mutex); the reader's History
   button, `HistoryPanel`, and an old version's banner with Restore.
   `catch_up`/`push_or_replay` are shared with `amd import documents`
-  (170). Editing in place (138) is still to come. The demo board has `acme-documents` and a shared
+  (170). **Changing documents** (ticket 176, `documents_edit.rs`, amdui
+  only; every change through `documents::commit_change`): read-only until
+  **Edit** (rich text with the shared `rich_editor::Toolbar`, or Markdown;
+  `rich::unsupported` — tables, images, HTML, footnotes, strikethrough —
+  forces Markdown so nothing is flattened; frontmatter kept aside;
+  `save` refuses a stale `version`); **New document** (`create_document`:
+  `<slug>.md`, or the next `NNNN-` in a numbered folder, `# ADR NNNN:` /
+  `# RFC NNNN:` in `adr/adr` / `adr/rfc`; opens for editing); **Archived**
+  (`status: archived` in frontmatter, `with_archived`; muted, italic, a
+  badge, a banner with Unarchive); **folders** (`folders` lists empty ones;
+  `create_folder` keeps a `.gitkeep`; `delete_folder` only when empty);
+  **move** (drag onto a folder heading, or Move…; `move_document` commits
+  the pure `git mv` first so History follows, then rewrites links — other
+  documents' links to it and its own relative links — in a second commit,
+  both pushed). Ticket 138's editing is covered here. The demo board has `acme-documents` and a shared
   `acme-handbook`.
 - **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
   download path checks a downloaded amdui's libraries on Linux

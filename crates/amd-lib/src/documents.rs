@@ -51,6 +51,8 @@ pub struct Document {
     pub path: String,
     /// The first `# ` heading, else the file name without `.md`.
     pub title: String,
+    /// Marked `status: archived` (ticket 176).
+    pub archived: bool,
 }
 
 /// The documents repositories of the project whose board is `board`: its
@@ -121,8 +123,10 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Document>) -> Result<()> {
                 continue;
             };
             let relative = slashed(relative);
+            let text = fs::read_to_string(&path).unwrap_or_default();
             out.push(Document {
-                title: title_of(&path).unwrap_or_else(|| stem(&name)),
+                title: title_in(&text).unwrap_or_else(|| stem(&name)),
+                archived: crate::documents_edit::is_archived(&text),
                 path: relative,
             });
         }
@@ -150,11 +154,6 @@ fn slashed(path: &Path) -> String {
 }
 
 /// A document's title: its first `# ` heading, skipping frontmatter.
-fn title_of(path: &Path) -> Option<String> {
-    let text = fs::read_to_string(path).ok()?;
-    title_in(&text)
-}
-
 fn title_in(text: &str) -> Option<String> {
     let mut lines = text.lines();
     let mut in_frontmatter = false;
@@ -381,8 +380,6 @@ pub fn restore(root: &Path, relative: &str, commit: &str) -> Result<Restored> {
     if !dirty.trim().is_empty() {
         bail!("{relative} has changes that aren't committed; commit or discard them first");
     }
-    let remote = git::remote_url(root).is_some();
-    let warning = catch_up(root)?.map(|w| format!("{w}; restored locally"));
     let version = history(root, relative, usize::MAX)?
         .into_iter()
         .find(|v| v.commit.starts_with(commit) || commit.starts_with(&v.short))
@@ -392,18 +389,43 @@ pub fn restore(root: &Path, relative: &str, commit: &str) -> Result<Restored> {
     if old == now {
         bail!("{relative} is already as it was at {}", version.short);
     }
-    fs::write(&full, &old).with_context(|| format!("writing {relative}"))?;
     let message = format!(
         "restore: {relative} to {} ({}, {})",
         version.short, version.date, version.author
     );
-    let paths = std::collections::BTreeSet::from([PathBuf::from(relative)]);
-    git::commit_paths_locally(root, &message, &paths)?;
-    if !remote || warning.is_some() {
+    commit_change(root, &message, || {
+        fs::write(&full, &old).with_context(|| format!("writing {relative}"))?;
+        Ok(vec![PathBuf::from(relative)])
+    })
+}
+
+/// The one way a change is written to a documents repository (tickets 169,
+/// 176; ADR 0007): catch up with origin, let `write` make the change and
+/// name the paths it touched, commit just those, and push (replaying once
+/// if origin moved). Offline, the change is committed locally with a
+/// warning; a push that still fails keeps the commit and says why.
+pub fn commit_change(
+    root: &Path,
+    message: &str,
+    write: impl FnOnce() -> Result<Vec<PathBuf>>,
+) -> Result<Restored> {
+    let remote = git::remote_url(root).is_some();
+    let offline = catch_up(root)?;
+    let paths: std::collections::BTreeSet<PathBuf> = write()?.into_iter().collect();
+    git::commit_paths_locally(root, message, &paths)?;
+    let message = message.to_string();
+    if !remote {
         return Ok(Restored {
             message,
-            pushed: !remote,
-            warning,
+            pushed: true,
+            warning: None,
+        });
+    }
+    if let Some(w) = offline {
+        return Ok(Restored {
+            message,
+            pushed: false,
+            warning: Some(format!("{w}; committed locally")),
         });
     }
     Ok(match push_or_replay(root) {
@@ -418,6 +440,21 @@ pub fn restore(root: &Path, relative: &str, commit: &str) -> Result<Restored> {
             warning: Some(format!("committed, but couldn't push: {e:#}")),
         },
     })
+}
+
+/// Refuses when any of `paths` (relative to `root`) has changes that aren't
+/// committed, so a write never sweeps someone's edits into its commit.
+pub fn ensure_clean(root: &Path, paths: &[&str]) -> Result<()> {
+    let mut args = vec!["status", "--porcelain", "--untracked-files=no", "--"];
+    args.extend(paths);
+    let dirty = git::checked(root, &args)?;
+    if !dirty.trim().is_empty() {
+        bail!(
+            "{} has changes that aren't committed; commit or discard them first",
+            paths.join(", ")
+        );
+    }
+    Ok(())
 }
 
 /// Brings a documents repository in step with origin before a change is

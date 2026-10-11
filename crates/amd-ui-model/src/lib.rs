@@ -451,6 +451,9 @@ pub struct DocSource {
     /// Whether it's cloned on this machine; when not, `documents` is empty.
     pub cloned: bool,
     pub documents: Vec<DocEntry>,
+    /// Every folder, empty ones included (ticket 176).
+    #[serde(default)]
+    pub folders: Vec<String>,
 }
 
 /// One document in a [`DocSource`].
@@ -459,6 +462,9 @@ pub struct DocEntry {
     /// Relative to the repository, `/` between parts.
     pub path: String,
     pub title: String,
+    /// Marked `status: archived` (ticket 176).
+    #[serde(default)]
+    pub archived: bool,
 }
 
 /// A document, rendered for reading.
@@ -475,6 +481,34 @@ pub struct RenderedDoc {
     /// current one (ticket 169).
     #[serde(default)]
     pub version: Option<DocVersion>,
+    /// Marked `status: archived` (ticket 176).
+    #[serde(default)]
+    pub archived: bool,
+}
+
+/// A document opened for editing (ticket 176).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocEdit {
+    pub source: String,
+    pub path: String,
+    /// Its frontmatter block, fences included, kept as it is; empty for
+    /// none.
+    pub frontmatter: String,
+    /// The markdown below it: what's edited.
+    pub body: String,
+    /// A fingerprint of the whole text as opened; saving hands it back.
+    pub version: String,
+    /// What the rich editor can't keep (tables, images…): when not empty,
+    /// it's edited as Markdown only.
+    pub unsupported: Vec<String>,
+}
+
+/// A change to a documents repository, and where its document now is.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocChange {
+    pub sync: SyncReport,
+    /// The document's path after the change (moved or created), if any.
+    pub path: Option<String>,
 }
 
 /// One version of a document, from git (ticket 169).
