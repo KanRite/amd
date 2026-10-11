@@ -442,6 +442,61 @@ pub fn commit_change(
     })
 }
 
+/// [`commit_change`] for a change that can simply be made again (ticket 131:
+/// a vote, a note). `change` writes it and returns the commit message and
+/// the paths. If the push is rejected because origin moved, that commit is
+/// dropped, the clone fast-forwarded, and `change` run again on the new
+/// files, up to three times: two people voting on one idea edit the same
+/// line, which a rebase replay would only turn into a conflict.
+pub fn commit_reapplied(
+    root: &Path,
+    mut change: impl FnMut() -> Result<(String, Vec<PathBuf>)>,
+) -> Result<Restored> {
+    let remote = git::remote_url(root).is_some();
+    let offline = catch_up(root)?;
+    let mut tries = 0;
+    loop {
+        let base = git::checked(root, &["rev-parse", "HEAD"]).ok();
+        let (message, paths) = change()?;
+        let paths: std::collections::BTreeSet<PathBuf> = paths.into_iter().collect();
+        git::commit_paths_locally(root, &message, &paths)?;
+        if !remote {
+            return Ok(Restored {
+                message,
+                pushed: true,
+                warning: None,
+            });
+        }
+        if let Some(w) = &offline {
+            return Ok(Restored {
+                message,
+                pushed: false,
+                warning: Some(format!("{w}; committed locally")),
+            });
+        }
+        let Err(e) = git::push(root) else {
+            return Ok(Restored {
+                message,
+                pushed: true,
+                warning: None,
+            });
+        };
+        tries += 1;
+        let Some(base) = base.filter(|_| tries < 3 && git::fetch(root).is_ok()) else {
+            return Ok(Restored {
+                message,
+                pushed: false,
+                warning: Some(format!("committed, but couldn't push: {e:#}")),
+            });
+        };
+        // Only this commit is dropped, never earlier unpushed work.
+        git::reset_keep(root, base.trim())?;
+        git::merge_ff_only(root).context(
+            "origin moved and this clone has commits of its own that aren't pushed; pull and sort that out first",
+        )?;
+    }
+}
+
 /// Refuses when any of `paths` (relative to `root`) has changes that aren't
 /// committed, so a write never sweeps someone's edits into its commit.
 pub fn ensure_clean(root: &Path, paths: &[&str]) -> Result<()> {

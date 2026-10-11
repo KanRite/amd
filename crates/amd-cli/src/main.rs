@@ -7,6 +7,7 @@
 mod completions;
 mod form;
 mod github;
+mod idea;
 mod init;
 mod join;
 mod project;
@@ -282,6 +283,19 @@ enum Cmd {
         /// Preview what would happen without writing anything
         #[arg(long)]
         dry_run: bool,
+    },
+    /// The project's ideas, best first; put one forward, vote, add notes
+    ///
+    /// Ideas live in the project's documents repository, in ideas/.
+    /// Everyone votes up to three + or three − on each; the
+    /// best-voted come first. `amd idea ticket <ref>` makes a backlog
+    /// ticket from one
+    Idea {
+        #[command(subcommand)]
+        action: Option<IdeaAction>,
+        /// Include archived ideas in the list
+        #[arg(long)]
+        all: bool,
     },
     /// Pull in open GitHub issues as TRIAGE tickets now, or switch the
     /// automatic pull on or off
@@ -741,6 +755,46 @@ fn main() -> ExitCode {
 }
 
 #[derive(Subcommand, Debug)]
+enum IdeaAction {
+    /// Put an idea forward, with your name on it unless --anonymous
+    New {
+        #[arg(value_name = "TITLE")]
+        title: String,
+        /// Leave your name off it
+        #[arg(long)]
+        anonymous: bool,
+        /// Write it up in $EDITOR first
+        #[arg(short, long)]
+        edit: bool,
+    },
+    /// Show an idea: its write-up, votes and notes
+    Show {
+        #[arg(value_name = "IDEA")]
+        reference: String,
+    },
+    /// Vote: + up to +++, or - down to --- (or -2, +3); each sign is one
+    /// click, and your vote stays within three either way
+    Vote {
+        #[arg(value_name = "IDEA")]
+        reference: String,
+        #[arg(value_name = "VOTE", allow_hyphen_values = true)]
+        clicks: String,
+    },
+    /// Add a note under an idea
+    Note {
+        #[arg(value_name = "IDEA")]
+        reference: String,
+        #[arg(value_name = "TEXT")]
+        text: String,
+    },
+    /// Make a backlog ticket from an idea, linked both ways
+    Ticket {
+        #[arg(value_name = "IDEA")]
+        reference: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum ProjectAction {
     /// Make a project current for this folder (writes .current-project);
     /// with no name, pick one in a terminal
@@ -860,6 +914,29 @@ fn run() -> Result<()> {
             );
         }
     }
+    // Ideas are documents, found from the project; no board command needed
+    // (ticket 131).
+    if let Cmd::Idea { action, all } = command {
+        let action = match action {
+            None => idea::Action::List { all },
+            Some(IdeaAction::New {
+                title,
+                anonymous,
+                edit,
+            }) => idea::Action::New {
+                title,
+                anonymous,
+                edit,
+            },
+            Some(IdeaAction::Show { reference }) => idea::Action::Show { reference },
+            Some(IdeaAction::Vote { reference, clicks }) => {
+                idea::Action::Vote { reference, clicks }
+            }
+            Some(IdeaAction::Note { reference, text }) => idea::Action::Note { reference, text },
+            Some(IdeaAction::Ticket { reference }) => idea::Action::Ticket { reference },
+        };
+        return idea::run(action, &editor_command());
+    }
     if let Cmd::Project { action } = command {
         return match action {
             None => project::list(),
@@ -892,6 +969,7 @@ fn run() -> Result<()> {
         Cmd::Init { .. }
         | Cmd::Join { .. }
         | Cmd::Project { .. }
+        | Cmd::Idea { .. }
         | Cmd::Mine { .. }
         | Cmd::Completions { .. }
         | Cmd::Gui => {

@@ -1670,6 +1670,58 @@ assert "amd board --tag narrows every column to tasks carrying that tag" \
 assert "amd <destination> --tag with no matches lists an empty column, not an error" \
   bash -c "cd '${import_dst}' && '${AMD}' backlog --tag NO-SUCH-TAG --plain | grep -q '(empty)'"
 
+echo "ideas (ticket 131):"
+# A project with its documents repository and a bare origin. Sam is git's identity in the clones; Priya votes through git's
+# environment config.
+ix="$(mktemp -d)"
+ix_env="XDG_CONFIG_HOME=${ix}/config AMD_NO_INPUT=1"
+(
+  set -e
+  export XDG_CONFIG_HOME="${ix}/config"
+  cd "${ix}"
+  git init -q --bare -b main origin-documents.git
+  git init -q -b main idp-tickets
+  git clone -q origin-documents.git idp-documents 2>/dev/null
+  for r in idp-tickets idp-documents; do
+    git -C "${r}" config user.email sam@acme.io && git -C "${r}" config user.name "Sam Lee" && git -C "${r}" config commit.gpgsign false
+  done
+  ( cd idp-tickets && "${AMD}" init idp --local-only >/dev/null 2>&1 && "${AMD}" register . >/dev/null 2>&1 )
+  mkdir -p idp-documents/ideas && echo "# Old idea" > idp-documents/ideas/old-idea.md
+  git -C idp-documents add -A && git -C idp-documents commit -q -m "seed for ticket 131" && git -C idp-documents push -q origin main 2>/dev/null
+)
+in_ix() { (cd "${ix}/idp-tickets" && env ${ix_env} "${AMD}" "$@"); }
+ix_fns="$(declare -f in_ix); ix='${ix}'; ix_env='${ix_env}'; AMD='${AMD}'"
+assert "amd idea new puts an idea forward with your name, committed and pushed" \
+  bash -c "${ix_fns}; in_ix idea new 'Dark mode' | grep -q 'put forward ideas/dark-mode.md in idp-documents' \
+    && grep -q '^author: \"Sam Lee <sam@acme.io>\"' '${ix}/idp-documents/ideas/dark-mode.md' \
+    && git -C '${ix}/origin-documents.git' log -1 --format=%s main | grep -q '^idea: Dark mode'"
+assert "...--anonymous leaves the name off" \
+  bash -c "${ix_fns}; in_ix idea new 'Quiet tweak' --anonymous >/dev/null && ! grep -q author '${ix}/idp-documents/ideas/quiet-tweak.md'"
+assert "votes are clicks: ++ then - leaves +1, and +++ stops at +3" \
+  bash -c "${ix_fns}; in_ix idea vote dark ++ | grep -q 'your vote on Dark mode is +2' \
+    && in_ix idea vote dark - | grep -q 'is +1; its score is +1' \
+    && in_ix idea vote dark +++ | grep -q 'is +3' \
+    && ! in_ix idea vote dark + 2>/dev/null"
+assert "another person's vote counts beside yours, and a negative one sinks" \
+  bash -c "${ix_fns}; in_ix idea vote quiet + >/dev/null \
+    && (cd '${ix}/idp-tickets' && env ${ix_env} GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=user.email GIT_CONFIG_VALUE_0=priya@acme.io \
+         GIT_CONFIG_KEY_1=user.name GIT_CONFIG_VALUE_1='Priya Shah' '${AMD}' idea vote quiet --- >/dev/null) \
+    && grep -q 'Sam Lee <sam@acme.io> +1\",\"Priya Shah <priya@acme.io> -3' '${ix}/idp-documents/ideas/quiet-tweak.md' \
+    && in_ix idea show quiet | grep -q 'votes: Sam Lee +1, Priya Shah -3'"
+assert "amd idea lists best first, the old idea in the middle and the negative one last" \
+  bash -c "${ix_fns}; out=\$(in_ix idea) \
+    && printf '%s\\n' \"\$out\" | head -1 | grep -q '+3 .*Dark mode — Sam Lee' \
+    && printf '%s\\n' \"\$out\" | tail -1 | grep -q -- '-2 .*Quiet tweak'"
+assert "amd idea note adds a dated note; show prints votes and notes" \
+  bash -c "${ix_fns}; in_ix idea note dark 'Follow the OS setting' | grep -q 'added a note to Dark mode' \
+    && out=\$(in_ix idea show dark) && printf '%s\\n' \"\$out\" | grep -q 'votes: Sam Lee +3' \
+    && printf '%s\\n' \"\$out\" | grep -q 'Sam Lee (20[0-9-]*): Follow the OS setting'"
+assert "amd idea ticket makes a backlog ticket from it, linked both ways" \
+  bash -c "${ix_fns}; out=\$(in_ix idea ticket dark 2>&1) && printf '%s\\n' \"\$out\" | grep -q 'Dark mode -> ticket 001' \
+    && grep -q '^source: \"idea:idp-documents/ideas/dark-mode.md\"' '${ix}'/idp-tickets/tasks/backlog/001-dark-mode.md \
+    && grep -q '^tickets: \[\"idp-tickets#001\"\]' '${ix}/idp-documents/ideas/dark-mode.md'"
+rm -rf "${ix}"
+
 echo "importing documents (ticket 079):"
 # A project folder: proj-tickets, and proj-documents with a bare origin; and
 # a tree of old documents somewhere else.
