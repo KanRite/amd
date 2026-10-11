@@ -337,7 +337,9 @@ pub fn App() -> impl IntoView {
                 <Show when=on_home>
                     <crate::home::HomeBar />
                 </Show>
-                <Show when=move || !on_home()>
+                // Tickets are made on the board; documents have their own
+                // New document (ticket 178).
+                <Show when=move || ctx.view.get() == View::Board>
                     <button
                         class="whitespace-nowrap rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
                         disabled=move || ctx.board.with(Option::is_none)
