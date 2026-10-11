@@ -5,6 +5,7 @@
 //! ticket format is a MiniJinja template you can edit.
 
 mod completions;
+mod docs;
 mod form;
 mod github;
 mod idea;
@@ -283,6 +284,14 @@ enum Cmd {
         /// Preview what would happen without writing anything
         #[arg(long)]
         dry_run: bool,
+    },
+    /// Read the project's documents: the start page, a search, the page tree
+    ///
+    /// The start page is the one pinned in amdui, else the README. Changes
+    /// are made in the documents repository itself, like any clone
+    Docs {
+        #[command(subcommand)]
+        action: DocsAction,
     },
     /// The project's ideas, best first; put one forward, vote, add notes
     ///
@@ -755,6 +764,23 @@ fn main() -> ExitCode {
 }
 
 #[derive(Subcommand, Debug)]
+enum DocsAction {
+    /// Print the start page
+    Start {
+        /// Print only its path
+        #[arg(long)]
+        path: bool,
+    },
+    /// Search the project's documents and the shared ones, ignoring case
+    Search {
+        #[arg(value_name = "TEXT", required = true, num_args = 1..)]
+        query: Vec<String>,
+    },
+    /// The pages the start page links to, and what they link to, as a tree
+    Tree,
+}
+
+#[derive(Subcommand, Debug)]
 enum IdeaAction {
     /// Put an idea forward, with your name on it unless --anonymous
     New {
@@ -914,6 +940,17 @@ fn run() -> Result<()> {
             );
         }
     }
+    // Documents are read from the project; no board command needed (ticket
+    // 179).
+    if let Cmd::Docs { action } = command {
+        return docs::run(match action {
+            DocsAction::Start { path } => docs::Action::Start { path },
+            DocsAction::Search { query } => docs::Action::Search {
+                query: query.join(" "),
+            },
+            DocsAction::Tree => docs::Action::Tree,
+        });
+    }
     // Ideas are documents, found from the project; no board command needed
     // (ticket 131).
     if let Cmd::Idea { action, all } = command {
@@ -970,6 +1007,7 @@ fn run() -> Result<()> {
         | Cmd::Join { .. }
         | Cmd::Project { .. }
         | Cmd::Idea { .. }
+        | Cmd::Docs { .. }
         | Cmd::Mine { .. }
         | Cmd::Completions { .. }
         | Cmd::Gui => {

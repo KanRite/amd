@@ -476,6 +476,55 @@ fn set_pin(root: &Path, path: Option<&str>) -> Result<()> {
     config.save_to(&file)
 }
 
+/// One page of the link tree under the start page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Page {
+    /// 0 for the start page, 1 for what it links to, and so on.
+    pub depth: usize,
+    pub path: String,
+    pub title: String,
+}
+
+/// The documents linked from `start`, then from those, depth first and each
+/// page once (ticket 179): the site map the start page defines. Only
+/// markdown documents inside the repository that exist count.
+pub fn link_tree(root: &Path, start: &str) -> Result<Vec<Page>> {
+    fn visit(root: &Path, path: &str, depth: usize, seen: &mut Vec<String>, out: &mut Vec<Page>) {
+        if seen.iter().any(|p| p == path) {
+            return;
+        }
+        seen.push(path.to_string());
+        let Ok(text) = fs::read_to_string(root.join(path)) else {
+            return;
+        };
+        let title = crate::documents::title_of(&text)
+            .unwrap_or_else(|| path.rsplit('/').next().unwrap_or(path).to_string());
+        out.push(Page {
+            depth,
+            path: path.to_string(),
+            title,
+        });
+        let links = std::cell::RefCell::new(Vec::new());
+        rewrite_links(&text, |target| {
+            if let Some(found) = join_link(path, target) {
+                links.borrow_mut().push(found);
+            }
+            None
+        });
+        for link in links.into_inner() {
+            let lower = link.to_ascii_lowercase();
+            let markdown = lower.ends_with(".md") || lower.ends_with(".markdown");
+            if markdown && resolve(root, &link).is_ok_and(|p| p.is_file()) {
+                visit(root, &link, depth + 1, seen, out);
+            }
+        }
+    }
+    resolve(root, start)?;
+    let mut out = Vec::new();
+    visit(root, start, 0, &mut Vec::new(), &mut out);
+    Ok(out)
+}
+
 /// A line that matched a search.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hit {
@@ -711,6 +760,31 @@ mod tests {
         );
         pin_start_page(&root, None).unwrap();
         assert_eq!(start_page(&root).as_deref(), Some("README.md"));
+    }
+
+    #[test]
+    fn the_link_tree_follows_links_from_the_start_page_once_each() {
+        let (_dir, root) = repo();
+        // README → ADR 1, which links back to the README (shown once) and
+        // to a picture (not a document).
+        fs::write(
+            root.join("docs.md"),
+            "# Docs\n\n[readme](README.md) [gone](nope.md) [web](https://x.io/a.md)\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("README.md"),
+            "# P\n\nSee [ADR 1](adr/adr/0001-x.md#why) and [docs](docs.md).\n",
+        )
+        .unwrap();
+        let tree = link_tree(&root, "README.md").unwrap();
+        let got: Vec<(usize, &str)> = tree.iter().map(|p| (p.depth, p.path.as_str())).collect();
+        assert_eq!(
+            got,
+            [(0, "README.md"), (1, "adr/adr/0001-x.md"), (1, "docs.md")]
+        );
+        assert_eq!(tree[1].title, "ADR 0001: X");
+        assert!(link_tree(&root, "../outside.md").is_err());
     }
 
     #[test]

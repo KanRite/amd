@@ -154,6 +154,11 @@ fn slashed(path: &Path) -> String {
 }
 
 /// A document's title: its first `# ` heading, skipping frontmatter.
+pub fn title_of(text: &str) -> Option<String> {
+    title_in(text)
+}
+
+/// A document's title: its first `# ` heading, skipping frontmatter.
 fn title_in(text: &str) -> Option<String> {
     let mut lines = text.lines();
     let mut in_frontmatter = false;
