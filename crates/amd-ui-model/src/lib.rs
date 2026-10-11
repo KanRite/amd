@@ -226,6 +226,10 @@ pub struct Board {
     /// The priority an imported GitHub issue starts at (ticket 158).
     #[serde(default)]
     pub triage_priority: String,
+    /// Whether the landing page pulls in this project's GitHub issues
+    /// (ticket 173).
+    #[serde(default)]
+    pub import_issues: bool,
 }
 
 /// Whether to show Admin, and the note that says why (ticket 149).
@@ -869,6 +873,7 @@ mod assigned_tests {
             admin: AdminAccess::default(),
             shared_documents: String::new(),
             triage_priority: String::new(),
+            import_issues: true,
         };
         board.epics.push(Epic {
             repo: String::new(),

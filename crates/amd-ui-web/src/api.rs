@@ -454,6 +454,17 @@ struct PriorityArgs<'a> {
     priority: &'a str,
 }
 
+/// Pulls in GitHub issues for every project whose switch is on (ticket
+/// 173): what the landing page does when it loads.
+pub async fn pull_issues() -> Result<Vec<SyncReport>, String> {
+    call("pull_issues", &NoArgs {}).await
+}
+
+/// Whether the landing page pulls in this project's GitHub issues.
+pub async fn set_import_issues(on: bool) -> Result<SyncReport, String> {
+    call("set_import_issues", &OnArgs { on }).await
+}
+
 /// Sets the priority imported GitHub issues start at (ticket 158).
 pub async fn set_triage_priority(priority: &str) -> Result<SyncReport, String> {
     call("set_triage_priority", &PriorityArgs { priority }).await

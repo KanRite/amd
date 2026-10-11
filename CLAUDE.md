@@ -149,50 +149,59 @@ redundant. Their history is in git if it is ever wanted again.
   on the board. The CLI filters with `--by` and `--since` and restores
   `<id>...` or `--all` in one auto-commit. A force push that rewrote the
   remote's history is out of its reach (that's 145 and branch protection).
-- `crates/amd-lib/src/import.rs` — `amd import <path>`: reads a tasks
-  directory tree, treating it as a read-only `Board` (`Board::at`), and
-  copies each ticket into the current board — status kept, id renumbered
-  against the destination's own counter, `parent`/`related` remapped when
-  both ends are part of the same batch, same-titled tickets (within the
-  batch or against the destination) tagged `DUPLICATE`. `archive/` isn't a
-  destination. A ticket that fails to parse (no frontmatter, unreadable) is
-  skipped and reported, not a hard failure for the whole batch. `--dry-run`
-  computes and reports everything without writing or spending an id.
+- **`amd import` (ticket 173): stand where the things go, name where they
+  come from.** Never overwrites; what's left out is printed and appended to
+  `import.log` in the folder it ran from (`import_log.rs`: dated sections,
+  the name added to `.git/info/exclude`, so never committed).
+- `crates/amd-lib/src/import.rs` — `amd import tickets <PATH>` (or a bare
+  path), run from the destination board's `tasks/` directory (`cmd_import`
+  guards that, and that `<PATH>` has the four column folders and isn't this
+  board). Reads the source as a read-only `Board` (`Board::at`) and copies
+  each ticket in — status kept, id renumbered against the destination's
+  own counter, `parent`/`related` remapped when both ends are part of the
+  same batch. A ticket whose title is already on the board is **skipped
+  and reported**, not imported (ticket 173; it used to be tagged
+  DUPLICATE); same-titled tickets within the batch are both imported,
+  tagged `DUPLICATE`. `archive/` isn't a destination. A ticket that fails
+  to parse is skipped and reported. One auto-commit (`import: tickets`).
+  `--dry-run` computes everything without writing or spending an id.
 - `crates/amd-lib/src/import_documents.rs` — `amd import documents
-  [PATH] [--into DIR] [--project NAME] [--dry-run]` (ticket 079; `amd
-  import` takes `tickets <PATH>`, `documents [PATH]` or `issues [REPO]`,
-  and a bare path is still tickets). `plan` mirrors the tree: markdown, plus files a document
-  links to or shows inside the tree (a link scan, not a parser), hidden
-  files skipped, symlinks not followed; an existing destination is a
-  clash, skipped and listed, never overwritten. It refuses the documents
-  repository itself, a folder inside it, or one holding it. `apply`
-  refuses a clone with uncommitted tracked changes, a detached HEAD, or a
-  branch other than `origin/HEAD`'s, then (ticket 170, ADR 0007: straight
-  to main) `documents::catch_up` (fetch, fast-forward, refuse diverged),
-  commits, and `documents::push_or_replay` (one `rebase @{u}` replay); a
-  failed push keeps the commit and warns. It used to make a
-  `chore/import-documents-…` branch and open a PR with `gh`. Handled before
-  `ensure_board()` so it never offers to create a board; `--project`
-  resolves through the registry (scratch boards included, unlike My
-  work), else `Board::discover()`. The target is
-  `documents::sources`' own repository.
-- `crates/amd-lib/src/import_issues.rs` — `amd import issues [REPO]
-  [--label L] [--dry-run]` (ticket 158), and Admin's "Import GitHub
-  issues": open issues from `gh issue list --json` into the loose backlog
-  through `Draft` (so template, `created-by`, priority and the counter
-  behave as in `amd new`), tagged `TRIAGE` plus each label the project
-  lists (the others are named in the notes, so a label never fails an
-  import), with `source: "github:owner/repo#N"`. `targets`: `owner/repo`,
-  or a declared name cloned here; none given, every declared repository
-  cloned here with a github.com `origin`, else the board's own repository.
-  **An issue is imported once, ever**: `imported_sources` reads every
-  `source:` line ever added in the board's history (`git log -p -G`) plus
-  the files on disk, archive included, so abandoning a TRIAGE ticket turns
-  the issue down for good. `plan_with` takes the fetch as a closure, so it's
-  tested without GitHub; `tests/test.sh` puts a fake `gh` on `PATH`. One
-  auto-commit per run (`import: issues "N from slugs"`). Tickets start at
-  the project's `triage-priority` (tickets `.settings`, `low` unless set;
-  `amd triage-priority [p]`, the dropdown in Admin's import section).
+  <PATH> [--dry-run]` (tickets 079, 170, 173), run from the folder of a
+  documents repository (a repo named `*-documents`, or the project's
+  `shared-documents`) the files should go into: `cmd_import_documents`
+  passes that folder, relative to the repo root, as `plan`'s `into`.
+  `plan` mirrors the tree: markdown, plus files a document links to or
+  shows inside the tree (a link scan, not a parser), hidden files skipped,
+  symlinks not followed; an existing destination is a clash, skipped and
+  logged, never overwritten. The source can't be inside the destination
+  repository, or hold it. `apply` refuses a clone with uncommitted tracked
+  changes, a detached HEAD, or a branch other than `origin/HEAD`'s, then
+  (ADR 0007: straight to main) `documents::catch_up` (fetch, fast-forward,
+  refuse diverged), commits, and `documents::push_or_replay` (one
+  `rebase @{u}` replay); a failed push keeps the commit and warns. Handled
+  before `ensure_board()`. `--into` and `--project` are gone.
+- `crates/amd-lib/src/import_issues.rs` — GitHub issues, **pulled in
+  automatically** (ticket 173): amdui's `pull_issues`, called by the
+  landing page once it shows, does every project on this machine whose
+  `import-issues` setting is on (the default; `amd issues on|off`, Admin's
+  "GitHub issues" switch), at most every five minutes per project
+  (`AppState.issues_pulled`), each caught up first and committed as one;
+  silent when there's nothing, no `gh` or no network. `amd issues
+  [--repo owner/repo] [--label L] [--dry-run]` checks now (`amd import
+  issues` points there); Admin keeps Preview and Check now. Open issues
+  from `gh issue list --json` go into the loose backlog through `Draft`
+  (template, `created-by`, priority and the counter as in `amd new`),
+  tagged `TRIAGE` plus each label the project lists (the others are named
+  in the notes), with `source: "github:owner/repo#N"`. `targets`:
+  `owner/repo`, or a declared name; none given, every declared repository
+  on GitHub — from its clone, else (173) from the tickets origin with the
+  name swapped in (`clone::sibling_url`, `git::url_identity` resolving SSH
+  aliases) — else the board's own repository. **An issue is imported
+  once, ever**: `imported_sources` reads every `source:` line ever added in
+  the board's history (`git log -p -G`) plus the files on disk, archive
+  included. `plan_with` takes the fetch as a closure, so it's tested
+  without GitHub; `tests/test.sh` puts a fake `gh` on `PATH`. Tickets
+  start at the project's `triage-priority`.
 - `crates/amd-cli/src/main.rs` — the `amd` binary: clap CLI and command handlers; it also owns
   `form.rs`, `value.rs`, `completions.rs` and `init.rs`, which are CLI-only.
 - `crates/amd-cli/src/init.rs` — `amd init <project>`: finds or creates

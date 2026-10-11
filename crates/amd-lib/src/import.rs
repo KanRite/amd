@@ -1,8 +1,10 @@
 //! Importing tickets from an existing tasks-directory tree into the current
 //! board: status (column) preserved, ids renumbered against the
 //! destination's own counter, `parent`/`related` remapped within the
-//! imported batch, and same-titled tickets flagged `DUPLICATE` for a human
-//! to sort out rather than silently merged or dropped.
+//! imported batch. A ticket whose title is already on the board is left
+//! out and reported (ticket 173: an import never adds a second copy);
+//! same-titled tickets within the batch are both imported, flagged
+//! `DUPLICATE` for a human to sort out.
 //!
 //! The source tree is read-only throughout — nothing here ever writes to
 //! it, so the same source can be imported more than once, or into more
@@ -95,6 +97,15 @@ pub fn import(dest: &Board, source_root: &Path, dry_run: bool) -> Result<ImportS
 
             let old_id = format!("{old_number:03}");
             let title = task.title();
+            // Never a second copy of what's already here (ticket 173): a
+            // ticket whose title is on this board is left out, and said so.
+            if existing_titles.contains(&normalize_title(&title)) {
+                skipped.push((
+                    task.path.clone(),
+                    format!("\"{title}\" is already on this board"),
+                ));
+                continue;
+            }
 
             let new_id = format!("{next:03}");
             let text = match task::set_meta(&text, "id", &format!("{new_id:?}")) {
@@ -145,8 +156,7 @@ pub fn import(dest: &Board, source_root: &Path, dry_run: bool) -> Result<ImportS
     let mut imported = Vec::with_capacity(pending.len());
     for item in pending {
         let normalized = normalize_title(&item.title);
-        let duplicate = title_counts.get(&normalized).copied().unwrap_or(0) > 1
-            || existing_titles.contains(&normalized);
+        let duplicate = title_counts.get(&normalized).copied().unwrap_or(0) > 1;
         let text = if duplicate {
             add_tag(&item.text, DUPLICATE_TAG)?
         } else {
@@ -412,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn an_imported_title_matching_the_destination_board_is_flagged_too() {
+    fn a_title_already_on_the_destination_board_is_left_out() {
         let src_dir = tempfile::tempdir().unwrap();
         let source = board_at(src_dir.path());
         write_ticket(
@@ -440,8 +450,15 @@ mod tests {
         dest.record_id(1).unwrap();
 
         let summary = import(&dest, &source.root, false).unwrap();
-        assert_eq!(summary.imported.len(), 1);
-        assert!(summary.imported[0].duplicate);
+        // Never a second copy (ticket 173): skipped, and said why.
+        assert!(summary.imported.is_empty());
+        assert_eq!(summary.skipped.len(), 1);
+        assert!(
+            summary.skipped[0].1.contains("already on this board"),
+            "{:?}",
+            summary.skipped
+        );
+        assert_eq!(dest.next_id().unwrap(), 2, "no number spent on it");
         // The pre-existing destination ticket must not have been touched.
         let existing_text =
             fs::read_to_string(dest.dir(Column::Backlog).join("001-existing.md")).unwrap();

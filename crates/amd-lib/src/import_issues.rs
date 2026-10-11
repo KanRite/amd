@@ -1,4 +1,4 @@
-//! `amd import issues` (ticket 158): a repository's open GitHub issues
+//! `amd issues` and the landing page (tickets 158, 173): open GitHub issues
 //! brought into the loose backlog as tickets tagged TRIAGE, so new work
 //! reported on GitHub gets sorted like any other.
 //!
@@ -162,11 +162,18 @@ fn source_of(slug: &str, number: u64) -> String {
 /// that's on GitHub.
 pub fn targets(board: &Board, repo: Option<&str>) -> Result<Vec<Target>> {
     let declared = board_settings::load(board).repos();
+    // Each declared repository on GitHub: from its clone here, else (ticket
+    // 173) from the tickets repository's own origin with the name swapped
+    // in, as `amd clone` does, so one not cloned here still counts.
+    let tickets_origin = git::remote_url(board.repo_root());
     let cloned: Vec<(String, String)> = declared
         .iter()
         .filter_map(|name| {
-            let path = registry::clone_of(&board.root, name)?;
-            Some((name.clone(), github_slug(&path)?))
+            let slug = match registry::clone_of(&board.root, name) {
+                Some(path) => github_slug(&path)?,
+                None => slug_of_url(&crate::clone::sibling_url(tickets_origin.as_deref()?, name))?,
+            };
+            Some((name.clone(), slug))
         })
         .collect();
 
@@ -212,8 +219,16 @@ pub fn targets(board: &Board, repo: Option<&str>) -> Result<Vec<Target>> {
         }]);
     }
     bail!(
-        "no repository of this project is on GitHub here — name one: `amd import issues owner/repo`"
+        "no repository of this project is on GitHub here — name one: `amd issues --repo owner/repo`"
     )
+}
+
+/// `owner/repo` from a github.com remote URL, in any of its forms.
+fn slug_of_url(url: &str) -> Option<String> {
+    git::url_identity(url)
+        .strip_prefix("github.com/")
+        .filter(|slug| is_slug(slug))
+        .map(str::to_string)
 }
 
 /// `owner/repo` when `repo`'s `origin` is on github.com.
@@ -545,6 +560,19 @@ mod tests {
         let (tags, dropped) = tags_for(issue, &["BUG".to_string()]);
         assert_eq!(tags, ["TRIAGE", "BUG"]);
         assert_eq!(dropped, ["needs-info"]);
+    }
+
+    #[test]
+    fn a_github_url_gives_its_slug() {
+        assert_eq!(
+            slug_of_url("git@github.com:acme/web.git").as_deref(),
+            Some("acme/web")
+        );
+        assert_eq!(
+            slug_of_url("https://github.com/Acme/Web").as_deref(),
+            Some("acme/web")
+        );
+        assert_eq!(slug_of_url("git@gitlab.com:acme/web.git"), None);
     }
 
     #[test]
