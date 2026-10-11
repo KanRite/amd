@@ -739,7 +739,12 @@ async fn import_issues(
                 sync: None,
             });
         }
-        let slugs: Vec<&str> = targets.iter().map(|t| t.slug.as_str()).collect();
+        // Only the repositories it could read (ticket 180).
+        let slugs: Vec<&str> = targets
+            .iter()
+            .map(|t| t.slug.as_str())
+            .filter(|s| !plan.skipped.iter().any(|(k, _)| k == s))
+            .collect();
         let detail = format!("{} from {}", plan.new.len(), slugs.join(", "));
         let (done, warning) =
             transition::with_auto_commit(board, "import", "issues", &detail, || {

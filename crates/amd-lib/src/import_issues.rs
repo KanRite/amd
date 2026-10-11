@@ -125,11 +125,23 @@ impl Planned {
 pub struct Plan {
     pub new: Vec<Planned>,
     pub already: usize,
+    /// Repositories whose issues couldn't be read, and why (ticket 180):
+    /// left out so the others still come in.
+    pub skipped: Vec<(String, String)>,
 }
 
 impl Plan {
     /// `imported 2 issues, 1 already imported`, or the dry run's version.
     pub fn summary(&self, dry_run: bool) -> String {
+        let mut line = self.counts(dry_run);
+        if !self.skipped.is_empty() {
+            let names: Vec<&str> = self.skipped.iter().map(|(s, _)| s.as_str()).collect();
+            line.push_str(&format!("; couldn't read {}", names.join(", ")));
+        }
+        line
+    }
+
+    fn counts(&self, dry_run: bool) -> String {
         let n = self.new.len();
         if n == 0 {
             return match self.already {
@@ -374,8 +386,18 @@ pub fn plan_with(
     let priority = settings.triage_priority();
     let mut next = board.next_id()?;
     let mut plan = Plan::default();
+    let mut first_error = None;
     for target in targets {
-        let mut issues = fetch(&target.slug, label)?;
+        // One repository that can't be read (gone, renamed, no access)
+        // mustn't stop the others (ticket 180).
+        let mut issues = match fetch(&target.slug, label) {
+            Ok(issues) => issues,
+            Err(e) => {
+                plan.skipped.push((target.slug.clone(), format!("{e:#}")));
+                first_error.get_or_insert(e);
+                continue;
+            }
+        };
         issues.sort_by_key(|issue| issue.number);
         for issue in issues {
             if seen.contains(&source_of(&target.slug, issue.number)) {
@@ -399,6 +421,12 @@ pub fn plan_with(
             });
             next += 1;
         }
+    }
+    // None readable at all (no gh, no network): an error, as before.
+    if plan.skipped.len() == targets.len()
+        && let Some(e) = first_error
+    {
+        return Err(e);
     }
     Ok(plan)
 }
@@ -586,6 +614,34 @@ mod tests {
         assert!(!is_slug("acme"));
         assert!(!is_slug("acme/web/extra"));
         assert!(!is_slug("acme/ web"));
+    }
+
+    #[test]
+    fn one_unreadable_repository_doesnt_stop_the_others() {
+        let (_dir, board) = board();
+        let mut targets = vec![Target {
+            slug: "acme/gone".to_string(),
+            repository: None,
+        }];
+        targets.extend(web());
+        let fetch = |slug: &str, label: Option<&str>| {
+            if slug == "acme/gone" {
+                anyhow::bail!("Could not resolve to a Repository")
+            }
+            canned(slug, label)
+        };
+        let plan = plan_with(&board, &targets, None, fetch).unwrap();
+        assert!(!plan.new.is_empty(), "acme/web's issues still come in");
+        assert_eq!(plan.skipped.len(), 1);
+        assert_eq!(plan.skipped[0].0, "acme/gone");
+        assert!(
+            plan.summary(true).ends_with("; couldn't read acme/gone"),
+            "{}",
+            plan.summary(true)
+        );
+        // Nothing readable at all is still an error.
+        let none = plan_with(&board, &targets[..1], None, fetch);
+        assert!(none.is_err());
     }
 
     #[test]
