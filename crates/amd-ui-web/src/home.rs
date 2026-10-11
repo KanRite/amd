@@ -188,7 +188,24 @@ pub fn HomeBar() -> impl IntoView {
         </button>
         {doc_button("Documents", "docs", "Read this project's documents (docs/)")}
         {doc_button("ADRs", "adr", "Read this project's decisions and proposals (adr/)")}
-        {doc_button("Ideas", "ideas", "Read this project's ideas (ideas/)")}
+        // Ideas have a view of their own (ticket 131).
+        <button
+            type="button"
+            class=small
+            title=move || match current() {
+                None => "Choose a project first".to_string(),
+                Some(p) if !p.documents => format!("{}-documents isn't cloned on this machine", p.name),
+                Some(_) => "This project's ideas: vote, add notes, make tickets".to_string(),
+            }
+            disabled=move || !current().is_some_and(|p| p.documents)
+            on:click=move |_| {
+                if let Some(p) = current() {
+                    open(ctx, p.root, View::Ideas, None);
+                }
+            }
+        >
+            "Ideas"
+        </button>
         <button
             type="button"
             class=small

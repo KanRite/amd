@@ -658,3 +658,56 @@ pub async fn save_document(
     )
     .await
 }
+
+/// The project's ideas, best first (ticket 131).
+pub async fn list_ideas() -> Result<amd_ui_model::IdeaList, String> {
+    call("list_ideas", &NoArgs {}).await
+}
+
+/// One idea: its write-up, votes and notes.
+pub async fn read_idea(path: &str) -> Result<amd_ui_model::IdeaDetail, String> {
+    call("read_idea", &PathArgs { path }).await
+}
+
+#[derive(Serialize)]
+struct NewIdeaArgs<'a> {
+    title: &'a str,
+    body: &'a str,
+    named: bool,
+}
+
+/// Puts an idea forward, with your name on it when `named`.
+pub async fn create_idea(
+    title: &str,
+    body: &str,
+    named: bool,
+) -> Result<amd_ui_model::DocChange, String> {
+    call("create_idea", &NewIdeaArgs { title, body, named }).await
+}
+
+#[derive(Serialize)]
+struct VoteArgs<'a> {
+    path: &'a str,
+    delta: i32,
+}
+
+/// One click on an idea's + (1) or − (−1).
+pub async fn vote_idea(path: &str, delta: i32) -> Result<amd_ui_model::DocChange, String> {
+    call("vote_idea", &VoteArgs { path, delta }).await
+}
+
+#[derive(Serialize)]
+struct NoteArgs<'a> {
+    path: &'a str,
+    text: &'a str,
+}
+
+/// Adds your note under an idea.
+pub async fn note_idea(path: &str, text: &str) -> Result<amd_ui_model::DocChange, String> {
+    call("note_idea", &NoteArgs { path, text }).await
+}
+
+/// Makes a backlog ticket from an idea.
+pub async fn idea_to_ticket(path: &str) -> Result<amd_ui_model::IdeaTicket, String> {
+    call("idea_to_ticket", &PathArgs { path }).await
+}

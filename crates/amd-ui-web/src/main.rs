@@ -10,6 +10,7 @@ mod dialog;
 mod documents;
 mod editor;
 mod home;
+mod ideas;
 mod preferences;
 mod rich_dom;
 mod rich_editor;

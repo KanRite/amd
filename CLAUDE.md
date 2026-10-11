@@ -101,6 +101,34 @@ redundant. Their history is in git if it is ever wanted again.
   use [name]`); `amdui` reads `Board.projects` and calls `use_project`, which
   writes the same file and moves the process to the folder so the file —
   not whichever tickets repo it was launched in — decides.
+- `crates/amd-lib/src/ideas.rs` — Ideas (ticket 131): developers' ideas
+  for apps and improvements, before anyone means to do them. Each is a
+  markdown file in the project's **own** documents repository's `ideas/`
+  (never the shared one: ideas belong to a project; `ideas::source`),
+  pushed straight to main (ADR 0007). Frontmatter `title`, `author`
+  (`Name <email>`, left out when anonymous), `created`, `votes` (a JSON/YAML
+  flow list of `"Name <email> +2"`, one per person) and `tickets`
+  (`<tickets-repo>#<id>`); notes are a `## Notes` list (`- **Name**, date:
+  text`, later lines indented). A file without frontmatter is an idea with
+  no votes. Votes are clicks: each ±1, kept within ±3 per person (0 drops
+  the line); the score is the sum; `sort` is score, then voters, then
+  newest. "You" is git's identity in the documents clone (`Person::of`).
+  Votes and notes go through `documents::commit_reapplied`: a push
+  rejected because origin moved drops just that commit
+  (`reset --keep` to the commit before it), fast-forwards, and makes the
+  change again on the new file (up to three times), since two people
+  voting edit the same line and a rebase replay would conflict.
+  `to_ticket` makes a backlog ticket (`source: "idea:<repo>/<path>"`,
+  notes naming the idea) and records it on the idea. Refused in an
+  archived project. CLI: `amd idea [--all]`, `idea new <title>
+  [--anonymous] [-e]`, `show`, `vote <ref> <+|++|-|-2…>`, `note`, `ticket`
+  (`crates/amd-cli/src/idea.rs`, handled before `ensure_board()`). amdui:
+  `View::Ideas` (`amd-ui-web/src/ideas.rs`), from the landing page's Ideas
+  button: cards best first with your − / + (disabled at ±3), an idea
+  opened beside them (write-up via `ideas::write_up`, votes, notes, Add
+  note, Make a ticket then Open ticket, Open in Documents to edit), New
+  idea (rich text, "Put my name on it"). Commands `list_ideas`,
+  `read_idea`, `create_idea`, `vote_idea`, `note_idea`, `idea_to_ticket`.
 - `crates/amd-lib/src/archive.rs` — archiving a project (ticket 157):
   `archived = on` in the tickets `.settings`, auto-committed like any
   setting. An archived project only reads: the CLI's `run()` refuses a
