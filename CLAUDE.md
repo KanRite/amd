@@ -1244,7 +1244,19 @@ changes):
   **move** (drag onto a folder heading, or Move…; `move_document` commits
   the pure `git mv` first so History follows, then rewrites links — other
   documents' links to it and its own relative links — in a second commit,
-  both pushed). Ticket 138's editing is covered here. The demo board has `acme-documents` and a shared
+  both pushed). **Start page and search** (ticket 179, amdui only:
+  the CLI has the repository itself): each project's own documents
+  repository has one start page, `start-page = <path>` in `.agile-md` at
+  its root (`documents_edit::{pinned, start_page, pin_start_page}`,
+  committed like any document; README.md when nothing is pinned, or the
+  pin is gone). Documents opens on it when nothing else is open; the
+  reader has Pin as start page / Unpin and a Start page badge, and the
+  sidebar a ⌂ Start page link. A move keeps the pin on the moved
+  document. Search (`documents_edit::search`, `search_documents`) covers
+  the own and shared repositories: titles and text, ignoring case, up to
+  three lines a document, title matches first; a result opens the
+  document and finds the text in it (`window.find`, started at the
+  document's top). Ticket 138's editing is covered here. The demo board has `acme-documents` and a shared
   `acme-handbook`.
 - **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
   download path checks a downloaded amdui's libraries on Linux

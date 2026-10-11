@@ -711,3 +711,28 @@ pub async fn note_idea(path: &str, text: &str) -> Result<amd_ui_model::DocChange
 pub async fn idea_to_ticket(path: &str) -> Result<amd_ui_model::IdeaTicket, String> {
     call("idea_to_ticket", &PathArgs { path }).await
 }
+
+#[derive(Serialize)]
+struct PinArgs<'a> {
+    source: &'a str,
+    path: Option<&'a str>,
+}
+
+/// Pins a document as the start page (ticket 179); `None` goes back to the
+/// README.
+pub async fn pin_start_page(
+    source: &str,
+    path: Option<&str>,
+) -> Result<amd_ui_model::DocChange, String> {
+    call("pin_start_page", &PinArgs { source, path }).await
+}
+
+#[derive(Serialize)]
+struct QueryArgs<'a> {
+    query: &'a str,
+}
+
+/// Searches the project's documents and the shared ones (ticket 179).
+pub async fn search_documents(query: &str) -> Result<Vec<amd_ui_model::DocHit>, String> {
+    call("search_documents", &QueryArgs { query }).await
+}
