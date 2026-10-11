@@ -234,7 +234,10 @@ redundant. Their history is in git if it is ever wanted again.
   landing page once it shows, does every project on this machine whose
   `import-issues` setting is on (the default; `amd issues on|off`, Admin's
   "GitHub issues" switch), at most every five minutes per project
-  (`AppState.issues_pulled`), each caught up first and committed as one;
+  (`AppState.issues_pulled`), GitHub asked **without** amdui's write
+  lock (ticket 181: holding it through every project's fetch made each
+  top-bar button wait up to 15 s on a cold start), and only a project with
+  something new takes the lock to catch up, plan again, write and commit;
   silent when there's nothing, no `gh` or no network. `amd issues
   [--repo owner/repo] [--label L] [--dry-run]` checks now (`amd import
   issues` points there); Admin keeps Preview and Check now. Open issues

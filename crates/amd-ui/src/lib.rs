@@ -616,18 +616,21 @@ async fn set_shared_documents(state: Tauri<'_, AppState>, name: String) -> Resul
 
 /// Pulls in open GitHub issues for every project on this machine whose
 /// switch is on (ticket 173), when the landing page loads: at most once per
-/// project every five minutes, each caught up first and committed as one.
-/// Quiet about a project with nothing on GitHub, no `gh`, or no network;
-/// one report per project that got something.
+/// project every five minutes. Quiet about a project with nothing on
+/// GitHub, no `gh`, or no network; one report per project that got
+/// something.
+///
+/// GitHub is asked **without** the write lock (ticket 181): this runs on
+/// every cold start and takes seconds per project, and holding the lock
+/// made every button that opens a project wait for it. Only a project
+/// with something new takes the lock, to catch up, plan again against
+/// the counter as it is then, write and commit.
 #[tauri::command]
 async fn pull_issues(state: Tauri<'_, AppState>) -> Result<Vec<SyncReport>> {
     let writing = Arc::clone(&state.writing);
     let pulled = Arc::clone(&state.issues_pulled);
     blocking(move || {
         use agile_md::import_issues as issues;
-        let _guard = writing
-            .lock()
-            .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
         let mut reports = Vec::new();
         for project in agile_md::my_work::projects() {
             if project.archived {
@@ -650,10 +653,35 @@ async fn pull_issues(state: Tauri<'_, AppState>) -> Result<Vec<SyncReport>> {
             let Ok(targets) = issues::targets(&board, None) else {
                 continue;
             };
+            // The network, unlocked: each repository's open issues, once.
+            let fetched: Vec<(String, std::result::Result<Vec<issues::Issue>, String>)> = targets
+                .iter()
+                .map(|t| {
+                    (
+                        t.slug.clone(),
+                        issues::fetch(&t.slug, None).map_err(|e| format!("{e:#}")),
+                    )
+                })
+                .collect();
+            let answer = |slug: &str, _: Option<&str>| -> anyhow::Result<Vec<issues::Issue>> {
+                match fetched.iter().find(|(s, _)| s == slug) {
+                    Some((_, Ok(found))) => Ok(found.clone()),
+                    Some((_, Err(e))) => Err(anyhow::anyhow!("{e}")),
+                    None => Ok(Vec::new()),
+                }
+            };
+            // Anything new? Read-only, so still unlocked.
+            match issues::plan_with(&board, &targets, None, answer) {
+                Ok(plan) if !plan.new.is_empty() => {}
+                _ => continue,
+            }
+            let _guard = writing
+                .lock()
+                .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
             if agile_md::sync::catch_up(&board, agile_md::sync::Purpose::Write).is_err() {
                 continue;
             }
-            let Ok(plan) = issues::plan(&board, &targets, None) else {
+            let Ok(plan) = issues::plan_with(&board, &targets, None, answer) else {
                 continue;
             };
             if plan.new.is_empty() {
