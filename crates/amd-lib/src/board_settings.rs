@@ -104,6 +104,9 @@ const TRIAGE_PRIORITY: &str = "triage-priority";
 /// Whether amdui's landing page pulls in the project's GitHub issues
 /// (ticket 173).
 const IMPORT_ISSUES: &str = "import-issues";
+/// Set once the documents `.settings/` has been carried across (ticket
+/// 182), so it's never read again.
+const MIGRATED: &str = "migrated-from-documents";
 /// The project is archived (ticket 157): read-only for amd until unarchived.
 const ARCHIVED: &str = "archived";
 const TAGS_ONLY: &str = "prevent-arbitrary-tags";
@@ -730,15 +733,20 @@ pub fn load(board: &Board) -> BoardSettings {
 /// (ticket 057's split) into the tickets `.settings` (ticket 111), so a
 /// project that had them loses nothing. `repos` is the union of both; any
 /// other key is taken from documents only where the tickets file doesn't
-/// set it. Saves only when something changed, and returns the keys it
-/// carried — empty once everything is across, so it's safe (and silent) to
-/// call before every command. The documents files are never written, only
-/// left behind to be deleted by a documents PR.
+/// set it. Returns the keys it carried. It happens **once** (ticket 182):
+/// `migrated-from-documents = on` is recorded with it, and after that the
+/// documents files are never read, so a repository deregistered later
+/// isn't put back by an old `repos` file still lying there. Safe (and
+/// silent) to call before every command. The documents files are never
+/// written, only left behind to be deleted.
 pub fn migrate_from_documents(board: &Board) -> Result<Vec<String>> {
     let Some(root) = documents_root(board) else {
         return Ok(Vec::new());
     };
     let mut settings = load(board);
+    if settings.config.get(MIGRATED).is_some() {
+        return Ok(Vec::new());
+    }
     let mut moved = Vec::new();
     for key in MIGRATED_KEYS {
         let Some(value) = read_documents_key(&root, key) else {
@@ -757,7 +765,12 @@ pub fn migrate_from_documents(board: &Board) -> Result<Vec<String>> {
             moved.push(key.to_string());
         }
     }
-    if !moved.is_empty() {
+    // Recorded whenever there was a documents folder to read, moved or not.
+    let found = MIGRATED_KEYS
+        .iter()
+        .any(|key| read_documents_key(&root, key).is_some());
+    if found {
+        settings.config.set(MIGRATED, "on");
         settings.save(board)?;
     }
     Ok(moved)
@@ -1370,6 +1383,14 @@ mod tests {
             migrate_from_documents(&board).unwrap().is_empty(),
             "silent once across"
         );
+
+        // Ticket 182: once is once. A repository taken off afterwards stays
+        // off, though the old documents file still names it.
+        let mut settings = load(&board);
+        assert!(settings.undeclare_repo("long-one"));
+        settings.save(&board).unwrap();
+        assert!(migrate_from_documents(&board).unwrap().is_empty());
+        assert_eq!(load(&board).repos(), ["TestRepository", "another"]);
     }
 
     #[test]

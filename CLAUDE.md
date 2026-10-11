@@ -86,6 +86,9 @@ redundant. Their history is in git if it is ever wanted again.
   the CLI after `catch_up`, and by amdui's `change()`) carries a documents
   `.settings/` across once — `repos` unioned, other keys filling gaps,
   tickets winning a clash — commits it, says so, and is silent after.
+  **Once only** (ticket 182): it records `migrated-from-documents = on`
+  and never reads the documents folder again, so a repository
+  deregistered later isn't re-added from an old `repos` file.
   `documents_root()` survives only to find that old directory: sibling path
   first, then a project-scoped registry lookup, never a machine-wide name.
 - `crates/amd-lib/src/current_project.rs` — several projects in one folder

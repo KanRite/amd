@@ -854,6 +854,11 @@ assert "...committed, like any change" \
   bash -c "git -C '${st}/proj-tickets' log -1 --format=%s | grep -q '^settings: migrate'"
 assert "...and silent once everything is across" \
   bash -c "cd '${st}/proj-tickets' && ! env ${st_env} '${AMD}' board --plain 2>&1 | grep -q 'moved '"
+assert "...once only: a repository deregistered stays off, though documents still names it (ticket 182)" \
+  bash -c "cd '${st}/proj-tickets' && grep -qx 'migrated-from-documents = on' .settings \
+    && env ${st_env} '${AMD}' deregister docs-repo >/dev/null 2>&1 \
+    && env ${st_env} '${AMD}' board --plain >/dev/null 2>&1 \
+    && grep -qx 'repos = old-repo' .settings"
 assert "amd wip-limit is committed" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' wip-limit 3 >/dev/null 2>&1 \
     && grep -qx 'wip-limit = 3' .settings && git log -1 --format=%s | grep -q '^settings: wip-limit'"
