@@ -677,15 +677,15 @@ gi_env="XDG_CONFIG_HOME=${gi}/config AMD_NO_INPUT=1 GH_LOG=${gi}/gh.log PATH=${g
   env ${gi_env} "${AMD}" tags add bug >/dev/null
 )
 gib="${gi}/issues-tickets"
-assert "amd import issues --dry-run lists what it would import and writes nothing" \
-  bash -c "cd '${gib}' && out=\$(env ${gi_env} '${AMD}' import issues acme/web --dry-run) \
+assert "amd issues --dry-run lists what it would import and writes nothing" \
+  bash -c "cd '${gib}' && out=\$(env ${gi_env} '${AMD}' issues --repo acme/web --dry-run) \
     && printf '%s\\n' \"\$out\" | grep -q '#2 -> 001 \"Dark mode\" (acme/web) \[TRIAGE\] low\$' \
     && printf '%s\\n' \"\$out\" | grep -q '#4 -> 002 \"Checkout button overlaps\" (acme/web) \[TRIAGE, BUG\] low, labels not on the tag list: needs-info' \
     && printf '%s\\n' \"\$out\" | grep -q 'would import 2 issues — nothing written' \
     && ! ls tasks/backlog/*.md 2>/dev/null | grep -v README"
 assert "...a real run makes TRIAGE tickets with their source, in one commit" \
   bash -c "cd '${gib}' && before=\$(git rev-list --count HEAD 2>/dev/null || echo 0) \
-    && env ${gi_env} '${AMD}' import issues acme/web | grep -q 'imported 2 issues' \
+    && env ${gi_env} '${AMD}' issues --repo acme/web | grep -q 'imported 2 issues' \
     && grep -q '^tags: \[TRIAGE,BUG\]' tasks/backlog/002-checkout-button-overlaps.md \
     && grep -q '^source: \"github:acme/web#4\"' tasks/backlog/002-checkout-button-overlaps.md \
     && grep -q 'Labels not on the project.s tag list: needs-info' tasks/backlog/002-checkout-button-overlaps.md \
@@ -693,14 +693,14 @@ assert "...a real run makes TRIAGE tickets with their source, in one commit" \
     && [ \"\$(git rev-list --count HEAD)\" = \$((before + 1)) ] \
     && git log -1 --format=%s | grep -q 'import: issues \"2 from acme/web\"'"
 assert "...a second run imports nothing" \
-  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' import issues acme/web | grep -q 'nothing new to import, 2 already imported'"
+  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' issues --repo acme/web | grep -q 'nothing new to import, 2 already imported'"
 assert "...nor once its ticket is abandoned" \
   bash -c "cd '${gib}' && env ${gi_env} '${AMD}' abandon 1 >/dev/null 2>&1 && rm -rf tasks/archive \
-    && env ${gi_env} '${AMD}' import issues acme/web | grep -q '2 already imported' && ! ls tasks/backlog/003-* 2>/dev/null"
-assert "--label is passed to gh, and refused for other imports" \
-  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' import issues acme/web --label bug --dry-run >/dev/null \
+    && env ${gi_env} '${AMD}' issues --repo acme/web | grep -q '2 already imported' && ! ls tasks/backlog/003-* 2>/dev/null"
+assert "--label is passed to gh, and amd import issues points at amd issues (ticket 173)" \
+  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' issues --repo acme/web --label bug --dry-run >/dev/null \
     && tail -1 '${gi}/gh.log' | grep -q -- '--repo acme/web .*--label bug' \
-    && env ${gi_env} '${AMD}' import tickets . --label bug 2>&1 | grep -q 'for .amd import issues.'"
+    && env ${gi_env} '${AMD}' import issues 2>&1 | grep -q 'pulled in automatically.*amd issues. checks now'"
 assert "TRIAGE is built in: it can't be added to or removed from the list" \
   bash -c "cd '${gib}' && ! env ${gi_env} '${AMD}' tags add triage 2>/dev/null \
     && env ${gi_env} '${AMD}' tags remove TRIAGE 2>&1 | grep -q 'built in'"
@@ -711,9 +711,13 @@ assert "amd triage-priority sets what imported tickets start at, and refuses a m
     && ! env ${gi_env} '${AMD}' triage-priority urgent 2>/dev/null \
     && env ${gi_env} '${AMD}' triage-priority High | grep -q 'start at priority high' \
     && grep -qx 'triage-priority = high' .settings \
-    && env ${gi_env} '${AMD}' import issues acme/other --dry-run | grep -q '\[TRIAGE\] high'"
+    && env ${gi_env} '${AMD}' issues --repo acme/other --dry-run | grep -q '\[TRIAGE\] high'"
 assert "with no repository on GitHub, it asks for owner/repo" \
-  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' import issues 2>&1 | grep -q 'amd import issues owner/repo'"
+  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' issues 2>&1 | grep -q 'amd issues --repo owner/repo'"
+assert "amd issues off and on set whether the landing page pulls them in (ticket 173)" \
+  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' issues off | grep -q 'only pulled in by .amd issues.' \
+    && grep -qx 'import-issues = off' .settings \
+    && env ${gi_env} '${AMD}' issues on | grep -q 'landing page pulls in' && grep -qx 'import-issues = on' .settings"
 rm -rf "${gi}"
 
 echo "the registry is scoped by project directory (ticket 095):"
@@ -1348,7 +1352,10 @@ assert "on a board with its counter in .settings, amd new commits the move too, 
 assert "...and a dry run that works out numbers changes nothing" \
   bash -c "cd '${old_board}' && git checkout -q HEAD~1 -- .settings && rm .next-id \
     && git add -A && git commit -q -m 'ticket 164 setup: old style again' \
-    && '${AMD}' import tickets tasks --dry-run >/dev/null 2>&1 && [ -z \"\$(git status --porcelain)\" ]"
+    && src=\"\$(mktemp -d)\" && mkdir -p \"\${src}\"/backlog \"\${src}\"/todo \"\${src}\"/doing \"\${src}\"/done \
+    && printf -- '---\nid: \"001\"\ntitle: \"Elsewhere\"\n---\n' > \"\${src}/backlog/001-elsewhere.md\" \
+    && cd tasks && '${AMD}' import tickets \"\${src}\" --dry-run 2>&1 | grep -q 'would import 1 ticket' \
+    && [ -z \"\$(git status --porcelain)\" ] && rm -rf \"\${src}\""
 rm -rf "${old_board}"
 
 # Ticket 142: a board with no remote commits, and doesn't try to push.
@@ -1540,7 +1547,7 @@ rm -rf "${wip_repo}"
 
 echo "import and tag filtering:"
 import_src="$(mktemp -d)"
-mkdir -p "${import_src}/backlog" "${import_src}/todo" "${import_src}/done"
+mkdir -p "${import_src}/backlog" "${import_src}/todo" "${import_src}/doing" "${import_src}/done"
 cat > "${import_src}/backlog/010-old-backlog-ticket.md" <<'TICKET'
 ---
 id: "010"
@@ -1578,21 +1585,27 @@ TICKET
 import_dst="$(mktemp -d)"
 ( cd "${import_dst}" && git init -q && git config user.email t@t.co && git config user.name t \
   && AMD_YES=1 "${AMD}" init imported --local-only >/dev/null )
-assert "amd import lands tickets in their original columns with fresh ids" \
-  bash -c "cd '${import_dst}' && '${AMD}' import '${import_src}' >/dev/null \
-    && test -f tasks/backlog/001-old-backlog-ticket.md \
-    && test -f tasks/todo/002-in-progress-work.md \
-    && test -f tasks/done/003-shipped-feature.md"
+assert "amd import tickets is refused outside the board's tasks directory (ticket 173)" \
+  bash -c "cd '${import_dst}' && '${AMD}' import '${import_src}' 2>&1 | grep -q 'from the board.s tasks directory: cd .*/tasks'"
+assert "...and when the path isn't a tasks directory" \
+  bash -c "cd '${import_dst}/tasks' && '${AMD}' import tickets '${import_src}/backlog' 2>&1 | grep -q 'isn.t a tasks directory'"
+assert "amd import lands tickets in their original columns with fresh ids, in one commit" \
+  bash -c "cd '${import_dst}/tasks' && '${AMD}' import '${import_src}' >/dev/null \
+    && test -f backlog/001-old-backlog-ticket.md \
+    && test -f todo/002-in-progress-work.md \
+    && test -f done/003-shipped-feature.md \
+    && git log -1 --format=%s | grep -q '^import: tickets'"
 assert "the source tree is untouched by the import" \
   test -f "${import_src}/backlog/010-old-backlog-ticket.md"
 assert "a --dry-run import writes nothing" \
-  bash -c "cd '${import_dst}' && '${AMD}' import '${import_src}' --dry-run | grep -q 'would import 3 tickets' \
-    && ! test -f tasks/backlog/004-old-backlog-ticket.md"
-assert "importing the same source again flags every ticket DUPLICATE against the existing board" \
-  bash -c "cd '${import_dst}' && '${AMD}' import '${import_src}' >/dev/null \
-    && '${AMD}' tag DUPLICATE | grep -q 'Old backlog ticket' \
-    && '${AMD}' tag DUPLICATE | grep -q 'In progress work' \
-    && '${AMD}' tag DUPLICATE | grep -q 'Shipped feature'"
+  bash -c "cd '${import_dst}/tasks' && '${AMD}' import tickets '${import_src}' --dry-run | grep -q 'nothing to import' \
+    && ! test -f backlog/004-old-backlog-ticket.md"
+assert "importing the same source again leaves out what's already here, logged to import.log, never committed" \
+  bash -c "cd '${import_dst}/tasks' && out=\$('${AMD}' import tickets '${import_src}' 2>&1) \
+    && grep -q 'already on this board' <<<\"\$out\" && ! ls backlog/004-* 2>/dev/null \
+    && grep -q 'amd import tickets' import.log && grep -q 'Shipped feature.* is already on this board' import.log \
+    && ! git status --porcelain --untracked-files=all | grep -q import.log"
+( cd "${import_dst}" && "${AMD}" tags add duplicate >/dev/null && "${AMD}" new "Old backlog ticket" -t duplicate --no-edit >/dev/null 2>&1 )
 assert "amd tag finds nothing for a tag nobody has" \
   bash -c "cd '${import_dst}' && ! '${AMD}' tag NO-SUCH-TAG | grep -q 'Old backlog ticket'"
 assert "amd backlog --tag narrows the listed column to tasks carrying that tag" \
@@ -1601,15 +1614,10 @@ assert "amd backlog --tag narrows the listed column to tasks carrying that tag" 
 assert "amd board --tag narrows every column to tasks carrying that tag" \
   bash -c "cd '${import_dst}' && out=\$('${AMD}' board --tag DUPLICATE --plain) \
     && echo \"\$out\" | grep -q 'Old backlog ticket' \
-    && echo \"\$out\" | grep -q 'In progress work' \
-    && echo \"\$out\" | grep -q 'Shipped feature' \
+    && ! echo \"\$out\" | grep -q 'In progress work' \
     && test \"\$(echo \"\$out\" | grep -c 'Old backlog ticket')\" = 1"
 assert "amd <destination> --tag with no matches lists an empty column, not an error" \
   bash -c "cd '${import_dst}' && '${AMD}' backlog --tag NO-SUCH-TAG --plain | grep -q '(empty)'"
-assert "amd import tickets <PATH> is the same import (ticket 079)" \
-  bash -c "cd '${import_dst}' && '${AMD}' import tickets '${import_src}' --dry-run | grep -q 'would import 3 tickets'"
-assert "...and refuses --into, which is for documents" \
-  bash -c "cd '${import_dst}' && ! '${AMD}' import tickets '${import_src}' --into x 2>/dev/null"
 
 echo "importing documents (ticket 079):"
 # A project folder: proj-tickets, and proj-documents with a bare origin; and
@@ -1636,32 +1644,34 @@ dm_env="XDG_CONFIG_HOME=${dm}/config"
   echo unused > old/img/unused.png
   echo "# hidden" > old/.obsidian/h.md
 )
+assert "amd import documents is refused outside a documents repository (ticket 173)" \
+  bash -c "cd '${dm}/old' && env ${dm_env} '${AMD}' import documents '${dm}/old' 2>&1 | grep -q 'from inside a documents repository'"
 assert "amd import documents --dry-run lists the files and writes nothing" \
-  bash -c "cd '${dm}/old' && out=\"\$(env ${dm_env} '${AMD}' import documents --project proj --dry-run 2>&1)\" \
+  bash -c "cd '${dm}/proj-documents' && out=\"\$(env ${dm_env} '${AMD}' import documents '${dm}/old' --dry-run 2>&1)\" \
     && grep -q 'would add README.md' <<<\"\${out}\" && grep -q 'would add img/d.png' <<<\"\${out}\" \
-    && grep -q 'skipped adr/0001-x.md: already in proj-documents' <<<\"\${out}\" \
+    && grep -q 'skipped adr/0001-x.md: already in proj-documents, not overwritten' <<<\"\${out}\" \
     && ! grep -q 'unused.png\|obsidian' <<<\"\${out}\" \
-    && test \"\$(git -C '${dm}/proj-documents' branch --list | wc -l)\" = 1"
-assert "amd import documents commits on main and pushes it, no branch or pull request (ticket 170)" \
-  bash -c "cd '${dm}/old' && out=\"\$(env ${dm_env} '${AMD}' import documents --project proj 2>&1)\" \
+    && ! test -e README.md && ! test -e import.log"
+assert "from a folder of the repository, it imports there, logs what it left out, commits on main and pushes" \
+  bash -c "mkdir -p '${dm}/proj-documents/docs/old' && cd '${dm}/proj-documents/docs/old' \
+    && echo '# Clash' > README.md && git add README.md && git -c commit.gpgsign=false commit -q -m 'ticket 173 setup: a clash' && git push -q 2>/dev/null \
+    && out=\"\$(env ${dm_env} '${AMD}' import documents '${dm}/old' 2>&1)\" \
     && grep -q 'imported 3 files into proj-documents on main, pushed' <<<\"\${out}\" \
+    && grep -q 'skipped docs/old/README.md: already in proj-documents' <<<\"\${out}\" \
+    && grep -q 'docs/old/README.md: already in proj-documents, not overwritten' import.log \
+    && grep -qx '# Clash' README.md \
+    && git -C '${dm}/origin-documents.git' show main:docs/old/adr/0002-y.md | grep -q '# Y' \
+    && git -C '${dm}/origin-documents.git' show main:docs/old/img/d.png >/dev/null \
     && test -z \"\$(git -C '${dm}/proj-documents' branch --list 'chore/*')\" \
-    && test -e '${dm}/proj-documents/README.md' \
-    && git -C '${dm}/origin-documents.git' show main:adr/0002-y.md | grep -q '# Y' \
-    && git -C '${dm}/origin-documents.git' show main:img/d.png >/dev/null \
-    && git -C '${dm}/origin-documents.git' show main:adr/0001-x.md | grep -q 'Already here' \
-    && git -C '${dm}/origin-documents.git' log -1 --format=%s main | grep -q '^docs: import 3 files from old'"
+    && test -z \"\$(git -C '${dm}/proj-documents' status --porcelain)\""
 assert "...and refuses a documents clone that isn't on its main branch" \
   bash -c "git -C '${dm}/proj-documents' remote set-head origin main \
     && git -C '${dm}/proj-documents' switch -q -c elsewhere && echo '# Z' > '${dm}/old/adr/0003-z.md' \
-    && cd '${dm}/old' && env ${dm_env} '${AMD}' import documents --project proj 2>&1 | grep -q 'not main; switch to main first' \
+    && cd '${dm}/proj-documents' && env ${dm_env} '${AMD}' import documents '${dm}/old' 2>&1 | grep -q 'not main; switch to main first' \
     && git -C '${dm}/proj-documents' switch -q main && rm '${dm}/old/adr/0003-z.md'"
-assert "...from inside the project it needs no --project, and --into puts the tree in a folder" \
-  bash -c "cd '${dm}/proj-tickets' && env ${dm_env} '${AMD}' import documents '${dm}/old' --into archive/old --dry-run 2>&1 \
-    | grep -q 'would add archive/old/adr/0001-x.md'"
-assert "...and a documents clone with uncommitted changes is refused" \
+assert "...and a documents clone with uncommitted changes" \
   bash -c "echo changed >> '${dm}/proj-documents/adr/0001-x.md' \
-    && cd '${dm}/old' && ! env ${dm_env} '${AMD}' import documents --project proj 2>&1 | grep -q 'imported' \
+    && cd '${dm}/proj-documents' && ! env ${dm_env} '${AMD}' import documents '${dm}/old' 2>&1 | grep -q 'imported' \
     && git -C '${dm}/proj-documents' checkout -q -- adr/0001-x.md"
 rm -rf "${dm}"
 

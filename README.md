@@ -275,47 +275,54 @@ pick is shown again.
 
 ## Bringing in existing work
 
-`amd import tickets <PATH>` copies another board's tickets into this one
-(a bare `amd import <PATH>` does the same): each keeps its column, gets a
-fresh number, and keeps its parent and related links within the batch;
-a ticket with the same title as one already here is tagged `DUPLICATE`.
+Both imports work the same way: **stand where the things should go, and
+name where they come from.** Nothing is ever overwritten: anything left out
+is printed and appended to `import.log` in the folder you ran it from (it's
+kept out of git, so it's never committed). `--dry-run` shows what would
+happen and writes nothing.
 
-`amd import documents [PATH]` copies a folder of documents (the current
-directory by default) into the project's `{project}-documents`
-repository:
-
-```
-cd ~/old-notes
-amd import documents --project acme --dry-run   # what would be added
-amd import documents --project acme             # commit on main and push
-```
-
-The folder is mirrored as it is (or under `--into <dir>`): every markdown
-file, and every picture or other file a document links to. Hidden files
-and folders are left out. A file the repository already has is never
-overwritten; it's skipped and listed. Documents are pushed straight to
-main, with git as their history, so the import catches up with origin,
-commits on the main branch and pushes; amdui's History can undo any of
-it. It refuses a clone with uncommitted changes, one that isn't on its
-main branch, and one that has diverged from origin. From inside the project,
-`--project` isn't needed. `--dry-run` works for every kind.
-
-`amd import issues [REPO]` brings a repository's open GitHub issues into
-the backlog, tagged `TRIAGE`, so they get sorted like any other new work
-(it reads them with `gh`):
+**Tickets**: from this board's `tasks/` directory, name another board's
+`tasks/` directory (the one holding `backlog/`, `todo/`, `doing/` and
+`done/`):
 
 ```
-amd import issues --dry-run            # every declared repository on GitHub
-amd import issues acme/web --label bug # one repository, one label
+cd acme-tickets/tasks
+amd import tickets ../../old-project/tasks --dry-run
+amd import tickets ../../old-project/tasks     # a bare `amd import <PATH>` is the same
 ```
 
-Each ticket links back to its issue and carries the issue's text. A
-label becomes a tag when it's on the project's tag list; any other is
-named in the ticket's notes. An issue is only ever imported once: run it
-again and only new issues come in, and abandoning a `TRIAGE` ticket turns
-its issue down for good. New tickets start at the project's triage
-priority, `low` unless `amd triage-priority medium` (or Admin) says
-otherwise. Admin in amdui has the same, under "Import GitHub issues".
+Each ticket keeps its column, gets a fresh number, and keeps its parent and
+related links within the batch. A ticket whose title is already on this
+board is left out (and logged); two same-titled tickets within the batch are
+both brought in, tagged `DUPLICATE`. The import is one commit.
+
+**Documents**: from the folder of a documents repository the files should go
+into, name the folder to copy:
+
+```
+cd acme-documents/docs
+amd import documents ~/old-notes --dry-run
+amd import documents ~/old-notes               # commit on main and push
+```
+
+The folder is mirrored as it is: every markdown file, and every picture or
+other file a document links to; hidden files and folders are left out.
+Documents are pushed straight to main, with git as their history, so the
+import catches up with origin, commits on the main branch and pushes, and
+amdui's History can undo any of it. It refuses a clone with uncommitted
+changes, one that isn't on its main branch, and one that has diverged.
+
+**GitHub issues** come in by themselves: when amdui's landing page opens, it
+pulls in the open issues of each project's repositories on GitHub (at most
+every five minutes per project), tagged `TRIAGE`, with a link back to the
+issue and its text, as one commit. A label becomes a tag when it's on the
+project's tag list; any other is named in the ticket's notes. An issue is
+only ever imported once, so abandoning a `TRIAGE` ticket turns its issue down
+for good. New tickets start at the project's triage priority (`amd
+triage-priority medium`, or Admin). Admin's "GitHub issues" switch, or `amd
+issues off`, stops the automatic pull; `amd issues` checks now (`--repo
+owner/repo` and `--label` for a one-off, `--dry-run` to preview). It reads
+GitHub with `gh`.
 
 ## Working together, and getting tickets back
 

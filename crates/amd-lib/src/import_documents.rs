@@ -83,7 +83,7 @@ pub fn plan(source: &Path, repo: &Path, into: Option<&str>) -> Result<Plan> {
                 matches!(part, Component::Normal(name) if !name.to_string_lossy().starts_with('.'))
             });
             if !ok {
-                bail!("--into {into:?} must be a folder inside the repository, like docs/imported");
+                bail!("{into:?} isn't a folder documents can be imported into (a hidden one?)");
             }
             into.to_string()
         }

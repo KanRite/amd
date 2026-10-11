@@ -34,7 +34,15 @@ const LAST_BOARD: &str = "ui.board";
 #[derive(Default)]
 struct AppState {
     writing: Arc<Mutex<()>>,
+    /// When each project's GitHub issues were last pulled in from the
+    /// landing page (ticket 173), by its board repository, so going back to
+    /// the landing page doesn't call GitHub every time.
+    issues_pulled: Arc<Mutex<std::collections::HashMap<PathBuf, std::time::Instant>>>,
 }
+
+/// How long the landing page leaves a project's issues before asking
+/// GitHub again (ticket 173).
+const ISSUE_PULL_EVERY: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 
 /// Runs a change against the project off the async runtime, alone.
 async fn change<T: Send + 'static>(
@@ -603,6 +611,90 @@ async fn set_shared_documents(state: Tauri<'_, AppState>, name: String) -> Resul
     .await
 }
 
+/// Pulls in open GitHub issues for every project on this machine whose
+/// switch is on (ticket 173), when the landing page loads: at most once per
+/// project every five minutes, each caught up first and committed as one.
+/// Quiet about a project with nothing on GitHub, no `gh`, or no network;
+/// one report per project that got something.
+#[tauri::command]
+async fn pull_issues(state: Tauri<'_, AppState>) -> Result<Vec<SyncReport>> {
+    let writing = Arc::clone(&state.writing);
+    let pulled = Arc::clone(&state.issues_pulled);
+    blocking(move || {
+        use agile_md::import_issues as issues;
+        let _guard = writing
+            .lock()
+            .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
+        let mut reports = Vec::new();
+        for project in agile_md::my_work::projects() {
+            {
+                let mut seen = pulled.lock().map_err(|_| "restart amdui".to_string())?;
+                if seen
+                    .get(&project.root)
+                    .is_some_and(|at| at.elapsed() < ISSUE_PULL_EVERY)
+                {
+                    continue;
+                }
+                seen.insert(project.root.clone(), std::time::Instant::now());
+            }
+            let board = Board::in_repo(&project.root);
+            if !board_settings::load(&board).import_issues() {
+                continue;
+            }
+            let Ok(targets) = issues::targets(&board, None) else {
+                continue;
+            };
+            if agile_md::sync::catch_up(&board, agile_md::sync::Purpose::Write).is_err() {
+                continue;
+            }
+            let Ok(plan) = issues::plan(&board, &targets, None) else {
+                continue;
+            };
+            if plan.new.is_empty() {
+                continue;
+            }
+            let detail = format!("{} from GitHub", plan.new.len());
+            let Ok((done, warning)) =
+                transition::with_auto_commit(&board, "import", "issues", &detail, || {
+                    issues::apply(&board, &plan)
+                })
+            else {
+                continue;
+            };
+            let n = done.len();
+            reports.push(report(
+                &board,
+                format!(
+                    "Imported {n} GitHub issue{} into {}",
+                    if n == 1 { "" } else { "s" },
+                    project.name
+                ),
+                warning,
+            ));
+        }
+        Ok(reports)
+    })
+    .await
+}
+
+/// Whether the landing page pulls in this project's GitHub issues (ticket
+/// 173).
+#[tauri::command]
+async fn set_import_issues(state: Tauri<'_, AppState>, on: bool) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        save_setting(
+            board,
+            &format!("import-issues {}", if on { "on" } else { "off" }),
+            |s| {
+                s.set_import_issues(on);
+                Ok(())
+            },
+        )
+    })
+    .await
+}
+
 /// The priority an imported GitHub issue starts at (ticket 158).
 #[tauri::command]
 async fn set_triage_priority(state: Tauri<'_, AppState>, priority: String) -> Result<SyncReport> {
@@ -617,7 +709,7 @@ async fn set_triage_priority(state: Tauri<'_, AppState>, priority: String) -> Re
 }
 
 /// Brings a repository's open GitHub issues into the backlog, tagged
-/// TRIAGE (ticket 158), as `amd import issues` does; `preview` only says
+/// TRIAGE (ticket 158), as `amd issues` does; `preview` only says
 /// what it would do. `repo` empty means every declared repository on
 /// GitHub; `label` empty means every issue.
 #[tauri::command]
@@ -1226,6 +1318,8 @@ pub fn run() {
             set_shared_documents,
             import_issues,
             set_triage_priority,
+            pull_issues,
+            set_import_issues,
             list_documents,
             document_history,
             read_document_version,

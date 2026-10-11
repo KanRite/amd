@@ -35,25 +35,30 @@ use agile_md::{board_settings, branch, git, task, templates, transition};
 
 /// `amd import --help`'s examples and what each kind does (ticket 162).
 const IMPORT_HELP: &str = "\
+Stand where the things should go; name where they come from. Nothing is
+overwritten: what's left out is printed and appended to import.log in the
+folder you ran it from (never committed).
+
 Kinds:
-  tickets    Copies another board's tickets into this one. Each keeps its
-             column, gets a fresh number, and keeps parent and related links
-             within the batch; a title already on this board is tagged
-             DUPLICATE. The source board is never changed.
-  documents  Copies a folder of documents into the project's documents
-             repository, committed on its main branch and pushed. A file
-             already there is skipped, never overwritten.
-  issues     Brings open GitHub issues into the backlog, tagged TRIAGE, at
-             the project's triage priority (amd triage-priority). An issue is
-             only ever imported once. Needs the GitHub CLI, gh.
+  tickets    Run from this board's tasks/ directory; FROM is another board's
+             tasks/ directory. Each ticket keeps its column, gets a fresh
+             number, and keeps parent and related links within the batch. A
+             ticket whose title is already on this board is left out. One
+             commit. The source board is never changed.
+  documents  Run from the folder of a documents repository the files should
+             go into; FROM is the folder to copy. Markdown, and the files it
+             links to, are mirrored; hidden files are left out. Committed on
+             the main branch and pushed.
+
+GitHub issues aren't imported here: amdui pulls them in when its landing page
+opens, and `amd issues` checks now.
 
 Examples:
-  amd import tickets ../old-project/tasks --dry-run
-  amd import ../old-project/tasks                    # the same: a bare path is tickets
-  amd import documents ~/notes --project acme --into archive
-  amd import issues acme/web --label bug
+  cd acme-tickets/tasks && amd import tickets ../../old-project/tasks --dry-run
+  cd acme-tickets/tasks && amd import ../../old-project/tasks   # a bare path is tickets
+  cd acme-documents/docs && amd import documents ~/notes
 
---dry-run shows what would happen and writes nothing, for every kind.";
+--dry-run shows what would happen and writes nothing.";
 
 const AFTER_HELP: &str = "\
 A <REF> is a task id (e.g. 7 or 007) or a unique slug substring. Leave it out
@@ -262,32 +267,41 @@ enum Cmd {
         #[command(subcommand)]
         action: Option<TagsAction>,
     },
-    /// Import tickets from another board, documents, or GitHub issues
+    /// Import tickets from another board, or documents, into where you are
     #[command(after_help = IMPORT_HELP)]
     Import {
-        /// What to import: `tickets`, `documents` or `issues`. A path on its
-        /// own is a tickets import from that board
+        /// What to import: `tickets` or `documents`. A path on its own is a
+        /// tickets import from that board
         #[arg(value_name = "KIND")]
         first: String,
-        /// Where from. tickets: a board's tasks directory (the one holding
-        /// backlog/ todo/ doing/ done/). documents: a folder (default: the
-        /// current directory). issues: owner/repo or a repository the
-        /// project declares (default: every declared repository on GitHub)
+        /// Where from. tickets: another board's tasks directory (holding
+        /// backlog/ todo/ doing/ done/). documents: the folder to copy
         #[arg(value_name = "FROM")]
         path: Option<PathBuf>,
-        /// issues: only issues with this GitHub label
-        #[arg(long, value_name = "LABEL")]
-        label: Option<String>,
         /// Preview what would happen without writing anything
         #[arg(long)]
         dry_run: bool,
-        /// documents: put the tree under this folder of the documents
-        /// repository (default: its root)
-        #[arg(long, value_name = "DIR")]
-        into: Option<String>,
-        /// documents: the project to import into, when you aren't inside it
-        #[arg(long, value_name = "NAME")]
-        project: Option<String>,
+    },
+    /// Pull in open GitHub issues as TRIAGE tickets now, or switch the
+    /// automatic pull on or off
+    ///
+    /// amdui pulls them in by itself when its landing page opens, for each
+    /// project whose switch is on (the default). With no action, this
+    /// checks now: every declared repository on GitHub, or --repo
+    Issues {
+        /// `on` or `off`: whether the landing page pulls this project's
+        /// issues in
+        #[arg(value_name = "on|off", value_parser = PossibleValuesParser::new(["on", "off"]))]
+        action: Option<String>,
+        /// Check this repository (owner/repo) instead of the declared ones
+        #[arg(long, value_name = "OWNER/REPO")]
+        repo: Option<String>,
+        /// Only issues with this GitHub label
+        #[arg(long, value_name = "LABEL")]
+        label: Option<String>,
+        /// Show what would come in without writing anything
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Move a task into backlog/, or list it with no ref
     Backlog {
@@ -810,21 +824,18 @@ fn run() -> Result<()> {
         first,
         path,
         dry_run,
-        into,
-        project,
-        label,
     } = &command
-        && first == "documents"
     {
-        if label.is_some() {
-            bail!("--label is for `amd import issues`");
+        // Documents go into the documents repository you're standing in:
+        // no board needed here, and none offered (tickets 079, 173).
+        if first == "documents" {
+            return cmd_import_documents(path.as_deref(), *dry_run);
         }
-        return cmd_import_documents(
-            path.as_deref(),
-            *dry_run,
-            into.as_deref(),
-            project.as_deref(),
-        );
+        if first == "issues" {
+            bail!(
+                "GitHub issues are pulled in automatically when amdui's landing page opens; `amd issues` checks now"
+            );
+        }
     }
     if let Cmd::Project { action } = command {
         return match action {
@@ -867,33 +878,32 @@ fn run() -> Result<()> {
         Cmd::Import {
             first,
             path,
-            label,
             dry_run,
-            into,
-            project,
         } => {
-            if into.is_some() || project.is_some() {
-                bail!("--into and --project are for `amd import documents`");
-            }
-            if first == "issues" {
-                let repo = path.map(|p| p.display().to_string());
-                return cmd_import_issues(&board, repo.as_deref(), label.as_deref(), dry_run);
-            }
-            if label.is_some() {
-                bail!("--label is for `amd import issues`");
-            }
             let path = match (first.as_str(), path) {
                 ("tickets", Some(path)) => path,
-                ("tickets", None) => bail!("usage: amd import tickets <PATH>"),
+                ("tickets", None) => {
+                    bail!("usage: amd import tickets <PATH>, from the board's tasks directory")
+                }
                 (_, None) => PathBuf::from(first),
                 (_, Some(_)) => {
-                    bail!(
-                        "amd import takes `tickets <PATH>`, `documents [PATH]` or `issues [REPO]`, not {first:?}"
-                    )
+                    bail!("amd import takes `tickets <PATH>` or `documents <PATH>`, not {first:?}")
                 }
             };
             cmd_import(&board, &path, dry_run)
         }
+        Cmd::Issues {
+            action,
+            repo,
+            label,
+            dry_run,
+        } => cmd_issues(
+            &board,
+            action.as_deref(),
+            repo.as_deref(),
+            label.as_deref(),
+            dry_run,
+        ),
         Cmd::Backlog { task, tag } => cmd_destination(
             &board,
             Destination::Column(Column::Backlog),
@@ -2105,7 +2115,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
     match command {
         Cmd::Show { task: Some(_) } => Lookup,
         Cmd::Renumber { apply: false, .. } => Read,
-        Cmd::Import { dry_run: true, .. } => Read,
+        Cmd::Import { dry_run: true, .. } | Cmd::Issues { dry_run: true, .. } => Read,
         // Listing what was removed reads; restoring writes.
         Cmd::Recover { ids, all, .. } => {
             if ids.is_empty() && !all {
@@ -2384,10 +2394,56 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     Ok(())
 }
 
+/// `amd import tickets <PATH>` (ticket 173): run from
+/// the board's tasks directory, naming another board's tasks directory.
+/// Never a second copy of a ticket already here; what's left out is printed
+/// and appended to `import.log` here. One auto-commit.
 fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {
-    let summary = agile_md::import::import(board, path, dry_run)?;
-    for (path, reason) in &summary.skipped {
-        eprintln!("skipped {}: {reason}", path.display());
+    let here = env::current_dir().context("reading the current directory")?;
+    let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    };
+    if !same(&here, &board.root) {
+        bail!(
+            "run amd import tickets from the board's tasks directory: cd {}",
+            board.root.display()
+        );
+    }
+    let is_tasks = |dir: &Path| Column::ALL.iter().all(|c| dir.join(c.to_string()).is_dir());
+    if !is_tasks(path) {
+        bail!(
+            "{} isn't a tasks directory (it needs backlog/, todo/, doing/ and done/)",
+            path.display()
+        );
+    }
+    if same(path, &board.root) {
+        bail!("that's this board's own tasks directory");
+    }
+    let detail = format!("from {}", path.display());
+    let summary = if dry_run {
+        agile_md::import::import(board, path, true)?
+    } else {
+        with_auto_commit(board, "import", "tickets", &detail, || {
+            agile_md::import::import(board, path, false)
+        })?
+    };
+    let left_out: Vec<String> = summary
+        .skipped
+        .iter()
+        .map(|(file, reason)| format!("{}: {reason}", file.display()))
+        .collect();
+    for line in &left_out {
+        eprintln!("skipped {line}");
+    }
+    if !dry_run
+        && let Some(log) = agile_md::import_log::append(
+            &here,
+            &format!("amd import tickets {}", path.display()),
+            &left_out,
+        )?
+    {
+        eprintln!("(also in {})", log.display());
     }
     if summary.imported.is_empty() {
         println!("nothing to import from {}", path.display());
@@ -2424,16 +2480,36 @@ fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-/// `amd import issues [REPO]` (ticket 158): open GitHub issues into the
-/// loose backlog, tagged TRIAGE, in one auto-commit. An issue imported
-/// before, even one whose ticket has since gone, is skipped.
-fn cmd_import_issues(
+/// `amd issues [on|off]` (tickets 158, 173): with no action, open GitHub
+/// issues into the loose backlog now, tagged TRIAGE, in one auto-commit (an
+/// issue imported before, even one whose ticket has since gone, is
+/// skipped); `on`/`off` switches whether amdui's landing page does it by
+/// itself.
+fn cmd_issues(
     board: &Board,
+    action: Option<&str>,
     repo: Option<&str>,
     label: Option<&str>,
     dry_run: bool,
 ) -> Result<()> {
     use agile_md::import_issues;
+    if let Some(action) = action {
+        let on = action == "on";
+        with_auto_commit(board, "settings", "import-issues", action, || {
+            let mut settings = board_settings::load(board);
+            settings.set_import_issues(on);
+            settings.save(board)
+        })?;
+        println!(
+            "{}",
+            if on {
+                "amdui's landing page pulls in this project's GitHub issues"
+            } else {
+                "GitHub issues are only pulled in by `amd issues` now"
+            }
+        );
+        return Ok(());
+    }
     let targets = import_issues::targets(board, repo)?;
     let plan = import_issues::plan(board, &targets, label)?;
     let done = if dry_run || plan.new.is_empty() {
@@ -2457,65 +2533,60 @@ fn cmd_import_issues(
     Ok(())
 }
 
-/// `amd import documents [PATH]` (ticket 079): the tree at `path` (here by
-/// default) into the project's documents repository, committed on its
-/// default branch and pushed (ADR 0007, ticket 170). `--dry-run` only shows
-/// the plan.
-fn cmd_import_documents(
-    path: Option<&Path>,
-    dry_run: bool,
-    into: Option<&str>,
-    project: Option<&str>,
-) -> Result<()> {
-    let board = match project {
-        Some(name) => {
-            // Every registered board, scratch ones too (My work leaves
-            // those out; naming one here is deliberate).
-            let found: Vec<PathBuf> = Registry::load()
-                .entries
-                .into_iter()
-                .filter(|e| e.has_board())
-                .filter(|e| agile_md::current_project::project_name(&e.root) == name)
-                .map(|e| e.root)
-                .collect();
-            match found.as_slice() {
-                [one] => Board::in_repo(one),
-                [] => bail!("no project called {name} on this machine (amd mine lists them)"),
-                _ => bail!(
-                    "{name} is in more than one folder: {}; run this from inside the one you mean",
-                    found
-                        .iter()
-                        .map(|root| agile_md::registry::project_dir_of(root)
-                            .display()
-                            .to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            }
-        }
-        None => Board::discover()
-            .context("which project? run this from inside it, or name it with --project <name>")?,
-    };
-    let own = agile_md::documents::sources(&board)
-        .into_iter()
-        .find(|s| s.kind == agile_md::documents::Kind::Own)
-        .context("this project has no documents repository")?;
-    let Some(repo) = own.root else {
+/// `amd import documents <PATH>` (tickets 079, 170, 173): run from the
+/// folder of a documents repository the files should go into, naming the
+/// tree to import. Never overwrites: what's already there is printed and
+/// appended to `import.log` here. Committed on the default branch and
+/// pushed (ADR 0007). `--dry-run` only shows the plan.
+fn cmd_import_documents(path: Option<&Path>, dry_run: bool) -> Result<()> {
+    let Some(path) = path else {
         bail!(
-            "{} isn't cloned on this machine; clone it beside the project's other repositories first",
-            own.name
+            "usage: amd import documents <PATH>, from the folder of the documents repository it should go into"
         );
     };
-    let source = match path {
-        Some(path) => path.to_path_buf(),
-        None => env::current_dir().context("reading the current directory")?,
+    let here = env::current_dir().context("reading the current directory")?;
+    let repo = agile_md::git::checked(&here, &["rev-parse", "--show-toplevel"])
+        .map(PathBuf::from)
+        .ok();
+    let name = |root: &Path| {
+        root.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
     };
-    let plan = agile_md::import_documents::plan(&source, &repo, into)?;
-    for clash in &plan.clashes {
-        eprintln!("skipped {clash}: already in {}", own.name);
+    // A documents repository: `*-documents`, or the one the project shares.
+    let shared = Board::discover()
+        .ok()
+        .and_then(|board| board_settings::load(&board).shared_documents());
+    let repo = repo.filter(|root| {
+        let n = name(root);
+        n.ends_with("-documents") || shared.as_deref() == Some(n.as_str())
+    });
+    let Some(repo) = repo else {
+        bail!(
+            "run amd import documents from inside a documents repository, in the folder the files should go into (e.g. cd acme-documents/docs)"
+        );
+    };
+    let here = here.canonicalize().unwrap_or(here);
+    let root = repo.canonicalize().unwrap_or(repo);
+    let into = here
+        .strip_prefix(&root)
+        .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    let plan = agile_md::import_documents::plan(path, &root, Some(&into))?;
+    let repo_name = name(&root);
+    let left_out: Vec<String> = plan
+        .clashes
+        .iter()
+        .map(|clash| format!("{clash}: already in {repo_name}, not overwritten"))
+        .collect();
+    for line in &left_out {
+        eprintln!("skipped {line}");
     }
     if plan.copies.is_empty() {
         println!("nothing to import from {}", plan.source.display());
+        if !dry_run {
+            log_left_out(&here, path, &left_out)?;
+        }
         return Ok(());
     }
     for (_, to) in &plan.copies {
@@ -2524,22 +2595,31 @@ fn cmd_import_documents(
     let count = plan.copies.len();
     let files = if count == 1 { "file" } else { "files" };
     if dry_run {
-        println!(
-            "would import {count} {files} into {} — nothing written",
-            own.name
-        );
+        println!("would import {count} {files} into {repo_name} — nothing written");
         return Ok(());
     }
     // Straight to main, pushed (ADR 0007, ticket 170).
     let outcome = agile_md::import_documents::apply(&plan)?;
+    log_left_out(&here, path, &left_out)?;
     println!(
-        "imported {count} {files} into {} on {}{}",
-        own.name,
+        "imported {count} {files} into {repo_name} on {}{}",
         outcome.branch,
         if outcome.pushed { ", pushed" } else { "" }
     );
     if let Some(warning) = &outcome.warning {
         eprintln!("amd: {warning}");
+    }
+    Ok(())
+}
+
+/// What a documents import left out, into `import.log` where it ran.
+fn log_left_out(here: &Path, path: &Path, left_out: &[String]) -> Result<()> {
+    if let Some(log) = agile_md::import_log::append(
+        here,
+        &format!("amd import documents {}", path.display()),
+        left_out,
+    )? {
+        eprintln!("(also in {})", log.display());
     }
     Ok(())
 }

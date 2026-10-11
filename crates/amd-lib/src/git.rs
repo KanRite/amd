@@ -251,6 +251,12 @@ pub fn remote_identity(repo: &Path) -> Option<String> {
     Some(normalise_remote(&url, ssh_hostname))
 }
 
+/// [`remote_identity`] for a URL that isn't a configured remote:
+/// `host/owner/repo`, an SSH host alias resolved as `ssh -G` would.
+pub fn url_identity(url: &str) -> String {
+    normalise_remote(url, ssh_hostname)
+}
+
 /// A remote URL as `host/owner/repo`: lowercased; scheme, user, port and a
 /// trailing `.git` or `/` dropped; the scp form `user@host:owner/repo`
 /// treated as SSH. An SSH host goes through `resolve` (an alias from

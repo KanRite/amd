@@ -101,6 +101,9 @@ const TAGS: &str = "tags";
 const SHARED_DOCUMENTS: &str = "shared-documents";
 /// The priority an imported GitHub issue's ticket starts at (ticket 158).
 const TRIAGE_PRIORITY: &str = "triage-priority";
+/// Whether amdui's landing page pulls in the project's GitHub issues
+/// (ticket 173).
+const IMPORT_ISSUES: &str = "import-issues";
 const TAGS_ONLY: &str = "prevent-arbitrary-tags";
 /// `prevent-arbitrary-tags`' name until ticket 141. Still read, and renamed
 /// the next time the setting is written.
@@ -567,6 +570,24 @@ impl BoardSettings {
             }
         }
         Ok(())
+    }
+
+    /// Whether amdui's landing page pulls in this project's open GitHub
+    /// issues by itself (ticket 173): `import-issues`, on unless set off.
+    pub fn import_issues(&self) -> bool {
+        !matches!(
+            self.config
+                .get(IMPORT_ISSUES)
+                .map(|v| v.trim().to_lowercase())
+                .as_deref(),
+            Some("off" | "false" | "0" | "no")
+        )
+    }
+
+    /// Sets [`import_issues`](Self::import_issues).
+    pub fn set_import_issues(&mut self, on: bool) {
+        self.config
+            .set(IMPORT_ISSUES, if on { "on" } else { "off" });
     }
 
     /// The priority a ticket made from a GitHub issue starts at (ticket

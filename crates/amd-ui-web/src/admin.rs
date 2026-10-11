@@ -676,8 +676,25 @@ fn DocumentsAdmin() -> impl IntoView {
 #[component]
 fn IssuesAdmin() -> impl IntoView {
     let ctx = Ctx::get();
-    let repo = RwSignal::new(String::new());
-    let label = RwSignal::new(String::new());
+    // The landing page pulls issues in by itself while this is on (ticket
+    // 173); Preview and Check now are for not waiting.
+    let auto = move || {
+        ctx.board
+            .with(|b| b.as_ref().is_none_or(|b| b.import_issues))
+    };
+    let auto_note = RwSignal::new(None::<String>);
+    let set_auto = move |on: bool| {
+        spawn_local(async move {
+            match api::set_import_issues(on).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    auto_note.set(None);
+                    ctx.reload();
+                }
+                Err(e) => auto_note.set(Some(e)),
+            }
+        });
+    };
     let result = RwSignal::new(None::<Result<amd_ui_model::IssueImport, String>>);
     let result_node = NodeRef::<leptos::html::Div>::new();
     Effect::new(move |_| {
@@ -712,8 +729,7 @@ fn IssuesAdmin() -> impl IntoView {
     let run = move |preview: bool| {
         busy.set(true);
         spawn_local(async move {
-            let outcome =
-                api::import_issues(&repo.get_untracked(), &label.get_untracked(), preview).await;
+            let outcome = api::import_issues("", "", preview).await;
             if let Ok(done) = &outcome
                 && let Some(sync) = done.sync.clone()
             {
@@ -724,35 +740,31 @@ fn IssuesAdmin() -> impl IntoView {
             busy.set(false);
         });
     };
-    let field = "flex-1 rounded border border-slate-300 bg-slate-50 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900";
     let secondary = "rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700";
     let primary = "rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50";
     view! {
         <section class="flex flex-col gap-2">
-            <h3 class="text-sm font-semibold">"Import GitHub issues"</h3>
+            <h3 class="text-sm font-semibold">"GitHub issues"</h3>
             <p class="text-xs text-slate-500">
-                "Open issues come into the backlog tagged TRIAGE, with a link back to the issue. A label becomes a tag when it's on the tag list. An issue is only ever imported once: abandon its ticket to turn it down. Reads GitHub through the gh CLI."
+                "Open issues on the project's GitHub repositories come into the backlog tagged TRIAGE, with a link back to the issue. A label becomes a tag when it's on the tag list. An issue is only ever imported once: abandon its ticket to turn it down. Reads GitHub through the gh CLI."
             </p>
+            <label class="flex items-center gap-2 text-sm font-semibold">
+                <input
+                    type="checkbox"
+                    prop:checked=auto
+                    on:change=move |ev| set_auto(event_target_checked(&ev))
+                />
+                "Pull in open issues when the landing page opens"
+            </label>
+            <Show when=move || auto_note.with(Option::is_some)>
+                <p class="text-xs text-red-700 dark:text-red-300">{move || auto_note.get().unwrap_or_default()}</p>
+            </Show>
             <div class="flex flex-wrap items-center gap-2">
-                <input
-                    class=field
-                    aria-label="Repository to import issues from"
-                    placeholder="every declared repository on GitHub, or owner/repo"
-                    prop:value=move || repo.get()
-                    on:input=move |ev| repo.set(event_target_value(&ev))
-                />
-                <input
-                    class=format!("{field} max-w-48")
-                    aria-label="Only issues with this label"
-                    placeholder="any label"
-                    prop:value=move || label.get()
-                    on:input=move |ev| label.set(event_target_value(&ev))
-                />
                 <button class=secondary disabled=move || busy.get() on:click=move |_| run(true)>
                     "Preview"
                 </button>
                 <button class=primary disabled=move || busy.get() on:click=move |_| run(false)>
-                    "Import"
+                    "Check now"
                 </button>
             </div>
             // What Preview or Import found, right under their buttons

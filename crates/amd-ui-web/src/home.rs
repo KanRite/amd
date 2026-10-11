@@ -20,6 +20,28 @@ pub fn load_home(home: RwSignal<Option<Result<Home, String>>>) {
 
 #[component]
 pub fn HomeView(home: RwSignal<Option<Result<Home, String>>>) -> impl IntoView {
+    // GitHub issues come in by themselves when the landing page opens
+    // (ticket 173): once it has shown, in the background, each project at
+    // most every five minutes (amdui keeps count). What came in is said in
+    // the header, and the page reloads to show it.
+    let ctx = Ctx::get();
+    let asked = StoredValue::new(false);
+    Effect::new(move |_| {
+        let loaded = home.with(|h| matches!(h, Some(Ok(_))));
+        if loaded && !asked.get_value() {
+            asked.set_value(true);
+            spawn_local(async move {
+                if let Ok(reports) = api::pull_issues().await
+                    && !reports.is_empty()
+                {
+                    for report in reports {
+                        ctx.report(report);
+                    }
+                    load_home(home);
+                }
+            });
+        }
+    });
     view! {
         <div class="mx-auto flex h-full max-w-5xl flex-col gap-6 overflow-y-auto p-6">
             {move || match home.get() {
