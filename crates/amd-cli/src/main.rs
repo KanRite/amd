@@ -2676,10 +2676,18 @@ fn cmd_issues(
     }
     let targets = import_issues::targets(board, repo)?;
     let plan = import_issues::plan(board, &targets, label)?;
+    for (slug, why) in &plan.skipped {
+        eprintln!("amd: couldn't read the issues of {slug}: {why}");
+    }
     let done = if dry_run || plan.new.is_empty() {
         plan.new.clone()
     } else {
-        let slugs: Vec<&str> = targets.iter().map(|t| t.slug.as_str()).collect();
+        // Only the repositories it could read (ticket 180).
+        let slugs: Vec<&str> = targets
+            .iter()
+            .map(|t| t.slug.as_str())
+            .filter(|s| !plan.skipped.iter().any(|(k, _)| k == s))
+            .collect();
         let detail = format!("{} from {}", plan.new.len(), slugs.join(", "));
         let (done, warning) =
             transition::with_auto_commit(board, "import", "issues", &detail, || {
