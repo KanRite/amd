@@ -1720,6 +1720,25 @@ assert "amd idea ticket makes a backlog ticket from it, linked both ways" \
   bash -c "${ix_fns}; out=\$(in_ix idea ticket dark 2>&1) && printf '%s\\n' \"\$out\" | grep -q 'Dark mode -> ticket 001' \
     && grep -q '^source: \"idea:idp-documents/ideas/dark-mode.md\"' '${ix}'/idp-tickets/tasks/backlog/001-dark-mode.md \
     && grep -q '^tickets: \[\"idp-tickets#001\"\]' '${ix}/idp-documents/ideas/dark-mode.md'"
+echo "reading documents from the command line (ticket 179):"
+(
+  cd "${ix}/idp-documents" && mkdir -p docs
+  printf '# Idp\n\nStart with [the guide](docs/guide.md).\n' > README.md
+  printf '# Guide\n\nSee [setup](setup.md) and [home](../README.md).\nThe Widget lives here.\n' > docs/guide.md
+  printf '# Setup\n\nInstall it.\n' > docs/setup.md
+  git add -A && git commit -q -m "docs for ticket 179" && git push -q origin main 2>/dev/null
+)
+assert "amd docs start prints the README until a page is pinned; --path gives its path" \
+  bash -c "${ix_fns}; in_ix docs start | head -1 | grep -qx '# Idp' \
+    && in_ix docs start --path | grep -q 'idp-documents/README.md\$'"
+assert "amd docs tree follows links from the start page, each page once" \
+  bash -c "${ix_fns}; out=\$(in_ix docs tree) && [ \"\$out\" = \"\$(printf 'Idp  README.md\\n  Guide  docs/guide.md\\n    Setup  docs/setup.md')\" ]"
+assert "amd docs search finds lines across documents, ignoring case" \
+  bash -c "${ix_fns}; in_ix docs search widget | grep -qx 'idp-documents/docs/guide.md:4: The Widget lives here.' \
+    && in_ix docs search no such words 2>&1 | grep -q 'nothing matches'"
+assert "a pinned start page is what amd docs start prints" \
+  bash -c "${ix_fns}; echo 'start-page = docs/setup.md' > '${ix}/idp-documents/.agile-md' \
+    && in_ix docs start | head -1 | grep -qx '# Setup' && rm '${ix}/idp-documents/.agile-md'"
 rm -rf "${ix}"
 
 echo "importing documents (ticket 079):"

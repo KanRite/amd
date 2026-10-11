@@ -381,6 +381,11 @@ pub fn move_document(root: &Path, from: &str, to_folder: &str) -> Result<(String
     }
     let mut touched: Vec<&str> = changes.iter().map(|(d, _)| d.as_str()).collect();
     touched.push(from);
+    // The start page goes with it (ticket 179).
+    let repin = pinned(root).as_deref() == Some(from);
+    if repin {
+        touched.push(SETTINGS);
+    }
     ensure_clean(root, &touched)?;
     let links = format!("move: links to {to}");
     let done = commit_change(root, &links, || {
@@ -397,6 +402,10 @@ pub fn move_document(root: &Path, from: &str, to_folder: &str) -> Result<(String
             fs::write(root.join(at), text).with_context(|| format!("writing {at}"))?;
             paths.push(PathBuf::from(at));
         }
+        if repin {
+            set_pin(root, Some(&to))?;
+            paths.push(PathBuf::from(SETTINGS));
+        }
         Ok(paths)
     })?;
     let done = Restored {
@@ -404,6 +413,171 @@ pub fn move_document(root: &Path, from: &str, to_folder: &str) -> Result<(String
         ..done
     };
     Ok((to, done))
+}
+
+/// The documents repository's own settings file (ticket 179), committed in
+/// it like any document: `start-page = docs/index.md`.
+pub const SETTINGS: &str = ".agile-md";
+const START_PAGE: &str = "start-page";
+
+/// The document pinned as the start page, if one is and it's still there.
+pub fn pinned(root: &Path) -> Option<String> {
+    let config = crate::settings::Config::load_from(&root.join(SETTINGS));
+    let path = config.get(START_PAGE)?.trim().to_string();
+    resolve(root, &path)
+        .ok()
+        .filter(|p| p.is_file())
+        .map(|_| path)
+}
+
+/// The page Documents opens on (ticket 179): the pinned one, else the
+/// README at the top of the repository.
+pub fn start_page(root: &Path) -> Option<String> {
+    pinned(root).or_else(|| {
+        ["README.md", "readme.md", "Readme.md"]
+            .into_iter()
+            .find(|name| root.join(name).is_file())
+            .map(str::to_string)
+    })
+}
+
+/// Pins `path` as the start page, or, with `None`, goes back to the README.
+pub fn pin_start_page(root: &Path, path: Option<&str>) -> Result<Restored> {
+    if let Some(path) = path {
+        if !resolve(root, path)?.is_file() {
+            bail!("{path} isn't a document");
+        }
+        if pinned(root).as_deref() == Some(path) {
+            bail!("{path} is the start page already");
+        }
+    } else if pinned(root).is_none() {
+        bail!("no start page is pinned; the README is the start page");
+    }
+    ensure_clean(root, &[SETTINGS])?;
+    let message = match path {
+        Some(path) => format!("pin: start page {path}"),
+        None => "unpin: start page".to_string(),
+    };
+    commit_change(root, &message, || {
+        set_pin(root, path)?;
+        Ok(vec![PathBuf::from(SETTINGS)])
+    })
+}
+
+fn set_pin(root: &Path, path: Option<&str>) -> Result<()> {
+    let file = root.join(SETTINGS);
+    let mut config = crate::settings::Config::load_from(&file);
+    match path {
+        Some(path) => config.set(START_PAGE, path),
+        None => {
+            config.remove(START_PAGE);
+        }
+    }
+    config.save_to(&file)
+}
+
+/// One page of the link tree under the start page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Page {
+    /// 0 for the start page, 1 for what it links to, and so on.
+    pub depth: usize,
+    pub path: String,
+    pub title: String,
+}
+
+/// The documents linked from `start`, then from those, depth first and each
+/// page once (ticket 179): the site map the start page defines. Only
+/// markdown documents inside the repository that exist count.
+pub fn link_tree(root: &Path, start: &str) -> Result<Vec<Page>> {
+    fn visit(root: &Path, path: &str, depth: usize, seen: &mut Vec<String>, out: &mut Vec<Page>) {
+        if seen.iter().any(|p| p == path) {
+            return;
+        }
+        seen.push(path.to_string());
+        let Ok(text) = fs::read_to_string(root.join(path)) else {
+            return;
+        };
+        let title = crate::documents::title_of(&text)
+            .unwrap_or_else(|| path.rsplit('/').next().unwrap_or(path).to_string());
+        out.push(Page {
+            depth,
+            path: path.to_string(),
+            title,
+        });
+        let links = std::cell::RefCell::new(Vec::new());
+        rewrite_links(&text, |target| {
+            if let Some(found) = join_link(path, target) {
+                links.borrow_mut().push(found);
+            }
+            None
+        });
+        for link in links.into_inner() {
+            let lower = link.to_ascii_lowercase();
+            let markdown = lower.ends_with(".md") || lower.ends_with(".markdown");
+            if markdown && resolve(root, &link).is_ok_and(|p| p.is_file()) {
+                visit(root, &link, depth + 1, seen, out);
+            }
+        }
+    }
+    resolve(root, start)?;
+    let mut out = Vec::new();
+    visit(root, start, 0, &mut Vec::new(), &mut out);
+    Ok(out)
+}
+
+/// A line that matched a search.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hit {
+    pub path: String,
+    pub title: String,
+    /// 1-based; 0 when only the title matched.
+    pub line: usize,
+    pub text: String,
+}
+
+/// Every document in `root` whose title or text holds `query`, ignoring
+/// case: its first few matching lines each, frontmatter left out. Titles
+/// matching come first.
+pub fn search(root: &Path, query: &str, per_document: usize) -> Result<Vec<Hit>> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut titled = Vec::new();
+    let mut rest = Vec::new();
+    for doc in crate::documents::list(root)? {
+        let text = fs::read_to_string(root.join(&doc.path)).unwrap_or_default();
+        let (front, body) = split_frontmatter(&text);
+        let skip = front.map_or(0, |f| f.lines().count());
+        let mut hits: Vec<Hit> = body
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| l.to_lowercase().contains(&needle))
+            .take(per_document.max(1))
+            .map(|(i, l)| Hit {
+                path: doc.path.clone(),
+                title: doc.title.clone(),
+                line: skip + i + 1,
+                text: l.trim().chars().take(200).collect(),
+            })
+            .collect();
+        let title_hit = doc.title.to_lowercase().contains(&needle);
+        if hits.is_empty() && title_hit {
+            hits.push(Hit {
+                path: doc.path.clone(),
+                title: doc.title.clone(),
+                line: 0,
+                text: String::new(),
+            });
+        }
+        if title_hit {
+            titled.extend(hits);
+        } else {
+            rest.extend(hits);
+        }
+    }
+    titled.extend(rest);
+    Ok(titled)
 }
 
 /// The numbers of a folder's documents named `NNNN-…`; with `deep`, its
@@ -559,6 +733,83 @@ mod tests {
             .output()
             .unwrap();
         String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    #[test]
+    fn the_start_page_is_the_readme_until_one_is_pinned_and_follows_a_move() {
+        let (dir, root) = repo();
+        assert_eq!(start_page(&root).as_deref(), Some("README.md"));
+        assert!(pin_start_page(&root, None).is_err(), "nothing pinned yet");
+        assert!(pin_start_page(&root, Some("nope.md")).is_err());
+        let done = pin_start_page(&root, Some("adr/adr/0001-x.md")).unwrap();
+        assert!(done.pushed);
+        assert_eq!(start_page(&root).as_deref(), Some("adr/adr/0001-x.md"));
+        assert!(
+            origin_has(dir.path(), "main:.agile-md").contains("start-page = adr/adr/0001-x.md")
+        );
+        assert!(
+            pin_start_page(&root, Some("adr/adr/0001-x.md")).is_err(),
+            "already"
+        );
+        fs::create_dir_all(root.join("adr/adr/old")).unwrap();
+        let (to, _) = move_document(&root, "adr/adr/0001-x.md", "adr/adr/old").unwrap();
+        assert_eq!(
+            pinned(&root).as_deref(),
+            Some(to.as_str()),
+            "the pin moved with it"
+        );
+        pin_start_page(&root, None).unwrap();
+        assert_eq!(start_page(&root).as_deref(), Some("README.md"));
+    }
+
+    #[test]
+    fn the_link_tree_follows_links_from_the_start_page_once_each() {
+        let (_dir, root) = repo();
+        // README → ADR 1, which links back to the README (shown once) and
+        // to a picture (not a document).
+        fs::write(
+            root.join("docs.md"),
+            "# Docs\n\n[readme](README.md) [gone](nope.md) [web](https://x.io/a.md)\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("README.md"),
+            "# P\n\nSee [ADR 1](adr/adr/0001-x.md#why) and [docs](docs.md).\n",
+        )
+        .unwrap();
+        let tree = link_tree(&root, "README.md").unwrap();
+        let got: Vec<(usize, &str)> = tree.iter().map(|p| (p.depth, p.path.as_str())).collect();
+        assert_eq!(
+            got,
+            [(0, "README.md"), (1, "adr/adr/0001-x.md"), (1, "docs.md")]
+        );
+        assert_eq!(tree[1].title, "ADR 0001: X");
+        assert!(link_tree(&root, "../outside.md").is_err());
+    }
+
+    #[test]
+    fn search_finds_titles_and_lines_ignoring_case() {
+        let (_dir, root) = repo();
+        fs::write(
+            root.join("notes.md"),
+            "---\ntitle: n\n---\n# Notes\n\nThe readme says hi.\nREADME again.\n",
+        )
+        .unwrap();
+        let hits = search(&root, "readme", 3).unwrap();
+        // ADR 0001 links to the readme; notes.md says it twice; README.md's
+        // own text doesn't hold the word, but its file name isn't searched.
+        let notes: Vec<&Hit> = hits.iter().filter(|h| h.path == "notes.md").collect();
+        assert_eq!(notes.len(), 2);
+        assert_eq!(notes[0].line, 6, "counted from the top of the file");
+        assert_eq!(notes[0].text, "The readme says hi.");
+        assert!(hits.iter().any(|h| h.path == "adr/adr/0001-x.md"));
+        let titled = search(&root, "adr 0001", 3).unwrap();
+        assert_eq!(
+            titled[0].path, "adr/adr/0001-x.md",
+            "a title match comes first"
+        );
+        assert!(search(&root, "  ", 3).unwrap().is_empty());
+        assert!(search(&root, "zzz-nothing", 3).unwrap().is_empty());
     }
 
     #[test]

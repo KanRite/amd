@@ -457,6 +457,24 @@ pub struct DocSource {
     /// Every folder, empty ones included (ticket 176).
     #[serde(default)]
     pub folders: Vec<String>,
+    /// The page Documents opens on (ticket 179): the pinned one, else the
+    /// README. Only the project's own repository has one.
+    #[serde(default)]
+    pub start: Option<String>,
+    /// Whether `start` was pinned, rather than the README by default.
+    #[serde(default)]
+    pub pinned: bool,
+}
+
+/// A line of a document that matched a search (ticket 179).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocHit {
+    pub source: String,
+    pub path: String,
+    pub title: String,
+    /// 1-based; 0 when only the title matched.
+    pub line: usize,
+    pub text: String,
 }
 
 /// One document in a [`DocSource`].

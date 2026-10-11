@@ -17,7 +17,7 @@
 //! the reader, web and mail links in the system's browser or mail program.
 
 use amd_ui_model::rich::{parse_markdown, to_html, to_markdown};
-use amd_ui_model::{DocChange, DocEdit, DocSource, DocVersion, RenderedDoc};
+use amd_ui_model::{DocChange, DocEdit, DocHit, DocSource, DocVersion, RenderedDoc};
 use leptos::html::Div;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -55,6 +55,18 @@ struct Actions {
     move_document: Callback<(String, String, String)>,
 }
 
+impl Actions {
+    /// Opens a document, asking first when the open one has unsaved edits.
+    fn open_doc(&self, source: String, path: String) {
+        let target = (source, path);
+        if self.dirty.get_untracked() {
+            self.leave.set(Some(target));
+        } else {
+            self.open.set(Some(target));
+        }
+    }
+}
+
 const SMALL: &str = "rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:hover:bg-slate-700";
 
 #[component]
@@ -79,6 +91,12 @@ pub fn DocumentsView() -> impl IntoView {
     let confirm_cancel = RwSignal::new(false);
     let leave = RwSignal::new(None::<(String, String)>);
     let moving = RwSignal::new(false);
+    // Search (ticket 179): what's typed, what came back (for the latest
+    // query only), and the text to find once the picked document shows.
+    let query = RwSignal::new(String::new());
+    let hits = RwSignal::new(None::<Result<Vec<DocHit>, String>>);
+    let asked = StoredValue::new(0u32);
+    let find = RwSignal::new(None::<String>);
 
     let load_history = move || {
         if let Some((source, path)) = open.get_untracked() {
@@ -328,6 +346,16 @@ pub fn DocumentsView() -> impl IntoView {
             spawn_local(async move { doc.set(Some(api::read_document(&source, &path).await)) });
         }
         None => {
+            // The project's start page (ticket 179), else the first README.
+            let start = sources.with(|s| {
+                let list = s.as_ref()?.as_ref().ok()?;
+                let own = list.iter().find(|s| !s.shared)?;
+                Some((own.name.clone(), own.start.clone()?))
+            });
+            if start.is_some() {
+                open.set(start);
+                return;
+            }
             let first = shown.with(|s| {
                 let s = s.as_ref()?.as_ref().ok()?;
                 let source = s.iter().find(|s| !s.documents.is_empty())?;
@@ -343,6 +371,52 @@ pub fn DocumentsView() -> impl IntoView {
             }
         }
     });
+
+    // A document opened from a search: find the text in it once it shows.
+    Effect::new(move |_| {
+        if doc.with(|d| matches!(d, Some(Ok(_))))
+            && let Some(text) = find.get()
+        {
+            find.set(None);
+            set_timeout(
+                move || find_in_page(&text),
+                std::time::Duration::from_millis(80),
+            );
+        }
+    });
+    let run_search = move |text: String| {
+        query.set(text.clone());
+        let n = asked.get_value() + 1;
+        asked.set_value(n);
+        if text.trim().chars().count() < 2 {
+            hits.set(None);
+            return;
+        }
+        spawn_local(async move {
+            let found = api::search_documents(&text).await;
+            if asked.get_value() == n {
+                hits.set(Some(found));
+            }
+        });
+    };
+    // The start page and whether it was pinned, for a repository.
+    let start_of = move |source: &str| -> (Option<String>, bool) {
+        sources.with(|s| {
+            s.as_ref()
+                .and_then(|r| r.as_ref().ok())
+                .and_then(|list| list.iter().find(|x| x.name == source))
+                .map(|x| (x.start.clone(), x.pinned))
+                .unwrap_or_default()
+        })
+    };
+    let pin = move |source: String, path: Option<String>| {
+        spawn_local(async move {
+            match api::pin_start_page(&source, path.as_deref()).await {
+                Ok(change) => after(source, change),
+                Err(e) => note.set(Some(e)),
+            }
+        });
+    };
 
     // Another document changed on disk (a pull, an edit): read both again,
     // unless the open one is being edited (its save checks for that).
@@ -428,6 +502,41 @@ pub fn DocumentsView() -> impl IntoView {
                 aria-label="Documents"
                 class="w-72 shrink-0 overflow-y-auto border-r border-slate-200 bg-white p-3 text-sm dark:border-slate-700 dark:bg-slate-800"
             >
+                <input
+                    type="search"
+                    aria-label="Search documents"
+                    placeholder="Search documents"
+                    class="mb-2 w-full rounded border border-slate-300 bg-slate-50 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
+                    prop:value=move || query.get()
+                    on:input=move |ev| run_search(event_target_value(&ev))
+                />
+                {move || {
+                    sources.with(|s| {
+                        let own = s.as_ref()?.as_ref().ok()?.iter().find(|s| !s.shared)?;
+                        let start = own.start.clone()?;
+                        let name = own.name.clone();
+                        Some(view! {
+                            <button
+                                type="button"
+                                class="mb-2 w-full rounded px-2 py-1 text-left text-xs text-accent-700 hover:bg-slate-100 dark:text-accent-300 dark:hover:bg-slate-700"
+                                title=format!("{name} / {start}")
+                                on:click={
+                                    let (name, start) = (name.clone(), start.clone());
+                                    move |_| actions.open_doc(name.clone(), start.clone())
+                                }
+                            >
+                                "⌂ Start page"
+                            </button>
+                        })
+                    })
+                }}
+                <Show when=move || hits.with(Option::is_some)>
+                    <SearchResults hits query on_open=Callback::new(move |(source, path): (String, String)| {
+                        find.set(Some(query.get_untracked()));
+                        actions.open_doc(source, path);
+                    }) />
+                </Show>
+                <div class=move || if hits.with(Option::is_some) { "hidden" } else { "" }>
                 {move || {
                     ctx.doc_scope
                         .get()
@@ -468,6 +577,7 @@ pub fn DocumentsView() -> impl IntoView {
                             .into_any()
                     }
                 }}
+                </div>
             </nav>
             <article class="min-w-0 flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-900">
                 {move || {
@@ -548,10 +658,44 @@ pub fn DocumentsView() -> impl IntoView {
                         let folder_choices = folders_of(&d.source);
                         let here = d.path.rsplit_once('/').map(|(f, _)| f.to_string()).unwrap_or_default();
                         let (move_source, move_path) = (d.source.clone(), d.path.clone());
+                        // The start page (ticket 179): only the project's own
+                        // repository has one.
+                        let (start, pinned) = start_of(&d.source);
+                        let own = sources.with_untracked(|s| {
+                            s.as_ref()
+                                .and_then(|r| r.as_ref().ok())
+                                .is_some_and(|l| l.iter().any(|x| x.name == d.source && !x.shared))
+                        });
+                        let is_start = start.as_deref() == Some(d.path.as_str());
+                        let (pin_source, pin_path) = (d.source.clone(), d.path.clone());
+                        let pin_button = (own && !old).then(|| {
+                            if is_start && pinned {
+                                view! {
+                                    <span class="rounded bg-accent-100 px-2 py-0.5 text-xs text-accent-800 dark:bg-accent-900 dark:text-accent-100">"Start page"</span>
+                                    <button type="button" class=SMALL title="Go back to the README as the start page" on:click=move |_| pin(pin_source.clone(), None)>
+                                        "Unpin"
+                                    </button>
+                                }
+                                    .into_any()
+                            } else if is_start {
+                                view! {
+                                    <span class="rounded bg-accent-100 px-2 py-0.5 text-xs text-accent-800 dark:bg-accent-900 dark:text-accent-100" title="The README is the start page until another document is pinned">"Start page"</span>
+                                }
+                                    .into_any()
+                            } else {
+                                view! {
+                                    <button type="button" class=SMALL title="Open Documents on this page, for everyone" on:click=move |_| pin(pin_source.clone(), Some(pin_path.clone()))>
+                                        "Pin as start page"
+                                    </button>
+                                }
+                                    .into_any()
+                            }
+                        });
                         view! {
                             <div class="mx-auto max-w-4xl p-8">
                                 <div class="mb-4 flex flex-wrap items-center gap-2">
                                     <p class="flex-1 font-mono text-xs text-slate-500">{place}</p>
+                                    {pin_button}
                                     <Show when=move || !old && editing.with(Option::is_none)>
                                         <button type="button" class=SMALL on:click=move |_| edit()>
                                             "Edit"
@@ -745,6 +889,116 @@ fn MovePicker(folders: Vec<String>, here: String, on_pick: Callback<String>) -> 
 
 /// A document's versions, newest first (ticket 169): the first is the
 /// current one; any other opens read-only in the reader, with Restore.
+/// Search results (ticket 179): each document's title and path, then its
+/// matching lines; a click opens it at the match.
+#[component]
+fn SearchResults(
+    hits: RwSignal<Option<Result<Vec<DocHit>, String>>>,
+    query: RwSignal<String>,
+    on_open: Callback<(String, String)>,
+) -> impl IntoView {
+    view! {
+        <div class="flex flex-col gap-1">
+            <div class="flex items-center justify-between px-2 text-xs text-slate-500">
+                <span>
+                    {move || match hits.get() {
+                        Some(Ok(h)) => {
+                            let docs = {
+                                let mut seen: Vec<(String, String)> = h.iter().map(|x| (x.source.clone(), x.path.clone())).collect();
+                                seen.dedup();
+                                seen.len()
+                            };
+                            match docs {
+                                0 => "Nothing found".to_string(),
+                                1 => "1 document".to_string(),
+                                n => format!("{n} documents"),
+                            }
+                        }
+                        Some(Err(_)) => "Search failed".to_string(),
+                        None => String::new(),
+                    }}
+                </span>
+                <button type="button" class="hover:underline" on:click=move |_| {
+                    query.set(String::new());
+                    hits.set(None);
+                }>
+                    "Clear"
+                </button>
+            </div>
+            {move || match hits.get() {
+                Some(Err(e)) => view! { <p role="alert" class="px-2 text-xs text-red-700 dark:text-red-300">{e}</p> }.into_any(),
+                Some(Ok(h)) => {
+                    // Grouped by document, in the order they came.
+                    let mut groups: Vec<(String, String, String, Vec<DocHit>)> = Vec::new();
+                    for hit in h {
+                        match groups.last_mut() {
+                            Some(g) if g.0 == hit.source && g.1 == hit.path => g.3.push(hit),
+                            _ => groups.push((hit.source.clone(), hit.path.clone(), hit.title.clone(), vec![hit])),
+                        }
+                    }
+                    groups
+                        .into_iter()
+                        .map(|(source, path, title, lines)| {
+                            let open = (source.clone(), path.clone());
+                            view! {
+                                <button
+                                    type="button"
+                                    class="flex flex-col gap-0.5 rounded px-2 py-1 text-left hover:bg-slate-100 dark:hover:bg-slate-700"
+                                    on:click=move |_| on_open.run(open.clone())
+                                >
+                                    <span class="font-medium">{title}</span>
+                                    <span class="truncate text-xs text-slate-500">{format!("{source} / {path}")}</span>
+                                    {lines
+                                        .into_iter()
+                                        .filter(|l| l.line > 0)
+                                        .map(|l| view! {
+                                            <span class="truncate text-xs text-slate-600 dark:text-slate-300">{format!("{}: {}", l.line, l.text)}</span>
+                                        })
+                                        .collect_view()}
+                                </button>
+                            }
+                        })
+                        .collect_view()
+                        .into_any()
+                }
+                None => ().into_any(),
+            }}
+        </div>
+    }
+}
+
+/// Finds `text` in the open document and scrolls to it (WebKit's
+/// `window.find`), searching from the document's top, not from the search
+/// box that still holds the text.
+fn find_in_page(text: &str) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    if let Some(document) = window.document() {
+        if let Some(active) = document.active_element()
+            && let Ok(blur) = js_sys::Reflect::get(&active, &"blur".into())
+            && let Ok(blur) = blur.dyn_into::<js_sys::Function>()
+        {
+            let _ = blur.call0(&active);
+        }
+        if let Ok(Some(start)) = document.query_selector("article .doc")
+            && let Ok(range) = document.create_range()
+            && let Ok(Some(selection)) = window.get_selection()
+        {
+            let _ = range.set_start(&start, 0);
+            range.collapse_with_to_start(true);
+            let _ = selection.remove_all_ranges();
+            let _ = selection.add_range(&range);
+        }
+    }
+    if let Ok(find) = js_sys::Reflect::get(&window, &"find".into())
+        && let Ok(find) = find.dyn_into::<js_sys::Function>()
+    {
+        let args = js_sys::Array::of4(&text.into(), &false.into(), &false.into(), &true.into());
+        let _ = find.apply(&window, &args);
+    }
+}
+
 #[component]
 fn HistoryPanel(
     history: RwSignal<Option<Result<Vec<DocVersion>, String>>>,

@@ -782,7 +782,22 @@ async fn list_documents() -> Result<Vec<amd_ui_model::DocSource>> {
                     .as_deref()
                     .map(agile_md::documents_edit::folders)
                     .unwrap_or_default();
+                // A start page is the project's own (ticket 179).
+                let own = source.kind == agile_md::documents::Kind::Own;
+                let start = source
+                    .root
+                    .as_deref()
+                    .filter(|_| own)
+                    .and_then(agile_md::documents_edit::start_page);
+                let pinned = own
+                    && source
+                        .root
+                        .as_deref()
+                        .and_then(agile_md::documents_edit::pinned)
+                        .is_some();
                 amd_ui_model::DocSource {
+                    start,
+                    pinned,
                     shared: source.kind == agile_md::documents::Kind::Shared,
                     cloned: source.root.is_some(),
                     name: source.name,
@@ -1127,6 +1142,49 @@ async fn doc_change(
             },
             path,
         })
+    })
+    .await
+}
+
+/// Pins a document as the project's start page (ticket 179), or with no
+/// path goes back to the README.
+#[tauri::command]
+async fn pin_start_page(
+    state: Tauri<'_, AppState>,
+    source: String,
+    path: Option<String>,
+) -> Result<amd_ui_model::DocChange> {
+    doc_change(&state, source, move |root| {
+        Ok((
+            None,
+            agile_md::documents_edit::pin_start_page(root, path.as_deref())?,
+        ))
+    })
+    .await
+}
+
+/// Searches the project's documents and the shared ones (ticket 179):
+/// titles and text, ignoring case, at most 3 lines a document and 200 in
+/// all.
+#[tauri::command]
+async fn search_documents(query: String) -> Result<Vec<amd_ui_model::DocHit>> {
+    blocking(move || {
+        let project = Project::open()?;
+        let mut out = Vec::new();
+        for source in agile_md::documents::sources(&project.repos[0].1) {
+            let Some(root) = source.root else { continue };
+            for hit in agile_md::documents_edit::search(&root, &query, 3).map_err(err)? {
+                out.push(amd_ui_model::DocHit {
+                    source: source.name.clone(),
+                    path: hit.path,
+                    title: hit.title,
+                    line: hit.line,
+                    text: hit.text,
+                });
+            }
+        }
+        out.truncate(200);
+        Ok(out)
     })
     .await
 }
@@ -1721,6 +1779,8 @@ pub fn run() {
             home,
             set_project_hidden,
             set_project_archived,
+            pin_start_page,
+            search_documents,
             list_ideas,
             read_idea,
             create_idea,
