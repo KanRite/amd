@@ -246,6 +246,18 @@ pub fn App() -> impl IntoView {
         doc_scope: RwSignal::new(None),
     };
     provide_context(ctx);
+    // A document belongs to the project it was opened in (ticket 175):
+    // whatever switches project (the landing page's picker or buttons, the
+    // header's switcher, a Projects row), the open document goes with it,
+    // so the reader never re-reads another project's document.
+    let shown = Memo::new(move |_| ctx.board.with(|b| b.as_ref().map(|b| b.tasks_dir.clone())));
+    Effect::new(move |before: Option<Option<String>>| {
+        let now = shown.get();
+        if before.is_some_and(|b| b != now) {
+            ctx.document.set(None);
+        }
+        now
+    });
     ctx.reload();
     use_colour_scheme(ctx);
     watch_disk(ctx);

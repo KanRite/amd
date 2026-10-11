@@ -81,10 +81,23 @@ pub fn HomeBar() -> impl IntoView {
     let ctx = Ctx::get();
     let home = ctx.home;
     let data = move || home.with(|h| h.as_ref().and_then(|h| h.as_ref().ok()).cloned());
+    // The project whose board was on screen, when there was one (ticket
+    // 175: going Home from a board keeps it current, whatever the folder's
+    // `.current-project` says), else what amdui has open.
+    let on_screen = move || {
+        ctx.board.with(|b| {
+            b.as_ref().and_then(|b| {
+                std::path::Path::new(&b.tasks_dir)
+                    .parent()
+                    .map(|p| p.display().to_string())
+            })
+        })
+    };
     let current = move || {
         data().and_then(|h| {
-            let root = h.current.clone();
-            h.projects.into_iter().find(|p| p.root == root)
+            let shown = on_screen();
+            let pick = |root: &str| h.projects.iter().find(|p| p.root == root).cloned();
+            shown.as_deref().and_then(pick).or_else(|| pick(&h.current))
         })
     };
     let choose = move |root: String| {

@@ -296,12 +296,16 @@ echo "discovery from a project's parent directory (not itself a git repo):"
 # holding {project}-tickets as a child. amd board should find it without
 # needing to cd one level deeper.
 plain_parent="$(mktemp -d)"
-mkdir -p "${plain_parent}/solo-tickets/tasks"
+mkdir -p "${plain_parent}/solo-tickets/tasks/backlog"
 ( cd "${plain_parent}/solo-tickets" && git init -q && git config user.email t@t.co && git config user.name t \
   && git add -A && git commit -q -m seed --allow-empty )
 assert "amd board finds the one project sibling from its parent directory" \
   bash -c "cd '${plain_parent}' && '${AMD}' board --plain | grep -q TODO"
-mkdir -p "${plain_parent}/second-tickets/tasks"
+mkdir -p "${plain_parent}/old-code/tasks/todo" "${plain_parent}/old-code/tasks/doing" "${plain_parent}/old-code/tasks/done"
+( cd "${plain_parent}/old-code" && git init -q )
+assert "an old v3 board in a code repo beside it isn't a project (ticket 175)" \
+  bash -c "cd '${plain_parent}' && '${AMD}' board --plain | grep -q TODO && ! '${AMD}' project 2>&1 | grep -q old-code"
+mkdir -p "${plain_parent}/second-tickets/tasks/backlog"
 ( cd "${plain_parent}/second-tickets" && git init -q && git config user.email t@t.co && git config user.name t )
 assert "two project siblings is an ambiguity error, not a guess" \
   bash -c "cd '${plain_parent}' && '${AMD}' board 2>&1 | grep -q 'more than one project board'"
@@ -319,7 +323,7 @@ echo "discovery from inside a sibling repo that has no board of its own (ticket 
 sibling_parent="$(mktemp -d)"
 ( cd "${sibling_parent}" && git init -q code && cd code \
   && git config user.email t@t.co && git config user.name t && git commit -q -m seed --allow-empty )
-mkdir -p "${sibling_parent}/proj-tickets/tasks"
+mkdir -p "${sibling_parent}/proj-tickets/tasks/backlog"
 ( cd "${sibling_parent}/proj-tickets" && git init -q && git config user.email t@t.co && git config user.name t \
   && git add -A && git commit -q -m seed --allow-empty )
 assert "amd board finds the sibling tickets repo from inside the code repo" \
@@ -327,7 +331,7 @@ assert "amd board finds the sibling tickets repo from inside the code repo" \
 mkdir -p "${sibling_parent}/code/deep/nested"
 assert "...and from a subdirectory of the code repo, not just its top level" \
   bash -c "cd '${sibling_parent}/code/deep/nested' && '${AMD}' board --plain | grep -q TODO"
-mkdir -p "${sibling_parent}/second-tickets/tasks"
+mkdir -p "${sibling_parent}/second-tickets/tasks/backlog"
 ( cd "${sibling_parent}/second-tickets" && git init -q && git config user.email t@t.co && git config user.name t )
 # Two *-tickets* siblings is the `amd init`/`amd join` layout — a folder of
 # projects — so from a code repository it's an error naming the fix (ticket
