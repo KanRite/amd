@@ -157,13 +157,15 @@ pub fn HomeBar() -> impl IntoView {
             </Show>
             <For
                 each=move || data().map(|h| h.projects).unwrap_or_default()
-                key=|p| p.root.clone()
+                // Archiving changes the label, so it's part of the key.
+                key=|p| (p.root.clone(), p.archived)
                 let:p
             >
                 {
                     let root = p.root.clone();
                     let selected = move || current().is_some_and(|c| c.root == root);
-                    view! { <option value=p.root.clone() selected=selected>{p.name.clone()}</option> }
+                    let label = if p.archived { format!("{} (archived)", p.name) } else { p.name.clone() };
+                    view! { <option value=p.root.clone() selected=selected>{label}</option> }
                 }
             </For>
         </select>
@@ -363,9 +365,51 @@ fn Projects(
         .iter()
         .map(|p| (p.clone(), twice(&p.name)))
         .collect();
+    // Archived projects are apart (ticket 157), hidden or not.
+    let (archived, rows): (Vec<_>, Vec<_>) = rows.into_iter().partition(|(p, _)| p.archived);
     let (shown, hidden): (Vec<_>, Vec<_>) = rows.into_iter().partition(|(p, _)| !p.hidden);
     let show_hidden = RwSignal::new(false);
     let hidden_count = hidden.len();
+    let show_archived = RwSignal::new(false);
+    let archived_count = archived.len();
+    let unarchive_github = RwSignal::new(false);
+    let unarchive = move |root: String| {
+        let github = unarchive_github.get_untracked();
+        spawn_local(async move {
+            match api::set_project_archived(&root, false, github).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    crate::home::load_home(home);
+                }
+                Err(e) => ctx.error.set(Some(e)),
+            }
+        });
+    };
+    let archived_row = move |(p, show_dir): (HomeProject, bool)| {
+        let root = p.root.clone();
+        let back = p.root.clone();
+        view! {
+            <li class="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
+                <button
+                    type="button"
+                    class="flex-1 text-left font-medium italic text-slate-500 hover:underline"
+                    title="Open this project's board, read-only"
+                    on:click=move |_| open(ctx, root.clone(), View::Board, None)
+                >
+                    {p.name.clone()}
+                    {show_dir.then(|| view! { <span class="ml-2 text-xs font-normal text-slate-500">{p.dir.clone()}</span> })}
+                </button>
+                <button
+                    type="button"
+                    class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                    title="Bring this project back, for everyone"
+                    on:click=move |_| unarchive(back.clone())
+                >
+                    "Unarchive"
+                </button>
+            </li>
+        }
+    };
     let toggle = move |root: String, hide: bool| {
         spawn_local(async move {
             match api::set_project_hidden(&root, hide).await {
@@ -416,6 +460,27 @@ fn Projects(
             </Show>
             <Show when=move || show_hidden.get()>
                 <ul class="flex flex-col gap-1.5 opacity-80">{hidden.clone().into_iter().map(row).collect_view()}</ul>
+            </Show>
+            <Show when=move || { archived_count > 0 }>
+                <button
+                    type="button"
+                    class="self-start text-sm text-slate-500 hover:underline"
+                    aria-expanded=move || show_archived.get().to_string()
+                    on:click=move |_| show_archived.update(|s| *s = !*s)
+                >
+                    {move || format!("{} Archived ({archived_count})", if show_archived.get() { "▾" } else { "▸" })}
+                </button>
+            </Show>
+            <Show when=move || show_archived.get()>
+                <label class="flex items-center gap-2 text-xs text-slate-500">
+                    <input
+                        type="checkbox"
+                        prop:checked=move || unarchive_github.get()
+                        on:change=move |ev| unarchive_github.set(event_target_checked(&ev))
+                    />
+                    "Unarchive on GitHub too"
+                </label>
+                <ul class="flex flex-col gap-1.5">{archived.clone().into_iter().map(archived_row).collect_view()}</ul>
             </Show>
         </section>
     }

@@ -6,7 +6,9 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 
+use agile_md::board::Board;
 use agile_md::current_project::{self, ProjectEntry};
+use agile_md::transition::Event;
 
 use crate::form;
 
@@ -27,8 +29,13 @@ pub fn list() -> Result<()> {
         } else {
             ' '
         };
+        let archived = if agile_md::archive::is_archived(&Board::in_repo(&project.tickets)) {
+            "  (archived)"
+        } else {
+            ""
+        };
         println!(
-            "{marker} {:<width$}  {}",
+            "{marker} {:<width$}  {}{archived}",
             project.name,
             repositories(&dir, project)
         );
@@ -68,6 +75,53 @@ pub fn use_project(name: Option<String>) -> Result<()> {
     }
     current_project::write(&dir, &name)?;
     println!("current project: {name}");
+    Ok(())
+}
+
+/// `amd project archive|unarchive [name] [--github]` (ticket 157): the
+/// named project in this folder, else the one amd uses here.
+pub fn archive(name: Option<String>, on: bool, github: bool) -> Result<()> {
+    let board = match name {
+        Some(name) => {
+            let dir = current_project::project_dir()?;
+            let projects = current_project::projects(&dir);
+            match projects.iter().find(|p| p.name == name) {
+                Some(project) => Board::in_repo(&project.tickets),
+                None => bail!(
+                    "no project '{name}' in {} (one of: {})",
+                    dir.display(),
+                    projects
+                        .iter()
+                        .map(|p| p.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            }
+        }
+        None => Board::discover()?,
+    };
+    if !board.root.is_dir() {
+        bail!("no board at {}", board.root.display());
+    }
+    agile_md::project_trust::check(&board)?;
+    let report = |events: Vec<Event>| {
+        for event in events {
+            match event {
+                Event::Info(text) => println!("{text}"),
+                Event::Warn(text) => eprintln!("amd: {text}"),
+            }
+        }
+    };
+    report(agile_md::sync::catch_up(
+        &board,
+        agile_md::sync::Purpose::Write,
+    )?);
+    report(agile_md::archive::set_archived(
+        &board,
+        on,
+        github,
+        &mut agile_md::archive::gh,
+    )?);
     Ok(())
 }
 

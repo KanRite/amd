@@ -162,20 +162,7 @@ fn source_of(slug: &str, number: u64) -> String {
 /// that's on GitHub.
 pub fn targets(board: &Board, repo: Option<&str>) -> Result<Vec<Target>> {
     let declared = board_settings::load(board).repos();
-    // Each declared repository on GitHub: from its clone here, else (ticket
-    // 173) from the tickets repository's own origin with the name swapped
-    // in, as `amd clone` does, so one not cloned here still counts.
-    let tickets_origin = git::remote_url(board.repo_root());
-    let cloned: Vec<(String, String)> = declared
-        .iter()
-        .filter_map(|name| {
-            let slug = match registry::clone_of(&board.root, name) {
-                Some(path) => github_slug(&path)?,
-                None => slug_of_url(&crate::clone::sibling_url(tickets_origin.as_deref()?, name))?,
-            };
-            Some((name.clone(), slug))
-        })
-        .collect();
+    let cloned = on_github(board, &declared);
 
     if let Some(repo) = repo.map(str::trim).filter(|r| !r.is_empty()) {
         if let Some((name, slug)) = cloned.iter().find(|(name, _)| name == repo) {
@@ -224,7 +211,24 @@ pub fn targets(board: &Board, repo: Option<&str>) -> Result<Vec<Target>> {
 }
 
 /// `owner/repo` from a github.com remote URL, in any of its forms.
-fn slug_of_url(url: &str) -> Option<String> {
+/// Each of `names` on GitHub, as `(name, owner/repo)`: from its clone here,
+/// else (ticket 173) from the tickets repository's own origin with the name
+/// swapped in, as `amd clone` does, so one not cloned here still counts.
+pub(crate) fn on_github(board: &Board, names: &[String]) -> Vec<(String, String)> {
+    let tickets_origin = git::remote_url(board.repo_root());
+    names
+        .iter()
+        .filter_map(|name| {
+            let slug = match registry::clone_of(&board.root, name) {
+                Some(path) => github_slug(&path)?,
+                None => slug_of_url(&crate::clone::sibling_url(tickets_origin.as_deref()?, name))?,
+            };
+            Some((name.clone(), slug))
+        })
+        .collect()
+}
+
+pub(crate) fn slug_of_url(url: &str) -> Option<String> {
     git::url_identity(url)
         .strip_prefix("github.com/")
         .filter(|slug| is_slug(slug))
@@ -232,7 +236,7 @@ fn slug_of_url(url: &str) -> Option<String> {
 }
 
 /// `owner/repo` when `repo`'s `origin` is on github.com.
-fn github_slug(repo: &Path) -> Option<String> {
+pub(crate) fn github_slug(repo: &Path) -> Option<String> {
     git::remote_identity(repo)?
         .strip_prefix("github.com/")
         .filter(|slug| is_slug(slug))

@@ -174,6 +174,9 @@ pub fn AdminPanel() -> impl IntoView {
                         </button>
                     </div>
                 </section>
+
+                // Last, away from the everyday settings (ticket 157).
+                <ArchiveAdmin />
             </div>
             <ModalClose />
         </Modal>
@@ -666,6 +669,101 @@ fn DocumentsAdmin() -> impl IntoView {
             </div>
             <Show when=move || note.with(Option::is_some)>
                 <p class="text-xs text-slate-600 dark:text-slate-300">{move || note.get().unwrap_or_default()}</p>
+            </Show>
+        </section>
+    }
+}
+
+/// Archiving the project (ticket 157): read-only for everyone until it's
+/// unarchived, optionally its GitHub repositories too. Asks once more
+/// before archiving.
+#[component]
+fn ArchiveAdmin() -> impl IntoView {
+    let ctx = Ctx::get();
+    let archived = move || ctx.board.with(|b| b.as_ref().is_some_and(|b| b.archived));
+    let github = RwSignal::new(false);
+    let confirm = RwSignal::new(false);
+    let busy = RwSignal::new(false);
+    let note = RwSignal::new(None::<String>);
+    let run = move |_| {
+        let on = !archived();
+        if on && !confirm.get_untracked() {
+            confirm.set(true);
+            return;
+        }
+        let Some(root) = ctx
+            .board
+            .with_untracked(|b| b.as_ref().map(|b| b.tasks_dir.clone()))
+        else {
+            return;
+        };
+        let github = github.get_untracked();
+        busy.set(true);
+        spawn_local(async move {
+            match api::set_project_archived(&root, on, github).await {
+                Ok(report) => {
+                    note.set(report.warning.clone());
+                    ctx.report(report);
+                    confirm.set(false);
+                    ctx.reload();
+                }
+                Err(e) => note.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
+    let project = move || {
+        ctx.board
+            .with(|b| b.as_ref().map(|b| b.project.clone()).unwrap_or_default())
+    };
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">
+                {move || if archived() { "This project is archived" } else { "Archive this project" }}
+            </h3>
+            <p class="text-xs text-slate-500">
+                {move || if archived() {
+                    "Read-only for everyone, and off My work. Unarchive it to change it again.".to_string()
+                } else {
+                    format!("Puts {} away: read-only for everyone, and off My work, until it's unarchived. Committed for the whole team.", project())
+                }}
+            </p>
+            <label class="flex items-center gap-2 text-sm">
+                <input
+                    type="checkbox"
+                    prop:checked=move || github.get()
+                    on:change=move |ev| github.set(event_target_checked(&ev))
+                />
+                {move || if archived() {
+                    "Also unarchive its repositories on GitHub"
+                } else {
+                    "Also archive its repositories on GitHub (tickets, documents and declared code repositories)"
+                }}
+            </label>
+            <div class="flex items-center gap-2">
+                <button
+                    class=move || if archived() || !confirm.get() {
+                        "rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700"
+                    } else {
+                        "rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
+                    }
+                    disabled=move || busy.get()
+                    on:click=run
+                >
+                    {move || if archived() {
+                        "Unarchive"
+                    } else if confirm.get() {
+                        "Confirm: archive it"
+                    } else {
+                        "Archive"
+                    }}
+                </button>
+                <Show when=move || confirm.get() && !archived()>
+                    <button class="text-sm underline" on:click=move |_| confirm.set(false)>"Cancel"</button>
+                </Show>
+            </div>
+            <Show when=move || note.with(Option::is_some)>
+                <p class="text-xs text-amber-700 dark:text-amber-300">{move || note.get().unwrap_or_default()}</p>
             </Show>
         </section>
     }

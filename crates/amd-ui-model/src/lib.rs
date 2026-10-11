@@ -230,6 +230,9 @@ pub struct Board {
     /// (ticket 173).
     #[serde(default)]
     pub import_issues: bool,
+    /// The project is archived (ticket 157): read-only until unarchived.
+    #[serde(default)]
+    pub archived: bool,
 }
 
 /// Whether to show Admin, and the note that says why (ticket 149).
@@ -569,6 +572,9 @@ pub struct HomeProject {
     /// Whether that shared repository is cloned here.
     #[serde(default)]
     pub shared_cloned: bool,
+    /// Archived for everyone (ticket 157): listed apart, with Unarchive.
+    #[serde(default)]
+    pub archived: bool,
 }
 
 /// Which documents the Documents view shows (ticket 168): the project's
@@ -908,6 +914,7 @@ mod assigned_tests {
             shared_documents: String::new(),
             triage_priority: String::new(),
             import_issues: true,
+            archived: false,
         };
         board.epics.push(Epic {
             repo: String::new(),

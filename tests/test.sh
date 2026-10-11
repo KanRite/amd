@@ -1412,6 +1412,53 @@ assert "amd mine --hide leaves a project out, --all brings it back, --unhide res
     && in_mw mine --all | grep -q beta && in_mw mine --unhide beta >/dev/null && in_mw mine | grep -q beta"
 assert "amd mine --json gives the same list for scripts" \
   bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --json | grep -c '\"project\"' | grep -qx 6"
+
+echo "archiving a project (ticket 157):"
+in_beta() { (cd "${mwh}/work/beta-tickets" && env XDG_CONFIG_HOME="${mw}/config" TMPDIR="${mw_bin}" AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+mw_fns="$(declare -f in_mw in_beta); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'"
+assert "amd project archive commits archived = on and amd project marks it" \
+  bash -c "${mw_fns}; in_mw project archive beta | grep -q '^archived beta\$' \
+    && grep -qx 'archived = on' '${mwh}/work/beta-tickets/.settings' \
+    && git -C '${mwh}/work/beta-tickets' log -1 --format=%s | grep -q 'settings: archived' \
+    && in_mw project | grep -q 'beta .*(archived)'"
+assert "an archived project refuses changes, naming unarchive" \
+  bash -c "${mw_fns}; for change in 'new Refused --no-edit' 'todo 3' 'set 3 priority low' 'tags add NEW' 'wip-limit 3'; do \
+      in_beta \${change} 2>&1 | grep -q 'beta is archived.*amd project unarchive' || exit 1; done \
+    && [ \"\$(ls '${mwh}/work/beta-tickets/tasks/backlog/' | grep -c refused)\" = 0 ]"
+assert "...but still reads" \
+  bash -c "${mw_fns}; in_beta board | grep -q 'beta todo' && in_beta show 1 | grep -q 'beta doing' && in_beta tags >/dev/null"
+assert "...and is off My work" \
+  bash -c "${mw_fns}; out=\$(in_mw mine) && ! printf '%s\\n' \"\$out\" | grep -q beta && printf '%s\\n' \"\$out\" | grep -q alpha"
+assert "amd project unarchive brings it back" \
+  bash -c "${mw_fns}; in_mw project unarchive beta | grep -q '^unarchived beta\$' \
+    && ! grep -q archived '${mwh}/work/beta-tickets/.settings' \
+    && in_beta new 'Back again' --no-edit >/dev/null 2>&1 && ls '${mwh}/work/beta-tickets/tasks/backlog/' | grep -q back-again"
+# --github: a fake gh logs what it's asked; origin looks like GitHub but
+# pushes go to a local bare repository.
+mkdir -p "${mw}/ghbin" && git init -q --bare -b main "${mw}/beta-origin.git"
+cat > "${mw}/ghbin/gh" <<'GH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${GH_LOG:?}"
+GH
+chmod +x "${mw}/ghbin/gh"
+(
+  cd "${mwh}/work/beta-tickets"
+  git remote add origin git@github.com:acme/beta-tickets.git
+  git config url."${mw}/beta-origin.git".pushInsteadOf git@github.com:acme/beta-tickets.git
+  git push -q -u origin main 2>/dev/null
+)
+gh_beta() { (cd "${mwh}/work/beta-tickets" && env XDG_CONFIG_HOME="${mw}/config" TMPDIR="${mw_bin}" AMD_SYNC=0 GH_LOG="${mw}/gh.log" PATH="${mw}/ghbin:${PATH}" "${AMD}" "$@"); }
+mw_fns="${mw_fns}; $(declare -f gh_beta)"
+assert "--github pushes the setting, then archives the tickets and documents repositories" \
+  bash -c "${mw_fns}; out=\$(gh_beta project archive --github 2>&1) \
+    && printf '%s\\n' \"\$out\" | grep -q 'archived acme/beta-tickets on GitHub' \
+    && grep -qx 'repo archive acme/beta-tickets --yes' '${mw}/gh.log' \
+    && grep -qx 'repo archive acme/beta-documents --yes' '${mw}/gh.log' \
+    && git -C '${mw}/beta-origin.git' show main:.settings | grep -qx 'archived = on'"
+assert "--github unarchives on GitHub, then pushes the setting" \
+  bash -c "${mw_fns}; gh_beta project unarchive --github >/dev/null 2>&1 \
+    && grep -qx 'repo unarchive acme/beta-tickets --yes' '${mw}/gh.log' \
+    && ! git -C '${mw}/beta-origin.git' show main:.settings | grep -q archived"
 rm -rf "${mw}"
 
 echo "work to pick when there's nothing to do (ticket 160):"
