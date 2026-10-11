@@ -27,6 +27,8 @@ pub enum View {
     Board,
     /// The project's documents (ticket 129).
     Documents,
+    /// The project's ideas, best first (ticket 131).
+    Ideas,
 }
 
 /// Which overlay, if any, is open over the board.
@@ -428,6 +430,10 @@ pub fn App() -> impl IntoView {
                         project_dir.track();
                         view! { <crate::documents::DocumentsView /> }.into_any()
                     }
+                    View::Ideas => {
+                        project_dir.track();
+                        view! { <crate::ideas::IdeasView /> }.into_any()
+                    }
                 }}
             </main>
 
@@ -502,7 +508,7 @@ fn ViewTabs() -> impl IntoView {
     // the board has no tabs: only the way back while documents are open.
     let ctx = Ctx::get();
     view! {
-        <Show when=move || ctx.view.get() == View::Documents>
+        <Show when=move || matches!(ctx.view.get(), View::Documents | View::Ideas)>
             <button
                 type="button"
                 class="rounded border border-slate-300 px-2.5 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
@@ -510,6 +516,17 @@ fn ViewTabs() -> impl IntoView {
                 on:click=move |_| ctx.view.set(View::Board)
             >
                 "Board"
+            </button>
+        </Show>
+        // Back to the ideas from one opened in Documents (ticket 131).
+        <Show when=move || ctx.view.get() == View::Documents>
+            <button
+                type="button"
+                class="rounded border border-slate-300 px-2.5 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                title="This project's ideas"
+                on:click=move |_| ctx.view.set(View::Ideas)
+            >
+                "Ideas"
             </button>
         </Show>
     }

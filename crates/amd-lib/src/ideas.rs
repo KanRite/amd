@@ -397,10 +397,9 @@ pub fn to_ticket(
         },
     )?;
     let id = draft.id.clone();
-    let mut notes = format!(
-        "From the idea [{}]({source}/{path}) in {source}",
-        idea.title
-    );
+    // Plain text: a link from the tickets repository into the documents
+    // one wouldn't resolve.
+    let mut notes = format!("From the idea \"{}\" ({path} in {source})", idea.title);
     if let Some(author) = &idea.author {
         notes.push_str(&format!(", put forward by {}", Person::parse(author).name));
     }
@@ -441,6 +440,24 @@ pub fn to_ticket(
         ))
     })?;
     Ok((id, events, done))
+}
+
+/// The write-up alone: no frontmatter, no title heading, no notes.
+pub fn write_up(text: &str) -> String {
+    let (_, body) = split_frontmatter(text);
+    let mut out = Vec::new();
+    let mut titled = false;
+    for line in body.lines() {
+        if line.trim_end() == NOTES {
+            break;
+        }
+        if !titled && line.starts_with("# ") {
+            titled = true;
+            continue;
+        }
+        out.push(line);
+    }
+    out.join("\n").trim().to_string()
 }
 
 /// `+2`, `-1`, `0`.
@@ -639,6 +656,13 @@ votes: [\"Sam Lee <sam@acme.io> +3\", \"Priya Shah <priya@acme.io> -1\"]\nticket
         assert_eq!(idea.notes.len(), 2);
         assert_eq!(idea.notes[0].text, "Follow the OS.\nOr a switch.");
         assert_eq!(idea.notes[1].date, "2026-10-12");
+    }
+
+    #[test]
+    fn the_write_up_leaves_out_title_and_notes() {
+        let text = "---\ntitle: \"X\"\n---\n# X\n\nBody here.\n\n## Detail\n\nMore.\n\n## Notes\n\n- **A**, d: n\n";
+        assert_eq!(write_up(text), "Body here.\n\n## Detail\n\nMore.");
+        assert_eq!(write_up("# Only a title\n"), "");
     }
 
     #[test]

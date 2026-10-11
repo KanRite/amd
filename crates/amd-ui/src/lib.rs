@@ -821,6 +821,210 @@ async fn read_document(source: String, path: String) -> Result<amd_ui_model::Ren
     .await
 }
 
+/// The project's ideas, best first (ticket 131), with your own vote on
+/// each.
+#[tauri::command]
+async fn list_ideas() -> Result<amd_ui_model::IdeaList> {
+    blocking(|| {
+        let project = Project::open()?;
+        let source = agile_md::ideas::source(&project.repos[0].1);
+        let me = source
+            .root
+            .as_deref()
+            .and_then(|root| agile_md::ideas::Person::of(root).ok())
+            .map(|p| p.email)
+            .unwrap_or_default();
+        Ok(amd_ui_model::IdeaList {
+            cloned: source.root.is_some(),
+            ideas: agile_md::ideas::list(&source)
+                .iter()
+                .map(|i| idea_card(i, &me))
+                .collect(),
+            source: source.name,
+        })
+    })
+    .await
+}
+
+fn idea_card(idea: &agile_md::ideas::Idea, me: &str) -> amd_ui_model::IdeaCard {
+    amd_ui_model::IdeaCard {
+        path: idea.path.clone(),
+        title: idea.title.clone(),
+        author: idea
+            .author
+            .as_deref()
+            .map(|a| a.split('<').next().unwrap_or(a).trim().to_string()),
+        created: idea.created.clone(),
+        score: idea.score(),
+        voters: idea.votes.len(),
+        mine: idea.vote_of(me),
+        notes: idea.notes.len(),
+        tickets: idea.tickets.clone(),
+        archived: idea.archived,
+    }
+}
+
+/// Where the project's ideas are, and who "you" are there.
+fn ideas_root() -> Result<(Board, PathBuf, String, agile_md::ideas::Person)> {
+    let project = Project::open()?;
+    let board = Board::at(project.repos[0].1.root.clone());
+    let source = agile_md::ideas::source(&board);
+    let root = source
+        .root
+        .ok_or_else(|| format!("{} isn't cloned on this machine", source.name))?;
+    let me = agile_md::ideas::Person::of(&root).map_err(err)?;
+    Ok((board, root, source.name, me))
+}
+
+/// One idea opened: the write-up rendered, the votes and the notes.
+#[tauri::command]
+async fn read_idea(path: String) -> Result<amd_ui_model::IdeaDetail> {
+    blocking(move || {
+        let (_, root, source, me) = ideas_root()?;
+        let idea = agile_md::ideas::read(&root, &source, &path).map_err(err)?;
+        Ok(amd_ui_model::IdeaDetail {
+            card: idea_card(&idea, &me.email),
+            html: documents::render(&root, &path, &agile_md::ideas::write_up(&idea.text)),
+            votes: idea
+                .votes
+                .iter()
+                .map(|v| amd_ui_model::IdeaVote {
+                    name: v.name.clone(),
+                    value: v.value,
+                })
+                .collect(),
+            notes: idea
+                .notes
+                .iter()
+                .map(|n| amd_ui_model::IdeaNote {
+                    name: n.name.clone(),
+                    date: n.date.clone(),
+                    text: n.text.clone(),
+                })
+                .collect(),
+            source,
+        })
+    })
+    .await
+}
+
+/// Runs a change to the project's ideas under the write lock; refused in an
+/// archived project (ticket 157).
+async fn idea_change(
+    state: &Tauri<'_, AppState>,
+    change: impl FnOnce(
+        &Path,
+        &agile_md::ideas::Person,
+    ) -> anyhow::Result<(Option<String>, agile_md::documents::Restored)>
+    + Send
+    + 'static,
+) -> Result<amd_ui_model::DocChange> {
+    let writing = Arc::clone(&state.writing);
+    blocking(move || {
+        let _guard = writing
+            .lock()
+            .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
+        let (board, root, _, me) = ideas_root()?;
+        agile_md::archive::ensure_writable(&board).map_err(err)?;
+        let (path, done) = change(&root, &me).map_err(err)?;
+        Ok(amd_ui_model::DocChange {
+            sync: SyncReport {
+                committed: true,
+                pushed: done.pushed,
+                warning: done.warning,
+                message: done.message,
+            },
+            path,
+        })
+    })
+    .await
+}
+
+/// Puts an idea forward (ticket 131), with your name on it when `named`.
+#[tauri::command]
+async fn create_idea(
+    state: Tauri<'_, AppState>,
+    title: String,
+    body: String,
+    named: bool,
+) -> Result<amd_ui_model::DocChange> {
+    idea_change(&state, move |root, me| {
+        let (path, done) = agile_md::ideas::create(root, &title, &body, named.then_some(me))?;
+        Ok((Some(path), done))
+    })
+    .await
+}
+
+/// One click on an idea's + or −.
+#[tauri::command]
+async fn vote_idea(
+    state: Tauri<'_, AppState>,
+    path: String,
+    delta: i32,
+) -> Result<amd_ui_model::DocChange> {
+    idea_change(&state, move |root, me| {
+        let (_, done) = agile_md::ideas::vote(root, &path, delta.clamp(-1, 1), me)?;
+        Ok((Some(path), done))
+    })
+    .await
+}
+
+/// Adds your note under an idea.
+#[tauri::command]
+async fn note_idea(
+    state: Tauri<'_, AppState>,
+    path: String,
+    text: String,
+) -> Result<amd_ui_model::DocChange> {
+    idea_change(&state, move |root, me| {
+        let done = agile_md::ideas::note(root, &path, &text, me)?;
+        Ok((Some(path), done))
+    })
+    .await
+}
+
+/// Makes a backlog ticket from an idea, linked both ways.
+#[tauri::command]
+async fn idea_to_ticket(
+    state: Tauri<'_, AppState>,
+    path: String,
+) -> Result<amd_ui_model::IdeaTicket> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let source = agile_md::ideas::source(board);
+        let root = source
+            .root
+            .ok_or_else(|| format!("{} isn't cloned on this machine", source.name))?;
+        let (id, events, done) =
+            agile_md::ideas::to_ticket(board, &root, &source.name, &path).map_err(err)?;
+        let task = board.find(&id).map_err(err)?;
+        let mut warnings: Vec<String> = events
+            .into_iter()
+            .filter_map(|e| match e {
+                Event::Warn(w) => Some(w),
+                Event::Info(_) => None,
+            })
+            .collect();
+        warnings.extend(done.warning.clone());
+        Ok(amd_ui_model::IdeaTicket {
+            sync: SyncReport {
+                committed: true,
+                pushed: warnings.is_empty(),
+                warning: (!warnings.is_empty()).then(|| warnings.join("; ")),
+                message: format!("ticket {id} made from the idea"),
+            },
+            repo: board
+                .repo_root()
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            file: task.file_name(),
+            id,
+        })
+    })
+    .await
+}
+
 /// Where the documents repository `source` (the project's own or the
 /// shared one) is cloned; an error for any other name, or one not cloned.
 fn documents_root(source: &str) -> Result<PathBuf> {
@@ -1517,6 +1721,12 @@ pub fn run() {
             home,
             set_project_hidden,
             set_project_archived,
+            list_ideas,
+            read_idea,
+            create_idea,
+            vote_idea,
+            note_idea,
+            idea_to_ticket,
             set_include_unassigned,
             board_fingerprint,
             sync_board,

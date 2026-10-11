@@ -514,6 +514,71 @@ pub struct DocChange {
     pub path: Option<String>,
 }
 
+/// An idea in the list (ticket 131): best first, with your own vote.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdeaCard {
+    /// `ideas/<file>.md` in the project's documents repository.
+    pub path: String,
+    pub title: String,
+    /// Who put it forward (a name), if they said.
+    pub author: Option<String>,
+    pub created: String,
+    /// The sum of everyone's votes.
+    pub score: i32,
+    pub voters: usize,
+    /// Your vote, −3 to +3.
+    pub mine: i32,
+    pub notes: usize,
+    /// The tickets made from it, as `<tickets repository>#<id>`.
+    pub tickets: Vec<String>,
+    pub archived: bool,
+}
+
+/// The project's ideas.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdeaList {
+    /// The documents repository they're in.
+    pub source: String,
+    /// Whether it's cloned here; nothing can be shown or added otherwise.
+    pub cloned: bool,
+    pub ideas: Vec<IdeaCard>,
+}
+
+/// One person's vote, as the idea shows it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdeaVote {
+    pub name: String,
+    pub value: i32,
+}
+
+/// A note under an idea.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdeaNote {
+    pub name: String,
+    pub date: String,
+    pub text: String,
+}
+
+/// An idea opened: its write-up rendered, who voted, and the notes.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdeaDetail {
+    pub card: IdeaCard,
+    pub source: String,
+    pub html: String,
+    pub votes: Vec<IdeaVote>,
+    pub notes: Vec<IdeaNote>,
+}
+
+/// A ticket made from an idea, and where to find it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdeaTicket {
+    pub sync: SyncReport,
+    pub id: String,
+    /// The tickets repository's name.
+    pub repo: String,
+    pub file: String,
+}
+
 /// One version of a document, from git (ticket 169).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocVersion {

@@ -125,15 +125,22 @@ fn list(sources: &[Source], all: bool) -> Result<()> {
         println!("no ideas yet — `amd idea new \"<title>\"` puts one forward");
         return Ok(());
     }
-    let width = ideas.iter().map(|i| i.slug().len()).max().unwrap_or(0);
-    for idea in &ideas {
-        let mut line = format!(
-            "{:>3}  ({} vote{}, {} note{})  {:<width$}  {}",
-            ideas::signed(idea.score()),
+    let counts = |idea: &Idea| {
+        format!(
+            "({} vote{}, {} note{})",
             idea.votes.len(),
             if idea.votes.len() == 1 { "" } else { "s" },
             idea.notes.len(),
             if idea.notes.len() == 1 { "" } else { "s" },
+        )
+    };
+    let width = ideas.iter().map(|i| i.slug().len()).max().unwrap_or(0);
+    let counted = ideas.iter().map(|i| counts(i).len()).max().unwrap_or(0);
+    for idea in &ideas {
+        let mut line = format!(
+            "{:>3}  {:<counted$}  {:<width$}  {}",
+            ideas::signed(idea.score()),
+            counts(idea),
             idea.slug(),
             idea.title,
         );
