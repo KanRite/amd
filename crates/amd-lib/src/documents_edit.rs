@@ -406,21 +406,35 @@ pub fn move_document(root: &Path, from: &str, to_folder: &str) -> Result<(String
     Ok((to, done))
 }
 
-/// The numbers of a folder's documents named `NNNN-…`, when it has any.
-fn numbers(root: &Path, folder: &str) -> Vec<u32> {
-    let Ok(entries) = fs::read_dir(root.join(folder)) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().into_owned();
-            let (number, _) = name.split_once('-')?;
-            (number.len() == 4 && name.ends_with(".md"))
-                .then(|| number.parse().ok())
-                .flatten()
-        })
-        .collect()
+/// The numbers of a folder's documents named `NNNN-…`; with `deep`, its
+/// sub-folders' too (ticket 177: an ADR moved into `adr/adr/superseded/`
+/// keeps its number, so a new one mustn't take it again).
+fn numbers(root: &Path, folder: &str, deep: bool) -> Vec<u32> {
+    fn walk(dir: &Path, deep: bool, out: &mut Vec<u32>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                if deep {
+                    walk(&entry.path(), deep, out);
+                }
+            } else if let Some((number, _)) = name.split_once('-')
+                && number.len() == 4
+                && name.ends_with(".md")
+                && let Ok(n) = number.parse()
+            {
+                out.push(n);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&root.join(folder), deep, &mut out);
+    out
 }
 
 /// Makes a new document titled `title` in `folder`: `<slug>.md` beginning
@@ -442,8 +456,14 @@ pub fn create_document(root: &Path, folder: &str, title: &str) -> Result<(String
         "adr/rfc" => Some("RFC"),
         _ => None,
     };
-    let taken = numbers(root, &folder);
-    let numbered = kind.is_some() || !taken.is_empty();
+    // Numbered when its own documents are; the next number counts those
+    // moved into its sub-folders too.
+    let numbered = kind.is_some() || !numbers(root, &folder, false).is_empty();
+    let taken = if numbered {
+        numbers(root, &folder, true)
+    } else {
+        Vec::new()
+    };
     let (name, heading) = if numbered {
         let next = taken.iter().max().copied().unwrap_or(0) + 1;
         let heading = match kind {
@@ -675,6 +695,9 @@ mod tests {
     #[test]
     fn new_documents_are_named_and_numbered() {
         let (_dir, root) = repo();
+        // ADR 0001 moved into a sub-folder keeps its number (ticket 177).
+        create_folder(&root, "adr/adr", "superseded").unwrap();
+        move_document(&root, "adr/adr/0001-x.md", "adr/adr/superseded").unwrap();
         let (path, _) = create_document(&root, "adr/adr", "Keep the cache").unwrap();
         assert_eq!(path, "adr/adr/0002-keep-the-cache.md");
         assert_eq!(

@@ -940,6 +940,14 @@ fn FolderRow(
     };
     let (drop_source, drop_folder) = (source.clone(), folder.clone());
     let (del_source, del_folder) = (source.clone(), folder.clone());
+    // WebKit ignores `autofocus` on a field added later (ticket 177): put
+    // the cursor in the name field as soon as it's shown.
+    let field = NodeRef::<leptos::html::Input>::new();
+    Effect::new(move |_| {
+        if let Some(el) = field.get() {
+            let _ = el.focus();
+        }
+    });
     let title_class = if is_top {
         "flex-1 truncate text-sm font-semibold"
     } else {
@@ -996,8 +1004,8 @@ fn FolderRow(
         </div>
         <Show when=asking.clone()>
             <input
+                node_ref=field
                 type="text"
-                autofocus
                 class="ml-2 mt-1 w-[90%] rounded border border-slate-300 bg-slate-50 px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-900"
                 placeholder=move || {
                     if actions.pending.with(|p| p.as_ref().is_some_and(|p| p.document)) {
