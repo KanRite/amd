@@ -11,7 +11,7 @@ use agile_md::board::{Board, Column};
 use agile_md::board_settings;
 use agile_md::current_project;
 use agile_md::group::{GROUP_FILE, State};
-use agile_md::model::load_repos;
+use agile_md::model::find_repos;
 use agile_md::task::Task;
 use amd_ui_model::epic::{GroupKind, Place};
 use amd_ui_model::wip::WipLimits;
@@ -47,9 +47,15 @@ pub struct Project {
 impl Project {
     /// The project around the current directory, as `amd` finds it.
     pub fn open() -> Result<Project> {
-        let found = load_repos().map_err(err)?;
+        // Boards only: their tickets are read by whatever needs them
+        // (ticket 184).
+        let found = find_repos().map_err(err)?;
         Ok(Project {
-            repos: found.repos.into_iter().map(|r| (r.name, r.board)).collect(),
+            repos: found
+                .repos
+                .into_iter()
+                .map(|(name, _, board)| (name, board))
+                .collect(),
             unregistered: found.unregistered,
             identity: found.identity,
         })

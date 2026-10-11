@@ -223,6 +223,25 @@ pub struct Repos {
 /// Open the current project's board and every declared, registered
 /// repository beside it.
 pub fn load_repos() -> Result<Repos> {
+    let found = find_repos()?;
+    let repos = found
+        .repos
+        .into_iter()
+        .map(|(_, root, board)| open_repo_board(root, board))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Repos {
+        repos,
+        unregistered: found.unregistered,
+        identity: found.identity,
+    })
+}
+
+/// The project's boards, as [`load_repos`] finds them, **without reading a
+/// single ticket** (ticket 184): `(name, repository root, board)` for each.
+/// amdui opens the project for every command, including the once-a-second
+/// fingerprint, and reading every ticket into cards each time only to drop
+/// them was most of what it did.
+pub fn find_repos() -> Result<FoundRepos> {
     // A hard error now, not a `.ok()` folded away — `amdui` operates on
     // exactly one project (the one launched from), never a personal
     // cross-project stack the way the old machine-wide registry allowed.
@@ -232,7 +251,7 @@ pub fn load_repos() -> Result<Repos> {
     let registry = Registry::load();
     let project_dir = crate::registry::project_dir_of(&current_root);
 
-    let mut repos = vec![open_repo_board(current_root.clone(), current)?];
+    let mut repos = vec![(repo_name(&current_root), current_root.clone(), current)];
     // A name this project declares but that isn't registered locally
     // (or is, but its board has since gone missing) — rendered greyed
     // out in the repo-visibility row, not silently omitted, so a
@@ -243,7 +262,7 @@ pub fn load_repos() -> Result<Repos> {
         match registry.find_near(name, &project_dir) {
             Some(entry) if entry.root == current_root => {} // already added, above
             Some(entry) if entry.has_board() => {
-                repos.push(open_repo_board(entry.root.clone(), entry.board())?);
+                repos.push((repo_name(&entry.root), entry.root.clone(), entry.board()));
             }
             _ => unregistered.push(name.clone()),
         }
@@ -251,12 +270,27 @@ pub fn load_repos() -> Result<Repos> {
     // `user.email` is ordinarily global, so any registered repo's
     // context resolves the same identity — the first one is as good as
     // any other.
-    let identity = crate::git::config(&repos[0].board.root, "user.email");
-    Ok(Repos {
+    let identity = crate::git::config(&repos[0].2.root, "user.email");
+    Ok(FoundRepos {
         repos,
         unregistered,
         identity,
     })
+}
+
+/// What [`find_repos`] finds.
+pub struct FoundRepos {
+    /// `(name, repository root, board)`: the current project's own board
+    /// first, then each declared repository registered here with a board.
+    pub repos: Vec<(String, PathBuf, Board)>,
+    pub unregistered: Vec<String>,
+    pub identity: Option<String>,
+}
+
+fn repo_name(root: &Path) -> String {
+    root.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| root.display().to_string())
 }
 
 /// A cheap summary of what's on disk for `board` (ticket 091): every file
