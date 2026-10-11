@@ -129,8 +129,6 @@ pub fn AdminPanel() -> impl IntoView {
 
                 <EpicsAdmin />
 
-                <ArchiveAdmin />
-
                 <section class="flex flex-col gap-2">
                     <h3 class="text-sm font-semibold">"Ticket template"</h3>
                     <p class="text-xs text-slate-500">{template_note}</p>
@@ -176,6 +174,9 @@ pub fn AdminPanel() -> impl IntoView {
                         </button>
                     </div>
                 </section>
+
+                // Last, away from the everyday settings (ticket 157).
+                <ArchiveAdmin />
             </div>
             <ModalClose />
         </Modal>

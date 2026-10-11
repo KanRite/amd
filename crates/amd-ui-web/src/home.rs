@@ -157,7 +157,8 @@ pub fn HomeBar() -> impl IntoView {
             </Show>
             <For
                 each=move || data().map(|h| h.projects).unwrap_or_default()
-                key=|p| p.root.clone()
+                // Archiving changes the label, so it's part of the key.
+                key=|p| (p.root.clone(), p.archived)
                 let:p
             >
                 {

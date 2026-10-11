@@ -306,7 +306,7 @@ pub fn App() -> impl IntoView {
                         }
                     }
                 >
-                    <span class="text-lg font-semibold">"agile-md"</span>
+                    <span class="whitespace-nowrap text-lg font-semibold">"agile-md"</span>
                 </Show>
                 <span class="min-w-0 flex-1 truncate text-xs text-slate-500" title=tasks_dir>
                     {move || {
