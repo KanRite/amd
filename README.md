@@ -555,3 +555,18 @@ settings are untouched, and prints the command to open it.
 `amd` was pure bash through v3; v4 is the same tool in Rust, which is what
 buys the templating. The CLI, the board layout and the file format are
 unchanged — v3 boards work as-is.
+
+## Contributing
+
+Bugs and ideas go in [issues](https://github.com/agile-md/amd/issues/new/choose);
+they're pulled into the maintainers' board automatically and triaged there.
+Pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) has the build,
+the checks CI runs, the branch and commit names, and how to become a
+maintainer. Everyone taking part follows the
+[code of conduct](CODE_OF_CONDUCT.md). Report a security problem privately,
+through the repository's Security tab, not in an issue.
+
+## Licence
+
+MIT: see [LICENSE](LICENSE). Contributions are accepted under the same
+licence.
