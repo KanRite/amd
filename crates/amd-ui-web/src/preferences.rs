@@ -18,6 +18,7 @@ pub fn PreferencesPanel() -> impl IntoView {
                 <ZoomSection />
                 <BoardSection />
                 <AiSection />
+                <SpeechSection />
                 <EditorSection />
             </div>
             <ModalClose />
@@ -326,6 +327,182 @@ fn EditorSection() -> impl IntoView {
                 "The command that opens a folder in your editor, such as code, zed or idea. The board then shows an Editor button after AI, which opens the project folder in it. Empty: no button."
             </p>
             {move || status.get().map(|s| view! { <p class="text-xs">{s}</p> })}
+        </section>
+    }
+}
+
+/// Speech to text (ticket 187): nothing until a model is downloaded here;
+/// a switch to turn it off (the model stays), and Remove to uninstall.
+#[component]
+fn SpeechSection() -> impl IntoView {
+    use amd_ui_model::terminal::{SpeechProgress, SpeechStatus};
+    let status = RwSignal::new(None::<SpeechStatus>);
+    let progress = RwSignal::new(None::<SpeechProgress>);
+    let note = RwSignal::new(None::<String>);
+    let reload = move || {
+        spawn_local(async move {
+            match api::speech_status().await {
+                Ok(s) => status.set(Some(s)),
+                Err(e) => note.set(Some(e)),
+            }
+        });
+    };
+    reload();
+    // Downloads report here; Preferences can be closed and opened meanwhile.
+    api::on_event::<SpeechProgress>("speech-progress", move |p| {
+        if p.finished {
+            let _ = progress.try_set(None);
+            if let Some(e) = &p.error {
+                let _ = note.try_set(Some(format!("Couldn't download {}: {e}", p.model)));
+            } else {
+                let _ = note.try_set(Some(format!("{} is installed.", p.model)));
+            }
+            reload();
+        } else {
+            let _ = progress.try_set(Some(p));
+        }
+    });
+    let download = move |model: String| {
+        note.set(None);
+        progress.set(Some(SpeechProgress {
+            model: model.clone(),
+            ..Default::default()
+        }));
+        spawn_local(async move {
+            if let Err(e) = api::speech_download(&model).await {
+                progress.set(None);
+                note.set(Some(e));
+            }
+        });
+    };
+    let remove = move |model: String| {
+        spawn_local(async move {
+            match api::speech_remove(&model).await {
+                Ok(()) => note.set(Some(format!("{model} is removed."))),
+                Err(e) => note.set(Some(e)),
+            }
+            reload();
+        });
+    };
+    let choose = move |model: String| {
+        spawn_local(async move {
+            if let Err(e) = api::set_speech_model(&model).await {
+                note.set(Some(e));
+            }
+            reload();
+        });
+    };
+    let switch = move |on: bool| {
+        spawn_local(async move {
+            if let Err(e) = api::set_speech_enabled(on).await {
+                note.set(Some(e));
+            }
+            reload();
+        });
+    };
+    let small = "rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700";
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Speech to text"</h3>
+            <p class="text-xs text-slate-500">
+                "Talk to the terminal and the AI tab: hold the 🎤 in the panel, or Ctrl+Shift+Space. It runs a Whisper model on this machine; nothing is sent anywhere. Download a model to start; Remove takes it off again."
+            </p>
+            {move || {
+                status
+                    .get()
+                    .map(|st| {
+                        let installed_any = st.models.iter().any(|m| m.installed);
+                        let enabled = st.enabled;
+                        let mic = st
+                            .microphone
+                            .clone()
+                            .map(|m| format!("Microphone: {m}"))
+                            .unwrap_or_else(|| "No microphone found.".to_string());
+                        let chosen = st.model.clone();
+                        view! {
+                            <Show when=move || installed_any>
+                                <label class="flex items-center gap-2 text-sm">
+                                    <input
+                                        type="checkbox"
+                                        prop:checked=enabled
+                                        on:change=move |ev| switch(event_target_checked(&ev))
+                                    />
+                                    "Use speech to text"
+                                    <span class="text-xs text-slate-500">"(off hides the 🎤 and frees its memory; the model stays)"</span>
+                                </label>
+                            </Show>
+                            <ul class="flex flex-col gap-1">
+                                {st
+                                    .models
+                                    .into_iter()
+                                    .map(|m| {
+                                        let id = m.id.clone();
+                                        let (get, rm, use_it) = (id.clone(), id.clone(), id.clone());
+                                        let in_use = chosen.as_deref() == Some(id.as_str());
+                                        let busy = move || progress.with(Option::is_some);
+                                        let this_progress = {
+                                            let id = id.clone();
+                                            move || {
+                                                progress.with(|p| {
+                                                    p.as_ref().filter(|p| p.model == id).map(|p| {
+                                                        if p.total > 0 {
+                                                            format!(
+                                                                "{:.0} of {:.0} MB",
+                                                                p.done as f64 / 1e6,
+                                                                p.total as f64 / 1e6
+                                                            )
+                                                        } else {
+                                                            "starting…".to_string()
+                                                        }
+                                                    })
+                                                })
+                                            }
+                                        };
+                                        view! {
+                                            <li class="flex items-center gap-2 text-sm">
+                                                <span class="w-20 font-mono">{id.clone()}</span>
+                                                <span class="w-16 text-xs text-slate-500">{format!("{} MB", m.size_mb)}</span>
+                                                {if m.installed {
+                                                    view! {
+                                                        <span class="text-xs text-green-700 dark:text-green-400">
+                                                            {if in_use { "installed, in use" } else { "installed" }}
+                                                        </span>
+                                                        <span class="flex-1"></span>
+                                                        <Show when=move || !in_use>
+                                                            <button type="button" class=small on:click={
+                                                                let id = use_it.clone();
+                                                                move |_| choose(id.clone())
+                                                            }>"Use"</button>
+                                                        </Show>
+                                                        <button type="button" class=small on:click={
+                                                            let id = rm.clone();
+                                                            move |_| remove(id.clone())
+                                                        }>"Remove"</button>
+                                                    }
+                                                        .into_any()
+                                                } else {
+                                                    view! {
+                                                        <span class="flex-1 text-xs text-slate-500">{this_progress.clone()}</span>
+                                                        <button type="button" class=small disabled=busy on:click={
+                                                            let id = get.clone();
+                                                            move |_| download(id.clone())
+                                                        }>"Download"</button>
+                                                    }
+                                                        .into_any()
+                                                }}
+                                            </li>
+                                        }
+                                    })
+                                    .collect_view()}
+                            </ul>
+                            <p class="text-xs text-slate-500">
+                                {mic}
+                                ". tiny.en is quick; base.en is more accurate. Both are English only."
+                            </p>
+                        }
+                    })
+            }}
+            {move || note.get().map(|n| view! { <p class="text-xs">{n}</p> })}
         </section>
     }
 }

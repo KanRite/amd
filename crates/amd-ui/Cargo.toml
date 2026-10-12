@@ -35,6 +35,11 @@ tauri-build.workspace = true
 [dependencies]
 agile-md.workspace = true
 alacritty_terminal.workspace = true
+candle-core.workspace = true
+candle-nn.workspace = true
+candle-transformers.workspace = true
+cpal.workspace = true
+ureq.workspace = true
 amd-ui-model.workspace = true
 anyhow.workspace = true
 base64.workspace = true

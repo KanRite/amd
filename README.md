@@ -45,7 +45,8 @@ where the dock and top bar take the icon from.
 
 The desktop board needs [Trunk](https://trunkrs.dev) and the
 `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`)
-to build its pages, and WebKitGTK on Linux (`libwebkit2gtk-4.1-dev`). For the
+to build its pages, and on Linux WebKitGTK and ALSA (`libwebkit2gtk-4.1-dev
+libasound2-dev`; ALSA is for speech to text's microphone). For the
 command line alone, `cargo build --release -p amd-cli` needs none of them.
 
 Two commands: **`amd`** is the command line and **`amdui`** is the desktop
