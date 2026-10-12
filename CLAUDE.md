@@ -1293,8 +1293,39 @@ changes):
   the zoom keys are left to the terminal while it has focus
   (`in_terminal`). A tab's program starts the first time it's shown, keeps
   running while the board is away, and ends when the project changes.
-  Page panics now reach amdui's stderr (`page_panic`). Speech to text is
-  ticket 187, the built-in chat 186.
+  Page panics now reach amdui's stderr (`page_panic`). The built-in chat
+  is ticket 186. Since ticket 187 the panel is on **Board, Documents and
+  Ideas** (`on_project`).
+- **Speech to text** (ticket 187, `crates/amd-ui/src/speech/`): a 🎤 in
+  the panel bar (hold to talk, or click to start and click to stop; or
+  hold Ctrl+Shift+Space; Escape cancels) types what was said into the open
+  tab, no Enter. **Nothing is downloaded by default**: Preferences →
+  "Speech to text" offers tiny.en (42 MB, `lmz/candle-whisper`'s q80 GGUF)
+  and base.en (290 MB, `openai/whisper-base.en` safetensors), fetched with
+  `ureq` into `$XDG_DATA_HOME/agile-md/speech/<model>/` through `.part`
+  files (`model.rs`); **Remove** deletes the folder (and empty parents),
+  and "Use speech to text" (`ui.speech = off`) hides it and frees the
+  model while keeping the files; `ui.speech-model` is the one in use.
+  `audio.rs` records the default input with `cpal` (needs
+  `libasound2-dev` to build on Linux; CI installs it) on a thread of its
+  own; `dsp.rs` resamples to 16 kHz (our windowed sinc), cuts the burst a
+  waking microphone makes (`trim_wake_up`: PipeWire suspends idle inputs
+  and the first ~0.3 s measured RMS ~1.0, which Whisper heard as "you"),
+  and computes the 80 Slaney mel filters. `whisper.rs` runs candle's
+  Whisper (quantised or full), greedy, `[sot, notimestamps]` for the
+  `.en` models, returns nothing when Whisper's no-speech probability is
+  over 0.6, and decodes tokens itself from `tokenizer.json` (GPT-2 byte
+  map). (candle-core itself depends on `tokenizers` with the C `onig`
+  library on every desktop target, so it's built anyway, unused.) Debug
+  builds leave dependencies' debug information out (`[profile.dev.package."*"]
+  debug = false`): with candle, CI's runner ran out of disk linking amdui.
+  The model loads on the first dictation
+  (`AppState.speech`). Commands: `speech_status`, `speech_download`
+  (`speech-progress` events), `speech_remove`, `set_speech_model`,
+  `set_speech_enabled`, `speech_start`, `speech_stop`, `speech_cancel`.
+  Ignored tests transcribe ALSA's voice clips
+  (`AMD_SPEECH_WAV=/usr/share/sounds/alsa/Front_Center.wav
+  AMD_SPEECH_EXPECT="front center"`) and record speaker playback.
 - **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
   download path checks a downloaded amdui's libraries on Linux
   (`check_board_libraries`, via `ldd`) and names WebKitGTK when it's

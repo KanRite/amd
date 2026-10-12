@@ -6,6 +6,7 @@
 
 mod boards;
 mod documents;
+mod speech;
 mod terminal;
 
 use std::path::{Path, PathBuf};
@@ -42,6 +43,11 @@ struct AppState {
     /// The bottom panel's terminals (ticket 185), by id.
     terminals: Arc<Mutex<std::collections::HashMap<u32, terminal::Session>>>,
     next_terminal: Arc<std::sync::atomic::AtomicU32>,
+    /// Speech to text (ticket 187): the loaded model (only after the first
+    /// dictation), a recording in progress, a download in progress.
+    speech: Arc<Mutex<Option<speech::whisper::Engine>>>,
+    recording: Arc<Mutex<Option<speech::audio::Recorder>>>,
+    downloading: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// The AI tab's command when Preferences doesn't name one (ticket 185).
@@ -1890,6 +1896,14 @@ pub fn run() {
             use_project,
             clone_repository,
             page_panic,
+            speech_status,
+            speech_download,
+            speech_remove,
+            set_speech_model,
+            set_speech_enabled,
+            speech_start,
+            speech_stop,
+            speech_cancel,
             terminal_open,
             terminal_input,
             terminal_resize,
@@ -1903,6 +1917,223 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running amdui");
+}
+
+/// Speech to text's settings: `ui.speech` (off disables it) and
+/// `ui.speech-model` (the chosen model).
+fn speech_enabled() -> bool {
+    Config::load().get("ui.speech").map(str::trim) != Some("off")
+}
+
+/// The model dictation uses: the chosen one if it's installed, else the
+/// first installed, else none.
+fn speech_model() -> Option<speech::model::Model> {
+    use speech::model::Model;
+    let chosen = Config::load()
+        .get("ui.speech-model")
+        .and_then(Model::from_id)
+        .filter(|m| m.installed());
+    chosen.or_else(|| Model::ALL.into_iter().find(|m| m.installed()))
+}
+
+/// Where speech to text stands (ticket 187).
+#[tauri::command]
+async fn speech_status() -> Result<amd_ui_model::terminal::SpeechStatus> {
+    blocking(|| {
+        use speech::model::Model;
+        Ok(amd_ui_model::terminal::SpeechStatus {
+            enabled: speech_enabled(),
+            model: speech_model().map(|m| m.id().to_string()),
+            models: Model::ALL
+                .into_iter()
+                .map(|m| amd_ui_model::terminal::SpeechModel {
+                    id: m.id().to_string(),
+                    size_mb: m.size_mb(),
+                    installed: m.installed(),
+                })
+                .collect(),
+            microphone: speech::audio::microphone(),
+        })
+    })
+    .await
+}
+
+/// Downloads a model, saying how it's going through `speech-progress`
+/// events. One download at a time. The first model installed becomes the
+/// one used.
+#[tauri::command]
+async fn speech_download(
+    app: tauri::AppHandle,
+    state: Tauri<'_, AppState>,
+    model: String,
+) -> Result<()> {
+    use std::sync::atomic::Ordering;
+    use tauri::Emitter;
+    let which = speech::model::Model::from_id(&model)
+        .ok_or_else(|| format!("no speech model called {model}"))?;
+    let downloading = Arc::clone(&state.downloading);
+    if downloading.swap(true, Ordering::AcqRel) {
+        return Err("a model is downloading already".to_string());
+    }
+    let result = blocking(move || {
+        let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        let id = which.id().to_string();
+        let progress_app = app.clone();
+        let outcome = which.download(|done, total| {
+            if last.elapsed() >= std::time::Duration::from_millis(150) {
+                last = std::time::Instant::now();
+                let _ = progress_app.emit(
+                    "speech-progress",
+                    amd_ui_model::terminal::SpeechProgress {
+                        model: id.clone(),
+                        done,
+                        total,
+                        ..Default::default()
+                    },
+                );
+            }
+        });
+        let error = outcome.as_ref().err().map(|e| format!("{e:#}"));
+        if error.is_none() && Config::load().get("ui.speech-model").is_none() {
+            let mut config = Config::load();
+            config.set("ui.speech-model", &id);
+            config.save().map_err(err)?;
+        }
+        let _ = app.emit(
+            "speech-progress",
+            amd_ui_model::terminal::SpeechProgress {
+                model: id,
+                finished: true,
+                error: error.clone(),
+                ..Default::default()
+            },
+        );
+        error.map_or(Ok(()), Err)
+    })
+    .await;
+    downloading.store(false, Ordering::Release);
+    result
+}
+
+/// Uninstalls a model: its files deleted, and unloaded if it was loaded.
+#[tauri::command]
+async fn speech_remove(state: Tauri<'_, AppState>, model: String) -> Result<()> {
+    let engine = Arc::clone(&state.speech);
+    blocking(move || {
+        let which = speech::model::Model::from_id(&model)
+            .ok_or_else(|| format!("no speech model called {model}"))?;
+        let mut loaded = engine.lock().map_err(|_| "restart amdui".to_string())?;
+        if loaded.as_ref().is_some_and(|e| e.model == which) {
+            *loaded = None;
+        }
+        which.remove().map_err(err)?;
+        let mut config = Config::load();
+        if config.get("ui.speech-model") == Some(which.id()) {
+            config.remove("ui.speech-model");
+            config.save().map_err(err)?;
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Chooses the model dictation uses.
+#[tauri::command]
+async fn set_speech_model(state: Tauri<'_, AppState>, model: String) -> Result<()> {
+    let engine = Arc::clone(&state.speech);
+    blocking(move || {
+        let which = speech::model::Model::from_id(&model)
+            .ok_or_else(|| format!("no speech model called {model}"))?;
+        let mut config = Config::load();
+        config.set("ui.speech-model", which.id());
+        config.save().map_err(err)?;
+        let mut loaded = engine.lock().map_err(|_| "restart amdui".to_string())?;
+        if loaded.as_ref().is_some_and(|e| e.model != which) {
+            *loaded = None;
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// The "Use speech to text" switch. Off hides dictation and frees the
+/// model's memory; the files stay, so on again needs no download.
+#[tauri::command]
+async fn set_speech_enabled(state: Tauri<'_, AppState>, on: bool) -> Result<()> {
+    let engine = Arc::clone(&state.speech);
+    let recording = Arc::clone(&state.recording);
+    blocking(move || {
+        let mut config = Config::load();
+        if on {
+            config.remove("ui.speech");
+        } else {
+            config.set("ui.speech", "off");
+            *engine.lock().map_err(|_| "restart amdui".to_string())? = None;
+            *recording.lock().map_err(|_| "restart amdui".to_string())? = None;
+        }
+        config.save().map_err(err)?;
+        Ok(())
+    })
+    .await
+}
+
+/// Starts recording from the microphone.
+#[tauri::command]
+async fn speech_start(state: Tauri<'_, AppState>) -> Result<()> {
+    let recording = Arc::clone(&state.recording);
+    blocking(move || {
+        if !speech_enabled() || speech_model().is_none() {
+            return Err("speech to text isn't set up: choose a model in Preferences".to_string());
+        }
+        let mut slot = recording.lock().map_err(|_| "restart amdui".to_string())?;
+        if slot.is_none() {
+            *slot = Some(speech::audio::Recorder::start().map_err(err)?);
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Stops recording and returns what was said. The model is loaded on the
+/// first dictation and kept until it's switched off or removed.
+#[tauri::command]
+async fn speech_stop(state: Tauri<'_, AppState>) -> Result<String> {
+    let recording = Arc::clone(&state.recording);
+    let engine = Arc::clone(&state.speech);
+    blocking(move || {
+        let recorder = recording
+            .lock()
+            .map_err(|_| "restart amdui".to_string())?
+            .take()
+            .ok_or_else(|| "nothing is recording".to_string())?;
+        let pcm = recorder.stop().map_err(err)?;
+        // Under a third of a second is a click, not speech.
+        if pcm.len() < speech::dsp::WHISPER_RATE as usize / 3 {
+            return Ok(String::new());
+        }
+        let model = speech_model().ok_or_else(|| "no speech model is installed".to_string())?;
+        let mut loaded = engine.lock().map_err(|_| "restart amdui".to_string())?;
+        if loaded.as_ref().is_none_or(|e| e.model != model) {
+            *loaded = Some(speech::whisper::Engine::load(model).map_err(err)?);
+        }
+        let engine = loaded
+            .as_mut()
+            .ok_or_else(|| "the speech model didn't load".to_string())?;
+        engine.transcribe(&pcm).map_err(err)
+    })
+    .await
+}
+
+/// Throws a recording away.
+#[tauri::command]
+fn speech_cancel(state: Tauri<'_, AppState>) -> Result<()> {
+    let recorder = state
+        .recording
+        .lock()
+        .map_err(|_| "restart amdui".to_string())?
+        .take();
+    drop(recorder);
+    Ok(())
 }
 
 /// The page panicked: its message, on amdui's error output (the page has

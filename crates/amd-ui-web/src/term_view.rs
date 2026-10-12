@@ -281,6 +281,10 @@ pub fn TermView(state: TermState, active: Signal<bool>, refocus: Signal<u32>) ->
         if ctrl && key.eq_ignore_ascii_case("v") {
             return;
         }
+        // Ctrl+Shift+Space is the panel's talk key (ticket 187).
+        if ctrl && ev.shift_key() && key == " " {
+            return;
+        }
         if ctrl && ev.shift_key() && key.eq_ignore_ascii_case("c") {
             ev.prevent_default();
             if let Some(doc) = document().dyn_ref::<web_sys::HtmlDocument>() {

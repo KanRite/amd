@@ -166,7 +166,7 @@ build_from_source() {
   if ! can_build_board; then
     printf 'Skipping the desktop board (amdui): it needs Trunk and the wasm target —\n' >&2
     printf '  cargo install --locked trunk && rustup target add wasm32-unknown-unknown\n' >&2
-    printf 'and on Linux WebKitGTK (libwebkit2gtk-4.1-dev). Then run install.sh again.\n' >&2
+    printf 'and on Linux WebKitGTK and ALSA (libwebkit2gtk-4.1-dev libasound2-dev). Then run install.sh again.\n' >&2
     return 0
   fi
   printf 'Building the desktop board (amdui)...\n'
@@ -174,7 +174,7 @@ build_from_source() {
     && ( cd "${SELF}" && cargo build --release --locked -p amd-ui ); then
     replace_bin "${SELF}/target/release/amdui" amdui
   else
-    printf 'The desktop board did not build (on Linux it needs libwebkit2gtk-4.1-dev);\n' >&2
+    printf 'The desktop board did not build (on Linux it needs libwebkit2gtk-4.1-dev and libasound2-dev);\n' >&2
     printf 'amd is installed without it.\n' >&2
   fi
 }
@@ -216,8 +216,8 @@ check_board_libraries() {
   missing="$(ldd "${DIR}/amdui" 2>/dev/null | awk '/not found/ {print $1}' | tr '\n' ' ')"
   [ -n "${missing}" ] || return 0
   printf 'Note: the desktop board (amdui) needs libraries this machine lacks:\n  %s\n' "${missing}" >&2
-  printf 'Install WebKitGTK 4.1, e.g. Debian/Ubuntu: sudo apt install libwebkit2gtk-4.1-0\n' >&2
-  printf '  Fedora: sudo dnf install webkit2gtk4.1    Arch: sudo pacman -S webkit2gtk-4.1\n' >&2
+  printf 'Install WebKitGTK 4.1 and ALSA, e.g. Debian/Ubuntu: sudo apt install libwebkit2gtk-4.1-0 libasound2t64\n' >&2
+  printf '  Fedora: sudo dnf install webkit2gtk4.1 alsa-lib    Arch: sudo pacman -S webkit2gtk-4.1 alsa-lib\n' >&2
   printf 'amd itself works without them.\n' >&2
 }
 

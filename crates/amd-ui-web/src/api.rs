@@ -864,3 +864,44 @@ pub fn report_panic(message: &str) {
         let _ = invoke_now("page_panic", args);
     }
 }
+
+// --- Speech to text (ticket 187) ------------------------------------------
+
+pub async fn speech_status() -> Result<amd_ui_model::terminal::SpeechStatus, String> {
+    call("speech_status", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct SpeechModelArgs<'a> {
+    model: &'a str,
+}
+
+/// Downloads a model; progress comes as `speech-progress` events.
+pub async fn speech_download(model: &str) -> Result<(), String> {
+    call("speech_download", &SpeechModelArgs { model }).await
+}
+
+pub async fn speech_remove(model: &str) -> Result<(), String> {
+    call("speech_remove", &SpeechModelArgs { model }).await
+}
+
+pub async fn set_speech_model(model: &str) -> Result<(), String> {
+    call("set_speech_model", &SpeechModelArgs { model }).await
+}
+
+pub async fn set_speech_enabled(on: bool) -> Result<(), String> {
+    call("set_speech_enabled", &OnArgs { on }).await
+}
+
+pub async fn speech_start() -> Result<(), String> {
+    call("speech_start", &NoArgs {}).await
+}
+
+/// Stops recording; what was said.
+pub async fn speech_stop() -> Result<String, String> {
+    call("speech_stop", &NoArgs {}).await
+}
+
+pub async fn speech_cancel() -> Result<(), String> {
+    call("speech_cancel", &NoArgs {}).await
+}

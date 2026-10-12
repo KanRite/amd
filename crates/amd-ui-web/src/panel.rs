@@ -50,12 +50,13 @@ pub fn BottomPanel(project: Memo<Option<String>>) -> impl IntoView {
     let give_back = move || refocus.update(|n| *n = n.wrapping_add(1));
     let shell = TermState::new(TermKind::Shell);
     let ai = TermState::new(TermKind::Ai);
-    let on_board = move || ctx.view.get() == View::Board;
+    // On every project screen: the board, Documents and Ideas (ticket 187).
+    let on_project = move || matches!(ctx.view.get(), View::Board | View::Documents | View::Ideas);
     // The editor from Preferences (ticket 188); read again each time the
     // board comes back, since Preferences is where it changes.
     let editor = RwSignal::new(false);
     Effect::new(move |_| {
-        if on_board() {
+        if on_project() {
             spawn_local(async move {
                 if let Ok(c) = api::editor_command().await {
                     editor.set(!c.is_empty());
@@ -63,6 +64,120 @@ pub fn BottomPanel(project: Memo<Option<String>>) -> impl IntoView {
             });
         }
     });
+    // Speech to text (ticket 187): offered once a model is installed and
+    // it's switched on. Read again whenever an overlay (Preferences) closes.
+    let speech = RwSignal::new(None::<amd_ui_model::terminal::SpeechStatus>);
+    Effect::new(move |_| {
+        let closed = ctx.overlay.with(Option::is_none);
+        if closed && on_project() {
+            spawn_local(async move {
+                if let Ok(status) = api::speech_status().await {
+                    speech.set(Some(status));
+                }
+            });
+        }
+    });
+    let speech_ready = move || speech.with(|s| s.as_ref().is_some_and(|s| s.ready()));
+    let dictation = RwSignal::new(Dictation::Idle);
+    let start_dictation = move || {
+        if dictation.get_untracked() != Dictation::Idle {
+            return;
+        }
+        if !open.get_untracked() {
+            open.set(true);
+        }
+        dictation.set(Dictation::Recording {
+            since: js_sys::Date::now(),
+            toggle: false,
+        });
+        spawn_local(async move {
+            if let Err(e) = api::speech_start().await {
+                dictation.set(Dictation::Idle);
+                ctx.error.set(Some(e));
+            }
+        });
+    };
+    let stop_dictation = move || {
+        if !matches!(dictation.get_untracked(), Dictation::Recording { .. }) {
+            return;
+        }
+        dictation.set(Dictation::Transcribing);
+        let target = match tab.get_untracked() {
+            TermKind::Shell => shell,
+            TermKind::Ai => ai,
+        };
+        spawn_local(async move {
+            match api::speech_stop().await {
+                Ok(text) if !text.is_empty() => {
+                    if let Some(id) = target.id.get_untracked() {
+                        let _ = api::terminal_input(id, &text).await;
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => ctx.error.set(Some(e)),
+            }
+            dictation.set(Dictation::Idle);
+            give_back();
+        });
+    };
+    // Hold Ctrl+Shift+Space to talk; letting go types what was said.
+    let _talk = window_event_listener(leptos::ev::keydown, move |ev| {
+        if (ev.ctrl_key() || ev.meta_key())
+            && ev.shift_key()
+            && ev.key() == " "
+            && on_project()
+            && speech_ready()
+        {
+            ev.prevent_default();
+            if !ev.repeat() {
+                start_dictation();
+            }
+        }
+    });
+    // Escape throws a recording away.
+    let _cancel = window_event_listener(leptos::ev::keydown, move |ev| {
+        if ev.key() == "Escape" && matches!(dictation.get_untracked(), Dictation::Recording { .. })
+        {
+            ev.prevent_default();
+            dictation.set(Dictation::Idle);
+            spawn_local(async move {
+                let _ = api::speech_cancel().await;
+            });
+        }
+    });
+    let _release = window_event_listener(leptos::ev::keyup, move |ev| {
+        let held = matches!(
+            dictation.get_untracked(),
+            Dictation::Recording { toggle: false, .. }
+        );
+        if held && matches!(ev.key().as_str(), " " | "Control" | "Shift" | "Meta") {
+            ev.prevent_default();
+            stop_dictation();
+        }
+    });
+    // The 🎤 button: hold it to talk, or click it once to start and again
+    // to stop.
+    let mic_down = move |_| match dictation.get_untracked() {
+        Dictation::Idle => start_dictation(),
+        Dictation::Recording { toggle: true, .. } => stop_dictation(),
+        _ => {}
+    };
+    let mic_up = move |_| {
+        if let Dictation::Recording {
+            since,
+            toggle: false,
+        } = dictation.get_untracked()
+        {
+            if js_sys::Date::now() - since < 350.0 {
+                dictation.set(Dictation::Recording {
+                    since,
+                    toggle: true,
+                });
+            } else {
+                stop_dictation();
+            }
+        }
+    };
     let open_editor = move |_| {
         spawn_local(async move {
             if let Err(e) = api::open_in_editor().await {
@@ -102,7 +217,7 @@ pub fn BottomPanel(project: Memo<Option<String>>) -> impl IntoView {
 
     // Ctrl+` opens and closes it, on the board.
     let _toggle = window_event_listener(leptos::ev::keydown, move |ev| {
-        if (ev.ctrl_key() || ev.meta_key()) && ev.code() == "Backquote" && on_board() {
+        if (ev.ctrl_key() || ev.meta_key()) && ev.code() == "Backquote" && on_project() {
             ev.prevent_default();
             open.update(|o| *o = !*o);
         }
@@ -151,14 +266,15 @@ pub fn BottomPanel(project: Memo<Option<String>>) -> impl IntoView {
             }
         }
     };
-    let active =
-        move |kind: TermKind| Signal::derive(move || on_board() && open.get() && tab.get() == kind);
+    let active = move |kind: TermKind| {
+        Signal::derive(move || on_project() && open.get() && tab.get() == kind)
+    };
 
     view! {
         <section
             aria-label="Terminal panel"
             class=move || {
-                if on_board() {
+                if on_project() {
                     "relative z-10 flex shrink-0 flex-col border-t border-slate-700 bg-[#1e1e1e] text-slate-200"
                 } else {
                     "hidden"
@@ -191,6 +307,26 @@ pub fn BottomPanel(project: Memo<Option<String>>) -> impl IntoView {
                         on:click=open_editor
                     >
                         "Editor"
+                    </button>
+                </Show>
+                <Show when=speech_ready>
+                    <button
+                        type="button"
+                        class=move || match dictation.get() {
+                            Dictation::Recording { .. } => "rounded bg-red-600 px-2 py-0.5 text-xs text-white",
+                            Dictation::Transcribing => "rounded bg-slate-700 px-2 py-0.5 text-xs text-slate-300",
+                            Dictation::Idle => "rounded px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-700/60",
+                        }
+                        title="Hold to talk, or click to start and click again to stop (or hold Ctrl+Shift+Space). What you say is typed into the open tab."
+                        aria-label="Dictate"
+                        on:mousedown=mic_down
+                        on:mouseup=mic_up
+                    >
+                        {move || match dictation.get() {
+                            Dictation::Recording { .. } => "🎤 listening…",
+                            Dictation::Transcribing => "🎤 transcribing…",
+                            Dictation::Idle => "🎤",
+                        }}
                     </button>
                 </Show>
                 <span class="flex-1 truncate px-2 text-xs text-slate-500">
@@ -228,4 +364,17 @@ pub fn BottomPanel(project: Memo<Option<String>>) -> impl IntoView {
             </div>
         </section>
     }
+}
+
+/// Where dictation is (ticket 187).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Dictation {
+    Idle,
+    /// Since when (ms), and whether a click started it (so a second click
+    /// stops it) rather than a hold.
+    Recording {
+        since: f64,
+        toggle: bool,
+    },
+    Transcribing,
 }

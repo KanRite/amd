@@ -72,6 +72,44 @@ pub struct TermFrame {
     pub alt_screen: bool,
 }
 
+/// A speech model, as Preferences lists it (ticket 187).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpeechModel {
+    /// `tiny.en` or `base.en`.
+    pub id: String,
+    pub size_mb: u32,
+    pub installed: bool,
+}
+
+/// Where speech to text stands on this machine.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpeechStatus {
+    /// The "Use speech to text" switch.
+    pub enabled: bool,
+    /// The model dictation uses, when one is installed.
+    pub model: Option<String>,
+    pub models: Vec<SpeechModel>,
+    /// The default microphone's name, if there is one.
+    pub microphone: Option<String>,
+}
+
+impl SpeechStatus {
+    /// Dictation can be offered: switched on, with a model installed.
+    pub fn ready(&self) -> bool {
+        self.enabled && self.model.is_some()
+    }
+}
+
+/// How a model's download is going.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpeechProgress {
+    pub model: String,
+    pub done: u64,
+    pub total: u64,
+    pub finished: bool,
+    pub error: Option<String>,
+}
+
 /// The bytes a key sends, or `None` for a key the terminal doesn't take
 /// (so the page leaves it alone). `key` is the DOM `KeyboardEvent.key`.
 pub fn key_bytes(
