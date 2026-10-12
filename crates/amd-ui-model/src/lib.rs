@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub mod appearance;
 pub mod epic;
 pub mod rich;
+pub mod terminal;
 pub mod ticket;
 pub mod wip;
 pub mod zoom;

@@ -17,6 +17,7 @@ pub fn PreferencesPanel() -> impl IntoView {
                 <AppearanceSection />
                 <ZoomSection />
                 <BoardSection />
+                <AiSection />
             </div>
             <ModalClose />
         </Modal>
@@ -217,6 +218,58 @@ fn BoardSection() -> impl IntoView {
             </div>
             <p class="text-xs text-slate-500">
                 "A directory holding backlog/, todo/, doing/ and done/. Opened when amdui starts outside a project, and remembered for next time."
+            </p>
+            {move || status.get().map(|s| view! { <p class="text-xs">{s}</p> })}
+        </section>
+    }
+}
+
+/// The command the bottom panel's AI tab runs (ticket 185): `claude` unless
+/// set here. A tab already running keeps its command until it's started
+/// again.
+#[component]
+fn AiSection() -> impl IntoView {
+    let command = RwSignal::new(String::new());
+    let status = RwSignal::new(None::<String>);
+    spawn_local(async move {
+        if let Ok(c) = api::ai_command().await {
+            command.set(c);
+        }
+    });
+    let save = move |_| {
+        let value = command.get_untracked();
+        spawn_local(async move {
+            match api::set_ai_command(&value).await {
+                Ok(saved) => {
+                    command.set(saved.clone());
+                    status.set(Some(format!(
+                        "The AI tab runs {saved} the next time it starts."
+                    )));
+                }
+                Err(e) => status.set(Some(e)),
+            }
+        });
+    };
+    let field = "rounded border border-slate-300 bg-slate-50 px-2 py-1.5 dark:border-slate-600 dark:bg-slate-900";
+    let secondary = "rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700";
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"AI command"</h3>
+            <div class="flex gap-2">
+                <input
+                    type="text"
+                    aria-label="AI command"
+                    placeholder="claude"
+                    class=format!("{field} flex-1 font-mono text-sm")
+                    prop:value=move || command.get()
+                    on:input=move |ev| command.set(event_target_value(&ev))
+                />
+                <button class=secondary on:click=save>
+                    "Save"
+                </button>
+            </div>
+            <p class="text-xs text-slate-500">
+                "What the board's AI tab runs, in the project folder, through your shell (so it's found as in a terminal). Leave it empty for claude."
             </p>
             {move || status.get().map(|s| view! { <p class="text-xs">{s}</p> })}
         </section>

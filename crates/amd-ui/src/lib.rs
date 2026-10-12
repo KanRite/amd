@@ -6,6 +6,7 @@
 
 mod boards;
 mod documents;
+mod terminal;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -38,7 +39,13 @@ struct AppState {
     /// landing page (ticket 173), by its board repository, so going back to
     /// the landing page doesn't call GitHub every time.
     issues_pulled: Arc<Mutex<std::collections::HashMap<PathBuf, std::time::Instant>>>,
+    /// The bottom panel's terminals (ticket 185), by id.
+    terminals: Arc<Mutex<std::collections::HashMap<u32, terminal::Session>>>,
+    next_terminal: Arc<std::sync::atomic::AtomicU32>,
 }
+
+/// The AI tab's command when Preferences doesn't name one (ticket 185).
+const DEFAULT_AI_COMMAND: &str = "claude";
 
 /// How long the landing page leaves a project's issues before asking
 /// GitHub again (ticket 173).
@@ -1807,6 +1814,16 @@ pub fn run() {
     }
     tauri::Builder::default()
         .manage(AppState::default())
+        // No shell outlives the window (ticket 185).
+        .on_window_event(|window, event| {
+            use tauri::Manager;
+            if let tauri::WindowEvent::Destroyed = event
+                && let Some(state) = window.try_state::<AppState>()
+                && let Ok(mut terminals) = state.terminals.lock()
+            {
+                terminals.clear();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             load_board,
             home,
@@ -1872,9 +1889,158 @@ pub fn run() {
             set_tasks_dir,
             use_project,
             clone_repository,
+            page_panic,
+            terminal_open,
+            terminal_input,
+            terminal_resize,
+            terminal_scroll,
+            terminal_close,
+            ai_command,
+            set_ai_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running amdui");
+}
+
+/// The page panicked: its message, on amdui's error output (the page has
+/// stopped by then, and its console isn't visible).
+#[tauri::command]
+fn page_panic(message: String) {
+    eprintln!("amdui: the page panicked: {message}");
+}
+
+/// Frames and endings from the panel's terminals, as Tauri events.
+struct TauriSink(tauri::AppHandle);
+
+impl terminal::Sink for TauriSink {
+    fn frame(&self, frame: amd_ui_model::terminal::TermFrame) {
+        use tauri::Emitter;
+        let _ = self.0.emit("terminal-frame", frame);
+    }
+    fn exited(&self, id: u32) {
+        use tauri::Emitter;
+        let _ = self.0.emit("terminal-exit", id);
+    }
+}
+
+/// Starts a terminal for the bottom panel (ticket 185): the user's shell,
+/// or the AI command from Preferences, in the project folder (the folder
+/// holding its repositories), on a `cols` × `rows` screen. Returns its id.
+#[tauri::command]
+async fn terminal_open(
+    app: tauri::AppHandle,
+    state: Tauri<'_, AppState>,
+    kind: amd_ui_model::terminal::TermKind,
+    cols: u16,
+    rows: u16,
+) -> Result<u32> {
+    let terminals = Arc::clone(&state.terminals);
+    let next = Arc::clone(&state.next_terminal);
+    blocking(move || {
+        use amd_ui_model::terminal::TermKind;
+        let cwd = Project::open()
+            .ok()
+            .map(|p| agile_md::registry::project_dir_of(p.repos[0].1.repo_root()));
+        let shell = std::env::var("SHELL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "/bin/bash".to_string());
+        let (program, args) = match kind {
+            TermKind::Shell => (shell, vec!["-l".to_string()]),
+            TermKind::Ai => (shell, vec!["-lc".to_string(), ai_command_now()]),
+        };
+        let id = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let session = terminal::Session::open(
+            id,
+            program.clone(),
+            args,
+            cwd,
+            cols,
+            rows,
+            Arc::new(TauriSink(app)),
+        )
+        .map_err(|e| format!("starting {program}: {e}"))?;
+        terminals
+            .lock()
+            .map_err(|_| "restart amdui".to_string())?
+            .insert(id, session);
+        Ok(id)
+    })
+    .await
+}
+
+/// Runs `f` on terminal `id`, if it's still open.
+fn with_terminal(state: &AppState, id: u32, f: impl FnOnce(&terminal::Session)) -> Result<()> {
+    let terminals = state
+        .terminals
+        .lock()
+        .map_err(|_| "restart amdui".to_string())?;
+    if let Some(session) = terminals.get(&id) {
+        f(session);
+    }
+    Ok(())
+}
+
+/// Keystrokes or pasted text for terminal `id`.
+#[tauri::command]
+fn terminal_input(state: Tauri<'_, AppState>, id: u32, text: String) -> Result<()> {
+    with_terminal(&state, id, |s| s.input(&text))
+}
+
+/// Terminal `id`'s screen is now `cols` × `rows`.
+#[tauri::command]
+fn terminal_resize(state: Tauri<'_, AppState>, id: u32, cols: u16, rows: u16) -> Result<()> {
+    with_terminal(&state, id, |s| s.resize(cols, rows))
+}
+
+/// Scrolls terminal `id` back (positive) or forward through its history.
+#[tauri::command]
+fn terminal_scroll(state: Tauri<'_, AppState>, id: u32, lines: i32) -> Result<()> {
+    with_terminal(&state, id, |s| s.scroll(lines))
+}
+
+/// Ends terminal `id` and its program.
+#[tauri::command]
+fn terminal_close(state: Tauri<'_, AppState>, id: u32) -> Result<()> {
+    let session = state
+        .terminals
+        .lock()
+        .map_err(|_| "restart amdui".to_string())?
+        .remove(&id);
+    // Dropped outside the lock: ending the program can take a moment.
+    drop(session);
+    Ok(())
+}
+
+fn ai_command_now() -> String {
+    Config::load()
+        .get("ui.ai-command")
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .unwrap_or(DEFAULT_AI_COMMAND)
+        .to_string()
+}
+
+/// The command the AI tab runs (ticket 185), `claude` unless Preferences
+/// says otherwise.
+#[tauri::command]
+fn ai_command() -> String {
+    ai_command_now()
+}
+
+/// Sets the AI tab's command in your own config; empty goes back to
+/// `claude`.
+#[tauri::command]
+fn set_ai_command(command: String) -> Result<String> {
+    let mut config = Config::load();
+    let command = command.trim();
+    if command.is_empty() || command == DEFAULT_AI_COMMAND {
+        config.remove("ui.ai-command");
+    } else {
+        config.set("ui.ai-command", command);
+    }
+    config.save().map_err(err)?;
+    Ok(ai_command_now())
 }
 
 /// Clones a repository the project declares but this machine hasn't got

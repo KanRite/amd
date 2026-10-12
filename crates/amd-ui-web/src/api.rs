@@ -736,3 +736,117 @@ struct QueryArgs<'a> {
 pub async fn search_documents(query: &str) -> Result<Vec<amd_ui_model::DocHit>, String> {
     call("search_documents", &QueryArgs { query }).await
 }
+
+// --- The bottom panel's terminals (ticket 185) ---------------------------
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "event"], js_name = listen, catch)]
+    async fn tauri_listen(event: &str, handler: &js_sys::Function) -> Result<JsValue, JsValue>;
+}
+
+/// Calls `f` with each `name` event's payload from the backend, for as long
+/// as the page lives.
+pub fn on_event<T: DeserializeOwned + 'static>(name: &'static str, f: impl Fn(T) + 'static) {
+    let handler = Closure::<dyn Fn(JsValue)>::new(move |event: JsValue| {
+        let payload = js_sys::Reflect::get(&event, &"payload".into()).unwrap_or(JsValue::NULL);
+        if let Ok(value) = serde_wasm_bindgen::from_value::<T>(payload) {
+            f(value);
+        }
+    });
+    let function: js_sys::Function = handler.as_ref().unchecked_ref::<js_sys::Function>().clone();
+    // Lives as long as the page.
+    handler.forget();
+    wasm_bindgen_futures::spawn_local(async move {
+        let _ = tauri_listen(name, &function).await;
+    });
+}
+
+#[derive(Serialize)]
+struct TermOpenArgs {
+    kind: amd_ui_model::terminal::TermKind,
+    cols: u16,
+    rows: u16,
+}
+
+/// Starts a terminal; its id.
+pub async fn terminal_open(
+    kind: amd_ui_model::terminal::TermKind,
+    cols: u16,
+    rows: u16,
+) -> Result<u32, String> {
+    call("terminal_open", &TermOpenArgs { kind, cols, rows }).await
+}
+
+#[derive(Serialize)]
+struct TermInputArgs<'a> {
+    id: u32,
+    text: &'a str,
+}
+
+pub async fn terminal_input(id: u32, text: &str) -> Result<(), String> {
+    call("terminal_input", &TermInputArgs { id, text }).await
+}
+
+#[derive(Serialize)]
+struct TermSizeArgs {
+    id: u32,
+    cols: u16,
+    rows: u16,
+}
+
+pub async fn terminal_resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
+    call("terminal_resize", &TermSizeArgs { id, cols, rows }).await
+}
+
+#[derive(Serialize)]
+struct TermScrollArgs {
+    id: u32,
+    lines: i32,
+}
+
+pub async fn terminal_scroll(id: u32, lines: i32) -> Result<(), String> {
+    call("terminal_scroll", &TermScrollArgs { id, lines }).await
+}
+
+#[derive(Serialize)]
+struct TermIdArgs {
+    id: u32,
+}
+
+pub async fn terminal_close(id: u32) -> Result<(), String> {
+    call("terminal_close", &TermIdArgs { id }).await
+}
+
+/// The AI tab's command (`claude` unless Preferences says otherwise).
+pub async fn ai_command() -> Result<String, String> {
+    call("ai_command", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct AiCommandArgs<'a> {
+    command: &'a str,
+}
+
+pub async fn set_ai_command(command: &str) -> Result<String, String> {
+    call("set_ai_command", &AiCommandArgs { command }).await
+}
+
+#[wasm_bindgen]
+extern "C" {
+    /// `invoke` called directly, for a panic hook, where nothing awaits.
+    #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"], js_name = invoke)]
+    fn invoke_now(cmd: &str, args: JsValue) -> js_sys::Promise;
+}
+
+#[derive(Serialize)]
+struct PanicArgs<'a> {
+    message: &'a str,
+}
+
+/// Tells amdui the page panicked, so the message reaches its error output.
+pub fn report_panic(message: &str) {
+    if let Ok(args) = serde_wasm_bindgen::to_value(&PanicArgs { message }) {
+        let _ = invoke_now("page_panic", args);
+    }
+}

@@ -437,6 +437,9 @@ pub fn App() -> impl IntoView {
                 }}
             </main>
 
+            // The terminal and AI panel, on the board (ticket 185).
+            <crate::panel::BottomPanel project=project_dir />
+
             {move || match ctx.overlay.get() {
                 Some(Overlay::Editor(doc)) => view! { <Editor doc /> }.into_any(),
                 Some(Overlay::NewTicket) => view! { <NewTicketDialog /> }.into_any(),
@@ -586,6 +589,10 @@ fn watch_disk(ctx: Ctx) {
 /// which would throw away the filters, the sort and anything being typed.
 fn refresh_keys(ctx: Ctx) {
     let _keys = window_event_listener(leptos::ev::keydown, move |ev| {
+        // Ctrl+R is a shell's reverse search (ticket 185).
+        if in_terminal(&ev) {
+            return;
+        }
         let reload_key = ev.key() == "F5"
             || ((ev.ctrl_key() || ev.meta_key()) && ev.key().eq_ignore_ascii_case("r"));
         if reload_key {
@@ -593,6 +600,16 @@ fn refresh_keys(ctx: Ctx) {
             ctx.refresh();
         }
     });
+}
+
+/// Whether a key was pressed in the bottom panel's terminal, which keeps
+/// keys like Ctrl+R and Ctrl+0 for its program (ticket 185).
+fn in_terminal(ev: &web_sys::KeyboardEvent) -> bool {
+    use wasm_bindgen::JsCast;
+    ev.target()
+        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        .and_then(|el| el.closest(".term").ok().flatten())
+        .is_some()
 }
 
 /// Ctrl + and Ctrl - zoom the board a step, Ctrl 0 back to 100% (ticket 024),
@@ -604,7 +621,7 @@ fn zoom_keys(ctx: Ctx) {
         }
     });
     let _keys = window_event_listener(leptos::ev::keydown, move |ev| {
-        if !(ev.ctrl_key() || ev.meta_key()) {
+        if !(ev.ctrl_key() || ev.meta_key()) || in_terminal(&ev) {
             return;
         }
         use amd_ui_model::zoom;
