@@ -846,6 +846,16 @@ pub async fn set_ai_command(command: &str) -> Result<String, String> {
     call("set_ai_command", &AiCommandArgs { command }).await
 }
 
+#[derive(Serialize)]
+struct ScreenArgs<'a> {
+    view: &'a amd_ui_model::screen::ScreenView,
+}
+
+/// Tells amd-ui what's on screen, for an AI assistant (ticket 186).
+pub async fn set_screen(view: &amd_ui_model::screen::ScreenView) -> Result<(), String> {
+    call("set_screen", &ScreenArgs { view }).await
+}
+
 #[wasm_bindgen]
 extern "C" {
     /// `invoke` called directly, for a panic hook, where nothing awaits.

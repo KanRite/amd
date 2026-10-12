@@ -11,6 +11,7 @@
 
 pub mod access;
 pub mod archive;
+pub mod assistant;
 pub mod authorship;
 pub mod board;
 pub mod board_settings;
@@ -35,6 +36,7 @@ pub mod recover;
 pub mod registry;
 pub mod renumber;
 pub mod richtext;
+pub mod screen;
 pub mod settings;
 pub mod sync;
 pub mod task;

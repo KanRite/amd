@@ -11,6 +11,7 @@ mod github;
 mod idea;
 mod init;
 mod join;
+mod mcp;
 mod project;
 mod render;
 mod value;
@@ -167,6 +168,13 @@ of theirs when it can, and otherwise undoes it, saves what you wrote, and
 exits non-zero so you can run it again on the up-to-date board. No network
 only warns. AMD_SYNC=0 (or `sync = off` in .settings) turns this off.
 
+`amd mcp` lets an AI tool work on the board through amd (an MCP server):
+it reads the board, tickets, documents, ideas and what amdui shows, and
+creates, moves, edits, assigns, notes and files tickets under the same
+rules, each committed. It never abandons, unlocks or changes settings. Your
+AI tool starts it; `amd mcp setup` prints how to connect Claude Code,
+VS Code, Cursor, Codex or Gemini CLI.
+
 Environment:
   AMD_DIR           board directory name under the repository root (default: tasks)
   AMD_BRANCH_TYPES  comma-separated branch types (default: feature, bugfix,
@@ -292,6 +300,18 @@ enum Cmd {
     Docs {
         #[command(subcommand)]
         action: DocsAction,
+    },
+    /// Let an AI assistant read and change the board (an MCP server)
+    ///
+    /// Your AI tool (Claude Code, Copilot in VS Code, Cursor, Codex, Gemini
+    /// CLI…) starts `amd mcp` and talks to it on stdin and stdout; you don't
+    /// run it yourself. Its tools read the board, tickets, documents, ideas
+    /// and what amdui shows, and create, move, edit, assign, note and file
+    /// tickets, each committed like any amd change. `amd mcp setup [tool]`
+    /// prints how to connect one
+    Mcp {
+        #[command(subcommand)]
+        action: Option<McpAction>,
     },
     /// The project's ideas, best first; put one forward, vote, add notes
     ///
@@ -764,6 +784,16 @@ fn main() -> ExitCode {
 }
 
 #[derive(Subcommand, Debug)]
+enum McpAction {
+    /// Print how to connect an AI tool to `amd mcp`
+    Setup {
+        /// claude, vscode, cursor, codex or gemini; every one when left out
+        #[arg(value_name = "TOOL", value_parser = PossibleValuesParser::new(mcp::CLIENTS))]
+        tool: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum DocsAction {
     /// Print the start page
     Start {
@@ -940,6 +970,17 @@ fn run() -> Result<()> {
             );
         }
     }
+    // The AI tool starts this in the project's folder; each tool call finds
+    // the board itself (ticket 186).
+    if let Cmd::Mcp { action } = command {
+        return match action {
+            None => mcp::run(),
+            Some(McpAction::Setup { tool }) => {
+                println!("{}", mcp::setup(tool.as_deref())?);
+                Ok(())
+            }
+        };
+    }
     // Documents are read from the project; no board command needed (ticket
     // 179).
     if let Cmd::Docs { action } = command {
@@ -1008,6 +1049,7 @@ fn run() -> Result<()> {
         | Cmd::Project { .. }
         | Cmd::Idea { .. }
         | Cmd::Docs { .. }
+        | Cmd::Mcp { .. }
         | Cmd::Mine { .. }
         | Cmd::Completions { .. }
         | Cmd::Gui => {

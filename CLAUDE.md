@@ -150,6 +150,49 @@ redundant. Their history is in git if it is ever wanted again.
   archive pushes the setting first, then archives (skipped, with a
   warning, if the push didn't land); unarchive unarchives first, then
   pushes. A `gh` failure is a warning.
+- **`amd mcp`: the board for any AI assistant** (ticket 186, instead of a
+  built-in chat tied to one provider: not every contributor uses Claude,
+  and some use no AI). `crates/amd-lib/src/assistant.rs` holds the tools,
+  with no MCP or stdio in it: `tools()` (name, title, description,
+  `read_only`, JSON Schema input) and `call(name, args) -> Reply {text,
+  data}`. Read: `screen`, `board` (done counted unless asked; 60 cards a
+  column), `ticket` (whole file plus `version`, the `ContentHash`),
+  `search_tickets`, `my_work`, `search_documents`, `document`,
+  `start_page`, `ideas`, `idea`. Change, all through amd-lib with the
+  auto-commit: `create_ticket` (`TicketFields`, which gained `priority`),
+  `move_ticket` (`transition::move_to`, never `enter_todo`: no branch
+  switching), `edit_ticket` (`apply_edit` with unnamed fields kept, plus
+  `set_priority`/`set_repository`; `version` makes it refuse a stale
+  ticket; no epic, which is `file_ticket`), `assign_ticket` (`@me` is
+  git's `user.name`), `add_note` (`**Name, date:** text` at the end of
+  `## Notes`), `file_ticket` (`set_epic`). **Never offered:** abandon,
+  unlock, settings, branches. Every call opens the project afresh
+  (`find_repos` from the directory the AI tool started it in, so a
+  `.current-project` switch is followed), runs `project_trust::check` and
+  `sync::catch_up` (Read, Lookup or Write), and a Write refuses an archived
+  project. A ticket is `repo#id`, or a reference on the project's own
+  board, else on the one other board that alone has it.
+  `crates/amd-cli/src/mcp.rs` is the wire, by hand (five methods,
+  newline-delimited JSON-RPC 2.0, protocol 2025-06-18 back to 2024-11-05):
+  `initialize`, `ping`, `tools/list` (annotations: `readOnlyHint`,
+  `destructiveHint: false`), `tools/call` (a failing tool is a result with
+  `isError`, so the model reads amd's refusal; panics caught). **stdout is
+  protocol only**: amd-lib prints nothing but the `git` it runs inherits
+  stdio, so `take_stdio` dups 0 and 1 for the protocol and points the
+  process's own at `/dev/null` and stderr; `AMD_NO_INPUT` and
+  `GIT_TERMINAL_PROMPT=0` are set. `amd mcp setup [claude|vscode|cursor|
+  codex|gemini]` prints how to connect each; it writes no one's config.
+  **What's on screen** (`crates/amd-lib/src/screen.rs`): amdui's
+  `set_screen` writes `$XDG_STATE_HOME/agile-md/screen/<repo>-<fnv1a of
+  the path>.json` (pid, time, project, and the page's `ScreenView`:
+  screen, open ticket, document, idea, epic column, search, repository
+  and assignee filters; names and paths only), from `report_screen` in
+  `app.rs`, a `Memo` so it's sent only on change (`ctx.idea` moved into
+  `Ctx` for it). FNV, not the standard hasher, so amdui and amd built
+  apart agree. The window's `Destroyed` event removes it; a killed amdui
+  leaves it, and `read` ignores a note whose pid isn't running (`kill
+  -0`). Preferences → AI command shows the Claude Code command and points
+  at `amd mcp setup`.
 - `crates/amd-lib/src/project_trust.rs` — a per-machine, trust-on-first-use
   check that a board's declared `project` hasn't changed unexpectedly since
   `amd` last saw it.
@@ -1293,8 +1336,8 @@ changes):
   the zoom keys are left to the terminal while it has focus
   (`in_terminal`). A tab's program starts the first time it's shown, keeps
   running while the board is away, and ends when the project changes.
-  Page panics now reach amdui's stderr (`page_panic`). The built-in chat
-  is ticket 186. Since ticket 187 the panel is on **Board, Documents and
+  Page panics now reach amdui's stderr (`page_panic`). Ticket 186 made
+  the board available to whatever runs in the AI tab, through `amd mcp`. Since ticket 187 the panel is on **Board, Documents and
   Ideas** (`on_project`).
 - **Speech to text** (ticket 187, `crates/amd-ui/src/speech/`): a 🎤 in
   the panel bar (hold to talk, or click to start and click to stop; or

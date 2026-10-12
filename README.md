@@ -490,6 +490,43 @@ gates entry — moving a ticket *out* of doing always works.
 `cargo build -p amd-cli` builds this without the desktop board — the whole
 API, no window or web stack, which is what CI and scripts want.
 
+## Using AI with agile-md
+
+Bring your own AI tool, or none. `amd mcp` is an
+[MCP](https://modelcontextprotocol.io) server: any AI tool that speaks it
+(Claude Code, Copilot in VS Code, Cursor, Codex, Gemini CLI and others)
+can work on the board through amd itself rather than by editing files.
+Connect yours once:
+
+```bash
+amd mcp setup              # what to add for each tool
+claude mcp add --scope user agile-md -- amd mcp   # e.g. Claude Code
+```
+
+Then ask it things like "what am I looking at?", "what should I pick up
+next?", "make a ticket for this bug" or "move this to doing". Its tools:
+
+- **Read:** what amdui is showing (the open ticket, document or idea, and
+  the board's filters), the board, a ticket, ticket search, My work, the
+  documents (search, a document, the start page and its tree) and ideas.
+- **Change tickets:** create, move, edit, assign, add a note, and file into
+  an epic or sprint. Each goes through the same rules as the board: one
+  column at a time, the WIP limit, drafts, started sprints, locks. Each is
+  committed and pushed as `amd` would, so git has the record.
+- **Never:** abandoning a ticket, breaking someone's lock, settings, or
+  branches. Those stay with you.
+
+Your AI tool asks before running a change, as it does for its other tools.
+Nothing runs unless your AI tool starts `amd mcp`; amd holds no API keys
+and talks to no AI service itself. For "this" to work, amdui leaves a note
+of what it's showing (names and paths only) in
+`~/.local/state/agile-md/screen/`; the AI reads content through the tools,
+which your AI tool lists as it goes.
+
+amdui's **AI tab** runs your AI tool's command line (Preferences → AI
+command, `claude` by default) in the project folder, so with `amd mcp`
+connected it can see what's on the board beside it.
+
 ## Shell completion
 
 ```bash

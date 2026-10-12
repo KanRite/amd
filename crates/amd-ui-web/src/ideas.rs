@@ -36,7 +36,7 @@ fn tone(score: i32) -> &'static str {
 pub fn IdeasView() -> impl IntoView {
     let ctx = Ctx::get();
     let list = RwSignal::new(None::<Result<IdeaList, String>>);
-    let open = RwSignal::new(None::<String>);
+    let open = ctx.idea;
     let detail = RwSignal::new(None::<Result<IdeaDetail, String>>);
     let adding = RwSignal::new(false);
     let show_archived = RwSignal::new(false);

@@ -322,6 +322,9 @@ pub struct TicketFields {
     pub related: Vec<String>,
     /// The ticket body — everything after the frontmatter.
     pub body: String,
+    /// `low`, `medium` or `high`; empty keeps what the template (on
+    /// creation) or the ticket (on an edit) says.
+    pub priority: String,
 }
 
 /// Make a ticket the way `amd new` does: render it from the templates, write
@@ -355,6 +358,11 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
         created
             .task
             .set_points(created.task.hash()?, fields.points.trim())?;
+    }
+    if !fields.priority.trim().is_empty() {
+        created
+            .task
+            .set_priority(created.task.hash()?, fields.priority.trim())?;
     }
     // Read what the report and the commit message need before filing it under
     // an epic: inside `backlog/` that moves the file, after which `created.task`
@@ -413,6 +421,9 @@ pub fn edit_ticket(
             && crate::task::repo_name(repository) != task.repository().unwrap_or_default()
         {
             task.set_repository(task.hash()?, repository)?;
+        }
+        if !fields.priority.trim().is_empty() && fields.priority.trim() != task.priority() {
+            task.set_priority(task.hash()?, fields.priority.trim())?;
         }
         board.set_epic(task, fields.epic.as_deref())?;
         Ok(())
