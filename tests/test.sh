@@ -1946,6 +1946,54 @@ assert "amd todo with no ref lists instead of prompting, even non-interactively"
 assert "--no-input works without the env var" \
   bash -c "env -u AMD_NO_INPUT '${AMD}' --no-input show 2>&1 | grep -q 'usage: amd show <ref>'"
 
+echo "amd mcp, the board for AI assistants (ticket 186):"
+mcp="$(mktemp -d)"
+(
+  cd "${mcp}" && git init -q board && cd board && git config user.email t@t.co && git config user.name Tess
+  AMD_YES=1 "${AMD}" init mcpdemo --local-only >/dev/null && git add -A && git commit -q -m "board for ticket 186"
+)
+in_mcp() { (cd "${mcp}/board" && XDG_STATE_HOME="${mcp}/state" "${AMD}" mcp 2>"${mcp}/stderr"); }
+rpc() { # id tool json-arguments
+  printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"%s","arguments":%s}}\n' "$1" "$2" "$3"
+}
+{
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}'
+  printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+  printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+  rpc 3 create_ticket '{"title":"Make the widget","priority":"high","points":"3","body":"## Notes\n\nFrom the assistant.\n"}'
+  rpc 4 move_ticket '{"ticket":"1","to":"doing"}'
+  rpc 5 move_ticket '{"ticket":"1","to":"todo"}'
+  rpc 6 add_note '{"ticket":"1","text":"Checked the sizes."}'
+  rpc 7 board '{}'
+} | in_mcp > "${mcp}/out"
+assert "amd mcp writes nothing but JSON-RPC on stdout, one reply per request" \
+  bash -c "[ \"\$(wc -l < '${mcp}/out')\" -eq 7 ] && ! grep -v '\"jsonrpc\":\"2.0\"' '${mcp}/out' | grep -q . && ! grep -qv '^{' '${mcp}/out'"
+assert "initialize agrees the protocol version and names the server" \
+  bash -c "grep '\"id\":1,' '${mcp}/out' | grep -q '\"protocolVersion\":\"2025-06-18\"' && grep '\"id\":1,' '${mcp}/out' | grep -q '\"name\":\"agile-md\"'"
+assert "tools/list offers the read and change tools, and nothing that abandons" \
+  bash -c "l=\$(grep '\"id\":2,' '${mcp}/out') && for t in screen board ticket search_tickets create_ticket move_ticket edit_ticket add_note file_ticket; do printf '%s' \"\$l\" | grep -q \"\\\"name\\\":\\\"\$t\\\"\" || exit 1; done && ! printf '%s' \"\$l\" | grep -q abandon"
+assert "create_ticket makes a backlog ticket with its priority and points, committed" \
+  bash -c "grep -q 'priority: \"high\"' '${mcp}'/board/tasks/*/001-make-the-widget.md && git -C '${mcp}/board' log --format=%s | grep -qx 'new: 001 \"Make the widget\"'"
+assert "a move the board refuses comes back as a tool error saying why" \
+  bash -c "grep '\"id\":4,' '${mcp}/out' | grep -q '\"isError\":true' && grep '\"id\":4,' '${mcp}/out' | grep -q 'one column at a time'"
+assert "move_ticket moves it as amd todo does, and commits" \
+  bash -c "test -f '${mcp}/board/tasks/todo/001-make-the-widget.md' && git -C '${mcp}/board' log --format=%s | grep -qx 'todo: 001 \"Make the widget\"'"
+assert "add_note signs and dates a note under ## Notes" \
+  grep -q '^\*\*Tess, 20[0-9-]*:\*\* Checked the sizes\.$' "${mcp}/board/tasks/todo/001-make-the-widget.md"
+assert "board lists the columns with the ticket in todo" \
+  bash -c "grep '\"id\":7,' '${mcp}/out' | grep -q 'board#001 Make the widget'"
+assert "git's own output goes to stderr, never into the protocol" \
+  grep -q 'new: 001' "${mcp}/stderr"
+assert "screen says amdui isn't open on the project when no window has written a note" \
+  bash -c "rpc() { printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"method\":\"tools/call\",\"params\":{\"name\":\"%s\",\"arguments\":%s}}\\n' \"\$1\" \"\$2\" \"\$3\"; }
+    out=\$(rpc 1 screen '{}' | (cd '${mcp}/board' && XDG_STATE_HOME='${mcp}/state' '${AMD}' mcp 2>/dev/null)) \
+    && printf '%s' \"\$out\" | grep -q \"amdui isn't open\""
+assert "amd mcp setup prints how to connect an AI tool" \
+  bash -c "'${AMD}' mcp setup claude | grep -qx '  claude mcp add --scope user agile-md -- amd mcp' && '${AMD}' mcp setup | grep -q Codex"
+assert "an archived project's tickets can't be changed through amd mcp" \
+  bash -c "cd '${mcp}/board' && echo 'archived = on' >> .settings && out=\$(printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\"params\":{\"name\":\"create_ticket\",\"arguments\":{\"title\":\"No\"}}}' | '${AMD}' mcp 2>/dev/null) && printf '%s' \"\$out\" | grep -q '\"isError\":true' && printf '%s' \"\$out\" | grep -q archived"
+rm -rf "${mcp}"
+
 echo "AMD_DIR:"
 # A fresh repo, not `${tmp}`: README/settings now live at the repository
 # root, so a second AMD_DIR-relocated board inside the same, already-heavily

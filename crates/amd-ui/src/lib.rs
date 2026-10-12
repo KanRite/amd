@@ -48,6 +48,9 @@ struct AppState {
     speech: Arc<Mutex<Option<speech::whisper::Engine>>>,
     recording: Arc<Mutex<Option<speech::audio::Recorder>>>,
     downloading: Arc<std::sync::atomic::AtomicBool>,
+    /// The board repository whose screen note this window last wrote
+    /// (ticket 186), taken away when the window closes.
+    screen: Arc<Mutex<Option<PathBuf>>>,
 }
 
 /// The AI tab's command when Preferences doesn't name one (ticket 185).
@@ -375,6 +378,7 @@ async fn create_ticket(
             parent: String::new(),
             related: Vec::new(),
             body: String::new(),
+            priority: String::new(),
         };
         let outcome = transition::create_ticket(board, &fields).map_err(err)?;
         let dest = outcome
@@ -1829,6 +1833,13 @@ pub fn run() {
             {
                 terminals.clear();
             }
+            if let tauri::WindowEvent::Destroyed = event
+                && let Some(state) = window.try_state::<AppState>()
+                && let Ok(screen) = state.screen.lock()
+                && let Some(repo) = screen.as_ref()
+            {
+                agile_md::screen::clear(repo);
+            }
         })
         .invoke_handler(tauri::generate_handler![
             load_board,
@@ -1910,6 +1921,7 @@ pub fn run() {
             terminal_scroll,
             terminal_close,
             ai_command,
+            set_screen,
             set_ai_command,
             editor_command,
             set_editor_command,
@@ -2255,6 +2267,34 @@ fn ai_command_now() -> String {
         .to_string()
 }
 
+/// Notes what the window shows (ticket 186), for an AI assistant's
+/// `screen` tool (`amd mcp`): the project's note, keyed by its own board
+/// repository. A project switch takes the old project's note away.
+#[tauri::command]
+fn set_screen(state: Tauri<'_, AppState>, mut view: agile_md::screen::View) -> Result<()> {
+    let found = agile_md::model::find_repos().map_err(err)?;
+    let (_, root, own) = &found.repos[0];
+    let project = agile_md::current_project::project_name(root);
+    // The page knows an idea by its path; ideas live in the project's own
+    // documents repository.
+    if let Some(idea) = view.idea.as_mut()
+        && idea.repo.is_empty()
+    {
+        idea.repo = agile_md::ideas::source(own).name;
+    }
+    let mut last = state
+        .screen
+        .lock()
+        .map_err(|_| "restart amdui".to_string())?;
+    if let Some(before) = last.as_ref()
+        && before != root
+    {
+        agile_md::screen::clear(before);
+    }
+    *last = Some(root.clone());
+    agile_md::screen::write(root, &project, view).map_err(err)
+}
+
 /// The command the AI tab runs (ticket 185), `claude` unless Preferences
 /// says otherwise.
 #[tauri::command]
@@ -2561,6 +2601,7 @@ mod tests {
             parent: String::new(),
             related: Vec::new(),
             body: String::new(),
+            priority: String::new(),
         };
         let dest = transition::create_ticket(project.board("").unwrap(), &fields)
             .unwrap()

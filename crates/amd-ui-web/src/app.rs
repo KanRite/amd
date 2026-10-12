@@ -107,6 +107,9 @@ pub struct Ctx {
     /// project's own or the shared repository, set by the landing page's
     /// buttons; `None` is everything.
     pub doc_scope: RwSignal<Option<amd_ui_model::DocScope>>,
+    /// The idea open in Ideas, by its path (ticket 186: in `Ctx` so the
+    /// screen note can say which).
+    pub idea: RwSignal<Option<String>>,
 }
 
 impl Ctx {
@@ -246,6 +249,7 @@ pub fn App() -> impl IntoView {
         disk_tick: RwSignal::new(0),
         document: RwSignal::new(None),
         doc_scope: RwSignal::new(None),
+        idea: RwSignal::new(None),
     };
     provide_context(ctx);
     // A document belongs to the project it was opened in (ticket 175):
@@ -257,9 +261,11 @@ pub fn App() -> impl IntoView {
         let now = shown.get();
         if before.is_some_and(|b| b != now) {
             ctx.document.set(None);
+            ctx.idea.set(None);
         }
         now
     });
+    report_screen(ctx);
     ctx.reload();
     use_colour_scheme(ctx);
     watch_disk(ctx);
@@ -552,6 +558,63 @@ fn ViewTabs() -> impl IntoView {
 /// terminal, an editor, a pull or a checkout — show up without a click. A
 /// change seen mid-drag waits for the drop. The first answer, and the first
 /// after switching project, is just the new baseline.
+/// Keeps amd-ui told what's on screen (ticket 186), so an AI assistant
+/// using `amd mcp` knows what "this ticket" is: the screen, the open
+/// ticket, document, idea or epic column, and the board's filters. Sent
+/// only when it changes.
+fn report_screen(ctx: Ctx) {
+    use amd_ui_model::screen::{ScreenPlace, ScreenView};
+    let view = Memo::new(move |_| {
+        let screen = ctx.view.get();
+        // Re-sent when the project changes, so the new project gets a note.
+        let _ = ctx.board.with(|b| b.as_ref().map(|b| b.tasks_dir.clone()));
+        let on_board = screen == View::Board;
+        ScreenView {
+            screen: match screen {
+                View::Home => "home",
+                View::Board => "board",
+                View::Documents => "documents",
+                View::Ideas => "ideas",
+            }
+            .to_string(),
+            ticket: ctx.overlay.with(|o| match o {
+                Some(Overlay::Editor(t)) => Some(ScreenPlace::new(&t.repo, &t.file)),
+                _ => None,
+            }),
+            document: (screen == View::Documents)
+                .then(|| ctx.document.get())
+                .flatten()
+                .map(|(repo, path)| ScreenPlace::new(&repo, &path)),
+            idea: (screen == View::Ideas)
+                .then(|| ctx.idea.get())
+                .flatten()
+                .map(|path| ScreenPlace::new("", &path)),
+            epic: on_board
+                .then(|| ctx.open_epic.get())
+                .flatten()
+                .map(|(repo, name)| ScreenPlace::new(&repo, &name)),
+            search: if on_board {
+                ctx.search.get().trim().to_string()
+            } else {
+                String::new()
+            },
+            about: on_board.then(|| ctx.about.get()).flatten(),
+            assignee: match on_board.then(|| ctx.user.get()) {
+                Some(Assigned::User(name)) => name,
+                Some(Assigned::Nobody) => "(nobody)".to_string(),
+                _ => String::new(),
+            },
+        }
+    });
+    Effect::new(move |_| {
+        let view = view.get();
+        spawn_local(async move {
+            // Best effort: a missing note only means the assistant asks.
+            let _ = api::set_screen(&view).await;
+        });
+    });
+}
+
 fn watch_disk(ctx: Ctx) {
     let last = StoredValue::new(None::<String>);
     let pending = StoredValue::new(false);

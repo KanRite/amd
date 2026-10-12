@@ -5,6 +5,7 @@
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use wasm_bindgen::JsCast;
 
 use crate::api;
 use crate::app::{Ctx, Modal, ModalClose, zoom_to};
@@ -274,9 +275,37 @@ fn AiSection() -> impl IntoView {
                 "What the board's AI tab runs, in the project folder, through your shell (so it's found as in a terminal). Leave it empty for claude."
             </p>
             {move || status.get().map(|s| view! { <p class="text-xs">{s}</p> })}
+            <h4 class="mt-2 text-sm font-semibold">"Let your AI see the board"</h4>
+            <p class="text-xs text-slate-500">
+                "Connected once, your AI tool can read the board, tickets, documents and ideas, see what's on screen here, and create, move and edit tickets (each committed, as from the board). Nothing runs until you connect one. For Claude Code, run this once:"
+            </p>
+            <input
+                type="text"
+                readonly=true
+                aria-label="Command that connects Claude Code to the board"
+                class=format!("{field} font-mono text-xs")
+                prop:value=CONNECT_CLAUDE
+                on:focus=move |ev| {
+                    if let Some(input) = ev
+                        .target()
+                        .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+                    {
+                        input.select();
+                    }
+                }
+            />
+            <p class="text-xs text-slate-500">
+                "Copilot in VS Code, Cursor, Codex, Gemini CLI and others: "
+                <code class="font-mono">"amd mcp setup"</code>
+                " prints what to add."
+            </p>
         </section>
     }
 }
+
+/// Connects Claude Code to `amd mcp` (ticket 186), as `amd mcp setup
+/// claude` prints it.
+const CONNECT_CLAUDE: &str = "claude mcp add --scope user agile-md -- amd mcp";
 
 /// The editor the board's Editor button opens the project folder in (ticket
 /// 188). Empty means no button.
