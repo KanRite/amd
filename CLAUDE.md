@@ -461,6 +461,15 @@ redundant. Their history is in git if it is ever wanted again.
   `XDG_CONFIG_HOME` in `DIR/config`; refuses a DIR it didn't make
   (`.agile-md-demo` marker). Shellchecked in CI.
 - `README.md`, `LICENSE` (MIT).
+- `docs/logo/` — the logo (ticket 194), light and dark (the dark one's
+  "Agile-", "MD", tagline and bulb base lightened for GitHub's dark
+  theme), from the designer's source vector with the text turned into
+  outlines (`inkscape --export-text-to-path`), so it doesn't depend on
+  DejaVu Sans. The README shows the right one with `<picture>`.
+  `crates/amd-ui/app-icon.svg` is the logo's mark (board and git diamond,
+  no words); after changing it, `cargo tauri icon app-icon.svg` in
+  `crates/amd-ui` regenerates `icons/` (delete the `android/`, `ios/` and
+  `64x64.png` it also makes: nothing uses them).
 
 ## How `amd` works (architecture)
 
