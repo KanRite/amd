@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/agile-md-dark.svg">
+    <img src="docs/logo/agile-md-light.svg" alt="Agile-MD: plan, write, ideate, deliver" width="560">
+  </picture>
+</p>
+
 # agile-md
 
 A tiny **filesystem Kanban** — tasks are markdown files moved between `todo/`,
