@@ -1,0 +1,499 @@
+//! Finding out that a newer release exists, and remembering "Later".
+//!
+//! This is only the *detecting* half of in-app updates (ticket 190): it
+//! reports `UpdateAvailable` and keeps the snooze. Applying an update is
+//! ticket 191, the banner ticket 192.
+//!
+//! The library has no HTTP client, so asking GitHub is a `ReleaseSource` the
+//! caller supplies (the front ends use `ureq`) and the tests replace with a
+//! fake. Everything here is silent about failure: an offline machine, a rate
+//! limit or a garbled answer means "nothing to report", never an error the
+//! user has to read.
+//!
+//! The state is machine-local, in `$XDG_STATE_HOME/agile-md/update.json`,
+//! never in a tickets or documents repository: whether *you* have seen a
+//! release is nothing a teammate's clone should inherit.
+
+use std::fmt;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
+use crate::settings::{self, Config};
+
+/// How long a result is trusted before GitHub is asked again.
+pub const CHECK_EVERY: i64 = 24 * 60 * 60;
+/// How long "Later" hides a release.
+pub const SNOOZE_FOR: i64 = 24 * 60 * 60;
+/// How soon to try again after a failed check, so an offline laptop doesn't
+/// ask on every call but doesn't wait a whole day either.
+pub const RETRY_AFTER_FAILURE: i64 = 60 * 60;
+
+/// `major.minor.patch`. A pre-release (`4.1.0-rc1`) does not parse, which is
+/// how pre-releases are kept out of the offer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Version(pub u64, pub u64, pub u64);
+
+impl Version {
+    /// `4.1.0` or `v4.1.0`.
+    pub fn parse(text: &str) -> Option<Version> {
+        let text = text.trim();
+        let text = text.strip_prefix('v').unwrap_or(text);
+        let mut parts = text.split('.');
+        let version = Version(
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+        );
+        parts.next().is_none().then_some(version)
+    }
+}
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}.{}.{}", self.0, self.1, self.2)
+    }
+}
+
+/// One published release.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Release {
+    pub version: Version,
+    pub notes_url: String,
+}
+
+/// Where releases come from. The caller supplies the network.
+pub trait ReleaseSource {
+    /// Every published release, in any order. An `Err` is a failed check.
+    fn releases(&self) -> Result<Vec<Release>>;
+}
+
+/// What the banner shows: the newest release, and how many releases the build
+/// is behind (so an update can catch up one release at a time, ticket 191).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateAvailable {
+    pub version: String,
+    pub notes_url: String,
+    pub behind: usize,
+}
+
+/// Reads GitHub's `GET /repos/{owner}/{repo}/releases` answer. Drafts,
+/// pre-releases and tags that aren't `major.minor.patch` are left out; so is
+/// anything it can't read, rather than failing the lot.
+pub fn parse_releases(json: &str) -> Result<Vec<Release>> {
+    #[derive(Deserialize)]
+    struct Item {
+        tag_name: String,
+        #[serde(default)]
+        html_url: String,
+        #[serde(default)]
+        draft: bool,
+        #[serde(default)]
+        prerelease: bool,
+    }
+    let items: Vec<Item> = serde_json::from_str(json)?;
+    Ok(items
+        .into_iter()
+        .filter(|item| !item.draft && !item.prerelease)
+        .filter_map(|item| {
+            Some(Release {
+                version: Version::parse(&item.tag_name)?,
+                notes_url: item.html_url,
+            })
+        })
+        .collect())
+}
+
+/// The newest release above `current`, and how many are above it.
+pub fn newest_above(current: Version, releases: &[Release]) -> Option<UpdateAvailable> {
+    let newer: Vec<&Release> = releases.iter().filter(|r| r.version > current).collect();
+    let latest = newer.iter().max_by_key(|r| r.version)?;
+    Some(UpdateAvailable {
+        version: latest.version.to_string(),
+        notes_url: latest.notes_url.clone(),
+        behind: newer.len(),
+    })
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct State {
+    /// Not before this (unix seconds) is GitHub asked again.
+    #[serde(default)]
+    next_check: i64,
+    /// The newest release seen, whatever this build was when it saw it.
+    #[serde(default)]
+    releases: Vec<(String, String)>,
+    #[serde(default)]
+    snoozed: Option<Snooze>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Snooze {
+    version: String,
+    until: i64,
+}
+
+impl State {
+    /// A missing or unreadable file is a fresh state, never an error.
+    fn load(path: &Path) -> State {
+        fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default()
+    }
+
+    /// Temp file then rename, so the CLI and amdui can't leave it half-written.
+    fn save(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
+        tmp_name.push(format!(".tmp.{}", std::process::id()));
+        let tmp = path.with_file_name(tmp_name);
+        fs::write(&tmp, serde_json::to_string_pretty(self)?)?;
+        fs::rename(&tmp, path)?;
+        Ok(())
+    }
+
+    fn known(&self) -> Vec<Release> {
+        self.releases
+            .iter()
+            .filter_map(|(tag, url)| {
+                Some(Release {
+                    version: Version::parse(tag)?,
+                    notes_url: url.clone(),
+                })
+            })
+            .collect()
+    }
+}
+
+/// `$XDG_STATE_HOME/agile-md/update.json`, else `~/.local/state/agile-md/update.json`.
+pub fn state_path() -> Option<PathBuf> {
+    std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
+        .map(|state| state.join("agile-md/update.json"))
+}
+
+/// Whether to look for updates at all: `AMD_UPDATE_CHECK`, then the
+/// `update-check` key in the global config, then **on**. `0`, `off`, `no`
+/// and `false` switch it off. The check makes a network call the user didn't
+/// ask for, so it can be turned off.
+pub fn enabled(config: &Config) -> bool {
+    settings::resolved("AMD_UPDATE_CHECK", config, "update-check")
+        .map(|value| {
+            !matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "0" | "off" | "no" | "false"
+            )
+        })
+        .unwrap_or(true)
+}
+
+/// What, if anything, to tell the user about.
+///
+/// Asks `source` only when the last answer is a day old (or an hour old after
+/// a failure); otherwise answers from the remembered list. `None` when this
+/// build is current, when the release was snoozed and the day isn't up, or
+/// when nothing is known (offline on first run).
+pub fn check(
+    source: &dyn ReleaseSource,
+    current: Version,
+    now: i64,
+    state_file: &Path,
+) -> Option<UpdateAvailable> {
+    let mut state = State::load(state_file);
+
+    // A clock set back would otherwise hold the check off for ages.
+    let due = now >= state.next_check || state.next_check - now > CHECK_EVERY;
+    if due {
+        match source.releases() {
+            Ok(releases) => {
+                state.releases = releases
+                    .iter()
+                    .map(|r| (r.version.to_string(), r.notes_url.clone()))
+                    .collect();
+                state.next_check = now + CHECK_EVERY;
+            }
+            Err(_) => state.next_check = now + RETRY_AFTER_FAILURE,
+        }
+        // Remembering is a courtesy; an unwritable state dir must not stop
+        // the answer.
+        let _ = state.save(state_file);
+    }
+
+    let available = newest_above(current, &state.known())?;
+    // Versions are always written by `Version`'s Display, so equal versions
+    // are equal text.
+    let snoozed = state
+        .snoozed
+        .as_ref()
+        .is_some_and(|snooze| snooze.version == available.version && now < snooze.until);
+    (!snoozed).then_some(available)
+}
+
+/// "Later": hides `version` for a day. A newer release than this one is still
+/// shown straight away, because the snooze is for the version, not for the
+/// banner.
+pub fn snooze(state_file: &Path, version: &str, now: i64) -> Result<()> {
+    let mut state = State::load(state_file);
+    state.snoozed = Some(Snooze {
+        version: version.to_string(),
+        until: now + SNOOZE_FOR,
+    });
+    state.save(state_file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    struct Fake {
+        releases: Vec<Release>,
+        fail: Cell<bool>,
+        asked: Cell<u32>,
+    }
+
+    impl Fake {
+        fn with(versions: &[&str]) -> Fake {
+            Fake {
+                releases: versions.iter().map(|v| release(v)).collect(),
+                fail: Cell::new(false),
+                asked: Cell::new(0),
+            }
+        }
+    }
+
+    impl ReleaseSource for Fake {
+        fn releases(&self) -> Result<Vec<Release>> {
+            self.asked.set(self.asked.get() + 1);
+            if self.fail.get() {
+                anyhow::bail!("offline");
+            }
+            Ok(self.releases.clone())
+        }
+    }
+
+    fn release(version: &str) -> Release {
+        Release {
+            version: Version::parse(version).unwrap(),
+            notes_url: format!("https://example.test/{version}"),
+        }
+    }
+
+    fn v(text: &str) -> Version {
+        Version::parse(text).unwrap()
+    }
+
+    #[test]
+    fn versions_compare_numerically_not_as_text() {
+        assert!(v("4.10.0") > v("4.9.0"));
+        assert!(v("v5.0.0") > v("4.99.99"));
+        assert_eq!(Version::parse("v4.1.0"), Some(Version(4, 1, 0)));
+        assert_eq!(Version::parse("4.1"), None);
+        assert_eq!(Version::parse("4.1.0.1"), None);
+        assert_eq!(Version::parse("4.1.0-rc1"), None, "pre-release");
+        assert_eq!(Version::parse("latest"), None);
+    }
+
+    #[test]
+    fn github_answer_drops_drafts_prereleases_and_odd_tags() {
+        let json = r#"[
+            {"tag_name":"v4.2.0","html_url":"https://x/4.2.0","draft":false,"prerelease":false},
+            {"tag_name":"v4.3.0-rc1","html_url":"https://x/rc","draft":false,"prerelease":true},
+            {"tag_name":"v4.4.0","html_url":"https://x/draft","draft":true,"prerelease":false},
+            {"tag_name":"nightly","html_url":"https://x/n","draft":false,"prerelease":false}
+        ]"#;
+        let releases = parse_releases(json).unwrap();
+        assert_eq!(releases, vec![release_at("4.2.0", "https://x/4.2.0")]);
+        assert!(parse_releases("not json").is_err());
+    }
+
+    fn release_at(version: &str, url: &str) -> Release {
+        Release {
+            version: v(version),
+            notes_url: url.into(),
+        }
+    }
+
+    #[test]
+    fn a_newer_release_is_offered_with_how_far_behind_the_build_is() {
+        let releases = vec![release("4.0.0"), release("4.1.0"), release("4.2.0")];
+        let found = newest_above(v("4.0.0"), &releases).unwrap();
+        assert_eq!(found.version, "4.2.0");
+        assert_eq!(found.behind, 2);
+        assert_eq!(found.notes_url, "https://example.test/4.2.0");
+    }
+
+    #[test]
+    fn the_same_or_an_older_release_is_nothing() {
+        let releases = vec![release("4.0.0"), release("3.9.0")];
+        assert_eq!(newest_above(v("4.0.0"), &releases), None);
+        assert_eq!(
+            newest_above(v("4.0.1"), &releases),
+            None,
+            "ahead of released"
+        );
+        assert_eq!(newest_above(v("4.0.0"), &[]), None);
+    }
+
+    #[test]
+    fn check_reports_a_newer_release_and_remembers_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let fake = Fake::with(&["4.0.0", "4.1.0"]);
+
+        let found = check(&fake, v("4.0.0"), 1_000, &file).unwrap();
+        assert_eq!(found.version, "4.1.0");
+
+        // Within a day, the answer comes from memory: GitHub isn't asked.
+        assert!(check(&fake, v("4.0.0"), 1_000 + 3_600, &file).is_some());
+        assert_eq!(fake.asked.get(), 1);
+
+        // After a day it is.
+        check(&fake, v("4.0.0"), 1_000 + CHECK_EVERY, &file);
+        assert_eq!(fake.asked.get(), 2);
+    }
+
+    #[test]
+    fn once_updated_the_remembered_release_is_no_longer_news() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let fake = Fake::with(&["4.1.0"]);
+        assert!(check(&fake, v("4.0.0"), 0, &file).is_some());
+        assert_eq!(check(&fake, v("4.1.0"), 60, &file), None);
+    }
+
+    #[test]
+    fn later_hides_a_release_for_a_day_then_it_returns() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let fake = Fake::with(&["4.1.0"]);
+        let found = check(&fake, v("4.0.0"), 0, &file).unwrap();
+
+        snooze(&file, &found.version, 100).unwrap();
+        assert_eq!(check(&fake, v("4.0.0"), 200, &file), None, "snoozed");
+        assert_eq!(
+            check(&fake, v("4.0.0"), 100 + SNOOZE_FOR - 1, &file),
+            None,
+            "just before the day is up"
+        );
+        assert!(
+            check(&fake, v("4.0.0"), 100 + SNOOZE_FOR, &file).is_some(),
+            "a day later it is back"
+        );
+    }
+
+    #[test]
+    fn a_still_newer_release_shows_at_once_despite_the_snooze() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let mut fake = Fake::with(&["4.1.0"]);
+        let found = check(&fake, v("4.0.0"), 0, &file).unwrap();
+        snooze(&file, &found.version, 10).unwrap();
+
+        fake.releases.push(release("4.2.0"));
+        let found = check(&fake, v("4.0.0"), CHECK_EVERY, &file).unwrap();
+        assert_eq!(found.version, "4.2.0");
+    }
+
+    #[test]
+    fn a_snooze_survives_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let fake = Fake::with(&["4.1.0"]);
+        check(&fake, v("4.0.0"), 0, &file);
+        snooze(&file, "4.1.0", 5).unwrap();
+
+        // A new process has only the file.
+        let again = Fake::with(&["4.1.0"]);
+        assert_eq!(check(&again, v("4.0.0"), 50, &file), None);
+        assert_eq!(again.asked.get(), 0, "not asked: the day isn't up");
+    }
+
+    #[test]
+    fn a_failed_check_is_silent_and_retried_within_the_hour() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let fake = Fake::with(&["4.1.0"]);
+        fake.fail.set(true);
+
+        assert_eq!(check(&fake, v("4.0.0"), 0, &file), None);
+        assert_eq!(fake.asked.get(), 1);
+        // Not on every call...
+        check(&fake, v("4.0.0"), 60, &file);
+        assert_eq!(fake.asked.get(), 1);
+        // ...but not a whole day either.
+        fake.fail.set(false);
+        assert!(check(&fake, v("4.0.0"), RETRY_AFTER_FAILURE, &file).is_some());
+    }
+
+    #[test]
+    fn a_failure_keeps_what_was_already_known() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let fake = Fake::with(&["4.1.0"]);
+        check(&fake, v("4.0.0"), 0, &file);
+
+        fake.fail.set(true);
+        assert!(check(&fake, v("4.0.0"), CHECK_EVERY, &file).is_some());
+    }
+
+    #[test]
+    fn a_clock_set_back_does_not_hold_the_check_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let fake = Fake::with(&["4.1.0"]);
+        check(&fake, v("4.0.0"), 10 * CHECK_EVERY, &file);
+        check(&fake, v("4.0.0"), 0, &file);
+        assert_eq!(fake.asked.get(), 2);
+    }
+
+    #[test]
+    fn a_corrupt_state_file_is_a_fresh_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        fs::write(&file, "{ not json").unwrap();
+        let fake = Fake::with(&["4.1.0"]);
+        assert!(check(&fake, v("4.0.0"), 0, &file).is_some());
+    }
+
+    #[test]
+    fn an_unwritable_state_dir_still_gives_an_answer() {
+        let dir = tempfile::tempdir().unwrap();
+        // A file where the directory should be: every save fails.
+        let blocker = dir.path().join("blocker");
+        fs::write(&blocker, "").unwrap();
+        let fake = Fake::with(&["4.1.0"]);
+        let found = check(&fake, v("4.0.0"), 0, &blocker.join("update.json"));
+        assert_eq!(found.unwrap().version, "4.1.0");
+    }
+
+    #[test]
+    fn the_state_lives_outside_any_repository() {
+        let state = tempfile::tempdir().unwrap();
+        // Safety: this test alone sets XDG_STATE_HOME, before reading it.
+        unsafe { std::env::set_var("XDG_STATE_HOME", state.path()) };
+        assert_eq!(
+            state_path().unwrap(),
+            state.path().join("agile-md/update.json")
+        );
+    }
+
+    #[test]
+    fn the_check_can_be_switched_off_and_defaults_on() {
+        let mut config = Config::default();
+        assert!(enabled(&config));
+        for off in ["off", "0", "no", "false", "OFF"] {
+            config.set("update-check", off);
+            assert!(!enabled(&config), "{off}");
+        }
+        config.set("update-check", "on");
+        assert!(enabled(&config));
+    }
+}

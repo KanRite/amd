@@ -196,6 +196,23 @@ redundant. Their history is in git if it is ever wanted again.
 - `crates/amd-lib/src/project_trust.rs` — a per-machine, trust-on-first-use
   check that a board's declared `project` hasn't changed unexpectedly since
   `amd` last saw it.
+- `crates/amd-lib/src/update.rs` — is there a newer release (ticket 190,
+  the detecting half of in-app updates; applying is 191, the Update / Later
+  banner 192, compatibility and `min_version` 193). amd-lib has no HTTP
+  client, so GitHub is a `ReleaseSource` the caller supplies (the front
+  ends use `ureq`; tests use a fake). `parse_releases` reads the releases
+  API answer, dropping drafts, pre-releases and tags that aren't
+  `major.minor.patch`; `newest_above` gives `UpdateAvailable {version,
+  notes_url, behind}`, `behind` being how many releases the build is
+  missing so an update can catch up one at a time. `check(source, current,
+  now, state_file)` asks GitHub at most once a day (an hour after a
+  failure), otherwise answers from the remembered list; a failed check is
+  silent. `snooze` is "Later": it hides *that version* for 24 hours, so a
+  still newer release shows at once. State is `$XDG_STATE_HOME/agile-md/
+  update.json`, machine-local, never in a repository; a missing or corrupt
+  file is a fresh start. `update-check = off` / `AMD_UPDATE_CHECK=0` turns
+  the check off (`enabled`). The clock is passed in. The `ureq`
+  `ReleaseSource` arrives with its first caller (the banner, 192).
 - `crates/amd-lib/src/renumber.rs` — `amd renumber [--keep T] [--apply]`
   (ticket 146): tickets sharing a number (`local` numbering can clash when
   clones create apart). The first committed keeps it, judged by commit
