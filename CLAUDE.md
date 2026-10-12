@@ -1272,6 +1272,29 @@ changes):
   only markdown documents in the repository that exist). Pinning stays in
   amdui; the CLI changes documents through the clone itself. Ticket 138's editing is covered here. The demo board has `acme-documents` and a shared
   `acme-handbook`.
+- **The bottom panel** (ticket 185): on the board only, a one-line bar
+  with **Terminal** and **AI** tabs; a click or Ctrl+` opens it, its top
+  edge drags it taller, "Full height" fills the board's area (`room()`:
+  window height less `main`'s top). All Rust, no JavaScript terminal:
+  `crates/amd-ui/src/terminal.rs` runs the program on `alacritty_terminal`
+  (its `tty` opens the pseudo-terminal, its `EventLoop` reads into a
+  `Term`), and a frame thread per session sends the page the changed rows
+  (`term.damage()`) at most every 16 ms as `terminal-frame` events, through
+  the `Sink` trait (tests use a channel). Colours are resolved to CSS from
+  the xterm palette; the default ones are left to the page's theme.
+  Commands: `terminal_open(kind, cols, rows)`, `terminal_input`,
+  `terminal_resize`, `terminal_scroll`, `terminal_close`; sessions live in
+  `AppState.terminals` and are dropped (the program hung up) when the
+  window is destroyed. The Terminal tab is `$SHELL -l`, the AI tab
+  `$SHELL -lc "<ui.ai-command>"` (Preferences, `claude` by default), both
+  in the project folder. The page (`panel.rs`, `term_view.rs`) keeps one
+  signal per row, takes keys through a hidden textarea
+  (`amd_ui_model::terminal::key_bytes`, `paste_bytes`), and F5, Ctrl+R and
+  the zoom keys are left to the terminal while it has focus
+  (`in_terminal`). A tab's program starts the first time it's shown, keeps
+  running while the board is away, and ends when the project changes.
+  Page panics now reach amdui's stderr (`page_panic`). Speech to text is
+  ticket 187, the built-in chat 186.
 - **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
   download path checks a downloaded amdui's libraries on Linux
   (`check_board_libraries`, via `ldd`) and names WebKitGTK when it's

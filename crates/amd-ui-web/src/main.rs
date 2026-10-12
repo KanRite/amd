@@ -11,13 +11,22 @@ mod documents;
 mod editor;
 mod home;
 mod ideas;
+mod panel;
 mod preferences;
 mod rich_dom;
 mod rich_editor;
+mod term_view;
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
     console_error_panic_hook::set_once();
+    // A panic stops the whole page; say so where it can be seen, on amdui's
+    // own error output, as well as in the web view's console.
+    let console = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        api::report_panic(&info.to_string());
+        console(info);
+    }));
     leptos::mount::mount_to_body(app::App);
 }
 
