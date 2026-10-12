@@ -16,6 +16,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # The workspace builds three times over (clippy, unit tests, the CLI
+      # tests), and candle (ticket 187) is large: room first.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
       # The desktop board (crates/amd-ui) is a Tauri app: WebKitGTK on Linux.
       - name: Install the desktop board's system libraries
         run: |

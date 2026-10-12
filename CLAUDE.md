@@ -1315,7 +1315,11 @@ changes):
   Whisper (quantised or full), greedy, `[sot, notimestamps]` for the
   `.en` models, returns nothing when Whisper's no-speech probability is
   over 0.6, and decodes tokens itself from `tokenizer.json` (GPT-2 byte
-  map), so no `tokenizers` crate. The model loads on the first dictation
+  map). (candle-core itself depends on `tokenizers` with the C `onig`
+  library on every desktop target, so it's built anyway, unused.) Debug
+  builds leave dependencies' debug information out (`[profile.dev.package."*"]
+  debug = false`): with candle, CI's runner ran out of disk linking amdui.
+  The model loads on the first dictation
   (`AppState.speech`). Commands: `speech_status`, `speech_download`
   (`speech-progress` events), `speech_remove`, `set_speech_model`,
   `set_speech_enabled`, `speech_start`, `speech_stop`, `speech_cancel`.

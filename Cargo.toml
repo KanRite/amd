@@ -61,6 +61,12 @@ candle-transformers = "0.11"
 cpal = "0.18"
 ureq = "3"
 
+# Dependencies without debug information (ticket 187): candle's made the
+# debug build big enough to fill a CI runner's disk while linking amdui
+# (the linker died with a bus error). Our own crates keep theirs.
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
