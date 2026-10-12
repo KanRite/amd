@@ -6,6 +6,7 @@
 
 use amd_ui_model::terminal::{TermFrame, TermKind};
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 
 use crate::api;
 use crate::app::{Ctx, View};
@@ -50,6 +51,25 @@ pub fn BottomPanel(project: Memo<Option<String>>) -> impl IntoView {
     let shell = TermState::new(TermKind::Shell);
     let ai = TermState::new(TermKind::Ai);
     let on_board = move || ctx.view.get() == View::Board;
+    // The editor from Preferences (ticket 188); read again each time the
+    // board comes back, since Preferences is where it changes.
+    let editor = RwSignal::new(false);
+    Effect::new(move |_| {
+        if on_board() {
+            spawn_local(async move {
+                if let Ok(c) = api::editor_command().await {
+                    editor.set(!c.is_empty());
+                }
+            });
+        }
+    });
+    let open_editor = move |_| {
+        spawn_local(async move {
+            if let Err(e) = api::open_in_editor().await {
+                ctx.error.set(Some(e));
+            }
+        });
+    };
 
     // Frames and endings from amdui, to whichever tab they belong to.
     api::on_event::<TermFrame>("terminal-frame", move |frame| {
@@ -163,6 +183,16 @@ pub fn BottomPanel(project: Memo<Option<String>>) -> impl IntoView {
                 <button type="button" class=tab_class(TermKind::Ai) on:click=move |_| choose(TermKind::Ai)>
                     "AI"
                 </button>
+                <Show when=move || editor.get()>
+                    <button
+                        type="button"
+                        class="rounded px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-700/60"
+                        title="Open the project folder in your editor"
+                        on:click=open_editor
+                    >
+                        "Editor"
+                    </button>
+                </Show>
                 <span class="flex-1 truncate px-2 text-xs text-slate-500">
                     {move || if open.get() { "" } else { "Ctrl+` opens the panel" }}
                 </span>

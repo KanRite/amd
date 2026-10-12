@@ -18,6 +18,7 @@ pub fn PreferencesPanel() -> impl IntoView {
                 <ZoomSection />
                 <BoardSection />
                 <AiSection />
+                <EditorSection />
             </div>
             <ModalClose />
         </Modal>
@@ -270,6 +271,59 @@ fn AiSection() -> impl IntoView {
             </div>
             <p class="text-xs text-slate-500">
                 "What the board's AI tab runs, in the project folder, through your shell (so it's found as in a terminal). Leave it empty for claude."
+            </p>
+            {move || status.get().map(|s| view! { <p class="text-xs">{s}</p> })}
+        </section>
+    }
+}
+
+/// The editor the board's Editor button opens the project folder in (ticket
+/// 188). Empty means no button.
+#[component]
+fn EditorSection() -> impl IntoView {
+    let command = RwSignal::new(String::new());
+    let status = RwSignal::new(None::<String>);
+    spawn_local(async move {
+        if let Ok(c) = api::editor_command().await {
+            command.set(c);
+        }
+    });
+    let save = move |_| {
+        let value = command.get_untracked();
+        spawn_local(async move {
+            match api::set_editor_command(&value).await {
+                Ok(saved) => {
+                    command.set(saved.clone());
+                    status.set(Some(if saved.is_empty() {
+                        "No editor: the board has no Editor button.".to_string()
+                    } else {
+                        format!("The board's Editor button opens the project in {saved}.")
+                    }));
+                }
+                Err(e) => status.set(Some(e)),
+            }
+        });
+    };
+    let field = "rounded border border-slate-300 bg-slate-50 px-2 py-1.5 dark:border-slate-600 dark:bg-slate-900";
+    let secondary = "rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700";
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Editor command"</h3>
+            <div class="flex gap-2">
+                <input
+                    type="text"
+                    aria-label="Editor command"
+                    placeholder="code"
+                    class=format!("{field} flex-1 font-mono text-sm")
+                    prop:value=move || command.get()
+                    on:input=move |ev| command.set(event_target_value(&ev))
+                />
+                <button class=secondary on:click=save>
+                    "Save"
+                </button>
+            </div>
+            <p class="text-xs text-slate-500">
+                "The command that opens a folder in your editor, such as code, zed or idea. The board then shows an Editor button after AI, which opens the project folder in it. Empty: no button."
             </p>
             {move || status.get().map(|s| view! { <p class="text-xs">{s}</p> })}
         </section>

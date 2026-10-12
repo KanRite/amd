@@ -1897,6 +1897,9 @@ pub fn run() {
             terminal_close,
             ai_command,
             set_ai_command,
+            editor_command,
+            set_editor_command,
+            open_in_editor,
         ])
         .run(tauri::generate_context!())
         .expect("error while running amdui");
@@ -1947,7 +1950,7 @@ async fn terminal_open(
             .unwrap_or_else(|| "/bin/bash".to_string());
         let (program, args) = match kind {
             TermKind::Shell => (shell, vec!["-l".to_string()]),
-            TermKind::Ai => (shell, vec!["-lc".to_string(), ai_command_now()]),
+            TermKind::Ai => (shell, vec!["-lic".to_string(), ai_command_now()]),
         };
         let id = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let session = terminal::Session::open(
@@ -2043,6 +2046,88 @@ fn set_ai_command(command: String) -> Result<String> {
     Ok(ai_command_now())
 }
 
+/// The editor command from Preferences (ticket 188), empty when none is set.
+fn editor_command_now() -> String {
+    Config::load()
+        .get("ui.editor-command")
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The command the board's Editor button runs; empty means no button.
+#[tauri::command]
+fn editor_command() -> String {
+    editor_command_now()
+}
+
+/// Sets the editor command in your own config; empty removes it.
+#[tauri::command]
+fn set_editor_command(command: String) -> Result<String> {
+    let mut config = Config::load();
+    let command = command.trim();
+    if command.is_empty() {
+        config.remove("ui.editor-command");
+    } else {
+        config.set("ui.editor-command", command);
+    }
+    config.save().map_err(err)?;
+    Ok(editor_command_now())
+}
+
+/// Opens the project's folder in the editor from Preferences (ticket 188).
+/// The editor starts in a session of its own with no terminal, so it isn't
+/// amdui's child: closing amdui leaves it running. It goes through the
+/// user's shell, interactive like the AI tab's, so PATH is the one a
+/// terminal has.
+#[tauri::command]
+async fn open_in_editor() -> Result<()> {
+    blocking(move || {
+        let command = editor_command_now();
+        if command.is_empty() {
+            return Err("set an editor in Preferences first".to_string());
+        }
+        let dir = Project::open()
+            .map(|p| agile_md::registry::project_dir_of(p.repos[0].1.repo_root()))?;
+        spawn_detached(&command, &dir).map_err(|e| format!("starting the editor ({command}): {e}"))
+    })
+    .await
+}
+
+/// Runs `command dir` through the user's login shell, detached from this
+/// process: its own session, no stdin, stdout or stderr.
+fn spawn_detached(command: &str, dir: &std::path::Path) -> std::io::Result<()> {
+    let shell = std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "/bin/bash".to_string());
+    let mut cmd = std::process::Command::new(shell);
+    // `$1` is the folder, so no quoting of its path is needed.
+    cmd.args(["-lic", &format!("{command} \"$1\""), "amd"])
+        .arg(dir)
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: `setsid` is async-signal-safe and touches no memory.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+    }
+    let mut child = cmd.spawn()?;
+    // Reaped on a thread so it doesn't linger as a zombie while amdui runs.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 /// Clones a repository the project declares but this machine hasn't got
 /// (ticket 108), beside the tickets repository, and registers it — what
 /// `amd clone <name>` does. Returns a warning for each other clone of the
@@ -2078,6 +2163,29 @@ fn clone_into(project: &Project, name: &str) -> Result<Vec<String>> {
 mod tests {
     use super::*;
     use amd_ui_model::Column as UiColumn;
+
+    /// Ticket 188: the editor command gets the project folder as its
+    /// argument and runs, in a session of its own.
+    #[cfg(unix)]
+    #[test]
+    fn the_editor_is_started_detached_with_the_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let script = tmp.path().join("fake editor.sh");
+        std::fs::write(&script, "#!/bin/sh\ncp /proc/self/stat \"$1/ran\"\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let dir = tmp.path().join("project dir");
+        std::fs::create_dir(&dir).unwrap();
+        spawn_detached(&format!("'{}'", script.display()), &dir).unwrap();
+        let ran = dir.join("ran");
+        for _ in 0..100 {
+            if ran.exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(ran.exists(), "the editor never ran");
+    }
 
     /// Ticket 117: the status line after a change matches its commit, with
     /// no empty `""` when there is no detail.
