@@ -42,3 +42,4 @@ pub mod sync;
 pub mod task;
 pub mod templates;
 pub mod transition;
+pub mod update;
