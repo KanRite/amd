@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in amd or amdui doesn't work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      description: The commands you ran or the clicks you made, from the start.
+      placeholder: |
+        1. amd new "..."
+        2. amd todo 3
+        3. ...
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where
+      options:
+        - amd (the command line)
+        - amdui (the desktop board)
+        - install.sh
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `amd --version`.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Operating system
+      placeholder: Ubuntu 26.04, GNOME on Wayland / macOS 16 on Apple silicon
+  - type: textarea
+    id: output
+    attributes:
+      label: Output or error
+      description: Anything amd or amdui printed. Leave out anything private.
+      render: text
