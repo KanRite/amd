@@ -38,6 +38,7 @@ alacritty_terminal.workspace = true
 amd-ui-model.workspace = true
 anyhow.workspace = true
 base64.workspace = true
+libc.workspace = true
 # The documents reader renders markdown to HTML (ticket 129).
 pulldown-cmark = { workspace = true, features = ["html"] }
 serde.workspace = true

@@ -12,6 +12,20 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use wasm_bindgen::prelude::*;
 
+/// The editor command (empty when Preferences has none).
+pub async fn editor_command() -> Result<String, String> {
+    call("editor_command", &NoArgs {}).await
+}
+
+pub async fn set_editor_command(command: &str) -> Result<String, String> {
+    call("set_editor_command", &AiCommandArgs { command }).await
+}
+
+/// Opens the project's folder in the editor, detached from amdui.
+pub async fn open_in_editor() -> Result<(), String> {
+    call("open_in_editor", &NoArgs {}).await
+}
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = ["window", "__TAURI__", "core"], catch)]

@@ -95,6 +95,7 @@ dependencies = [
  "amd-ui-model",
  "anyhow",
  "base64 0.22.1",
+ "libc",
  "pulldown-cmark",
  "serde",
  "serde_json",

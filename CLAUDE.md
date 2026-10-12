@@ -1286,7 +1286,7 @@ changes):
   `terminal_resize`, `terminal_scroll`, `terminal_close`; sessions live in
   `AppState.terminals` and are dropped (the program hung up) when the
   window is destroyed. The Terminal tab is `$SHELL -l`, the AI tab
-  `$SHELL -lc "<ui.ai-command>"` (Preferences, `claude` by default), both
+  `$SHELL -lic "<ui.ai-command>"` (Preferences, `claude` by default), both
   in the project folder. The page (`panel.rs`, `term_view.rs`) keeps one
   signal per row, takes keys through a hidden textarea
   (`amd_ui_model::terminal::key_bytes`, `paste_bytes`), and F5, Ctrl+R and
