@@ -15,6 +15,7 @@ mod panel;
 mod preferences;
 mod rich_dom;
 mod rich_editor;
+mod roadmap;
 mod term_view;
 
 #[cfg(target_arch = "wasm32")]

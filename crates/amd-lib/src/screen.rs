@@ -33,7 +33,7 @@ pub struct Note {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct View {
-    /// `home`, `board`, `documents` or `ideas`.
+    /// `home`, `board`, `documents`, `ideas` or `roadmaps`.
     pub screen: String,
     /// The ticket open in the editor.
     pub ticket: Option<Place>,

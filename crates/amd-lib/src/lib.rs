@@ -37,6 +37,7 @@ pub mod recover;
 pub mod registry;
 pub mod renumber;
 pub mod richtext;
+pub mod roadmap;
 pub mod screen;
 pub mod settings;
 pub mod sync;

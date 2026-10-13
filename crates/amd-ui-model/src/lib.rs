@@ -733,6 +733,31 @@ pub struct IdeaList {
     pub ideas: Vec<IdeaCard>,
 }
 
+/// A milestone of a roadmap (ticket 206). Adding one made an epic — or a
+/// sprint — of the same name on the board.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MilestoneCard {
+    pub name: String,
+    pub description: String,
+    /// `epic` or `sprint`.
+    pub kind: String,
+    /// `YYYY-MM-DD`, or empty.
+    pub start: String,
+    /// The due-by date, `YYYY-MM-DD`, or empty.
+    pub due: String,
+}
+
+/// A roadmap for the board (ticket 206).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoadmapCard {
+    /// Names it in `add_milestone`.
+    pub slug: String,
+    pub name: String,
+    /// The estimated due date, `YYYY-MM-DD`, or empty.
+    pub due: String,
+    pub milestones: Vec<MilestoneCard>,
+}
+
 /// One person's vote, as the idea shows it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IdeaVote {

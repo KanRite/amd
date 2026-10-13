@@ -709,6 +709,35 @@ pub async fn save_document(
     .await
 }
 
+/// The project's roadmaps (ticket 206).
+pub async fn list_roadmaps() -> Result<Vec<amd_ui_model::RoadmapCard>, String> {
+    call("list_roadmaps", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct RoadmapArgs<'a> {
+    name: &'a str,
+    due: &'a str,
+}
+
+pub async fn create_roadmap(name: &str, due: &str) -> Result<SyncReport, String> {
+    call("create_roadmap", &RoadmapArgs { name, due }).await
+}
+
+#[derive(Serialize)]
+struct MilestoneArgs<'a> {
+    roadmap: &'a str,
+    milestone: &'a amd_ui_model::MilestoneCard,
+}
+
+/// Adds a milestone, which makes its epic or sprint on the board.
+pub async fn add_milestone(
+    roadmap: &str,
+    milestone: &amd_ui_model::MilestoneCard,
+) -> Result<SyncReport, String> {
+    call("add_milestone", &MilestoneArgs { roadmap, milestone }).await
+}
+
 /// The project's ideas, best first (ticket 131).
 pub async fn list_ideas() -> Result<amd_ui_model::IdeaList, String> {
     call("list_ideas", &NoArgs {}).await

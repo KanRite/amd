@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScreenView {
-    /// `home`, `board`, `documents` or `ideas`.
+    /// `home`, `board`, `documents`, `ideas` or `roadmaps`.
     pub screen: String,
     pub ticket: Option<ScreenPlace>,
     pub document: Option<ScreenPlace>,

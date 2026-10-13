@@ -56,7 +56,7 @@ pub fn tools() -> Vec<Tool> {
         Tool {
             name: "screen",
             title: "What's on screen",
-            description: "What amdui is showing for this project right now: the screen (home, board, documents or ideas), the open ticket, document or idea, the open epic or sprint, and the board's filters. Use it to find what the user means by \"this ticket\" or \"this document\".",
+            description: "What amdui is showing for this project right now: the screen (home, board, documents, ideas or roadmaps), the open ticket, document or idea, the open epic or sprint, and the board's filters. Use it to find what the user means by \"this ticket\" or \"this document\".",
             read_only: true,
             input: json!({"type": "object", "properties": {}}),
         },

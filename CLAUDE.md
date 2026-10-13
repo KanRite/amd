@@ -132,6 +132,21 @@ redundant. Their history is in git if it is ever wanted again.
   note, Make a ticket then Open ticket, Open in Documents to edit), New
   idea (rich text, "Put my name on it"). Commands `list_ideas`,
   `read_idea`, `create_idea`, `vote_idea`, `note_idea`, `idea_to_ticket`.
+- `crates/amd-lib/src/roadmap.rs` — Roadmaps (ticket 206): a name and
+  an estimated due date, made of milestones. One markdown file per roadmap
+  at `<tickets repo>/roadmaps/<slug>.md`, beside `tasks/` and not in it, so
+  the ticket scan never sees it (frontmatter `name`, `due`; each milestone a
+  `## name` section with `- kind:`, `- start:`, `- due:` lines and its
+  description). `add_milestone` makes the epic of the same name on the
+  board (name only; the description and dates stay on the milestone), or,
+  for a sprint milestone, a sprint with the description (on one line) and
+  `days` = start to due (`sprint_days`; the start date itself is kept only
+  on the milestone, as `_group.md` has no field for it). It checks
+  everything before writing anything and runs inside one auto-commit
+  (`roadmap-milestone: <name> "<roadmap>"`), so the roadmap file and the
+  epic are one commit. amdui: `View::Roadmaps` (`amd-ui-web/src/roadmap.rs`),
+  from the landing page's **Roadmap** button; commands `list_roadmaps`,
+  `create_roadmap`, `add_milestone`. No CLI or MCP tool yet.
 - `crates/amd-lib/src/archive.rs` — archiving a project (ticket 157):
   `archived = on` in the tickets `.settings`, auto-committed like any
   setting. An archived project only reads: the CLI's `run()` refuses a
