@@ -972,8 +972,9 @@ project, into one `amdui` window:
   project for everyone, exactly as `amd register --remove` (now an alias):
   undeclared in the tickets `.settings`, committed and pushed, and dropped
   from this machine's registry. The repository filter and fields list the
-  declared repositories plus any a ticket names (`ticket_repos`), so it
-  leaves everyone's lists unless a ticket still names it. A repository
+  declared repositories and nothing else (`ticket_repos`, ticket 195: a
+  repository a ticket merely names never adds to them), so it leaves
+  everyone's lists. A repository
   that's only *registered* here (a project's own tickets or documents
   repository, a scratch board) just loses its registration. Neither is an
   error. The clone is never touched. It takes `--project` like `register`.
