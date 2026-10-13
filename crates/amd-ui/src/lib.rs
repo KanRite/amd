@@ -2508,12 +2508,12 @@ mod tests {
         assert!(summary.tags_only);
     }
 
-    /// Ticket 120: the Repository filter and fields hold the project's
-    /// declared repositories plus any a ticket names, so one that
-    /// `amd deregister` takes off the project leaves them, unless a ticket
-    /// still names it.
+    /// Tickets 120, 195: the Repository filter and fields hold the project's
+    /// declared repositories and nothing else, so one that `amd deregister`
+    /// takes off the project leaves them, and a repository a ticket merely
+    /// names (one renamed or retired since) never joins them.
     #[test]
-    fn a_repository_leaves_the_lists_when_undeclared_unless_a_ticket_names_it() {
+    fn the_repository_lists_are_the_declared_repositories_only() {
         let (_dir, project) = project();
         let settings = project.repos[0].1.repo_root().join(".settings");
         let listed = |p: &Project| -> Vec<String> {
@@ -2529,9 +2529,9 @@ mod tests {
         assert_eq!(listed(&project), ["site"]);
 
         std::fs::write(&settings, "commit = off\n").unwrap();
-        assert!(listed(&project).is_empty(), "undeclared and unnamed: gone");
+        assert!(listed(&project).is_empty(), "undeclared: gone");
 
-        let file = new_ticket(&project, "About the site");
+        let file = new_ticket(&project, "About the old site");
         let path = project.repos[0].1.root.join("backlog").join(&file);
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("repository: \"\""), "{text}");
@@ -2540,7 +2540,13 @@ mod tests {
             text.replace("repository: \"\"", "repository: \"site\""),
         )
         .unwrap();
-        assert_eq!(listed(&project), ["site"], "a ticket still names it");
+        assert!(
+            listed(&project).is_empty(),
+            "a ticket naming it doesn't bring it back"
+        );
+
+        std::fs::write(&settings, "commit = off\nrepos = site\n").unwrap();
+        assert_eq!(listed(&project), ["site"], "declared: listed once");
     }
 
     #[test]
