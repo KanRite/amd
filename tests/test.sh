@@ -1202,6 +1202,24 @@ assert "amd link --one-way leaves the other end alone" \
 assert "a ticket with no branch carries the list too" \
   bash -c "grep -q '^related: \[\]$' tasks/*/*-assigned-at-creation.md"
 
+echo "duplicate:"
+assert "amd duplicate copies a ticket" \
+  "${AMD}" duplicate 1
+copy="$(grep -l '^clone-of: "001"$' tasks/*/*.md | head -1)"
+assert "the copy records what it is a copy of" \
+  bash -c "test -n '${copy}' && grep -q '^clone-of: \"001\"$' '${copy}'"
+assert "the copy lands in the backlog" \
+  bash -c "case '${copy}' in tasks/backlog/*) true;; *) false;; esac"
+copy_id="$(basename "${copy}" | cut -c1-3)"
+assert "the original lists the copy in clones" \
+  bash -c "grep -q '^clones: \[${copy_id}\]$' tasks/*/001-first-task.md"
+assert "a copy is not a plain relation" \
+  bash -c "! grep -q '${copy_id}' <(grep '^related:' tasks/*/001-first-task.md)"
+assert "the copy keeps the title" \
+  bash -c "grep -q '^title: \"First task\"$' '${copy}'"
+assert "duplicating an unknown ticket is refused" \
+  bash -c "! '${AMD}' duplicate 99"
+
 # `amd set` and `amd group` shipped with no coverage here, which is how the
 # suite came to disagree with the tool. They get their own repository so the
 # epic and sprint directories cannot disturb the id sequencing above.

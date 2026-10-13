@@ -464,6 +464,8 @@ mod tests {
             lapsed: None,
             parent: String::new(),
             related: Vec::new(),
+            clone_of: String::new(),
+            clones: Vec::new(),
         }
     }
 

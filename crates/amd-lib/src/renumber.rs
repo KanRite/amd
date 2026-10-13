@@ -149,8 +149,16 @@ fn renumber_one(
     let kept_text = read(&clash.keep.path)?;
     let moving_children = children(&moving_text);
     let kept_children = children(&kept_text);
-    let moving_related = related_ids(&moving_text);
-    let kept_related = related_ids(&kept_text);
+    let moving_related = list_ids(&moving_text, "related");
+    let kept_related = list_ids(&kept_text, "related");
+    let (moving_clones, kept_clones) = (
+        list_ids(&moving_text, "clones"),
+        list_ids(&kept_text, "clones"),
+    );
+    let (moving_clone_of, kept_clone_of) = (
+        task::meta_in(&moving_text, "clone-of").and_then(number),
+        task::meta_in(&kept_text, "clone-of").and_then(number),
+    );
 
     let text = task::set_meta(&moving_text, "id", &format!("\"{to:03}\""))?;
     if git::is_tracked(board.repo_root(), &moving.path) {
@@ -238,6 +246,58 @@ fn renumber_one(
                     )),
                 }
             }
+
+            // A copy names its original in `clone-of` and the original lists
+            // the copy in `clones`, so each end vouches for the other.
+            if task::meta_in(&text, "clone-of").and_then(number) == Some(clash.id) {
+                let mine = other_id.is_some_and(|id| moving_clones.contains(&id));
+                let theirs = other_id.is_some_and(|id| kept_clones.contains(&id));
+                match ours(mine, theirs) {
+                    Some(true) => {
+                        text = task::set_meta(&text, "clone-of", &format!("{new:?}"))?;
+                        report
+                            .updated
+                            .push((other.stem.clone(), format!("clone-of {old} -> {new}")));
+                    }
+                    Some(false) => {}
+                    None => report.ambiguous.push((
+                        other.stem.clone(),
+                        format!("clone-of {old}: {} or {new_stem}?", clash.keep.stem),
+                    )),
+                }
+            }
+            let clones: Vec<String> = task::meta_in(&text, "clones")
+                .map(task::parse_list)
+                .unwrap_or_default();
+            if clones.iter().any(|c| number(c) == Some(clash.id)) {
+                let mine = other_id.is_some() && moving_clone_of == other_id;
+                let theirs = other_id.is_some() && kept_clone_of == other_id;
+                match ours(mine, theirs) {
+                    Some(true) => {
+                        let mut list: Vec<String> = clones
+                            .into_iter()
+                            .map(|c| {
+                                if number(&c) == Some(clash.id) {
+                                    new.clone()
+                                } else {
+                                    c
+                                }
+                            })
+                            .collect();
+                        list.sort();
+                        list.dedup();
+                        text = task::set_meta(&text, "clones", &format!("[{}]", list.join(",")))?;
+                        report
+                            .updated
+                            .push((other.stem.clone(), format!("clones {old} -> {new}")));
+                    }
+                    Some(false) => {}
+                    None => report.ambiguous.push((
+                        other.stem.clone(),
+                        format!("clones {old}: {} or {new_stem}?", clash.keep.stem),
+                    )),
+                }
+            }
         }
 
         if text != before {
@@ -265,9 +325,9 @@ fn children(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// The numbers in a ticket's `related` list.
-fn related_ids(text: &str) -> Vec<u32> {
-    task::meta_in(text, "related")
+/// The numbers in one of a ticket's id lists (`related`, `clones`).
+fn list_ids(text: &str, key: &str) -> Vec<u32> {
+    task::meta_in(text, key)
         .map(task::parse_list)
         .unwrap_or_default()
         .iter()
@@ -381,6 +441,32 @@ mod tests {
         assert!(text(&board, "001-parent-of-nothing.md").contains("related: [002]"));
         assert_eq!(report.ambiguous.len(), 1, "{:?}", report.ambiguous);
         assert!(report.ambiguous[0].0 == "001-parent-of-nothing");
+        assert!(board.duplicate_ids().unwrap().is_empty());
+    }
+
+    #[test]
+    fn clone_links_follow_the_ticket_they_can_prove_they_mean() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        // Two tickets hold 002. The later one has a copy (004) and is itself
+        // a copy of 001; the older one has neither.
+        ticket(&board, "001-source.md", "clones: [002]\n", "");
+        ticket(&board, "002-alpha.md", "created: \"2026-01-01\"\n", "");
+        ticket(
+            &board,
+            "002-beta.md",
+            "created: \"2026-02-01\"\nclone-of: \"001\"\nclones: [004]\n",
+            "",
+        );
+        ticket(&board, "004-copy.md", "clone-of: \"002\"\n", "");
+
+        let clashes = plan(&board, None).unwrap();
+        apply(&board, &clashes).unwrap();
+
+        assert!(text(&board, "004-copy.md").contains("clone-of: \"005\""));
+        assert!(text(&board, "005-beta.md").contains("clones: [004]"));
+        // 001's bare 002 is the later ticket's: 005-beta says it is a copy of 001.
+        assert!(text(&board, "001-source.md").contains("clones: [005]"));
         assert!(board.duplicate_ids().unwrap().is_empty());
     }
 

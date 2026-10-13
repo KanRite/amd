@@ -161,7 +161,7 @@ redundant. Their history is in git if it is ever wanted again.
   `start_page`, `ideas`, `idea`. Change, all through amd-lib with the
   auto-commit: `create_ticket` (`TicketFields`, which gained `priority`),
   `move_ticket` (`transition::move_to`, never `enter_todo`: no branch
-  switching), `edit_ticket` (`apply_edit` with unnamed fields kept, plus
+  switching), `clone_ticket` (`transition::clone_ticket`), `edit_ticket` (`apply_edit` with unnamed fields kept, plus
   `set_priority`/`set_repository`; `version` makes it refuse a stale
   ticket; no epic, which is `file_ticket`), `assign_ticket` (`@me` is
   git's `user.name`), `add_note` (`**Name, date:** text` at the end of
@@ -812,6 +812,20 @@ off**, ticket 141) to
 
 ## Ticket fields (`crates/amd-lib/src/branch.rs`, `templates/ticket.md.jinja`)
 
+- **Duplicating a ticket** (ticket 198, `amd duplicate <ref>`, the editor's
+  Duplicate button, the MCP `clone_ticket`; `transition::clone_ticket`). `amd
+  clone` was already taken (it clones a declared repository). The copy goes
+  to the same board's backlog with the title, body, tags, branch type,
+  repository, parent, priority and points; not the assignee, lease, epic or
+  `created*`; the body loses its `## Children` and its ticked items are
+  unticked. It is linked by a typed pair, not `related`: `clone-of: "NNN"`
+  on the copy (only written when set) and `clones: [..]` on the original
+  (`Task::add_clone`, written by `Draft::write`). `import` and `renumber`
+  remap both keys, `renumber` using each end as proof of the other. An
+  original someone else holds can't take the backlink: the copy is still
+  made and `Created.unlinked` becomes a warning. Same board only, since a
+  bare id can't name a ticket on another.
+
 - **One ticket, one template.** There are no ticket types any more: `admin` and
   `development` collapsed into fields you either fill in or don't.
 - **`branch-type` is what gives a ticket a branch**, and it's empty by default.
@@ -932,7 +946,7 @@ off**, ticket 141) to
 - Custom `yaml` filter quotes/escapes frontmatter values, so a title containing
   `"` can't corrupt the block. Use it for every frontmatter value.
 - `TaskContext` is the contract with templates (`id`, `number`, `title`, `slug`,
-  `branch_type`, `branch_name`, `owner`, `parent`, `parent_link`, `related`, `tags`, `created`, `timestamp`, `column`,
+  `branch_type`, `branch_name`, `owner`, `parent`, `parent_link`, `related`, `clone_of`, `tags`, `created`, `timestamp`, `column`,
   `author`, `email`, `created_by`, `board`, `template`, `extra`). Adding a field is additive;
   renaming one breaks every user template — treat it as a public API.
 - Template errors are flattened by `render_error()` (message + line + cause

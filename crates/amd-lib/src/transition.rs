@@ -320,6 +320,9 @@ pub struct TicketFields {
     /// A ref (id or slug), or empty.
     pub parent: String,
     pub related: Vec<String>,
+    /// A ref (id or slug) for the ticket this one is a copy of, or empty.
+    /// Only creation reads it; an edit leaves the link alone.
+    pub clone_of: String,
     /// The ticket body — everything after the frontmatter.
     pub body: String,
     /// `low`, `medium` or `high`; empty keeps what the template (on
@@ -343,6 +346,7 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
             repository: fields.repository.clone().unwrap_or_default(),
             parent: Some(fields.parent.trim().to_string()).filter(|p| !p.is_empty()),
             related: fields.related.clone(),
+            clone_of: Some(fields.clone_of.trim().to_string()).filter(|c| !c.is_empty()),
             tags: fields.tags.clone(),
             extra: Default::default(),
         },
@@ -379,6 +383,11 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
             .events
             .push(Event::Info(format!("{id} now links to {id_display}")));
     }
+    if let Some(reason) = &created.unlinked {
+        outcome.events.push(Event::Warn(format!(
+            "could not list {id_display} as a clone on {reason}"
+        )));
+    }
     outcome.events.push(Event::Info(format!(
         "created {}/{file_name}",
         Column::Backlog
@@ -389,6 +398,52 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
     }
     outcome.dest = Some(dest);
     Ok(outcome)
+}
+
+/// Copy a ticket: a new backlog ticket with the original's title, body, tags,
+/// branch type, repository, parent, priority and points, linked to it as a
+/// clone (`clone-of` on the copy, `clones` on the original). It is raised
+/// unassigned, unleased and unsized into no epic; its checklist starts
+/// unticked and it lists no children, since those belong to the original.
+pub fn clone_ticket(board: &Board, original: &Task) -> Result<Outcome> {
+    let fields = TicketFields {
+        title: original.title(),
+        repository: original.repository(),
+        points: original.points().unwrap_or_default(),
+        tags: original.tags(),
+        branch_type: original.branch_type().unwrap_or_default(),
+        parent: original.parent().unwrap_or_default(),
+        clone_of: original.id_display(),
+        body: clone_body(&original.body()?),
+        priority: original.priority(),
+        ..TicketFields::default()
+    };
+    create_ticket(board, &fields)
+}
+
+/// The body of a copy: the original's, less its `## Children` section, with
+/// every ticked checklist item unticked.
+fn clone_body(body: &str) -> String {
+    let mut out = String::new();
+    let mut in_children = false;
+    for line in body.lines() {
+        if line.starts_with("## ") {
+            in_children = line.trim_end() == "## Children";
+        }
+        if in_children {
+            continue;
+        }
+        let line = match line.trim_start() {
+            rest if rest.starts_with("- [x]") || rest.starts_with("- [X]") => {
+                let indent = &line[..line.len() - rest.len()];
+                format!("{indent}- [ ]{}", &rest["- [x]".len()..])
+            }
+            _ => line.to_string(),
+        };
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
 }
 
 /// Save every editable field of an existing ticket in one write, checked
@@ -493,6 +548,19 @@ mod tests {
         std::fs::write(&path, body).unwrap();
         let task = Task::from_path(&path, column).unwrap();
         (board, task)
+    }
+
+    #[test]
+    fn a_copy_leaves_out_the_children_and_unticks_the_checklist() {
+        let body = "## Notes\n\nkeep\n\n## Acceptance criteria\n\n- [x] done\n  - [X] nested\n- [ ] open\n\n## Children\n\n- [[002-child]]\n";
+        let copy = clone_body(body);
+        assert!(!copy.contains("Children"), "{copy}");
+        assert!(!copy.contains("002-child"), "{copy}");
+        assert!(
+            copy.contains("- [ ] done\n  - [ ] nested\n- [ ] open\n"),
+            "{copy}"
+        );
+        assert!(copy.contains("## Notes\n\nkeep"), "{copy}");
     }
 
     #[test]

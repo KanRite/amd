@@ -254,6 +254,8 @@ impl Project {
             lapsed: self.lapsed_of(task),
             parent: task.parent().unwrap_or_default(),
             related: task.related(),
+            clone_of: task.clone_of().unwrap_or_default(),
+            clones: task.clones(),
         }
     }
 

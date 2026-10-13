@@ -153,6 +153,13 @@ pub fn tools() -> Vec<Tool> {
             }, "required": ["title"]}),
         },
         Tool {
+            name: "clone_ticket",
+            title: "Duplicate a ticket",
+            description: "Copy a ticket into the backlog of the same board and commit it. The copy keeps the title, body, tags, branch type, repository, parent, priority and points, but starts unassigned, unlocked and in no epic, with its checklist unticked. It is linked to the original as a clone: `clone-of` on the copy, `clones` on the original.",
+            read_only: false,
+            input: json!({"type": "object", "properties": {"ticket": reference}, "required": ["ticket"]}),
+        },
+        Tool {
             name: "move_ticket",
             title: "Move a ticket",
             description: "Move a ticket one column along (backlog, todo, doing, done) and commit it. Entering doing takes the user's lock on it; leaving gives it back. Refused when doing is at its WIP limit unless `force`. Doesn't switch git branches.",
@@ -220,6 +227,7 @@ pub fn call(name: &str, args: &Value) -> Result<Reply> {
         "ideas" => ideas_tool(args),
         "idea" => idea_tool(args),
         "create_ticket" => create_ticket(args),
+        "clone_ticket" => clone_ticket(args),
         "move_ticket" => move_ticket(args),
         "edit_ticket" => edit_ticket(args),
         "assign_ticket" => assign_ticket(args),
@@ -885,6 +893,7 @@ fn create_ticket(args: &Value) -> Result<Reply> {
         branch_type: String::new(),
         parent: arg(args, "parent").unwrap_or_default(),
         related: Vec::new(),
+        clone_of: String::new(),
         body: arg(args, "body").unwrap_or_default(),
         priority: arg(args, "priority").unwrap_or_default(),
     };
@@ -899,6 +908,27 @@ fn create_ticket(args: &Value) -> Result<Reply> {
     lines.extend(events_text(&outcome));
     lines.extend(tag_warning.into_iter().map(|w| format!("warning: {w}")));
     lines.extend(unknown.into_iter().map(|w| format!("warning: {w}")));
+    let data = card(&repo, &made);
+    Ok(project.reply(lines.join("\n"), data))
+}
+
+fn clone_ticket(args: &Value) -> Result<Reply> {
+    let mut project = Project::open(Purpose::Write)?;
+    let (i, original) = project.find(&required(args, "ticket")?)?;
+    let repo = project.boards[i].0.clone();
+    let board = project.ready(i)?;
+    let outcome = transition::clone_ticket(board, &original)?;
+    let made = outcome
+        .dest
+        .as_ref()
+        .and_then(|dest| Task::from_path(dest, Column::Backlog))
+        .context("the new ticket wasn't where it was written")?;
+    let mut lines = vec![format!(
+        "Copied {repo}#{} as {}",
+        original.id_display(),
+        line(&repo, &made)
+    )];
+    lines.extend(events_text(&outcome));
     let data = card(&repo, &made);
     Ok(project.reply(lines.join("\n"), data))
 }

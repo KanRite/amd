@@ -116,6 +116,12 @@ pub struct TicketSummary {
     /// The tickets it's related to (`related:`), as written.
     #[serde(default)]
     pub related: Vec<String>,
+    /// The ticket this one is a copy of (`clone-of:`), as written; empty if none.
+    #[serde(default)]
+    pub clone_of: String,
+    /// The tickets that are copies of it (`clones:`), as written.
+    #[serde(default)]
+    pub clones: Vec<String>,
 }
 
 /// The ticket number a `parent`/`related` entry names: `042`, `"042"` or
@@ -1011,6 +1017,8 @@ mod assigned_tests {
             lapsed: None,
             parent: String::new(),
             related: Vec::new(),
+            clone_of: String::new(),
+            clones: Vec::new(),
         }
     }
 
@@ -1126,6 +1134,8 @@ mod search_tests {
             lapsed: None,
             parent: String::new(),
             related: Vec::new(),
+            clone_of: String::new(),
+            clones: Vec::new(),
         }
     }
 

@@ -84,6 +84,8 @@ pub struct TaskContext {
     pub parent_link: String,
     /// Ids of the tickets this one depends on or relates to. Empty by default.
     pub related: Vec<String>,
+    /// Id of the ticket this one is a copy of, or an empty string.
+    pub clone_of: String,
     pub tags: Vec<String>,
     /// Local date, `YYYY-MM-DD`.
     pub created: String,
@@ -353,6 +355,7 @@ pub fn example_context(board: &Board) -> TaskContext {
         parent: String::new(),
         parent_link: String::new(),
         related: Vec::new(),
+        clone_of: String::new(),
         tags: Vec::new(),
         created,
         timestamp,
@@ -434,6 +437,7 @@ mod tests {
             parent: "002".to_string(),
             parent_link: "002-checkout".to_string(),
             related: vec!["003".to_string()],
+            clone_of: String::new(),
             tags: vec!["x".to_string(), "y".to_string()],
             created: "2026-08-03".to_string(),
             timestamp: "2026-08-03T09:00:00+01:00".to_string(),
@@ -469,8 +473,23 @@ mod tests {
         assert!(rendered.contains("[[002-checkout]]"), "{rendered}");
         assert!(rendered.contains("\ntags: [x,y]\n"), "{rendered}");
         assert!(rendered.contains("\nrelated: [003]\n"), "{rendered}");
+        assert!(!rendered.contains("clone-of"), "{rendered}");
         assert!(rendered.contains("## Acceptance criteria"), "{rendered}");
         assert!(rendered.ends_with('\n'), "{rendered}");
+    }
+
+    #[test]
+    fn a_clone_records_what_it_is_a_copy_of() {
+        let mut context = ctx();
+        context.clone_of = "007".to_string();
+        let rendered = Templates::builtin()
+            .unwrap()
+            .render("ticket", context)
+            .unwrap();
+        assert!(
+            rendered.contains("\nrelated: [003]\nclone-of: \"007\"\ntags"),
+            "{rendered}"
+        );
     }
 
     #[test]

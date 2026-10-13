@@ -588,6 +588,18 @@ impl Task {
             .unwrap_or_default()
     }
 
+    /// The id of the ticket this one is a copy of, if it is a clone.
+    pub fn clone_of(&self) -> Option<String> {
+        self.meta("clone-of").filter(|id| !id.is_empty())
+    }
+
+    /// The tickets that are copies of this one: ids as recorded in `clones`.
+    pub fn clones(&self) -> Vec<String> {
+        self.meta("clones")
+            .map(|raw| parse_list(&raw))
+            .unwrap_or_default()
+    }
+
     /// This ticket's tags, as recorded in `tags`.
     pub fn tags(&self) -> Vec<String> {
         self.meta("tags")
@@ -673,6 +685,21 @@ impl Task {
         related.sort();
         self.write_checked(expected, |text| {
             set_meta(text, "related", &format!("[{}]", related.join(",")))
+        })?;
+        Ok(true)
+    }
+
+    /// Add a copy's id to the `clones` list, in id order and without
+    /// duplicates. Returns whether the file changed.
+    pub fn add_clone(&self, expected: ContentHash, id: &str) -> Result<bool> {
+        let mut clones = self.clones();
+        if clones.iter().any(|known| known == id) {
+            return Ok(false);
+        }
+        clones.push(id.to_string());
+        clones.sort();
+        self.write_checked(expected, |text| {
+            set_meta(text, "clones", &format!("[{}]", clones.join(",")))
         })?;
         Ok(true)
     }

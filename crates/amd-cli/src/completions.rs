@@ -99,6 +99,7 @@ mod tests {
                 "backlog",
                 "abandon",
                 "link",
+                "duplicate",
                 "templates",
                 "completions",
             ] {
