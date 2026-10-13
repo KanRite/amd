@@ -122,6 +122,93 @@ pub struct TicketSummary {
     /// The tickets that are copies of it (`clones:`), as written.
     #[serde(default)]
     pub clones: Vec<String>,
+    /// Its typed links (`links:`), each `kind:id` as written (ticket 207).
+    #[serde(default)]
+    pub links: Vec<String>,
+}
+
+/// The kinds of link a ticket can have (ticket 207), as `(slug, label)`:
+/// the slug is what `links:` and `amd link --type` use. The same list, in
+/// the same order, as `agile_md::links::LinkType::ALL`, which `amd-ui`'s
+/// tests check, since this crate can't depend on amd-lib.
+pub const LINK_KINDS: [(&str, &str); 11] = [
+    ("relates-to", "Relates to"),
+    ("blocks", "Blocks"),
+    ("blocked-by", "Blocked by"),
+    ("depends-on", "Depends on"),
+    ("depended-on-by", "Depended on by"),
+    ("parent-of", "Parent of"),
+    ("child-of", "Child of"),
+    ("clone-of", "Clone of"),
+    ("cloned-by", "Cloned by"),
+    ("supersedes", "Supersedes"),
+    ("superseded-by", "Superseded by"),
+];
+
+/// The label for a link kind's slug (the slug itself if it's unknown).
+pub fn link_label(slug: &str) -> String {
+    LINK_KINDS
+        .iter()
+        .find(|(known, _)| *known == slug)
+        .map_or_else(|| slug.to_string(), |(_, label)| (*label).to_string())
+}
+
+/// A `links:` entry split into its kind slug and the other ticket's id.
+pub fn split_link(entry: &str) -> Option<(&str, &str)> {
+    let (kind, id) = entry.split_once(':')?;
+    (!id.trim().is_empty()).then_some((kind, id.trim()))
+}
+
+/// The tickets a person may be after when they type `query` into the link
+/// search (ticket 207), best first, at most `limit`. A number (`12`, `#12`)
+/// finds the ticket numbered 12 first and then those whose number starts
+/// with it; words must all appear in the title (ignoring case), or in the
+/// file name, so a pasted slug works. `me` is left out, and nothing is
+/// offered for an empty query.
+pub fn link_candidates(
+    all: &[TicketSummary],
+    me: Option<u32>,
+    query: &str,
+    limit: usize,
+) -> Vec<TicketSummary> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let digits = query.trim_start_matches('#');
+    let number = (!digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()))
+        .then(|| digits.trim_start_matches('0'));
+    let words: Vec<String> = query
+        .to_lowercase()
+        .split_whitespace()
+        .map(String::from)
+        .collect();
+    let mut hits: Vec<(u8, u32, &TicketSummary)> = all
+        .iter()
+        .filter(|t| me.is_none() || ticket_number(&t.id) != me)
+        .filter_map(|t| {
+            let n = ticket_number(&t.id).unwrap_or(0);
+            if let Some(typed) = number {
+                let shown = n.to_string();
+                if typed.is_empty() || shown == typed {
+                    return Some((0, n, t));
+                }
+                if shown.starts_with(typed) {
+                    return Some((1, n, t));
+                }
+            }
+            let haystack = format!("{} {}", t.title, t.file).to_lowercase();
+            words
+                .iter()
+                .all(|w| haystack.contains(w.as_str()))
+                .then_some((2, n, t))
+        })
+        .collect();
+    hits.sort_by_key(|(rank, n, _)| (*rank, *n));
+    hits.into_iter()
+        .take(limit)
+        .map(|(_, _, t)| t.clone())
+        .collect()
 }
 
 /// The ticket number a `parent`/`related` entry names: `042`, `"042"` or
@@ -1019,6 +1106,7 @@ mod assigned_tests {
             related: Vec::new(),
             clone_of: String::new(),
             clones: Vec::new(),
+            links: Vec::new(),
         }
     }
 
@@ -1136,6 +1224,7 @@ mod search_tests {
             related: Vec::new(),
             clone_of: String::new(),
             clones: Vec::new(),
+            links: Vec::new(),
         }
     }
 
@@ -1231,5 +1320,92 @@ mod search_tests {
         assert_eq!(complete_tag("#t", "triage"), "#TRIAGE ");
         assert_eq!(complete_tag("search -#am", "AMDUI"), "search -#AMDUI ");
         assert_eq!(complete_tag("search", "AMDUI"), "search");
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+
+    fn ticket(id: &str, title: &str) -> TicketSummary {
+        TicketSummary {
+            repo: String::new(),
+            repository: String::new(),
+            file: format!("{id}-{}.md", slugify(title)),
+            column: Column::Todo,
+            id: id.into(),
+            title: title.into(),
+            assignee: String::new(),
+            tags: Vec::new(),
+            priority: String::new(),
+            created: String::new(),
+            epic: None,
+            text: String::new(),
+            epic_label: String::new(),
+            points: String::new(),
+            lock: None,
+            lapsed: None,
+            parent: String::new(),
+            related: Vec::new(),
+            clone_of: String::new(),
+            clones: Vec::new(),
+            links: Vec::new(),
+        }
+    }
+
+    fn ids(found: &[TicketSummary]) -> Vec<&str> {
+        found.iter().map(|t| t.id.as_str()).collect()
+    }
+
+    #[test]
+    fn a_number_finds_that_ticket_first_then_the_ones_it_starts() {
+        let all = [
+            ticket("012", "Twelve"),
+            ticket("120", "Hundred twenty"),
+            ticket("021", "Other"),
+            ticket("001", "One"),
+        ];
+        assert_eq!(ids(&link_candidates(&all, None, "12", 8)), ["012", "120"]);
+        assert_eq!(ids(&link_candidates(&all, None, "#012", 8)), ["012", "120"]);
+    }
+
+    #[test]
+    fn words_find_a_title_in_any_case_and_all_must_appear() {
+        let all = [
+            ticket("001", "Enable linking of tickets"),
+            ticket("002", "Ticket search bug"),
+        ];
+        assert_eq!(
+            ids(&link_candidates(&all, None, "TICKET", 8)),
+            ["001", "002"]
+        );
+        assert_eq!(
+            ids(&link_candidates(&all, None, "search ticket", 8)),
+            ["002"]
+        );
+        assert!(link_candidates(&all, None, "nothing", 8).is_empty());
+    }
+
+    #[test]
+    fn the_ticket_itself_and_an_empty_query_offer_nothing() {
+        let all = [ticket("001", "Alpha"), ticket("002", "Alpha two")];
+        assert_eq!(ids(&link_candidates(&all, Some(1), "alpha", 8)), ["002"]);
+        assert!(link_candidates(&all, Some(1), "  ", 8).is_empty());
+    }
+
+    #[test]
+    fn the_list_is_cut_at_the_limit() {
+        let all: Vec<_> = (1..=5)
+            .map(|n| ticket(&format!("{n:03}"), "Same"))
+            .collect();
+        assert_eq!(link_candidates(&all, None, "same", 3).len(), 3);
+    }
+
+    #[test]
+    fn a_links_entry_splits_and_unknown_kinds_keep_their_slug() {
+        assert_eq!(split_link("blocks:012"), Some(("blocks", "012")));
+        assert_eq!(split_link("blocks:"), None);
+        assert_eq!(link_label("blocked-by"), "Blocked by");
+        assert_eq!(link_label("mystery"), "mystery");
     }
 }

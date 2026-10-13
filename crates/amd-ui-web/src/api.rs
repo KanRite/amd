@@ -223,6 +223,37 @@ pub async fn clone_ticket(place: &Place, file: &str) -> Result<Created, String> 
     call("clone_ticket", &TicketRef { place, file }).await
 }
 
+#[derive(Serialize)]
+struct LinkArgs<'a> {
+    place: &'a Place,
+    file: &'a str,
+    other: &'a str,
+    kind: &'a str,
+    remove: bool,
+}
+
+/// Links a ticket to another as `kind` (`blocks`, `child-of`, …), or unlinks
+/// them; the other ticket records the opposite (ticket 207).
+pub async fn link_ticket(
+    place: &Place,
+    file: &str,
+    other: &str,
+    kind: &str,
+    remove: bool,
+) -> Result<SyncReport, String> {
+    call(
+        "link_ticket",
+        &LinkArgs {
+            place,
+            file,
+            other,
+            kind,
+            remove,
+        },
+    )
+    .await
+}
+
 /// Creates a ticket in `repo`'s backlog (the board's own when `None`),
 /// as a draft when `draft` (ticket 114).
 pub async fn create_ticket(

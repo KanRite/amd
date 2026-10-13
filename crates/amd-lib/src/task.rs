@@ -704,6 +704,109 @@ impl Task {
         Ok(true)
     }
 
+    /// The typed links recorded in `links` (ticket 207). An entry this
+    /// version doesn't understand is skipped, not an error, so a board
+    /// written by a newer one still opens.
+    pub fn links(&self) -> Vec<crate::links::Link> {
+        self.meta("links")
+            .map(|raw| parse_list(&raw))
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|entry| crate::links::Link::parse(entry))
+            .collect()
+    }
+
+    /// Add a typed link to `links`, kept in order and without duplicates.
+    /// Returns whether the file changed.
+    pub fn add_link(&self, expected: ContentHash, link: &crate::links::Link) -> Result<bool> {
+        let mut links = self.links();
+        if links.contains(link) {
+            return Ok(false);
+        }
+        links.push(link.clone());
+        links.sort();
+        self.write_checked(expected, |text| set_links(text, &links))?;
+        Ok(true)
+    }
+
+    /// Take a typed link out of `links`. Returns whether the file changed.
+    pub fn remove_link(&self, expected: ContentHash, link: &crate::links::Link) -> Result<bool> {
+        let mut links = self.links();
+        let before = links.len();
+        links.retain(|known| known != link);
+        if links.len() == before {
+            return Ok(false);
+        }
+        self.write_checked(expected, |text| set_links(text, &links))?;
+        Ok(true)
+    }
+
+    /// Set the `parent` key (empty clears it). Only this file changes: the
+    /// parent's `## Children` list is [`Task::add_child_link`]'s business.
+    pub fn set_parent(&self, expected: ContentHash, id: &str) -> Result<()> {
+        self.write_checked(expected, |text| {
+            set_meta(text, "parent", &format!("{id:?}"))
+        })
+    }
+
+    /// Set the `clone-of` key (empty clears it, leaving the key as `""`).
+    pub fn set_clone_of(&self, expected: ContentHash, id: &str) -> Result<()> {
+        self.write_checked(expected, |text| {
+            set_meta(text, "clone-of", &format!("{id:?}"))
+        })
+    }
+
+    /// Take ids off the `related` list. Returns whether the file changed.
+    pub fn remove_related(&self, expected: ContentHash, id: &str) -> Result<bool> {
+        let mut related = self.related();
+        let before = related.len();
+        related.retain(|known| known != id);
+        if related.len() == before {
+            return Ok(false);
+        }
+        self.write_checked(expected, |text| {
+            set_meta(text, "related", &format!("[{}]", related.join(",")))
+        })?;
+        Ok(true)
+    }
+
+    /// Take a copy's id off the `clones` list. Returns whether the file changed.
+    pub fn remove_clone(&self, expected: ContentHash, id: &str) -> Result<bool> {
+        let mut clones = self.clones();
+        let before = clones.len();
+        clones.retain(|known| known != id);
+        if clones.len() == before {
+            return Ok(false);
+        }
+        self.write_checked(expected, |text| {
+            set_meta(text, "clones", &format!("[{}]", clones.join(",")))
+        })?;
+        Ok(true)
+    }
+
+    /// Take a child's wikilink out of the `## Children` list. Returns
+    /// whether the file changed.
+    pub fn remove_child_link(&self, expected: ContentHash, stem: &str) -> Result<bool> {
+        let text = fs::read_to_string(&self.path)
+            .with_context(|| format!("reading {}", self.path.display()))?;
+        let link = format!("- [[{stem}]]");
+        if !text.lines().any(|line| line.trim() == link) {
+            return Ok(false);
+        }
+        self.write_checked(expected, |text| {
+            let mut out: String = text
+                .lines()
+                .filter(|line| line.trim() != link)
+                .map(|line| format!("{line}\n"))
+                .collect();
+            if !text.ends_with('\n') {
+                out.pop();
+            }
+            Ok(out)
+        })?;
+        Ok(true)
+    }
+
     /// Record a child under a `## Children` heading, as a wikilink an editor
     /// can follow. The heading is added when it isn't there yet.
     pub fn add_child_link(&self, expected: ContentHash, stem: &str) -> Result<bool> {
@@ -901,6 +1004,12 @@ pub fn check_repository(near: &Path, name: &str) -> Result<()> {
         bail!("{name} isn't cloned on this machine — clone it first (and register it)");
     }
     Ok(())
+}
+
+/// Write the `links` key: a flow list of `kind:id` entries.
+fn set_links(text: &str, links: &[crate::links::Link]) -> Result<String> {
+    let entries: Vec<String> = links.iter().map(|link| link.entry()).collect();
+    set_meta(text, "links", &format!("[{}]", entries.join(",")))
 }
 
 pub(crate) fn set_meta(text: &str, key: &str, value: &str) -> Result<String> {

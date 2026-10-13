@@ -160,6 +160,18 @@ pub fn tools() -> Vec<Tool> {
             input: json!({"type": "object", "properties": {"ticket": reference}, "required": ["ticket"]}),
         },
         Tool {
+            name: "link_tickets",
+            title: "Link two tickets",
+            description: "Link a ticket to another on the same board with a type, or remove the link, and commit it. The other ticket records the opposite (`blocks` there is `blocked-by` here), so either end shows it. Types: relates-to, blocks, blocked-by, depends-on, depended-on-by, parent-of, child-of, clone-of, cloned-by, supersedes, superseded-by. A ticket has one parent and is the clone of one original.",
+            read_only: false,
+            input: json!({"type": "object", "properties": {
+                "ticket": reference,
+                "to": {"type": "string", "description": "The other ticket: its number, or part of its file name"},
+                "type": {"type": "string", "enum": crate::links::LinkType::ALL.map(crate::links::LinkType::slug), "description": "How `ticket` stands to `to`; relates-to when left out"},
+                "remove": {"type": "boolean", "description": "Take the link away instead of adding it"}
+            }, "required": ["ticket", "to"]}),
+        },
+        Tool {
             name: "move_ticket",
             title: "Move a ticket",
             description: "Move a ticket one column along (backlog, todo, doing, done) and commit it. Entering doing takes the user's lock on it; leaving gives it back. Refused when doing is at its WIP limit unless `force`. Doesn't switch git branches.",
@@ -228,6 +240,7 @@ pub fn call(name: &str, args: &Value) -> Result<Reply> {
         "idea" => idea_tool(args),
         "create_ticket" => create_ticket(args),
         "clone_ticket" => clone_ticket(args),
+        "link_tickets" => link_tickets(args),
         "move_ticket" => move_ticket(args),
         "edit_ticket" => edit_ticket(args),
         "assign_ticket" => assign_ticket(args),
@@ -931,6 +944,30 @@ fn clone_ticket(args: &Value) -> Result<Reply> {
     lines.extend(events_text(&outcome));
     let data = card(&repo, &made);
     Ok(project.reply(lines.join("\n"), data))
+}
+
+fn link_tickets(args: &Value) -> Result<Reply> {
+    let mut project = Project::open(Purpose::Write)?;
+    let (i, task) = project.find(&required(args, "ticket")?)?;
+    let repo = project.boards[i].0.clone();
+    let kind = match arg(args, "type") {
+        Some(text) => crate::links::LinkType::parse(&text)
+            .with_context(|| format!("unknown link type '{text}'"))?,
+        None => crate::links::LinkType::RelatesTo,
+    };
+    let remove = args.get("remove").and_then(Value::as_bool).unwrap_or(false);
+    let board = project.ready(i)?;
+    let other = board.find(&required(args, "to")?)?;
+    let outcome = transition::link_tickets(
+        board,
+        &task,
+        kind,
+        std::slice::from_ref(&other),
+        remove,
+        false,
+    )?;
+    let data = card(&repo, &task);
+    Ok(project.reply(events_text(&outcome).join("\n"), data))
 }
 
 fn move_ticket(args: &Value) -> Result<Reply> {

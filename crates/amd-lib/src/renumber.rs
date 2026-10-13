@@ -160,6 +160,8 @@ fn renumber_one(
         task::meta_in(&kept_text, "clone-of").and_then(number),
     );
 
+    let (moving_links, kept_links) = (link_entries(&moving_text), link_entries(&kept_text));
+
     let text = task::set_meta(&moving_text, "id", &format!("\"{to:03}\""))?;
     if git::is_tracked(board.repo_root(), &moving.path) {
         git::mv(board.repo_root(), &moving.path, &new_path)?;
@@ -298,6 +300,49 @@ fn renumber_one(
                     )),
                 }
             }
+
+            // A typed link (ticket 207) is recorded on both tickets, each as
+            // the inverse of the other, so each end vouches for the other.
+            let entries = link_entries(&text);
+            if entries.iter().any(|l| number(&l.id) == Some(clash.id)) {
+                let vouches = |links: &[crate::links::Link]| {
+                    entries
+                        .iter()
+                        .filter(|l| number(&l.id) == Some(clash.id))
+                        .all(|l| {
+                            links.iter().any(|back| {
+                                back.kind == l.kind.inverse()
+                                    && Some(back.id.as_str())
+                                        == other.id.map(|n| format!("{n:03}")).as_deref()
+                            })
+                        })
+                };
+                match ours(vouches(&moving_links), vouches(&kept_links)) {
+                    Some(true) => {
+                        let mut list: Vec<crate::links::Link> = entries
+                            .into_iter()
+                            .map(|mut l| {
+                                if number(&l.id) == Some(clash.id) {
+                                    l.id = new.clone();
+                                }
+                                l
+                            })
+                            .collect();
+                        list.sort();
+                        list.dedup();
+                        let written: Vec<String> = list.iter().map(|l| l.entry()).collect();
+                        text = task::set_meta(&text, "links", &format!("[{}]", written.join(",")))?;
+                        report
+                            .updated
+                            .push((other.stem.clone(), format!("links {old} -> {new}")));
+                    }
+                    Some(false) => {}
+                    None => report.ambiguous.push((
+                        other.stem.clone(),
+                        format!("links {old}: {} or {new_stem}?", clash.keep.stem),
+                    )),
+                }
+            }
         }
 
         if text != before {
@@ -322,6 +367,16 @@ fn children(text: &str) -> Vec<String> {
             let inner = line.trim().strip_prefix("- [[")?.strip_suffix("]]")?;
             Some(inner.to_string())
         })
+        .collect()
+}
+
+/// A ticket's typed links (ticket 207), as written in `links`.
+fn link_entries(text: &str) -> Vec<crate::links::Link> {
+    task::meta_in(text, "links")
+        .map(task::parse_list)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|entry| crate::links::Link::parse(entry))
         .collect()
 }
 
@@ -467,6 +522,31 @@ mod tests {
         assert!(text(&board, "005-beta.md").contains("clones: [004]"));
         // 001's bare 002 is the later ticket's: 005-beta says it is a copy of 001.
         assert!(text(&board, "001-source.md").contains("clones: [005]"));
+        assert!(board.duplicate_ids().unwrap().is_empty());
+    }
+
+    #[test]
+    fn typed_links_follow_the_ticket_they_can_prove_they_mean() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        // Two tickets hold 002. The later one blocks 004, which says so back;
+        // the older one links to nothing. 001 blocks "002": the later one,
+        // whose own links say it is blocked by 001.
+        ticket(&board, "001-source.md", "links: [blocks:002]\n", "");
+        ticket(&board, "002-alpha.md", "created: \"2026-01-01\"\n", "");
+        ticket(
+            &board,
+            "002-beta.md",
+            "created: \"2026-02-01\"\nlinks: [blocked-by:001,blocks:004]\n",
+            "",
+        );
+        ticket(&board, "004-other.md", "links: [blocked-by:002]\n", "");
+
+        let clashes = plan(&board, None).unwrap();
+        apply(&board, &clashes).unwrap();
+
+        assert!(text(&board, "004-other.md").contains("links: [blocked-by:005]"));
+        assert!(text(&board, "001-source.md").contains("links: [blocks:005]"));
         assert!(board.duplicate_ids().unwrap().is_empty());
     }
 

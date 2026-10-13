@@ -523,6 +523,39 @@ async fn rename_epic(
     .await
 }
 
+/// Links a ticket to another on the same board as `kind`, or unlinks them
+/// (`amd link`, ticket 207). The other ticket records the opposite, and both
+/// files go in one commit.
+#[tauri::command]
+async fn link_ticket(
+    state: Tauri<'_, AppState>,
+    place: Place,
+    file: String,
+    other: String,
+    kind: String,
+    remove: bool,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = p.board(&place.repo)?;
+        let task = task_at(board, &place, &file)?;
+        let kind = agile_md::links::LinkType::parse(&kind)
+            .ok_or_else(|| format!("unknown link type {kind:?}"))?;
+        let other = board.find(&other).map_err(err)?;
+        let outcome = transition::link_tickets(
+            board,
+            &task,
+            kind,
+            std::slice::from_ref(&other),
+            remove,
+            false,
+        )
+        .map_err(err)?;
+        let verb = if remove { "unlink" } else { "link" };
+        Ok(report_outcome(board, message(verb, &task), &outcome))
+    })
+    .await
+}
+
 /// Takes a ticket off the board into the archive (`amd abandon`).
 #[tauri::command]
 async fn archive_ticket(
@@ -1888,6 +1921,7 @@ pub fn run() {
             move_ticket,
             create_ticket,
             clone_ticket,
+            link_ticket,
             create_epic,
             create_sprint,
             start_sprint,
@@ -2458,6 +2492,15 @@ fn clone_into(project: &Project, name: &str) -> Result<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_pages_link_kinds_are_amd_libs() {
+        let lib: Vec<(&str, &str)> = agile_md::links::LinkType::ALL
+            .iter()
+            .map(|kind| (kind.slug(), kind.label()))
+            .collect();
+        assert_eq!(lib, amd_ui_model::LINK_KINDS);
+    }
+
     use super::*;
     use amd_ui_model::Column as UiColumn;
 

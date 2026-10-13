@@ -466,6 +466,7 @@ mod tests {
             related: Vec::new(),
             clone_of: String::new(),
             clones: Vec::new(),
+            links: Vec::new(),
         }
     }
 

@@ -826,6 +826,31 @@ off**, ticket 141) to
   made and `Created.unlinked` becomes a warning. Same board only, since a
   bare id can't name a ticket on another.
 
+- **Typed links** (ticket 207, `crates/amd-lib/src/links.rs`, `amd link
+  <ref> <ref>... [--type T] [--remove] [--one-way]`, the MCP `link_tickets`,
+  the editor's **Add link**). `LinkType` has eleven kinds, each with an
+  inverse written on the other ticket: relates-to, blocks/blocked-by,
+  depends-on/depended-on-by, parent-of/child-of, clone-of/cloned-by,
+  supersedes/superseded-by (the last of each pair exists only so the other
+  end has something to say). **Four kinds keep their older fields** so
+  there is one record of each fact: relates-to is `related`, child-of the
+  child's `parent` with parent-of the parent's `## Children` wikilink,
+  clone-of `clone-of` with cloned-by `clones`. The rest live in a `links`
+  flow list of `kind:id` entries (`links: [blocks:012,depends-on:003]`,
+  `Task::links`/`add_link`/`remove_link`; an entry it can't read is skipped).
+  `links::apply` writes both ends, each hash-checked, after a `preflight`
+  that refuses a second parent or a second original before touching a file;
+  `transition::link_tickets` wraps it in one auto-commit (`link:`/`unlink:
+  001 -> 002`). Same board only. `import` and `renumber` remap `links`
+  (renumber: each end vouches for the other as the inverse kind). amdui:
+  `TicketSummary.links` carries the entries; `amd_ui_model::LINK_KINDS`
+  mirrors `LinkType::ALL` (amd-ui's tests check they agree, as the model
+  can't depend on amd-lib); `link_candidates` is the search (a number finds
+  that ticket first, words match title or file name); the Relationships
+  panel shows a group per kind with a × on each, and both Add link and ×
+  wait while the editor has unsaved edits, since they rewrite the file.
+  The command is `link_ticket`.
+
 - **One ticket, one template.** There are no ticket types any more: `admin` and
   `development` collapsed into fields you either fill in or don't.
 - **`branch-type` is what gives a ticket a branch**, and it's empty by default.
