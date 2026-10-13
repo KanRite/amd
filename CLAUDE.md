@@ -599,6 +599,23 @@ off**, ticket 141) to
   the no-ref, listing form. The `Verb` external-subcommand path (epic names)
   parses `--tag`/`-t` out of its raw args by hand, since clap hands that
   whole tail over as an opaque `Vec<String>`.
+  **`--tag` is repeatable and `-TAG` leaves a tag out** (ticket 123,
+  `Task::matches_tags`, whole tags, case ignored): several wanted tags need
+  just one of them, every `-TAG` still rules tickets out, so `--tag FUTURE
+  --tag -BUSINESS` is "tagged FUTURE, not BUSINESS". clap needs
+  `allow_hyphen_values` on the flag for the dash. The MCP `board` tool's
+  `tag` takes the same.
+- **Board search** (ticket 123, `TicketSummary::matches` in
+  `amd-ui-model`): plain `word` / `-word` search the text (id, title, file
+  name, body, assignee, priority, epic; ignoring case) and **never the
+  tags**, so `triage` doesn't find the tag TRIAGE. `#TAG` / `-#TAG` search
+  the tags: any tag *starting with* what's typed, case ignored; several
+  `#TAG` terms need just one, each `-#TAG` rules tickets out, plain words
+  must all appear. Tags are checked first, so the text of a ticket they've
+  ruled out is never lowercased. The search box (`SearchBox` in
+  `amd-ui-web/src/app.rs`) offers the tags starting with a `#T` / `-#T` being
+  typed (`tag_being_typed`, `complete_tag`), from `Board.tags`. The CLI's
+  `--tag` is whole tags, not prefixes.
 - **Leases** (`docs/adr/0007-concurrency-and-locking.md`, currently only
   surviving at `~/develop/github/agile-md/to-sort/old-amd-docs/adr/` —
   `docs/adr/` was never restored into this repo after the git-history reset):
