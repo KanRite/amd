@@ -595,8 +595,7 @@ enum Cmd {
     /// Take a repository off the project
     ///
     /// For everyone: off its declared list (committed and pushed), so it
-    /// leaves the repository lists unless a ticket names it, and off this
-    /// machine. One that's only registered here just loses that. The clone
+    /// leaves the repository lists, and off this machine. One that's only registered here just loses that. The clone
     /// itself is left alone
     Deregister {
         #[arg(value_name = "NAME")]
@@ -2270,8 +2269,7 @@ fn cmd_clone(board: &Board, name: Option<&str>, all: bool) -> Result<()> {
 /// `amd deregister <name>` (ticket 120). A repository the project declares
 /// comes off the project for everyone, exactly as `register --remove`: off the
 /// declared list, committed and pushed, so it leaves every teammate's
-/// repository filter and fields unless a ticket names it, and off this
-/// machine's registry. One that's only registered here (a project's own
+/// repository filter and fields, and off this machine's registry. One that's only registered here (a project's own
 /// tickets or documents repository, say) just loses that registration. The
 /// clone is never touched.
 fn cmd_deregister(board: &Board, name: &str) -> Result<()> {

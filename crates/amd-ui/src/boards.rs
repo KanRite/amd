@@ -160,7 +160,7 @@ impl Project {
             .map(str::to_string)
             .filter(|p| !p.trim().is_empty())
             .unwrap_or_else(|| own_name.clone());
-        let ticket_repos = self.ticket_repos(&columns, &epics);
+        let ticket_repos = self.ticket_repos();
         let settings = board_settings::load(&self.repos[0].1);
         let tags = self.tag_uses(&settings)?;
         Ok(ui::Board {
@@ -207,23 +207,14 @@ impl Project {
             .collect())
     }
 
-    /// What the repository filter and fields offer (tickets 101/107): the
-    /// project's declared repositories plus any a ticket already names,
-    /// sorted, each marked available when it's cloned on this machine.
-    fn ticket_repos(&self, columns: &[BoardColumn], epics: &[Epic]) -> Vec<ui::RepoChoice> {
-        let mut names: std::collections::BTreeSet<String> = board_settings::load(&self.repos[0].1)
-            .repos()
-            .into_iter()
-            .collect();
-        let tickets = columns
-            .iter()
-            .flat_map(|c| c.tickets.iter())
-            .chain(epics.iter().flat_map(|e| e.tickets.iter()));
-        names.extend(
-            tickets
-                .map(|t| t.repository.clone())
-                .filter(|r| !r.is_empty()),
-        );
+    /// What the repository filter and fields offer (tickets 101/107, 195):
+    /// the project's declared repositories and nothing else, sorted, each
+    /// marked available when it's cloned on this machine. A repository a
+    /// ticket merely names (one since renamed or retired) is never added.
+    fn ticket_repos(&self) -> Vec<ui::RepoChoice> {
+        let mut names = board_settings::load(&self.repos[0].1).repos();
+        names.sort();
+        names.dedup();
         let here = &self.repos[0].1.root;
         names
             .into_iter()
