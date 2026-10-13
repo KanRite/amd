@@ -245,6 +245,27 @@ fn remap_links(text: &str, id_map: &HashMap<String, String>) -> Result<String> {
         text = task::set_meta(&text, "clones", &format!("[{}]", remapped.join(",")))?;
     }
 
+    let links_remap = task::meta_in(&text, "links").map(|raw| {
+        let entries: Vec<crate::links::Link> = task::parse_list(raw)
+            .iter()
+            .filter_map(|entry| crate::links::Link::parse(entry))
+            .collect();
+        let changed = entries.iter().any(|link| id_map.contains_key(&link.id));
+        (changed, entries)
+    });
+    if let Some((true, entries)) = links_remap {
+        let remapped: Vec<String> = entries
+            .into_iter()
+            .map(|mut link| {
+                if let Some(new_id) = id_map.get(&link.id) {
+                    link.id = new_id.clone();
+                }
+                link.entry()
+            })
+            .collect();
+        text = task::set_meta(&text, "links", &format!("[{}]", remapped.join(",")))?;
+    }
+
     Ok(text)
 }
 
@@ -559,5 +580,13 @@ mod tests {
         let out = remap_links(text, &map).unwrap();
         assert!(out.contains("clone-of: \"011\""), "{out}");
         assert!(out.contains("clones: [011,009]"), "{out}");
+    }
+
+    #[test]
+    fn typed_links_are_remapped_within_the_batch() {
+        let map: HashMap<String, String> = [("001".to_string(), "011".to_string())].into();
+        let text = "---\nid: \"002\"\nlinks: [blocks:001,depends-on:009]\n---\n\nbody\n";
+        let out = remap_links(text, &map).unwrap();
+        assert!(out.contains("links: [blocks:011,depends-on:009]"), "{out}");
     }
 }

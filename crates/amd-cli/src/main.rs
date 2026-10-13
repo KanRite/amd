@@ -606,12 +606,34 @@ enum Cmd {
         #[arg(long, value_name = "NAME")]
         project: Option<String>,
     },
-    /// Link tickets together: both ends get the other in `related`
+    /// Link tickets together, with a type; both ends record it
+    ///
+    /// By default the tickets are just related: both get the other in
+    /// `related`. `--type` says how the first stands to the others, and each
+    /// of them records the opposite (`amd link 12 13 --type blocks` makes 13
+    /// blocked-by 12). `--remove` unlinks. Both ends are one commit.
+    ///
+    /// Types: depends-on, depended-on-by, parent-of, child-of, relates-to,
+    /// clone-of, cloned-by, blocked-by, blocks, supersedes, superseded-by.
+    /// A ticket has one parent and is a clone of one original.
     Link {
         #[arg(value_name = "REF")]
         task: String,
         #[arg(value_name = "REF", required = true)]
         to: Vec<String>,
+        /// How the first ticket stands to the others
+        #[arg(
+            long = "type",
+            value_name = "TYPE",
+            default_value = "relates-to",
+            value_parser = clap::builder::PossibleValuesParser::new(
+                agile_md::links::LinkType::ALL.map(agile_md::links::LinkType::slug)
+            ),
+        )]
+        kind: String,
+        /// Take the link away instead of adding it
+        #[arg(long)]
+        remove: bool,
         /// Only record the link on the first ticket
         #[arg(long)]
         one_way: bool,
@@ -1297,7 +1319,13 @@ fn run() -> Result<()> {
         Cmd::Draft { task } => cmd_draft(&board, &task, true),
         Cmd::Ready { task } => cmd_draft(&board, &task, false),
         Cmd::Unlock { task, force } => cmd_unlock(&board, &task, force),
-        Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
+        Cmd::Link {
+            task,
+            to,
+            kind,
+            remove,
+            one_way,
+        } => cmd_link(&board, &task, &to, &kind, remove, one_way),
         Cmd::Duplicate { task } => {
             let original = board.find(&task)?;
             report(&transition::clone_ticket(&board, &original)?);
@@ -1631,42 +1659,32 @@ fn report(outcome: &transition::Outcome) {
     }
 }
 
-/// Link tickets together. The relation is symmetric by default — "related"
-/// reads the same from either end — so both files are updated unless the
-/// caller asks for one direction only.
-fn cmd_link(board: &Board, reference: &str, to: &[String], one_way: bool) -> Result<()> {
+/// Link tickets together (ticket 207). Both ends record the link — the
+/// opposite kind on the other ticket — unless the caller asks for one
+/// direction only.
+fn cmd_link(
+    board: &Board,
+    reference: &str,
+    to: &[String],
+    kind: &str,
+    remove: bool,
+    one_way: bool,
+) -> Result<()> {
+    let kind = agile_md::links::LinkType::parse(kind)
+        .with_context(|| format!("unknown link type '{kind}'"))?;
     let task = board.find(reference)?;
-    let id = task.id_display();
     let mut others = Vec::new();
     for other in to {
         let other = board.find(other)?;
         if other.path == task.path {
-            bail!("a task can't be related to itself");
+            bail!("a ticket can't be linked to itself");
         }
         others.push(other);
     }
-
-    let ids: Vec<String> = others.iter().map(|other| other.id_display()).collect();
-    // Both ends of the relation are one logical change, so one commit
-    // (ticket 054), like `amd group empty`.
-    // The message reads `link: 001 -> 002, 003 "<001's title>"`.
-    let subject = format!("{id} -> {}", ids.join(", "));
-    with_auto_commit(board, "link", &subject, &task.title(), || {
-        if task.add_related(task.hash()?, &ids)? {
-            println!("{} related: {}", id, ids.join(", "));
-        } else {
-            println!("{id} was already related to {}", ids.join(", "));
-        }
-        if one_way {
-            return Ok(());
-        }
-        for other in &others {
-            if other.add_related(other.hash()?, std::slice::from_ref(&id))? {
-                println!("{} related: {id}", other.id_display());
-            }
-        }
-        Ok(())
-    })
+    report(&transition::link_tickets(
+        board, &task, kind, &others, remove, one_way,
+    )?);
+    Ok(())
 }
 
 /// Opens the desktop board: the `amdui` binary installed beside this one,

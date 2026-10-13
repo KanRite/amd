@@ -1193,14 +1193,37 @@ assert "amd link relates two tickets both ways" \
     && grep -q 'related: \[0' tasks/*/002-second-task.md \
     && grep -q '002' tasks/backlog/*-depends-on-the-first.md"
 assert "amd link is idempotent" \
-  bash -c "'${AMD}' link 2 depends-on-the-first | grep -q 'already related'"
+  bash -c "'${AMD}' link 2 depends-on-the-first | grep -q 'already relates to'"
 assert "a task cannot be related to itself" \
-  bash -c "'${AMD}' link 2 2 2>&1 | grep -q \"can't be related to itself\""
+  bash -c "'${AMD}' link 2 2 2>&1 | grep -q \"can't be linked to itself\""
 "${AMD}" new "One way only" >/dev/null
 assert "amd link --one-way leaves the other end alone" \
   bash -c "'${AMD}' link 2 one-way --one-way >/dev/null && ! grep -q '002' tasks/backlog/*-one-way-only.md"
 assert "a ticket with no branch carries the list too" \
   bash -c "grep -q '^related: \[\]$' tasks/*/*-assigned-at-creation.md"
+
+echo "typed links (ticket 207):"
+"${AMD}" new "Link blocker" >/dev/null
+"${AMD}" new "Link blocked" >/dev/null
+assert "amd link --type blocks records the opposite on the other ticket" \
+  bash -c "'${AMD}' link link-blocker link-blocked --type blocks >/dev/null \
+    && grep -q '^links: \[blocks:0' tasks/backlog/*-link-blocker.md \
+    && grep -q '^links: \[blocked-by:0' tasks/backlog/*-link-blocked.md"
+assert "a typed link is idempotent" \
+  bash -c "'${AMD}' link link-blocker link-blocked --type blocks | grep -q 'already blocks'"
+assert "a ticket may take several links of different types" \
+  bash -c "'${AMD}' link link-blocker link-blocked --type supersedes >/dev/null \
+    && grep -q '^links: \[blocks:0[0-9]*,supersedes:0' tasks/backlog/*-link-blocker.md"
+assert "an unknown link type is refused" \
+  bash -c "! '${AMD}' link link-blocker link-blocked --type befriends 2>/dev/null"
+assert "amd link --remove takes it away from both tickets" \
+  bash -c "'${AMD}' link link-blocker link-blocked --type blocks --remove >/dev/null \
+    && ! grep -q 'blocks:' tasks/backlog/*-link-blocker.md \
+    && ! grep -q 'blocked-by:' tasks/backlog/*-link-blocked.md"
+assert "child-of sets the parent and lists the child" \
+  bash -c "'${AMD}' link link-blocked link-blocker --type child-of >/dev/null \
+    && grep -q '^parent: \"0' tasks/backlog/*-link-blocked.md \
+    && grep -q 'link-blocked' tasks/backlog/*-link-blocker.md"
 
 echo "duplicate:"
 assert "amd duplicate copies a ticket" \

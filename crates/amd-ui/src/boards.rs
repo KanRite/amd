@@ -256,6 +256,7 @@ impl Project {
             related: task.related(),
             clone_of: task.clone_of().unwrap_or_default(),
             clones: task.clones(),
+            links: task.links().iter().map(|link| link.entry()).collect(),
         }
     }
 

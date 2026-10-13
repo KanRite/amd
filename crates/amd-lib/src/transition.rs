@@ -446,6 +446,37 @@ fn clone_body(body: &str) -> String {
     out
 }
 
+/// Link `from` to each of `to` as `kind` — or unlink them, with `remove` —
+/// recording the opposite on the other ticket unless `one_way` (ticket 207).
+/// Every end is one change in history: one auto-commit, `link: 001 -> 002`.
+/// The events are a line for each ticket that changed.
+pub fn link_tickets(
+    board: &Board,
+    from: &Task,
+    kind: crate::links::LinkType,
+    to: &[Task],
+    remove: bool,
+    one_way: bool,
+) -> Result<Outcome> {
+    let id = from.id_display();
+    let ids: Vec<String> = to.iter().map(|other| other.id_display()).collect();
+    let subject = format!("{id} -> {}", ids.join(", "));
+    let verb = if remove { "unlink" } else { "link" };
+    let (lines, warning) = with_auto_commit(board, verb, &subject, &from.title(), || {
+        let mut lines = Vec::new();
+        for other in to {
+            lines.extend(crate::links::apply(from, kind, other, remove, one_way)?);
+        }
+        Ok(lines)
+    })?;
+    let mut outcome = Outcome::default();
+    outcome.events.extend(lines.into_iter().map(Event::Info));
+    if let Some(warning) = warning {
+        outcome.events.push(Event::Warn(warning));
+    }
+    Ok(outcome)
+}
+
 /// Save every editable field of an existing ticket in one write, checked
 /// against `expected` — the fingerprint taken when the form opened — so a
 /// ticket that changed underneath it is refused with the conflict rather than

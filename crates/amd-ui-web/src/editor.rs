@@ -500,7 +500,7 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                 </div>
             </Show>
 
-            <Relationships id=id place=place dirty=dirty />
+            <Relationships id=id place=place file=lock_file dirty=dirty />
 
             // ---- Rich text: toolbar + editable body
             <div class=move || if is_rich() { "flex shrink-0 flex-col gap-2" } else { "hidden" }>
@@ -1161,13 +1161,24 @@ fn AssigneePicker(
 /// named back. Each shows its number, title and column, and opens on a
 /// click; the links wait while there are unsaved edits, so following one
 /// can't lose them.
+///
+/// Ticket 207 adds the typed links (blocks, depends on, supersedes, …) and
+/// a way to make and break them: **Add link** picks a type, searches the
+/// board's tickets by number or title, and a click on a result links it;
+/// the other ticket records the opposite. Each link has a × to remove it
+/// (the "Linked from" ones don't: they're recorded on the other ticket).
+/// Adding and removing write both tickets, so they wait while this one has
+/// unsaved edits too.
 #[component]
 fn Relationships(
     id: RwSignal<String>,
     place: StoredValue<Place>,
+    file: StoredValue<String>,
     dirty: RwSignal<bool>,
 ) -> impl IntoView {
-    use amd_ui_model::{TicketSummary, ticket_number};
+    use amd_ui_model::{
+        LINK_KINDS, TicketSummary, link_candidates, link_label, split_link, ticket_number,
+    };
     let ctx = Ctx::get();
     // Every ticket on this ticket's board: the columns and the epics.
     let tickets = move || -> Vec<TicketSummary> {
@@ -1186,6 +1197,8 @@ fn Relationships(
                 .unwrap_or_default()
         })
     };
+    // Each group: its heading, the kind to unlink it with (none when this
+    // ticket doesn't hold the record), and its tickets.
     let groups = move || {
         let me = ticket_number(&id.get());
         let all = tickets();
@@ -1238,19 +1251,67 @@ fn Relationships(
             .into_iter()
             .filter_map(find)
             .collect();
-        [
-            ("Parent", parent),
-            ("Children", children),
-            ("Related", related),
-            ("Linked from", linked_from),
-            ("Clone of", clone_of),
-            ("Clones", clones),
-        ]
-        .into_iter()
-        .filter(|(_, list)| !list.is_empty())
-        .collect::<Vec<_>>()
+        let mut out: Vec<(String, Option<&'static str>, Vec<TicketSummary>)> = vec![
+            ("Parent".into(), Some("child-of"), parent),
+            ("Children".into(), Some("parent-of"), children),
+            ("Related".into(), Some("relates-to"), related),
+            ("Linked from".into(), None, linked_from),
+            ("Clone of".into(), Some("clone-of"), clone_of),
+            ("Clones".into(), Some("cloned-by"), clones),
+        ];
+        // The typed links, a group for each kind, in the picker's order.
+        let typed: Vec<(&str, u32)> = this
+            .as_ref()
+            .map(|t| {
+                t.links
+                    .iter()
+                    .filter_map(|entry| split_link(entry))
+                    .filter_map(|(kind, other)| Some((kind, ticket_number(other)?)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for (slug, _) in LINK_KINDS {
+            let list: Vec<TicketSummary> = typed
+                .iter()
+                .filter(|(kind, _)| *kind == slug)
+                .filter_map(|(_, n)| find(*n))
+                .collect();
+            out.push((link_label(slug), Some(slug), list));
+        }
+        out.into_iter()
+            .filter(|(_, _, list)| !list.is_empty())
+            .collect::<Vec<_>>()
     };
-    let link = move |t: TicketSummary| {
+
+    // Making and breaking links.
+    let adding = RwSignal::new(false);
+    let kind = RwSignal::new("relates-to".to_string());
+    let query = RwSignal::new(String::new());
+    let busy = RwSignal::new(false);
+    let failure = RwSignal::new(None::<String>);
+    let change_link = move |other: String, kind: String, remove: bool| {
+        busy.set(true);
+        failure.set(None);
+        spawn_local(async move {
+            let (place, file) = (place.get_value(), file.get_value());
+            match api::link_ticket(&place, &file, &other, &kind, remove).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    query.set(String::new());
+                    ctx.reload();
+                }
+                Err(e) => failure.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
+    let found = move || {
+        let me = ticket_number(&id.get());
+        link_candidates(&tickets(), me, &query.get(), 8)
+    };
+    let wait = move || dirty.get() || busy.get();
+
+    let link = move |(t, unlink): (TicketSummary, Option<&'static str>)| {
         let label = format!("{} {}", t.id, t.title);
         let column = t.column.dir_name();
         let target = Place {
@@ -1259,8 +1320,9 @@ fn Relationships(
             epic: t.epic.clone(),
         };
         let file = t.file.clone();
+        let other = t.id.clone();
         view! {
-            <li>
+            <li class="flex items-center gap-1">
                 <button
                     type="button"
                     class="text-left text-sm text-accent-700 hover:underline disabled:cursor-not-allowed disabled:opacity-60 dark:text-accent-300"
@@ -1270,35 +1332,126 @@ fn Relationships(
                 >
                     {label}
                 </button>
-                <span class="ml-2 text-xs text-slate-500">{column}</span>
+                <span class="ml-1 text-xs text-slate-500">{column}</span>
+                {unlink
+                    .map(|slug| {
+                        let label = format!("Remove the link to {other}");
+                        view! {
+                            <button
+                                type="button"
+                                aria-label=label.clone()
+                                title=move || {
+                                    if dirty.get() { "Save or discard your edits first".to_string() } else { label.clone() }
+                                }
+                                class="ml-1 rounded px-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-800"
+                                disabled=wait
+                                on:click=move |_| change_link(other.clone(), slug.to_string(), true)
+                            >
+                                "×"
+                            </button>
+                        }
+                    })}
             </li>
         }
     };
     view! {
-        <Show when=move || !groups().is_empty()>
-            <section
-                aria-label="Relationships"
-                class="flex flex-col gap-1.5 rounded border border-slate-200 px-3 py-2 dark:border-slate-700"
-            >
+        <section
+            aria-label="Relationships"
+            class="flex flex-col gap-1.5 rounded border border-slate-200 px-3 py-2 dark:border-slate-700"
+        >
+            <div class="flex items-center gap-2">
                 <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                     "Relationships"
                 </h3>
-                {move || {
-                    groups()
-                        .into_iter()
-                        .map(|(name, list)| {
-                            view! {
-                                <div class="flex flex-col gap-0.5">
-                                    <span class="text-xs font-medium text-slate-500">{name}</span>
-                                    <ul class="flex flex-col gap-0.5 pl-2">
-                                        {list.into_iter().map(link).collect_view()}
-                                    </ul>
-                                </div>
-                            }
-                        })
-                        .collect_view()
-                }}
-            </section>
-        </Show>
+                <button
+                    type="button"
+                    class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-800"
+                    aria-expanded=move || adding.get().to_string()
+                    title=move || {
+                        if dirty.get() {
+                            "Save or discard your edits first: a link changes this ticket's file"
+                        } else {
+                            "Link this ticket to another"
+                        }
+                    }
+                    disabled=move || dirty.get()
+                    on:click=move |_| adding.update(|open| *open = !*open)
+                >
+                    {move || if adding.get() { "Done" } else { "Add link" }}
+                </button>
+            </div>
+            <Show when=move || adding.get()>
+                <div class="flex flex-col gap-1.5 rounded bg-slate-50 p-2 dark:bg-slate-800/50">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <select
+                            aria-label="Link type"
+                            class="rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
+                            prop:value=move || kind.get()
+                            on:change=move |ev| kind.set(event_target_value(&ev))
+                        >
+                            {LINK_KINDS
+                                .map(|(slug, label)| view! { <option value=slug>{label}</option> })
+                                .collect_view()}
+                        </select>
+                        <input
+                            type="search"
+                            aria-label="Find a ticket to link, by number or title"
+                            placeholder="Find a ticket by number or title"
+                            class="min-w-48 flex-1 rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
+                            prop:value=move || query.get()
+                            on:input=move |ev| query.set(event_target_value(&ev))
+                        />
+                    </div>
+                    <ul class="flex flex-col gap-0.5" aria-label="Tickets found">
+                        {move || {
+                            found()
+                                .into_iter()
+                                .map(|t| {
+                                    let (other, label) = (t.id.clone(), format!("{} {}", t.id, t.title));
+                                    let column = t.column.dir_name();
+                                    view! {
+                                        <li class="flex items-center gap-2">
+                                            <button
+                                                type="button"
+                                                class="text-left text-sm hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                                                disabled=wait
+                                                title=move || format!("{} this ticket", link_label(&kind.get()))
+                                                on:click=move |_| change_link(other.clone(), kind.get_untracked(), false)
+                                            >
+                                                {label}
+                                            </button>
+                                            <span class="text-xs text-slate-500">{column}</span>
+                                        </li>
+                                    }
+                                })
+                                .collect_view()
+                        }}
+                    </ul>
+                    <Show when=move || !query.with(|q| q.trim().is_empty()) && found().is_empty()>
+                        <p class="text-xs text-slate-500">"No ticket matches"</p>
+                    </Show>
+                </div>
+            </Show>
+            {move || {
+                failure
+                    .get()
+                    .map(|e| view! { <p role="alert" class="text-xs text-red-700 dark:text-red-400">{e}</p> })
+            }}
+            {move || {
+                groups()
+                    .into_iter()
+                    .map(|(name, unlink, list)| {
+                        view! {
+                            <div class="flex flex-col gap-0.5">
+                                <span class="text-xs font-medium text-slate-500">{name}</span>
+                                <ul class="flex flex-col gap-0.5 pl-2">
+                                    {list.into_iter().map(|t| link((t, unlink))).collect_view()}
+                                </ul>
+                            </div>
+                        }
+                    })
+                    .collect_view()
+            }}
+        </section>
     }
 }
