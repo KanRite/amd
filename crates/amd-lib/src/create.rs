@@ -40,6 +40,9 @@ pub struct NewTicket {
     pub parent: Option<String>,
     /// Refs for the tickets this one relates to.
     pub related: Vec<String>,
+    /// A ref for the ticket this one is a copy of. The copy records it as
+    /// `clone-of`, and the original gets the copy's id in `clones`.
+    pub clone_of: Option<String>,
     pub tags: Vec<String>,
     /// Values for the template's own `extra.*` fields.
     pub extra: BTreeMap<String, String>,
@@ -59,6 +62,7 @@ pub struct Draft {
     pub body: String,
     parent: Option<Task>,
     related: Vec<String>,
+    clone_of: Option<Task>,
 }
 
 /// What changed when a draft was written, so a front end can report it.
@@ -68,6 +72,9 @@ pub struct Created {
     pub branch: String,
     /// Tickets that gained a link back to this one.
     pub linked: Vec<String>,
+    /// The original of a clone that couldn't list it (leased by someone
+    /// else, say), with the reason.
+    pub unlinked: Option<String>,
 }
 
 impl Draft {
@@ -96,6 +103,10 @@ impl Draft {
         }
         related.sort();
         related.dedup();
+        let clone_task = match &ticket.clone_of {
+            Some(reference) if !reference.is_empty() => Some(board.find(reference)?),
+            _ => None,
+        };
 
         // Every field the template asks for has to have been collected.
         let missing: Vec<String> = templates
@@ -143,6 +154,10 @@ impl Draft {
             assignee: ticket.assignee,
             repository,
             related: related.clone(),
+            clone_of: clone_task
+                .as_ref()
+                .map(|task| task.id_display())
+                .unwrap_or_default(),
             tags: crate::task::normalize_tags(&ticket.tags),
             created,
             timestamp,
@@ -165,6 +180,7 @@ impl Draft {
             body,
             parent: parent_task,
             related,
+            clone_of: clone_task,
         })
     }
 
@@ -182,6 +198,16 @@ impl Draft {
         let body = match crate::authorship::current_person(board) {
             Some(person) => crate::authorship::ensure_created_by(&body, &person)?,
             None => body,
+        };
+        // A custom template without the field, or one edited by hand, still
+        // records what this is a copy of.
+        let body = match &self.clone_of {
+            Some(original)
+                if crate::task::meta_in(&body, "clone-of").is_none_or(|id| id.is_empty()) =>
+            {
+                crate::task::set_meta(&body, "clone-of", &format!("\"{}\"", original.id_display()))?
+            }
+            _ => body,
         };
         let dir = self
             .path
@@ -209,12 +235,25 @@ impl Draft {
             }
         }
 
+        // A copy is listed on the original. An original that someone else
+        // holds can't be written to; the copy is already made, so that is a
+        // missing backlink to report rather than a failure.
+        let mut unlinked = None;
+        if let Some(original) = &self.clone_of {
+            match original.add_clone(original.hash()?, &self.id) {
+                Ok(true) => linked.push(original.id_display()),
+                Ok(false) => {}
+                Err(err) => unlinked = Some(format!("{}: {err:#}", original.id_display())),
+            }
+        }
+
         let task = Task::from_path(&self.path, Column::Backlog)
             .ok_or_else(|| anyhow::anyhow!("{} is not a task file", self.path.display()))?;
         Ok(Created {
             task,
             branch: self.branch,
             linked,
+            unlinked,
         })
     }
 }
@@ -355,5 +394,65 @@ mod tests {
             .to_string();
         assert!(err.contains("unknown branch type 'feat'"), "{err}");
         assert!(board.tasks().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_clone_and_its_original_point_at_each_other() {
+        let (_dir, board) = board();
+        let templates = Templates::load(&board).unwrap();
+        Draft::prepare(&board, &templates, ticket("Original"))
+            .unwrap()
+            .write(&board, None)
+            .unwrap();
+
+        let mut copy = ticket("Copy");
+        copy.clone_of = Some("001".to_string());
+        let created = Draft::prepare(&board, &templates, copy)
+            .unwrap()
+            .write(&board, None)
+            .unwrap();
+
+        assert_eq!(created.task.clone_of().as_deref(), Some("001"));
+        assert_eq!(created.linked, ["001"]);
+        assert!(created.unlinked.is_none());
+        assert_eq!(board.find("001").unwrap().clones(), ["002"]);
+        // Not a plain relation: `related` is untouched at both ends.
+        assert!(created.task.related().is_empty());
+        assert!(board.find("001").unwrap().related().is_empty());
+    }
+
+    #[test]
+    fn a_clone_of_a_ticket_that_is_not_there_is_refused_before_anything_is_written() {
+        let (_dir, board) = board();
+        let templates = Templates::load(&board).unwrap();
+        let mut copy = ticket("Copy");
+        copy.clone_of = Some("99".to_string());
+        let err = Draft::prepare(&board, &templates, copy)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no task matches '99'"), "{err}");
+        assert!(board.tasks().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_clone_made_from_a_template_without_the_field_still_records_it() {
+        let (_dir, board) = board();
+        let templates = Templates::load(&board).unwrap();
+        Draft::prepare(&board, &templates, ticket("Original"))
+            .unwrap()
+            .write(&board, None)
+            .unwrap();
+        let mut copy = ticket("Copy");
+        copy.clone_of = Some("001".to_string());
+        let draft = Draft::prepare(&board, &templates, copy).unwrap();
+        // What an editor or a custom template might hand back.
+        let stripped: String = draft
+            .body
+            .lines()
+            .filter(|line| !line.starts_with("clone-of:"))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        let created = draft.write(&board, Some(stripped)).unwrap();
+        assert_eq!(created.task.clone_of().as_deref(), Some("001"));
     }
 }

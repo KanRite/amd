@@ -377,35 +377,60 @@ async fn create_ticket(
             branch_type: String::new(),
             parent: String::new(),
             related: Vec::new(),
+            clone_of: String::new(),
             body: String::new(),
             priority: String::new(),
         };
         let outcome = transition::create_ticket(board, &fields).map_err(err)?;
-        let dest = outcome
-            .dest
-            .clone()
-            .ok_or("the ticket was created but not found")?;
-        let task = Task::from_path(&dest, Column::Backlog).ok_or("the new ticket can't be read")?;
         let name = if repo.is_empty() {
             project.repos[0].0.clone()
         } else {
             repo
         };
-        let sync = report_outcome(board, message("new", &task), &outcome);
-        Ok(Created {
-            doc: TicketDocument {
-                repo: name,
-                file: task.file_name(),
-                column: amd_ui_model::Column::Backlog,
-                epic: None,
-                lock: None,
-                lapsed: None,
-                version: task.hash().map_err(err)?.to_string(),
-                authorship: agile_md::authorship::summary(board, &task).unwrap_or_default(),
-                content: std::fs::read_to_string(&task.path).map_err(|e| e.to_string())?,
-            },
-            sync,
-        })
+        created_from(board, name, &outcome)
+    })
+    .await
+}
+
+/// What the page needs to open a ticket that was just made: where it landed,
+/// its text, and the report of what the change did.
+fn created_from(board: &Board, repo: String, outcome: &transition::Outcome) -> Result<Created> {
+    let dest = outcome
+        .dest
+        .clone()
+        .ok_or("the ticket was created but not found")?;
+    let task = Task::from_path(&dest, Column::Backlog).ok_or("the new ticket can't be read")?;
+    let sync = report_outcome(board, message("new", &task), outcome);
+    Ok(Created {
+        doc: TicketDocument {
+            repo,
+            file: task.file_name(),
+            column: amd_ui_model::Column::Backlog,
+            epic: None,
+            lock: None,
+            lapsed: None,
+            version: task.hash().map_err(err)?.to_string(),
+            authorship: agile_md::authorship::summary(board, &task).unwrap_or_default(),
+            content: std::fs::read_to_string(&task.path).map_err(|e| e.to_string())?,
+        },
+        sync,
+    })
+}
+
+/// Duplicates a ticket into the backlog of its board, linked to it as a
+/// clone (`amd duplicate`).
+#[tauri::command]
+async fn clone_ticket(state: Tauri<'_, AppState>, place: Place, file: String) -> Result<Created> {
+    change(&state, move |project| {
+        let board = project.board(&place.repo)?;
+        let original = task_at(board, &place, &file)?;
+        let outcome = transition::clone_ticket(board, &original).map_err(err)?;
+        let name = if place.repo.is_empty() {
+            project.repos[0].0.clone()
+        } else {
+            place.repo.clone()
+        };
+        created_from(board, name, &outcome)
     })
     .await
 }
@@ -1862,6 +1887,7 @@ pub fn run() {
             save_ticket,
             move_ticket,
             create_ticket,
+            clone_ticket,
             create_epic,
             create_sprint,
             start_sprint,
@@ -2606,6 +2632,7 @@ mod tests {
             branch_type: String::new(),
             parent: String::new(),
             related: Vec::new(),
+            clone_of: String::new(),
             body: String::new(),
             priority: String::new(),
         };

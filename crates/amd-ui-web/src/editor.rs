@@ -17,7 +17,7 @@ use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
 
 use crate::api;
-use crate::app::{Ctx, Modal};
+use crate::app::{Ctx, Modal, Overlay};
 use crate::rich_dom;
 
 /// Why the editor's banner is showing: its ticket changed on disk under
@@ -186,6 +186,26 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                         ctx.report(report);
                         ctx.close_overlay();
                         ctx.reload();
+                    }
+                    Err(e) => save_error.set(Some(e)),
+                }
+                saving.set(false);
+            });
+        }
+    };
+
+    // Duplicating copies the saved ticket, then opens the copy.
+    let duplicate = {
+        let file = file.clone();
+        move |_| {
+            let file = file.clone();
+            saving.set(true);
+            spawn_local(async move {
+                match api::clone_ticket(&place.get_value(), &file).await {
+                    Ok(created) => {
+                        ctx.report(created.sync);
+                        ctx.reload();
+                        ctx.overlay.set(Some(Overlay::Editor(created.doc)));
                     }
                     Err(e) => save_error.set(Some(e)),
                 }
@@ -551,6 +571,21 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                     on:blur=move |_| confirm_archive.set(false)
                 >
                     {move || if confirm_archive.get() { "Confirm archive" } else { "Archive" }}
+                </button>
+                <button
+                    type="button"
+                    title=move || {
+                        if dirty.get() {
+                            "Save or discard your edits first: the copy is made from the saved ticket"
+                        } else {
+                            "Copy this ticket into the backlog, linked to it as a clone"
+                        }
+                    }
+                    class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-800"
+                    disabled=move || saving.get() || dirty.get()
+                    on:click=duplicate
+                >
+                    "Duplicate"
                 </button>
                 <span class="flex-1 text-xs">
                     {move || match save_error.get() {
@@ -1185,11 +1220,31 @@ fn Relationships(
             })
             .cloned()
             .collect();
+        let clone_of: Vec<TicketSummary> = this
+            .as_ref()
+            .and_then(|t| ticket_number(&t.clone_of))
+            .and_then(find)
+            .into_iter()
+            .collect();
+        let clones: Vec<TicketSummary> = this
+            .as_ref()
+            .map(|t| {
+                t.clones
+                    .iter()
+                    .filter_map(|c| ticket_number(c))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(find)
+            .collect();
         [
             ("Parent", parent),
             ("Children", children),
             ("Related", related),
             ("Linked from", linked_from),
+            ("Clone of", clone_of),
+            ("Clones", clones),
         ]
         .into_iter()
         .filter(|(_, list)| !list.is_empty())

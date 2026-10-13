@@ -218,6 +218,11 @@ pub async fn archive_ticket(place: &Place, file: &str) -> Result<SyncReport, Str
     call("archive_ticket", &TicketRef { place, file }).await
 }
 
+/// Duplicates a ticket into its board's backlog, linked as a clone.
+pub async fn clone_ticket(place: &Place, file: &str) -> Result<Created, String> {
+    call("clone_ticket", &TicketRef { place, file }).await
+}
+
 /// Creates a ticket in `repo`'s backlog (the board's own when `None`),
 /// as a draft when `draft` (ticket 114).
 pub async fn create_ticket(

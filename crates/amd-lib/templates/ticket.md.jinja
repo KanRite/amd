@@ -7,6 +7,9 @@ branch-type: {{ branch_type | yaml }}
 branch-name: {{ branch_name | yaml }}
 parent: {{ parent | yaml }}
 related: [{{ related | join(",") }}]
+{% if clone_of %}
+clone-of: {{ clone_of | yaml }}
+{% endif %}
 tags: [{{ tags | join(",") }}]
 created: {{ created | yaml }}
 created-by: {{ created_by | yaml }}

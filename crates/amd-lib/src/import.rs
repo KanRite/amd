@@ -223,6 +223,28 @@ fn remap_links(text: &str, id_map: &HashMap<String, String>) -> Result<String> {
         text = task::set_meta(&text, "related", &format!("[{}]", remapped.join(",")))?;
     }
 
+    let clone_remap = task::meta_in(&text, "clone-of")
+        .map(task::unquote)
+        .map(str::trim)
+        .and_then(|old| id_map.get(old))
+        .cloned();
+    if let Some(new_id) = clone_remap {
+        text = task::set_meta(&text, "clone-of", &format!("{new_id:?}"))?;
+    }
+
+    let clones_remap = task::meta_in(&text, "clones").map(|raw| {
+        let ids = task::parse_list(raw);
+        let changed = ids.iter().any(|id| id_map.contains_key(id));
+        (changed, ids)
+    });
+    if let Some((true, ids)) = clones_remap {
+        let remapped: Vec<String> = ids
+            .into_iter()
+            .map(|id| id_map.get(&id).cloned().unwrap_or(id))
+            .collect();
+        text = task::set_meta(&text, "clones", &format!("[{}]", remapped.join(",")))?;
+    }
+
     Ok(text)
 }
 
@@ -528,5 +550,14 @@ mod tests {
         assert_eq!(summary.skipped.len(), 1);
         assert_eq!(summary.skipped[0].0, broken);
         assert!(summary.skipped[0].1.contains("frontmatter"));
+    }
+
+    #[test]
+    fn clone_links_are_remapped_within_the_batch() {
+        let map: HashMap<String, String> = [("001".to_string(), "011".to_string())].into();
+        let text = "---\nid: \"002\"\nclone-of: \"001\"\nclones: [001,009]\n---\n\nbody\n";
+        let out = remap_links(text, &map).unwrap();
+        assert!(out.contains("clone-of: \"011\""), "{out}");
+        assert!(out.contains("clones: [011,009]"), "{out}");
     }
 }

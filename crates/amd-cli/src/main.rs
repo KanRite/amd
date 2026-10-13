@@ -616,6 +616,16 @@ enum Cmd {
         #[arg(long)]
         one_way: bool,
     },
+    /// Duplicate a ticket into the backlog, linked to it as a clone
+    ///
+    /// The copy keeps the title, body, tags, branch type, repository, parent,
+    /// priority and points. It starts unassigned, unlocked and in no epic, with
+    /// its checklist unticked. It gets `clone-of: <id>` and the original gets
+    /// the copy in `clones`; `amd show` prints both.
+    Duplicate {
+        #[arg(value_name = "REF")]
+        task: String,
+    },
     /// Open the desktop board
     ///
     /// The same window as the `amdui` command
@@ -1288,6 +1298,11 @@ fn run() -> Result<()> {
         Cmd::Ready { task } => cmd_draft(&board, &task, false),
         Cmd::Unlock { task, force } => cmd_unlock(&board, &task, force),
         Cmd::Link { task, to, one_way } => cmd_link(&board, &task, &to, one_way),
+        Cmd::Duplicate { task } => {
+            let original = board.find(&task)?;
+            report(&transition::clone_ticket(&board, &original)?);
+            Ok(())
+        }
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
         Cmd::Log => cmd_log(&board),
         Cmd::Recover {
@@ -2574,6 +2589,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
             branch_type,
             parent,
             related,
+            clone_of: None,
             tags,
             extra,
         },
