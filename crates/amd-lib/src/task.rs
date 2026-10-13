@@ -603,6 +603,33 @@ impl Task {
         self.tags().iter().any(|known| normalize_tag(known) == tag)
     }
 
+    /// Whether this ticket passes a tag filter (ticket 123): each term is a
+    /// tag to include (`FUTURE`) or, with a dash, to leave out (`-FUTURE`);
+    /// a leading `#` is allowed (`#FUTURE`, `-#FUTURE`). With included
+    /// terms the ticket needs just one of them; it must carry none of the
+    /// excluded ones. Whole tags, case ignored; no terms passes everything.
+    pub fn matches_tags(&self, terms: &[String]) -> bool {
+        let (mut wanted, mut unwanted) = (Vec::new(), Vec::new());
+        for term in terms {
+            let term = term.trim();
+            let (out, tag) = match term.strip_prefix('-') {
+                Some(rest) => (true, rest),
+                None => (false, term),
+            };
+            let tag = tag.trim_start_matches('#');
+            if tag.is_empty() {
+                continue;
+            }
+            if out {
+                unwanted.push(tag);
+            } else {
+                wanted.push(tag);
+            }
+        }
+        (wanted.is_empty() || wanted.iter().any(|t| self.has_tag(t)))
+            && !unwanted.iter().any(|t| self.has_tag(t))
+    }
+
     /// Whether this ticket is a draft (ticket 114): it carries [`DRAFT_TAG`],
     /// and so can't leave the backlog until that's taken off.
     pub fn is_draft(&self) -> bool {
@@ -1084,6 +1111,41 @@ mod tests {
         assert!(task.has_tag("duplicate"));
         assert!(task.has_tag("URGENT"));
         assert!(!task.has_tag("missing"));
+    }
+
+    #[test]
+    fn matches_tags_includes_any_wanted_tag_and_drops_any_unwanted_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let tagged = |name: &str, tags: &str| {
+            ranked(
+                dir.path(),
+                name,
+                &format!("---\nid: \"001\"\ntitle: \"A\"\ntags: [{tags}]\n---\n\nbody\n"),
+            )
+        };
+        let future = tagged("001-a.md", "FUTURE");
+        let both = tagged("002-b.md", "FUTURE,BUSINESS");
+        let business = tagged("003-c.md", "business");
+        let none = tagged("004-d.md", "");
+        let terms = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        // No terms (or only empty ones) pass everything.
+        for task in [&future, &both, &business, &none] {
+            assert!(task.matches_tags(&[]) && task.matches_tags(&terms(&["-", "#", "-#"])));
+        }
+        // Wanted tags: any one will do, case ignored, whole tags only.
+        let wanted = terms(&["future", "BUSINESS"]);
+        assert!(future.matches_tags(&wanted) && both.matches_tags(&wanted));
+        assert!(business.matches_tags(&wanted) && !none.matches_tags(&wanted));
+        assert!(!future.matches_tags(&terms(&["FUT"])));
+        // Unwanted tags leave a ticket out; a # is allowed.
+        assert!(!future.matches_tags(&terms(&["-FUTURE"])));
+        assert!(business.matches_tags(&terms(&["-#FUTURE"])));
+        assert!(none.matches_tags(&terms(&["-FUTURE"])));
+        // Both together: tagged FUTURE and not BUSINESS.
+        let narrowed = terms(&["FUTURE", "-BUSINESS"]);
+        assert!(future.matches_tags(&narrowed) && !both.matches_tags(&narrowed));
+        assert!(!business.matches_tags(&narrowed) && !none.matches_tags(&narrowed));
     }
 
     #[test]

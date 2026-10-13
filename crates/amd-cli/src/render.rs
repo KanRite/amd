@@ -55,14 +55,14 @@ pub struct Node {
 }
 
 /// Read a column and nest it, reading each task's parent exactly once.
-/// `tag`, when given, drops every task that doesn't carry it — a task left
+/// `tags`, when given, drop every task that doesn't pass them (ticket 123: `FUTURE`, `-FUTURE`, see `Task::matches_tags`) — a task left
 /// out this way can still anchor a child from another column, same as any
 /// other task that isn't in the set being nested.
-pub fn column_forest(board: &Board, column: Column, tag: Option<&str>) -> Result<Vec<Node>> {
+pub fn column_forest(board: &Board, column: Column, tags: &[String]) -> Result<Vec<Node>> {
     let with_parents = board
         .tasks_in(column)?
         .into_iter()
-        .filter(|task| tag.is_none_or(|tag| task.has_tag(tag)))
+        .filter(|task| task.matches_tags(tags))
         .map(|task| {
             let parent = task.parent();
             (task, parent)
@@ -71,12 +71,12 @@ pub fn column_forest(board: &Board, column: Column, tag: Option<&str>) -> Result
     Ok(forest(with_parents))
 }
 
-/// Print one or more columns of the board. `tag` narrows every column to the
-/// tasks carrying it.
-pub fn columns(board: &Board, columns: &[Column], tag: Option<&str>) -> Result<()> {
+/// Print one or more columns of the board. `tags` narrow every column to the
+/// tasks passing them.
+pub fn columns(board: &Board, columns: &[Column], tags: &[String]) -> Result<()> {
     let mut loaded = Vec::new();
     for column in columns {
-        loaded.push((*column, column_forest(board, *column, tag)?));
+        loaded.push((*column, column_forest(board, *column, tags)?));
     }
     if rich() {
         // Falling back rather than failing: a rendering problem should never
@@ -91,12 +91,12 @@ pub fn columns(board: &Board, columns: &[Column], tag: Option<&str>) -> Result<(
 
 /// Print one flat, named list of tasks — an epic or the archive, not a board
 /// column — in the same shape `columns` prints a single column in. The no-ref
-/// form of a destination verb (`amd <destination>`) goes through this. `tag`,
-/// when given, narrows the list to tasks carrying it.
-pub fn named(title: &str, tasks: Vec<Task>, tag: Option<&str>) -> Result<()> {
+/// form of a destination verb (`amd <destination>`) goes through this. `tags`,
+/// when given, narrow the list to tasks passing them.
+pub fn named(title: &str, tasks: Vec<Task>, tags: &[String]) -> Result<()> {
     let with_parents = tasks
         .into_iter()
-        .filter(|task| tag.is_none_or(|tag| task.has_tag(tag)))
+        .filter(|task| task.matches_tags(tags))
         .map(|task| {
             let parent = task.parent();
             (task, parent)

@@ -86,7 +86,10 @@ epic. A sprint takes only sized tickets, and once started it takes nothing
 more and gives nothing back — its tickets only move on, to todo. `amd tag
 <tag>` lists every ticket carrying it, across every column. Any listing
 form — `board`, a bare destination verb, an epic by name — takes
-`--tag <tag>` to narrow it to tickets carrying that tag instead.
+`--tag <tag>` to narrow it to tickets carrying that tag instead; `--tag
+-<tag>` leaves them out, and `--tag` can be repeated (`--tag FUTURE --tag
+-BUSINESS`: tagged FUTURE, not BUSINESS; several wanted tags need just
+one).
 
 `doing/` carries a WIP limit (`AMD_WIP_LIMIT`, or `wip-limit` in
 `.settings`; `amd wip-limit <n>` sets it) — unset or unparsable defaults to
@@ -261,9 +264,14 @@ enum Cmd {
     New(NewArgs),
     /// Show all columns (the default command)
     Board {
-        /// Only show tasks carrying this tag
-        #[arg(short = 't', long = "tag", value_name = "TAG")]
-        tag: Option<String>,
+        /// Only show tasks carrying this tag; -TAG leaves them out; repeatable
+        #[arg(
+            short = 't',
+            long = "tag",
+            value_name = "TAG",
+            allow_hyphen_values = true
+        )]
+        tag: Vec<String>,
     },
     /// List every ticket carrying a tag
     Tag {
@@ -351,9 +359,15 @@ enum Cmd {
     Backlog {
         #[arg(value_name = "REF")]
         task: Option<String>,
-        /// With no ref, only show tasks carrying this tag
-        #[arg(short = 't', long = "tag", value_name = "TAG")]
-        tag: Option<String>,
+        /// With no ref, only show tasks carrying this tag; -TAG leaves them
+        /// out; repeatable
+        #[arg(
+            short = 't',
+            long = "tag",
+            value_name = "TAG",
+            allow_hyphen_values = true
+        )]
+        tag: Vec<String>,
     },
     /// Move a task into todo/, or list it with no ref
     ///
@@ -367,9 +381,15 @@ enum Cmd {
         /// Move the task without touching branches
         #[arg(long)]
         no_branch: bool,
-        /// With no ref, only show tasks carrying this tag
-        #[arg(short = 't', long = "tag", value_name = "TAG")]
-        tag: Option<String>,
+        /// With no ref, only show tasks carrying this tag; -TAG leaves them
+        /// out; repeatable
+        #[arg(
+            short = 't',
+            long = "tag",
+            value_name = "TAG",
+            allow_hyphen_values = true
+        )]
+        tag: Vec<String>,
         /// Move it even if todo/ is already at its WIP limit
         #[arg(long)]
         force: bool,
@@ -378,9 +398,15 @@ enum Cmd {
     Doing {
         #[arg(value_name = "REF")]
         task: Option<String>,
-        /// With no ref, only show tasks carrying this tag
-        #[arg(short = 't', long = "tag", value_name = "TAG")]
-        tag: Option<String>,
+        /// With no ref, only show tasks carrying this tag; -TAG leaves them
+        /// out; repeatable
+        #[arg(
+            short = 't',
+            long = "tag",
+            value_name = "TAG",
+            allow_hyphen_values = true
+        )]
+        tag: Vec<String>,
         /// Move it even if doing/ is already at its WIP limit
         #[arg(long)]
         force: bool,
@@ -389,18 +415,30 @@ enum Cmd {
     Done {
         #[arg(value_name = "REF")]
         task: Option<String>,
-        /// With no ref, only show tasks carrying this tag
-        #[arg(short = 't', long = "tag", value_name = "TAG")]
-        tag: Option<String>,
+        /// With no ref, only show tasks carrying this tag; -TAG leaves them
+        /// out; repeatable
+        #[arg(
+            short = 't',
+            long = "tag",
+            value_name = "TAG",
+            allow_hyphen_values = true
+        )]
+        tag: Vec<String>,
     },
     /// Take a ticket off the board into archive/, or list the archive with
     /// no ref
     Abandon {
         #[arg(value_name = "REF")]
         task: Option<String>,
-        /// With no ref, only show tasks carrying this tag
-        #[arg(short = 't', long = "tag", value_name = "TAG")]
-        tag: Option<String>,
+        /// With no ref, only show tasks carrying this tag; -TAG leaves them
+        /// out; repeatable
+        #[arg(
+            short = 't',
+            long = "tag",
+            value_name = "TAG",
+            allow_hyphen_values = true
+        )]
+        tag: Vec<String>,
     },
     /// Fix tickets that share a number
     ///
@@ -883,7 +921,7 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
     form::set_no_input(cli.no_input);
     render::set_plain(cli.plain);
-    let command = cli.command.unwrap_or(Cmd::Board { tag: None });
+    let command = cli.command.unwrap_or(Cmd::Board { tag: Vec::new() });
 
     // Completions don't need a board — and often run before there is one.
     if let Cmd::Completions { shell } = command {
@@ -1060,8 +1098,8 @@ fn run() -> Result<()> {
         Cmd::Register { .. } | Cmd::Deregister { .. } => unreachable!("handled above"),
         Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
         Cmd::New(args) => cmd_new(&board, args),
-        Cmd::Board { tag } => render::columns(&board, &Column::ALL, tag.as_deref()),
-        Cmd::Tag { tag } => render::named(&format!("tag: {tag}"), board.tasks_tagged(&tag)?, None),
+        Cmd::Board { tag } => render::columns(&board, &Column::ALL, &tag),
+        Cmd::Tag { tag } => render::named(&format!("tag: {tag}"), board.tasks_tagged(&tag)?, &[]),
         Cmd::Tags { action } => cmd_tags(&board, action),
         Cmd::Import {
             first,
@@ -1096,7 +1134,7 @@ fn run() -> Result<()> {
             &board,
             Destination::Column(Column::Backlog),
             task,
-            tag.as_deref(),
+            &tag,
             false,
         ),
         Cmd::Todo {
@@ -1110,24 +1148,20 @@ fn run() -> Result<()> {
                 let task = board.find(&reference)?;
                 cmd_enter_todo(&board, &task, branch, no_branch, force)
             }
-            None => render::columns(&board, &[Column::Todo], tag.as_deref()),
+            None => render::columns(&board, &[Column::Todo], &tag),
         },
         Cmd::Doing { task, tag, force } => cmd_destination(
             &board,
             Destination::Column(Column::Doing),
             task,
-            tag.as_deref(),
+            &tag,
             force,
         ),
-        Cmd::Done { task, tag } => cmd_destination(
-            &board,
-            Destination::Column(Column::Done),
-            task,
-            tag.as_deref(),
-            false,
-        ),
+        Cmd::Done { task, tag } => {
+            cmd_destination(&board, Destination::Column(Column::Done), task, &tag, false)
+        }
         Cmd::Abandon { task, tag } => {
-            cmd_destination(&board, Destination::Abandon, task, tag.as_deref(), false)
+            cmd_destination(&board, Destination::Abandon, task, &tag, false)
         }
         Cmd::Verb(args) => {
             let mut args = args.into_iter();
@@ -1135,21 +1169,21 @@ fn run() -> Result<()> {
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("usage: amd <destination> [ref] [--tag TAG]"))?;
             let mut task = None;
-            let mut tag = None;
+            let mut tag: Vec<String> = Vec::new();
             while let Some(arg) = args.next() {
                 match arg.as_str() {
                     "--tag" | "-t" => {
                         let value = args
                             .next()
                             .ok_or_else(|| anyhow::anyhow!("amd {name}: --tag needs a value"))?;
-                        tag = Some(value);
+                        tag.push(value);
                     }
                     _ if task.is_none() => task = Some(arg),
                     other => bail!("amd {name}: unexpected argument '{other}'"),
                 }
             }
             let destination = resolve_destination(&board, &name)?;
-            cmd_destination(&board, destination, task, tag.as_deref(), false)
+            cmd_destination(&board, destination, task, &tag, false)
         }
         Cmd::Show { task } => {
             let task = resolve(&board, task, "show", &Column::ALL)?;
@@ -1708,7 +1742,7 @@ fn cmd_destination(
     board: &Board,
     destination: Destination,
     task: Option<String>,
-    tag: Option<&str>,
+    tag: &[String],
     force: bool,
 ) -> Result<()> {
     match (destination, task) {

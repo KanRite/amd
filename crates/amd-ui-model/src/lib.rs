@@ -145,12 +145,60 @@ pub struct Lock {
 }
 
 impl TicketSummary {
-    /// Whether the ticket matches a search: every word of `query` must
-    /// appear, ignoring case, somewhere in its id, title, file name, body,
-    /// tags, assignee, priority or epic. An empty query matches everything.
+    /// Whether the ticket matches a search (ticket 123), ignoring case. The
+    /// query is split on spaces into terms:
+    ///
+    /// - `word` must appear, and `-word` must not, in the ticket's id,
+    ///   title, file name, body, assignee, priority or epic. **Tags are not
+    ///   searched as text**, so `triage` never finds the tag `TRIAGE`.
+    /// - `#TAG` matches a ticket carrying a tag that starts with `TAG`, and
+    ///   `-#TAG` one that carries none. With several `#TAG` terms a ticket
+    ///   needs just one of them; every `-#TAG` still rules tickets out.
+    /// - A lone `-`, `#` or `-#` is ignored. An empty query matches all.
+    ///
+    /// Tags are checked first: they are short, and a ticket they rule out
+    /// never has its text lowercased.
     pub fn matches(&self, query: &str) -> bool {
-        let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-        if words.is_empty() {
+        let mut words: Vec<String> = Vec::new();
+        let mut not_words: Vec<String> = Vec::new();
+        let mut tags: Vec<String> = Vec::new();
+        let mut not_tags: Vec<String> = Vec::new();
+        for term in query.split_whitespace() {
+            let (excluded, rest) = match term.strip_prefix('-') {
+                Some(rest) => (true, rest),
+                None => (false, term),
+            };
+            let (is_tag, rest) = match rest.strip_prefix('#') {
+                Some(rest) => (true, rest),
+                None => (false, rest),
+            };
+            if rest.is_empty() {
+                continue;
+            }
+            let list = match (is_tag, excluded) {
+                (true, true) => &mut not_tags,
+                (true, false) => &mut tags,
+                (false, true) => &mut not_words,
+                (false, false) => &mut words,
+            };
+            list.push(if is_tag {
+                rest.to_uppercase()
+            } else {
+                rest.to_lowercase()
+            });
+        }
+        let has = |wanted: &String| {
+            self.tags
+                .iter()
+                .any(|t| t.trim().to_uppercase().starts_with(wanted.as_str()))
+        };
+        if !tags.is_empty() && !tags.iter().any(has) {
+            return false;
+        }
+        if not_tags.iter().any(has) {
+            return false;
+        }
+        if words.is_empty() && not_words.is_empty() {
             return true;
         }
         let haystack = [
@@ -163,13 +211,41 @@ impl TicketSummary {
             self.epic.as_deref().unwrap_or(""),
             self.epic_label.as_str(),
         ]
-        .into_iter()
-        .chain(self.tags.iter().map(String::as_str))
-        .collect::<Vec<_>>()
         .join("\n")
         .to_lowercase();
         words.iter().all(|w| haystack.contains(w.as_str()))
+            && !not_words.iter().any(|w| haystack.contains(w.as_str()))
     }
+}
+
+/// The tag term being typed at the end of a search (ticket 123): the last
+/// word, when it starts `#` or `-#` and the query doesn't end in a space.
+/// `#T` gives `Some(("", "T"))`; `x -#tr` gives `Some(("-", "TR"))`. The
+/// search box offers the tags starting with the typed part.
+pub fn tag_being_typed(query: &str) -> Option<(&'static str, String)> {
+    if query.ends_with(char::is_whitespace) {
+        return None;
+    }
+    let word = query.split_whitespace().next_back()?;
+    if let Some(typed) = word.strip_prefix("-#") {
+        Some(("-", typed.to_uppercase()))
+    } else {
+        word.strip_prefix('#')
+            .map(|typed| ("", typed.to_uppercase()))
+    }
+}
+
+/// The query with the tag term being typed finished as `choice`, followed by
+/// a space so the next term can be typed straight away. A query that isn't
+/// ending in a tag term is returned unchanged.
+pub fn complete_tag(query: &str, choice: &str) -> String {
+    let Some((dash, _)) = tag_being_typed(query) else {
+        return query.to_string();
+    };
+    let start = query.rfind(char::is_whitespace).map_or(0, |i| {
+        i + query[i..].chars().next().map_or(1, char::len_utf8)
+    });
+    format!("{}{dash}#{} ", &query[..start], choice.to_uppercase())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1023,5 +1099,127 @@ mod assigned_tests {
         assert!(!adr.holds("adrift.md"));
         assert!(!adr.holds("docs/adr.md"));
         assert!(DocScope::default().holds("anything/at/all.md"));
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    fn ticket(title: &str, text: &str, tags: &[&str]) -> TicketSummary {
+        TicketSummary {
+            repo: String::new(),
+            file: "001-t.md".into(),
+            column: Column::Todo,
+            id: "001".into(),
+            title: title.into(),
+            assignee: String::new(),
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            priority: String::new(),
+            created: String::new(),
+            epic: None,
+            text: text.into(),
+            epic_label: String::new(),
+            points: String::new(),
+            repository: String::new(),
+            lock: None,
+            lapsed: None,
+            parent: String::new(),
+            related: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_empty_query_and_lone_markers_match_everything() {
+        let t = ticket("Sort the board", "", &["UX"]);
+        for query in ["", "   ", "-", "#", "-#", "- # -#"] {
+            assert!(t.matches(query), "{query:?}");
+        }
+    }
+
+    #[test]
+    fn plain_words_search_text_ignoring_case_and_never_tags() {
+        let tagged = ticket("Sort the board", "", &["TRIAGE"]);
+        let worded = ticket("Triage the board", "", &[]);
+        assert!(!tagged.matches("triage") && !tagged.matches("TRIAGE"));
+        assert!(worded.matches("triage") && worded.matches("TRIAGE"));
+        assert!(worded.matches("board TRIAGE"));
+        assert!(!worded.matches("board nothing"));
+    }
+
+    #[test]
+    fn a_dash_word_leaves_out_tickets_whose_text_has_it() {
+        let a = ticket("Future release", "", &[]);
+        let b = ticket("Business case", "a future plan", &[]);
+        let c = ticket("Other", "", &[]);
+        assert!(!a.matches("-FUTURE") && !b.matches("-future") && c.matches("-future"));
+        assert!(b.matches("business -release") && !a.matches("release -future"));
+    }
+
+    #[test]
+    fn a_hash_tag_matches_tags_that_start_with_it_ignoring_case() {
+        let t = ticket("T", "", &["TRIAGE", "AMDUI"]);
+        for query in ["#TRIAGE", "#triage", "#TRI", "#t", "#AMD"] {
+            assert!(t.matches(query), "{query}");
+        }
+        assert!(!t.matches("#UI") && !t.matches("#TRIAGED"));
+    }
+
+    #[test]
+    fn a_tag_term_is_not_found_in_the_text() {
+        let t = ticket("Future release", "all about the future", &["CLI"]);
+        assert!(!t.matches("#FUTURE") && t.matches("-#FUTURE"));
+    }
+
+    #[test]
+    fn dash_hash_leaves_out_tagged_tickets() {
+        let tagged = ticket("T", "", &["BUSINESS"]);
+        let other = ticket("T", "", &["CLI"]);
+        let bare = ticket("T", "", &[]);
+        assert!(!tagged.matches("-#BUS") && other.matches("-#BUS") && bare.matches("-#BUS"));
+    }
+
+    #[test]
+    fn several_included_tags_need_just_one_and_exclusions_still_apply() {
+        let future = ticket("T", "", &["FUTURE"]);
+        let business = ticket("T", "", &["BUSINESS"]);
+        let both = ticket("T", "", &["FUTURE", "BUSINESS"]);
+        let neither = ticket("T", "", &["CLI"]);
+        let query = "#FUTURE #BUSINESS";
+        assert!(future.matches(query) && business.matches(query) && both.matches(query));
+        assert!(!neither.matches(query));
+        let narrowed = "#FUTURE -#BUSINESS";
+        assert!(future.matches(narrowed) && !both.matches(narrowed) && !business.matches(narrowed));
+    }
+
+    #[test]
+    fn tags_and_text_combine() {
+        let t = ticket("Search the board", "", &["AMDUI"]);
+        assert!(t.matches("#AMDUI search") && t.matches("search #AMDUI"));
+        assert!(!t.matches("#CLI search") && !t.matches("#AMDUI -search"));
+    }
+
+    #[test]
+    fn an_old_lowercase_tag_still_matches() {
+        let t = ticket("T", "", &["cli"]);
+        assert!(t.matches("#CLI") && !t.matches("-#cli"));
+    }
+
+    #[test]
+    fn a_tag_term_being_typed_is_the_last_word_starting_with_a_hash() {
+        assert_eq!(tag_being_typed("#t"), Some(("", "T".into())));
+        assert_eq!(tag_being_typed("#"), Some(("", String::new())));
+        assert_eq!(tag_being_typed("board -#tr"), Some(("-", "TR".into())));
+        assert_eq!(tag_being_typed("-#"), Some(("-", String::new())));
+        for query in ["", "board", "-board", "#TRIAGE ", "#a b", "a#b"] {
+            assert_eq!(tag_being_typed(query), None, "{query:?}");
+        }
+    }
+
+    #[test]
+    fn choosing_a_tag_finishes_the_term_and_keeps_the_rest() {
+        assert_eq!(complete_tag("#t", "triage"), "#TRIAGE ");
+        assert_eq!(complete_tag("search -#am", "AMDUI"), "search -#AMDUI ");
+        assert_eq!(complete_tag("search", "AMDUI"), "search");
     }
 }

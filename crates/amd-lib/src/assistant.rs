@@ -68,7 +68,7 @@ pub fn tools() -> Vec<Tool> {
             input: json!({"type": "object", "properties": {
                 "column": {"type": "string", "enum": ["backlog", "todo", "doing", "done"], "description": "Only this column"},
                 "repo": {"type": "string", "description": "Only this repository's board"},
-                "tag": {"type": "string", "description": "Only tickets with this tag"},
+                "tag": {"type": "string", "description": "Only tickets with this tag; -TAG leaves them out"},
                 "assignee": {"type": "string", "description": "Only tickets assigned to this name; `nobody` for unassigned"},
                 "epic": {"type": "string", "description": "Only tickets in this epic or sprint"},
                 "include_done": {"type": "boolean", "description": "List done tickets too"}
@@ -512,7 +512,8 @@ fn board_tool(args: &Value) -> Result<Reply> {
     let epic = arg(args, "epic");
     let include_done = flag(args, "include_done") || only == Some(Column::Done);
     let keep = |task: &Task| {
-        tag.as_deref().is_none_or(|t| task.has_tag(t))
+        tag.as_ref()
+            .is_none_or(|t| task.matches_tags(std::slice::from_ref(t)))
             && who.as_deref().is_none_or(|w| {
                 let assigned = task.assignee().unwrap_or_default();
                 if w.eq_ignore_ascii_case("nobody") {

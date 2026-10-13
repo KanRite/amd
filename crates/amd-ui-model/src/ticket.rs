@@ -572,16 +572,25 @@ mod tests {
     }
 
     #[test]
-    fn search_covers_body_tags_assignee_and_epic() {
+    fn search_covers_body_assignee_and_epic_and_tags_only_with_a_hash() {
         let mut t = card("042", "high", "2026-10-03");
         t.text = "## Notes\nThe colour scheme should follow the OS theme.".into();
         t.tags = vec!["ui".into()];
         t.assignee = "mrdoodles".into();
         t.epic = Some("UserPreferences".into());
-        for q in ["os theme", "UI", "mrdoodles", "userpref", "high", "042"] {
+        for q in [
+            "os theme",
+            "mrdoodles",
+            "userpref",
+            "high",
+            "042",
+            "#UI",
+            "#ui",
+        ] {
             assert!(t.matches(q), "{q}");
         }
-        assert!(!t.matches("database"));
+        // Tags are found with a #, never as text (ticket 123).
+        assert!(!t.matches("database") && !t.matches("UI") && !t.matches("-#UI"));
     }
 
     #[test]

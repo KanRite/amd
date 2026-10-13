@@ -632,6 +632,18 @@ assert "with only listed tags on, amd new refuses an unlisted tag" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags only on | grep -q 'only listed tags: on' \
     && ! env ${tg_env} '${AMD}' new 'Refused' -t misc --no-edit 2>/dev/null && ! ls tasks/backlog/*-refused.md 2>/dev/null \
     && env ${tg_env} '${AMD}' new 'Allowed' -t future --no-edit >/dev/null 2>&1"
+assert "--tag -TAG leaves out tickets carrying it (ticket 123)" \
+  bash -c "cd '${tgb}' && out=\$(env ${tg_env} '${AMD}' board --plain --tag -MISC) \
+    && printf '%s\\n' \"\$out\" | grep -q 'Allowed' && ! printf '%s\\n' \"\$out\" | grep -q 'Tagged'"
+assert "...and --tag can be repeated: tagged FUTURE and not MISC" \
+  bash -c "cd '${tgb}' && out=\$(env ${tg_env} '${AMD}' board --plain --tag future --tag -misc) \
+    && printf '%s\\n' \"\$out\" | grep -q 'Allowed' && ! printf '%s\\n' \"\$out\" | grep -q 'Tagged'"
+assert "...two wanted tags need just one: --tag MISC --tag FUTURE shows both" \
+  bash -c "cd '${tgb}' && out=\$(env ${tg_env} '${AMD}' board --plain --tag MISC --tag FUTURE) \
+    && printf '%s\\n' \"\$out\" | grep -q 'Allowed' && printf '%s\\n' \"\$out\" | grep -q 'Tagged'"
+assert "...and a bare destination verb takes -TAG too" \
+  bash -c "cd '${tgb}' && out=\$(env ${tg_env} '${AMD}' backlog --plain --tag -MISC) \
+    && printf '%s\\n' \"\$out\" | grep -q 'Allowed' && ! printf '%s\\n' \"\$out\" | grep -q 'Tagged'"
 
 echo "drafts (ticket 114):"
 assert "amd new --draft tags it DRAFT, even with only listed tags on" \

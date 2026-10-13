@@ -792,10 +792,40 @@ fn SyncStatus() -> impl IntoView {
 }
 
 /// Searches the tickets on the board (archived ones are not loaded). Escape
-/// or the × clears it.
+/// or the × clears it. `word` and `-word` search the text; `#TAG` and
+/// `-#TAG` search the tags (ticket 123), and typing one offers the tags that
+/// start with what's been typed: arrows and Enter (or a click) finish it.
 #[component]
 fn SearchBox() -> impl IntoView {
     let ctx = Ctx::get();
+    let open = RwSignal::new(false);
+    let cursor = RwSignal::new(0usize);
+    // The tags starting with the tag term being typed, sorted, with how
+    // many tickets carry each.
+    let options = move || {
+        let Some((_, typed)) = amd_ui_model::tag_being_typed(&ctx.search.get()) else {
+            return Vec::new();
+        };
+        let mut found = ctx.board.with(|b| {
+            b.as_ref()
+                .map(|b| {
+                    b.tags
+                        .iter()
+                        .filter(|t| t.name.to_uppercase().starts_with(&typed))
+                        .map(|t| (t.name.to_uppercase(), t.count))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        });
+        found.sort();
+        found.dedup_by(|a, b| a.0 == b.0);
+        found
+    };
+    let choose = move |tag: String| {
+        ctx.search
+            .update(|q| *q = amd_ui_model::complete_tag(q, &tag));
+        cursor.set(0);
+    };
     view! {
         <div class="relative flex items-center">
             <span aria-hidden="true" class="pointer-events-none absolute left-2.5 text-sm text-slate-400">
@@ -803,14 +833,46 @@ fn SearchBox() -> impl IntoView {
             </span>
             <input
                 type="search"
-                placeholder="Search tickets"
-                aria-label="Search tickets"
-                class="w-56 rounded border border-slate-300 bg-white py-1.5 pr-7 pl-7 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-2 focus:outline-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 [&::-webkit-search-cancel-button]:hidden"
+                placeholder="Search tickets  -word  #TAG  -#TAG"
+                aria-label="Search tickets. Start a word with minus to leave it out; start with hash to search tags."
+                role="combobox"
+                aria-expanded=move || (open.get() && !options().is_empty()).to_string()
+                autocomplete="off"
+                title="word: in the text.  -word: leave out.  #TAG: tagged (starts with).  -#TAG: not tagged."
+                class="w-72 rounded border border-slate-300 bg-white py-1.5 pr-7 pl-7 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-2 focus:outline-accent-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 [&::-webkit-search-cancel-button]:hidden"
                 prop:value=move || ctx.search.get()
-                on:input=move |ev| ctx.search.set(event_target_value(&ev))
+                on:focus=move |_| open.set(true)
+                on:blur=move |_| open.set(false)
+                on:input=move |ev| {
+                    ctx.search.set(event_target_value(&ev));
+                    cursor.set(0);
+                    open.set(true);
+                }
                 on:keydown=move |ev| {
-                    if ev.key() == "Escape" {
-                        ctx.search.set(String::new());
+                    let shown = options();
+                    let listing = open.get_untracked() && !shown.is_empty();
+                    match ev.key().as_str() {
+                        "ArrowDown" if listing => {
+                            ev.prevent_default();
+                            cursor.update(|c| *c = (*c + 1).min(shown.len() - 1));
+                        }
+                        "ArrowUp" if listing => {
+                            ev.prevent_default();
+                            cursor.update(|c| *c = c.saturating_sub(1));
+                        }
+                        "Enter" | "Tab" if listing => {
+                            if let Some((tag, _)) = shown.get(cursor.get_untracked()) {
+                                ev.prevent_default();
+                                choose(tag.clone());
+                            }
+                        }
+                        "Escape" if listing => {
+                            ev.prevent_default();
+                            ev.stop_propagation();
+                            open.set(false);
+                        }
+                        "Escape" => ctx.search.set(String::new()),
+                        _ => {}
                     }
                 }
             />
@@ -824,6 +886,45 @@ fn SearchBox() -> impl IntoView {
                 >
                     "×"
                 </button>
+            </Show>
+            <Show when=move || open.get() && !options().is_empty()>
+                <ul
+                    role="listbox"
+                    aria-label="Tags"
+                    class="absolute top-full z-20 mt-1 max-h-56 w-full overflow-y-auto rounded border border-slate-300 bg-white py-1 text-sm shadow-lg dark:border-slate-600 dark:bg-slate-800"
+                >
+                    {move || {
+                        options()
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, (tag, count))| {
+                                let chosen = tag.clone();
+                                view! {
+                                    <li
+                                        role="option"
+                                        aria-selected=move || (cursor.get() == i).to_string()
+                                        class=move || {
+                                            let base = "flex cursor-pointer justify-between gap-2 px-2 py-1";
+                                            if cursor.get() == i {
+                                                format!("{base} bg-accent-600 text-white")
+                                            } else {
+                                                format!("{base} hover:bg-slate-100 dark:hover:bg-slate-700")
+                                            }
+                                        }
+                                        // Before the input's blur, so the click lands.
+                                        on:mousedown=move |ev| {
+                                            ev.prevent_default();
+                                            choose(chosen.clone());
+                                        }
+                                    >
+                                        <span>{tag}</span>
+                                        <span class="opacity-60">{count}</span>
+                                    </li>
+                                }
+                            })
+                            .collect_view()
+                    }}
+                </ul>
             </Show>
         </div>
     }
