@@ -715,11 +715,6 @@ pub async fn list_roadmaps() -> Result<amd_ui_model::RoadmapsPage, String> {
 }
 
 #[derive(Serialize)]
-struct BoardArgs<'a> {
-    board: &'a str,
-}
-
-#[derive(Serialize)]
 struct CreateRoadmapArgs<'a> {
     board: &'a str,
     alias: &'a str,
