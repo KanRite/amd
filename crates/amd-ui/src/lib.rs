@@ -548,13 +548,17 @@ async fn list_roadmaps() -> Result<amd_ui_model::RoadmapsPage> {
 
 /// Starts the roadmap of a board (ticket 206).
 #[tauri::command]
-async fn create_roadmap(state: Tauri<'_, AppState>, board: String) -> Result<SyncReport> {
+async fn create_roadmap(
+    state: Tauri<'_, AppState>,
+    board: String,
+    alias: String,
+) -> Result<SyncReport> {
     change(&state, move |p| {
         let store = &p.repos[0].1;
         p.board(&board)?;
         let board = board.trim().to_string();
         committed(store, "roadmap", &board, "", || {
-            agile_md::roadmap::create(store, &board).map(|_| ())
+            agile_md::roadmap::create(store, &board, &alias).map(|_| ())
         })
     })
     .await

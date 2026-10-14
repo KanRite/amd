@@ -719,8 +719,16 @@ struct BoardArgs<'a> {
     board: &'a str,
 }
 
-pub async fn create_roadmap(board: &str) -> Result<SyncReport, String> {
-    call("create_roadmap", &BoardArgs { board }).await
+#[derive(Serialize)]
+struct CreateRoadmapArgs<'a> {
+    board: &'a str,
+    alias: &'a str,
+}
+
+/// Starts a board's roadmap, called `alias` (else the board's name without
+/// `-tickets`).
+pub async fn create_roadmap(board: &str, alias: &str) -> Result<SyncReport, String> {
+    call("create_roadmap", &CreateRoadmapArgs { board, alias }).await
 }
 
 #[derive(Serialize)]
