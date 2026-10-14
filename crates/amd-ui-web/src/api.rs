@@ -709,19 +709,48 @@ pub async fn save_document(
     .await
 }
 
-/// The project's roadmaps (ticket 206).
-pub async fn list_roadmaps() -> Result<Vec<amd_ui_model::RoadmapCard>, String> {
+/// The project's roadmaps and the boards without one (ticket 206).
+pub async fn list_roadmaps() -> Result<amd_ui_model::RoadmapsPage, String> {
     call("list_roadmaps", &NoArgs {}).await
 }
 
 #[derive(Serialize)]
-struct RoadmapArgs<'a> {
-    name: &'a str,
-    due: &'a str,
+struct BoardArgs<'a> {
+    board: &'a str,
 }
 
-pub async fn create_roadmap(name: &str, due: &str) -> Result<SyncReport, String> {
-    call("create_roadmap", &RoadmapArgs { name, due }).await
+pub async fn create_roadmap(board: &str) -> Result<SyncReport, String> {
+    call("create_roadmap", &BoardArgs { board }).await
+}
+
+#[derive(Serialize)]
+struct AdoptArgs<'a> {
+    roadmap: &'a str,
+    board: &'a str,
+}
+
+/// Gives a roadmap from before roadmaps had boards its board.
+pub async fn adopt_roadmap(roadmap: &str, board: &str) -> Result<SyncReport, String> {
+    call("adopt_roadmap", &AdoptArgs { roadmap, board }).await
+}
+
+#[derive(Serialize)]
+struct RoadmapDetailsArgs<'a> {
+    roadmap: &'a str,
+    goal: &'a str,
+    sprints: bool,
+}
+
+pub async fn save_roadmap(roadmap: &str, goal: &str, sprints: bool) -> Result<SyncReport, String> {
+    call(
+        "save_roadmap",
+        &RoadmapDetailsArgs {
+            roadmap,
+            goal,
+            sprints,
+        },
+    )
+    .await
 }
 
 #[derive(Serialize)]
@@ -730,7 +759,7 @@ struct MilestoneArgs<'a> {
     milestone: &'a amd_ui_model::MilestoneCard,
 }
 
-/// Adds a milestone, which makes its epic or sprint on the board.
+/// Adds a milestone, which makes its epic or sprint on the roadmap's board.
 pub async fn add_milestone(
     roadmap: &str,
     milestone: &amd_ui_model::MilestoneCard,

@@ -186,6 +186,23 @@ pub fn HomeBar() -> impl IntoView {
         >
             "Board"
         </button>
+        // Roadmaps: a plan per board, its milestones becoming epics (ticket 206).
+        <button
+            type="button"
+            class=small
+            title=move || match current() {
+                None => "Choose a project first".to_string(),
+                Some(p) => format!("{}'s roadmaps and milestones", p.name),
+            }
+            disabled=move || current().is_none()
+            on:click=move |_| {
+                if let Some(p) = current() {
+                    open(ctx, p.root, View::Roadmaps, None);
+                }
+            }
+        >
+            "Roadmap"
+        </button>
         {doc_button("Documents", "docs", "Read this project's documents (docs/)")}
         {doc_button("ADRs", "adr", "Read this project's decisions and proposals (adr/)")}
         // Ideas have a view of their own (ticket 131).
@@ -205,23 +222,6 @@ pub fn HomeBar() -> impl IntoView {
             }
         >
             "Ideas"
-        </button>
-        // Roadmaps: milestones that become epics (ticket 206).
-        <button
-            type="button"
-            class=small
-            title=move || match current() {
-                None => "Choose a project first".to_string(),
-                Some(p) => format!("{}'s roadmaps and milestones", p.name),
-            }
-            disabled=move || current().is_none()
-            on:click=move |_| {
-                if let Some(p) = current() {
-                    open(ctx, p.root, View::Roadmaps, None);
-                }
-            }
-        >
-            "Roadmap"
         </button>
         <button
             type="button"

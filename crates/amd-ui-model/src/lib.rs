@@ -734,28 +734,63 @@ pub struct IdeaList {
 }
 
 /// A milestone of a roadmap (ticket 206). Adding one made an epic — or a
-/// sprint — of the same name on the board.
+/// sprint, if the roadmap uses sprints — of the same name on its board.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MilestoneCard {
     pub name: String,
     pub description: String,
-    /// `epic` or `sprint`.
+    /// `epic` or `sprint`; set from the roadmap when one is added.
     pub kind: String,
     /// `YYYY-MM-DD`, or empty.
     pub start: String,
     /// The due-by date, `YYYY-MM-DD`, or empty.
     pub due: String,
+    /// Working days a week, 1 to 7; 0 for the usual five.
+    pub days_per_week: u32,
+    /// Working days it takes; 0 when none was given.
+    pub duration: u32,
+    /// Working days it takes, given or worked out from its dates.
+    pub total: Option<u32>,
+    /// Working days left to its due date; negative once past.
+    pub remaining: Option<i64>,
+    /// Taking longer than calculated.
+    pub late: bool,
 }
 
-/// A roadmap for the board (ticket 206).
+/// A roadmap for one board (ticket 206).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RoadmapCard {
-    /// Names it in `add_milestone`.
+    /// Names it in the commands.
     pub slug: String,
     pub name: String,
-    /// The estimated due date, `YYYY-MM-DD`, or empty.
-    pub due: String,
+    /// The board (repository) it plans; empty for a roadmap from before
+    /// roadmaps had boards, which is adopted by one.
+    pub board: String,
+    /// What it is for.
+    pub goal: String,
+    /// Milestones are sprints rather than epics.
+    pub sprints: bool,
     pub milestones: Vec<MilestoneCard>,
+    /// Total working days of the milestones that have a length.
+    pub duration: Option<u32>,
+    /// Working days left to the last due date; negative once past.
+    pub remaining: Option<i64>,
+    /// Taking longer than calculated.
+    pub late: bool,
+}
+
+/// The Roadmaps page: the roadmaps, and the boards still without one.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoadmapsPage {
+    pub roadmaps: Vec<RoadmapCard>,
+    /// Boards (repositories) of the project that have no roadmap.
+    pub free_boards: Vec<String>,
+}
+
+/// "12 days", "1 day".
+pub fn days_label(days: i64) -> String {
+    let n = days.abs();
+    format!("{n} day{}", if n == 1 { "" } else { "s" })
 }
 
 /// One person's vote, as the idea shows it.

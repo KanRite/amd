@@ -1,50 +1,65 @@
-//! Roadmaps (ticket 206): a named plan for a board, with a due date, made of
+//! Roadmaps (ticket 206): a plan for one board of the project, made of
 //! milestones.
 //!
-//! A roadmap is one markdown file, `roadmaps/<slug>.md`, in the tickets
-//! repository beside `tasks/` (not inside it, so the ticket scan never sees
-//! it). A milestone is a `## name` section holding its kind, dates and
-//! description. Adding one also creates the epic — or, if asked, the sprint —
-//! of the same name on the board, in the same change so one auto-commit
-//! records both.
+//! A roadmap is one markdown file, `roadmaps/<slug>.md`, in the project's
+//! tickets repository beside `tasks/` (not inside it, so the ticket scan never
+//! sees it). The slug is the target board's name, so a board has at most one
+//! roadmap. A milestone is a `## name` section holding its kind, dates and
+//! description. Adding one also creates the epic — or, when the roadmap uses
+//! sprints, the sprint — of the same name on the target board, in the same
+//! change so one auto-commit records both.
 //!
 //! ```text
 //! ---
-//! name: "Launch"
-//! due: "2026-12-01"
+//! name: "acme-api"
+//! board: "acme-api"
+//! goal: "Ship the beta."
+//! sprints: true
 //! ---
 //!
 //! ## Beta
 //! - kind: epic
 //! - start: 2026-10-01
 //! - due: 2026-11-01
+//! - days-per-week: 4
+//! - duration: 12
 //!
 //! What the beta has to do.
 //! ```
+//!
+//! A roadmap from before it had a board (no `board:` line) still reads; it is
+//! offered for adoption by a board (`adopt`).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use time::Date;
 use time::macros::format_description;
+use time::{Date, Duration};
 
-use crate::board::Board;
+use crate::board::{Board, Column};
 use crate::group::{DEFAULT_DAYS, Group, Kind, State};
 
 /// The folder inside the tickets repository that holds the roadmaps.
 pub const FOLDER: &str = "roadmaps";
 
+/// Working days a week when a milestone doesn't say.
+pub const DEFAULT_DAYS_PER_WEEK: u32 = 5;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Milestone {
     pub name: String,
     pub description: String,
-    /// An epic, or a sprint whose length is `start` to `due`.
+    /// An epic, or a sprint whose length is `duration`, else `start` to `due`.
     pub kind: Kind,
     /// `YYYY-MM-DD`; empty when none was given.
     pub start: String,
     /// The due-by date, `YYYY-MM-DD`; empty when none was given.
     pub due: String,
+    /// Working days a week (1 to 7); 0 means `DEFAULT_DAYS_PER_WEEK`.
+    pub days_per_week: u32,
+    /// Length in working days; 0 means none was given.
+    pub duration: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,9 +67,26 @@ pub struct Roadmap {
     /// The file name without `.md`.
     pub slug: String,
     pub name: String,
-    /// The estimated due date, `YYYY-MM-DD`.
-    pub due: String,
+    /// The board (repository) whose epics or sprints the milestones make;
+    /// empty on a roadmap from before roadmaps had boards.
+    pub board: String,
+    /// What the roadmap is for.
+    pub goal: String,
+    /// Milestones are sprints rather than epics.
+    pub sprints: bool,
     pub milestones: Vec<Milestone>,
+}
+
+/// How a roadmap or milestone stands today.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Summary {
+    /// Total working days of the milestones that have a duration; `None` if
+    /// none has.
+    pub duration: Option<u32>,
+    /// Working days left to the last due date; negative when it has passed.
+    pub remaining: Option<i64>,
+    /// Taking longer than calculated.
+    pub late: bool,
 }
 
 fn folder(board: &Board) -> PathBuf {
@@ -111,9 +143,123 @@ pub fn sprint_days(start: &str, due: &str) -> Result<u32> {
     Ok(u32::try_from(days).unwrap_or(u32::MAX).max(1))
 }
 
+/// Working days from `from` to `to`, both counted: a week's first
+/// `per_week` days (Monday first) are working days. 0 when `to` is earlier.
+pub fn working_days(from: Date, to: Date, per_week: u32) -> i64 {
+    let per_week = if per_week == 0 {
+        DEFAULT_DAYS_PER_WEEK
+    } else {
+        per_week.min(7)
+    };
+    let mut count = 0;
+    let mut day = from;
+    while day <= to {
+        if u32::from(day.weekday().number_days_from_monday()) < per_week {
+            count += 1;
+        }
+        let Some(next) = day.next_day() else { break };
+        day = next;
+    }
+    count
+}
+
+impl Milestone {
+    fn per_week(&self) -> u32 {
+        if self.days_per_week == 0 {
+            DEFAULT_DAYS_PER_WEEK
+        } else {
+            self.days_per_week
+        }
+    }
+
+    /// Working days it takes: the duration given, else start to due.
+    pub fn working_duration(&self) -> Option<u32> {
+        if self.duration > 0 {
+            return Some(self.duration);
+        }
+        let (start, due) = (parse_date(&self.start).ok()?, parse_date(&self.due).ok()?);
+        Some(u32::try_from(working_days(start, due, self.per_week())).unwrap_or(u32::MAX))
+    }
+
+    /// Working days from `today` to the due date, counting both; negative
+    /// (the days since) once it has passed.
+    pub fn remaining(&self, today: Date) -> Option<i64> {
+        let due = parse_date(&self.due).ok()?;
+        if today <= due {
+            return Some(working_days(today, due, self.per_week()));
+        }
+        let after = due.checked_add(Duration::days(1))?;
+        Some(-working_days(after, today, self.per_week()))
+    }
+
+    /// Past due and not finished, or with less time left than its unfinished
+    /// share of the duration. `done` and `total` count the epic's or
+    /// sprint's tickets.
+    pub fn late(&self, today: Date, done: usize, total: usize) -> bool {
+        if total > 0 && done == total {
+            return false;
+        }
+        let Some(remaining) = self.remaining(today) else {
+            return false;
+        };
+        if remaining < 0 {
+            return true;
+        }
+        let Some(duration) = self.working_duration() else {
+            return false;
+        };
+        let unfinished = if total == 0 {
+            1.0
+        } else {
+            1.0 - done as f64 / total as f64
+        };
+        (remaining as f64) < f64::from(duration) * unfinished
+    }
+}
+
 impl Roadmap {
+    /// How the roadmap stands on `today`; `progress` gives a milestone's
+    /// finished and total ticket counts.
+    pub fn summary(&self, today: Date, progress: &dyn Fn(&Milestone) -> (usize, usize)) -> Summary {
+        let durations: Vec<u32> = self
+            .milestones
+            .iter()
+            .filter_map(Milestone::working_duration)
+            .collect();
+        // ISO dates sort as text.
+        let last = self
+            .milestones
+            .iter()
+            .filter(|m| m.remaining(today).is_some())
+            .max_by(|a, b| a.due.cmp(&b.due));
+        Summary {
+            duration: (!durations.is_empty()).then(|| durations.iter().sum()),
+            remaining: last.and_then(|m| m.remaining(today)),
+            late: self.milestones.iter().any(|m| {
+                let (done, total) = progress(m);
+                m.late(today, done, total)
+            }),
+        }
+    }
+
+    /// `summary`, reading each milestone's tickets from `target`.
+    pub fn summary_on(&self, today: Date, target: &Board) -> Summary {
+        self.summary(today, &|m| tickets_done(target, m))
+    }
+
     fn render(&self) -> String {
-        let mut out = format!("---\nname: {:?}\ndue: {:?}\n---\n", self.name, self.due);
+        let quoted = |s: &str| serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string());
+        let mut out = format!("---\nname: {}\n", quoted(&self.name));
+        if !self.board.is_empty() {
+            out.push_str(&format!("board: {}\n", quoted(&self.board)));
+        }
+        if !self.goal.is_empty() {
+            out.push_str(&format!("goal: {}\n", quoted(&self.goal)));
+        }
+        if self.sprints {
+            out.push_str("sprints: true\n");
+        }
+        out.push_str("---\n");
         for m in &self.milestones {
             out.push_str(&format!("\n## {}\n- kind: {}\n", m.name, m.kind.as_str()));
             if !m.start.is_empty() {
@@ -121,6 +267,12 @@ impl Roadmap {
             }
             if !m.due.is_empty() {
                 out.push_str(&format!("- due: {}\n", m.due));
+            }
+            if m.days_per_week > 0 {
+                out.push_str(&format!("- days-per-week: {}\n", m.days_per_week));
+            }
+            if m.duration > 0 {
+                out.push_str(&format!("- duration: {}\n", m.duration));
             }
             if !m.description.is_empty() {
                 out.push_str(&format!("\n{}\n", m.description.trim_end()));
@@ -133,7 +285,9 @@ impl Roadmap {
         let mut roadmap = Roadmap {
             slug: slug.to_string(),
             name: slug.to_string(),
-            due: String::new(),
+            board: String::new(),
+            goal: String::new(),
+            sprints: false,
             milestones: Vec::new(),
         };
         let mut lines = text.lines();
@@ -143,10 +297,14 @@ impl Roadmap {
                     break;
                 }
                 if let Some((key, value)) = line.split_once(':') {
-                    let value = value.trim().trim_matches('"').to_string();
+                    let value = value.trim();
+                    let text = serde_json::from_str::<String>(value)
+                        .unwrap_or_else(|_| value.trim_matches('"').to_string());
                     match key.trim() {
-                        "name" => roadmap.name = value,
-                        "due" => roadmap.due = value,
+                        "name" => roadmap.name = text,
+                        "board" => roadmap.board = text,
+                        "goal" => roadmap.goal = text,
+                        "sprints" => roadmap.sprints = value == "true",
                         _ => {}
                     }
                 }
@@ -168,6 +326,8 @@ impl Roadmap {
                     kind: Kind::Epic,
                     start: String::new(),
                     due: String::new(),
+                    days_per_week: 0,
+                    duration: 0,
                 });
             } else if let Some(m) = roadmap.milestones.last_mut() {
                 let field = line.strip_prefix("- ").and_then(|l| l.split_once(':'));
@@ -181,6 +341,12 @@ impl Roadmap {
                     }
                     Some(("start", v)) if description.is_empty() => m.start = v.trim().to_string(),
                     Some(("due", v)) if description.is_empty() => m.due = v.trim().to_string(),
+                    Some(("days-per-week", v)) if description.is_empty() => {
+                        m.days_per_week = v.trim().parse().unwrap_or(0);
+                    }
+                    Some(("duration", v)) if description.is_empty() => {
+                        m.duration = v.trim().parse().unwrap_or(0);
+                    }
                     _ => description.push(line),
                 }
             }
@@ -189,14 +355,23 @@ impl Roadmap {
         roadmap
     }
 
-    fn path(&self, board: &Board) -> PathBuf {
-        folder(board).join(format!("{}.md", self.slug))
+    fn path(&self, store: &Board) -> PathBuf {
+        folder(store).join(format!("{}.md", self.slug))
     }
 }
 
-/// Every roadmap of the board's repository, by name.
-pub fn list(board: &Board) -> Result<Vec<Roadmap>> {
-    let dir = folder(board);
+/// How many tickets of the epic or sprint a milestone made are done, and how
+/// many it has.
+fn tickets_done(target: &Board, milestone: &Milestone) -> (usize, usize) {
+    let tasks = target.tasks_in_group(&milestone.name).unwrap_or_default();
+    let done = tasks.iter().filter(|t| t.column == Column::Done).count();
+    (done, tasks.len())
+}
+
+/// Every roadmap of the repository, by board name (those without a board
+/// last).
+pub fn list(store: &Board) -> Result<Vec<Roadmap>> {
+    let dir = folder(store);
     let entries = match fs::read_dir(&dir) {
         Ok(entries) => entries,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -213,7 +388,13 @@ pub fn list(board: &Board) -> Result<Vec<Roadmap>> {
             roadmaps.push(Roadmap::parse(stem, &read(&path)?));
         }
     }
-    roadmaps.sort_by_key(|r| r.name.to_lowercase());
+    roadmaps.sort_by_key(|r| {
+        (
+            r.board.is_empty(),
+            r.board.to_lowercase(),
+            r.name.to_lowercase(),
+        )
+    });
     Ok(roadmaps)
 }
 
@@ -221,56 +402,110 @@ fn read(path: &Path) -> Result<String> {
     fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
 }
 
-/// Create a roadmap for `board`, whose epics its milestones will be.
-pub fn create(board: &Board, name: &str, due: &str) -> Result<Roadmap> {
-    let name = name.trim();
-    check_line("roadmap", name)?;
-    check_date(due)?;
+fn find(store: &Board, slug: &str) -> Result<Roadmap> {
+    list(store)?
+        .into_iter()
+        .find(|r| r.slug == slug)
+        .ok_or_else(|| anyhow::anyhow!("no roadmap called {slug}"))
+}
+
+/// Create the (empty) roadmap for `board_name`, stored in `store`.
+pub fn create(store: &Board, board_name: &str) -> Result<Roadmap> {
+    let board_name = board_name.trim();
+    if board_name.is_empty() {
+        bail!("choose the board the roadmap is for");
+    }
     let roadmap = Roadmap {
-        slug: slug(name),
-        name: name.to_string(),
-        due: due.to_string(),
+        slug: slug(board_name),
+        name: board_name.to_string(),
+        board: board_name.to_string(),
+        goal: String::new(),
+        sprints: false,
         milestones: Vec::new(),
     };
     if roadmap.slug.is_empty() {
-        bail!("'{name}' has no letters or digits to name a file with");
+        bail!("'{board_name}' has no letters or digits to name a file with");
     }
-    let path = roadmap.path(board);
-    if path.exists() {
-        bail!("a roadmap called {name} already exists");
+    if list(store)?.iter().any(|r| r.board == board_name) || roadmap.path(store).exists() {
+        bail!("{board_name} already has a roadmap");
     }
-    write(board, &roadmap)?;
+    write(store, &roadmap)?;
     Ok(roadmap)
 }
 
-fn write(board: &Board, roadmap: &Roadmap) -> Result<()> {
-    let path = roadmap.path(board);
-    fs::create_dir_all(folder(board))
-        .with_context(|| format!("creating {}", folder(board).display()))?;
+/// Give a roadmap from before roadmaps had boards its board.
+pub fn adopt(store: &Board, slug: &str, board_name: &str) -> Result<Roadmap> {
+    let board_name = board_name.trim();
+    let mut roadmap = find(store, slug)?;
+    if !roadmap.board.is_empty() {
+        bail!(
+            "{} is already the roadmap of {}",
+            roadmap.name,
+            roadmap.board
+        );
+    }
+    if board_name.is_empty() {
+        bail!("choose the board the roadmap is for");
+    }
+    if list(store)?.iter().any(|r| r.board == board_name) {
+        bail!("{board_name} already has a roadmap");
+    }
+    roadmap.board = board_name.to_string();
+    write(store, &roadmap)?;
+    Ok(roadmap)
+}
+
+/// Set what the roadmap is for, and whether its milestones are sprints.
+pub fn set_details(store: &Board, slug: &str, goal: &str, sprints: bool) -> Result<Roadmap> {
+    let mut roadmap = find(store, slug)?;
+    roadmap.goal = goal.trim().to_string();
+    roadmap.sprints = sprints;
+    write(store, &roadmap)?;
+    Ok(roadmap)
+}
+
+fn write(store: &Board, roadmap: &Roadmap) -> Result<()> {
+    let path = roadmap.path(store);
+    fs::create_dir_all(folder(store))
+        .with_context(|| format!("creating {}", folder(store).display()))?;
     fs::write(&path, roadmap.render()).with_context(|| format!("writing {}", path.display()))
 }
 
-/// Add a milestone to the roadmap `slug`, and create its epic (or sprint) on
-/// `board`. All the
-/// checks run before anything is written, so a refused milestone leaves no
-/// epic behind and no half-written roadmap.
-pub fn add_milestone(board: &Board, slug: &str, milestone: Milestone) -> Result<Roadmap> {
-    let mut roadmap = list(board)?
-        .into_iter()
-        .find(|r| r.slug == slug)
-        .ok_or_else(|| anyhow::anyhow!("no roadmap called {slug}"))?;
+/// Add a milestone to the roadmap `slug` (kept in `store`), and create its
+/// epic — or sprint, if the roadmap uses sprints — on `target`, the roadmap's
+/// board. All the checks run before anything is written, so a refused
+/// milestone leaves no epic behind and no half-written roadmap.
+pub fn add_milestone(
+    store: &Board,
+    target: &Board,
+    slug: &str,
+    milestone: Milestone,
+) -> Result<Roadmap> {
+    let mut roadmap = find(store, slug)?;
+    if roadmap.board.is_empty() {
+        bail!("give {} a board before adding milestones", roadmap.name);
+    }
+    let kind = if roadmap.sprints {
+        Kind::Sprint
+    } else {
+        Kind::Epic
+    };
     let milestone = Milestone {
         name: milestone.name.trim().to_string(),
         description: milestone.description.trim().to_string(),
+        kind,
         ..milestone
     };
     check_line("milestone", &milestone.name)?;
     check_date(&milestone.start)?;
     check_date(&milestone.due)?;
+    if !(0..=7).contains(&milestone.days_per_week) {
+        bail!("days per week is 1 to 7");
+    }
     if milestone.description.lines().any(|l| l.starts_with("## ")) {
         bail!("a description can't have a line starting with '## '");
     }
-    let days = sprint_days(&milestone.start, &milestone.due)?;
+    let dates = sprint_days(&milestone.start, &milestone.due)?;
     if roadmap.milestones.iter().any(|m| m.name == milestone.name) {
         bail!(
             "{} already has a milestone {}",
@@ -278,15 +513,21 @@ pub fn add_milestone(board: &Board, slug: &str, milestone: Milestone) -> Result<
             milestone.name
         );
     }
+    let sprint = kind == Kind::Sprint;
+    // A sprint is as long as the duration given, else as start to due.
+    let days = if milestone.duration > 0 {
+        milestone.duration
+    } else {
+        dates
+    };
     // The epic's name is the milestone's name; its description and dates stay
     // here. A sprint takes the description and the length.
-    let sprint = milestone.kind == Kind::Sprint;
-    board.create_group(&Group {
-        dir: board
+    target.create_group(&Group {
+        dir: target
             .dir(crate::board::Column::Backlog)
             .join(&milestone.name),
         name: milestone.name.clone(),
-        kind: milestone.kind,
+        kind,
         // `_group.md` keeps a description on one line.
         description: if sprint {
             milestone
@@ -301,14 +542,14 @@ pub fn add_milestone(board: &Board, slug: &str, milestone: Milestone) -> Result<
         state: State::Pending,
     })?;
     roadmap.milestones.push(milestone);
-    write(board, &roadmap)?;
+    write(store, &roadmap)?;
     Ok(roadmap)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::board::Column;
+    use time::macros::date;
 
     fn board() -> (tempfile::TempDir, Board) {
         let dir = tempfile::tempdir().unwrap();
@@ -317,13 +558,15 @@ mod tests {
         (dir, Board::at(root))
     }
 
-    fn milestone(name: &str, kind: Kind, start: &str, due: &str) -> Milestone {
+    fn milestone(name: &str, start: &str, due: &str) -> Milestone {
         Milestone {
             name: name.to_string(),
             description: "What it has to do.\n\nAnd more.".to_string(),
-            kind,
+            kind: Kind::Epic,
             start: start.to_string(),
             due: due.to_string(),
+            days_per_week: 0,
+            duration: 0,
         }
     }
 
@@ -336,99 +579,211 @@ mod tests {
     #[test]
     fn a_roadmap_and_its_milestones_round_trip() {
         let (_dir, board) = board();
-        create(&board, "Launch", "2026-12-01").unwrap();
-        add_milestone(
-            &board,
-            "launch",
-            milestone("Beta", Kind::Epic, "", "2026-11-01"),
-        )
-        .unwrap();
-        add_milestone(
-            &board,
-            "launch",
-            milestone("Sprint 1", Kind::Sprint, "2026-10-01", "2026-10-15"),
-        )
-        .unwrap();
+        create(&board, "acme-api").unwrap();
+        set_details(&board, "acme-api", "Ship the beta.\nThen the rest.", false).unwrap();
+        let mut beta = milestone("Beta", "2026-10-01", "2026-11-01");
+        beta.days_per_week = 4;
+        beta.duration = 12;
+        add_milestone(&board, &board, "acme-api", beta).unwrap();
         let roadmaps = list(&board).unwrap();
         assert_eq!(roadmaps.len(), 1);
         let r = &roadmaps[0];
-        assert_eq!((r.name.as_str(), r.due.as_str()), ("Launch", "2026-12-01"));
-        assert_eq!(r.milestones.len(), 2);
-        assert_eq!(r.milestones[0].name, "Beta");
-        assert_eq!(r.milestones[0].due, "2026-11-01");
-        assert_eq!(
-            r.milestones[0].description,
-            "What it has to do.\n\nAnd more."
-        );
-        assert_eq!(r.milestones[1].kind, Kind::Sprint);
-        assert_eq!(r.milestones[1].start, "2026-10-01");
+        assert_eq!((r.board.as_str(), r.sprints), ("acme-api", false));
+        assert_eq!(r.goal, "Ship the beta.\nThen the rest.");
+        let m = &r.milestones[0];
+        assert_eq!((m.name.as_str(), m.due.as_str()), ("Beta", "2026-11-01"));
+        assert_eq!((m.days_per_week, m.duration), (4, 12));
+        assert_eq!(m.description, "What it has to do.\n\nAnd more.");
     }
 
     #[test]
-    fn a_milestone_creates_an_epic_named_for_it_with_no_description() {
+    fn a_board_has_one_roadmap() {
         let (_dir, board) = board();
-        create(&board, "Launch", "").unwrap();
-        add_milestone(&board, "launch", milestone("Beta", Kind::Epic, "", "")).unwrap();
+        create(&board, "acme-api").unwrap();
+        assert!(create(&board, "acme-api").is_err());
+        assert!(create(&board, "").is_err());
+    }
+
+    #[test]
+    fn a_milestone_is_an_epic_unless_the_roadmap_uses_sprints() {
+        let (_dir, board) = board();
+        create(&board, "acme-api").unwrap();
+        add_milestone(&board, &board, "acme-api", milestone("Beta", "", "")).unwrap();
         let group = board.group("Beta").unwrap();
         assert_eq!(group.kind, Kind::Epic);
         assert_eq!(group.description, "");
+
+        set_details(&board, "acme-api", "", true).unwrap();
+        let mut s1 = milestone("S1", "2026-10-01", "2026-10-11");
+        s1.duration = 7;
+        add_milestone(&board, &board, "acme-api", s1).unwrap();
+        let group = board.group("S1").unwrap();
+        assert!(group.is_sprint());
+        assert_eq!(group.days, 7);
+        assert_eq!(group.description, "What it has to do. And more.");
+        add_milestone(
+            &board,
+            &board,
+            "acme-api",
+            milestone("S2", "2026-10-01", "2026-10-11"),
+        )
+        .unwrap();
+        assert_eq!(board.group("S2").unwrap().days, 10);
     }
 
     #[test]
-    fn a_sprint_milestone_takes_the_description_and_the_length() {
-        let (_dir, board) = board();
-        create(&board, "Launch", "").unwrap();
-        add_milestone(
-            &board,
-            "launch",
-            milestone("S1", Kind::Sprint, "2026-10-01", "2026-10-11"),
-        )
-        .unwrap();
-        let group = board.group("S1").unwrap();
-        assert!(group.is_sprint());
-        assert_eq!(group.days, 10);
-        assert_eq!(group.description, "What it has to do. And more.");
+    fn the_epic_goes_on_the_target_board() {
+        let (_a, store) = board();
+        let (_b, target) = board();
+        create(&store, "other").unwrap();
+        add_milestone(&store, &target, "other", milestone("Beta", "", "")).unwrap();
+        assert!(target.group("Beta").is_ok());
+        assert!(store.groups().unwrap().is_empty());
+        assert_eq!(list(&store).unwrap()[0].milestones.len(), 1);
     }
 
     #[test]
     fn a_refused_milestone_leaves_nothing_behind() {
         let (_dir, board) = board();
-        create(&board, "Launch", "").unwrap();
+        create(&board, "acme-api").unwrap();
+        let mut sevens = milestone("D", "", "");
+        sevens.days_per_week = 9;
         let bad = [
-            milestone("todo", Kind::Epic, "", ""),
-            milestone("a/b", Kind::Epic, "", ""),
-            milestone("S", Kind::Sprint, "2026-10-10", "2026-10-01"),
-            milestone("D", Kind::Epic, "", "next week"),
+            milestone("todo", "", ""),
+            milestone("a/b", "", ""),
+            milestone("", "", ""),
+            milestone("S", "2026-10-10", "2026-10-01"),
+            milestone("D", "", "next week"),
+            sevens,
         ];
         for m in bad {
-            assert!(add_milestone(&board, "launch", m).is_err());
+            assert!(add_milestone(&board, &board, "acme-api", m).is_err());
         }
         assert!(board.groups().unwrap().is_empty());
         assert!(list(&board).unwrap()[0].milestones.is_empty());
     }
 
     #[test]
-    fn a_duplicate_milestone_or_roadmap_is_refused() {
+    fn a_duplicate_milestone_is_refused() {
         let (_dir, board) = board();
-        create(&board, "Launch", "").unwrap();
-        assert!(create(&board, "launch", "").is_err());
-        add_milestone(&board, "launch", milestone("Beta", Kind::Epic, "", "")).unwrap();
-        assert!(add_milestone(&board, "launch", milestone("Beta", Kind::Epic, "", "")).is_err());
+        create(&board, "acme-api").unwrap();
+        add_milestone(&board, &board, "acme-api", milestone("Beta", "", "")).unwrap();
+        assert!(add_milestone(&board, &board, "acme-api", milestone("Beta", "", "")).is_err());
+    }
+
+    #[test]
+    fn an_old_roadmap_can_be_adopted_by_a_board() {
+        let (_dir, board) = board();
+        fs::create_dir_all(folder(&board)).unwrap();
+        fs::write(
+            folder(&board).join("launch.md"),
+            "---\nname: \"Launch\"\ndue: \"2026-12-01\"\n---\n\n## Beta\n- kind: epic\n\nText.\n",
+        )
+        .unwrap();
+        let old = &list(&board).unwrap()[0];
+        assert_eq!((old.name.as_str(), old.board.as_str()), ("Launch", ""));
+        assert!(add_milestone(&board, &board, "launch", milestone("X", "", "")).is_err());
+        adopt(&board, "launch", "acme-api").unwrap();
+        assert_eq!(list(&board).unwrap()[0].board, "acme-api");
+        assert!(adopt(&board, "launch", "acme-ui").is_err());
+        assert!(create(&board, "acme-api").is_err());
     }
 
     #[test]
     fn roadmaps_are_not_tickets() {
         let (_dir, board) = board();
-        create(&board, "Launch", "").unwrap();
+        create(&board, "acme-api").unwrap();
         assert!(board.tasks_in(Column::Backlog).unwrap().is_empty());
         assert!(board.groups().unwrap().is_empty());
     }
 
     #[test]
-    fn a_bad_roadmap_is_refused() {
-        let (_dir, board) = board();
-        assert!(create(&board, "", "").is_err());
-        assert!(create(&board, "!!!", "").is_err());
-        assert!(create(&board, "Launch", "soon").is_err());
+    fn working_days_count_the_first_days_of_each_week() {
+        // 2026-10-12 is a Monday.
+        assert_eq!(
+            working_days(date!(2026 - 10 - 12), date!(2026 - 10 - 18), 5),
+            5
+        );
+        assert_eq!(
+            working_days(date!(2026 - 10 - 12), date!(2026 - 10 - 18), 4),
+            4
+        );
+        assert_eq!(
+            working_days(date!(2026 - 10 - 12), date!(2026 - 10 - 12), 5),
+            1
+        );
+        assert_eq!(
+            working_days(date!(2026 - 10 - 17), date!(2026 - 10 - 18), 5),
+            0
+        );
+        assert_eq!(
+            working_days(date!(2026 - 10 - 13), date!(2026 - 10 - 12), 5),
+            0
+        );
+        assert_eq!(
+            working_days(date!(2026 - 10 - 12), date!(2026 - 10 - 25), 0),
+            10
+        );
+    }
+
+    #[test]
+    fn duration_is_given_or_calculated() {
+        let mut m = milestone("A", "2026-10-12", "2026-10-23");
+        assert_eq!(m.working_duration(), Some(10));
+        m.duration = 3;
+        assert_eq!(m.working_duration(), Some(3));
+        assert_eq!(milestone("B", "", "2026-10-23").working_duration(), None);
+    }
+
+    #[test]
+    fn remaining_counts_down_then_goes_negative() {
+        let m = milestone("A", "", "2026-10-23");
+        assert_eq!(m.remaining(date!(2026 - 10 - 19)), Some(5));
+        assert_eq!(m.remaining(date!(2026 - 10 - 23)), Some(1));
+        assert_eq!(m.remaining(date!(2026 - 10 - 26)), Some(-1));
+        assert_eq!(
+            milestone("B", "", "").remaining(date!(2026 - 10 - 19)),
+            None
+        );
+    }
+
+    #[test]
+    fn late_is_overdue_or_short_of_time_for_the_unfinished_work() {
+        let m = milestone("A", "2026-10-12", "2026-10-23"); // 10 working days
+        // Plenty of time, nothing done.
+        assert!(!m.late(date!(2026 - 10 - 12), 0, 4));
+        // Five days left, half the work left.
+        assert!(!m.late(date!(2026 - 10 - 19), 2, 4));
+        // Five days left, nothing done: only five days for ten days of work.
+        assert!(m.late(date!(2026 - 10 - 19), 0, 4));
+        // Overdue.
+        assert!(m.late(date!(2026 - 10 - 26), 3, 4));
+        // Finished, even if overdue.
+        assert!(!m.late(date!(2026 - 10 - 26), 4, 4));
+        // No due date: nothing to be late against.
+        assert!(!milestone("B", "", "").late(date!(2026 - 10 - 26), 0, 0));
+    }
+
+    #[test]
+    fn a_roadmap_adds_up_its_milestones() {
+        let mut a = milestone("A", "2026-10-12", "2026-10-23");
+        a.duration = 0;
+        let mut b = milestone("B", "", "2026-11-06");
+        b.duration = 5;
+        let roadmap = Roadmap {
+            slug: "x".into(),
+            name: "x".into(),
+            board: "x".into(),
+            goal: String::new(),
+            sprints: false,
+            milestones: vec![a, b],
+        };
+        let summary = roadmap.summary(date!(2026 - 10 - 12), &|_| (0, 0));
+        assert_eq!(summary.duration, Some(15));
+        // To the last due date, 2026-11-06 (a Friday): 4 full weeks.
+        assert_eq!(summary.remaining, Some(20));
+        assert!(!summary.late);
+        let late = roadmap.summary(date!(2026 - 10 - 26), &|_| (0, 3));
+        assert!(late.late);
     }
 }
