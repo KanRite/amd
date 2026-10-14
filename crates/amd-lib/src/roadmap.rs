@@ -43,6 +43,9 @@ use crate::group::{DEFAULT_DAYS, Group, Kind, State};
 /// The folder inside the tickets repository that holds the roadmaps.
 pub const FOLDER: &str = "roadmaps";
 
+/// The most characters a milestone's short name may have.
+pub const MILESTONE_NAME_MAX: usize = 20;
+
 /// Working days a week when a milestone doesn't say.
 pub const DEFAULT_DAYS_PER_WEEK: u32 = 5;
 
@@ -409,22 +412,42 @@ fn find(store: &Board, slug: &str) -> Result<Roadmap> {
         .ok_or_else(|| anyhow::anyhow!("no roadmap called {slug}"))
 }
 
-/// Create the (empty) roadmap for `board_name`, stored in `store`.
-pub fn create(store: &Board, board_name: &str) -> Result<Roadmap> {
+/// The roadmap name a board gets unless it is given an alias: the board's
+/// name without its `-tickets` suffix.
+pub fn default_name(board_name: &str) -> String {
+    let board_name = board_name.trim();
+    board_name
+        .strip_suffix("-tickets")
+        .filter(|n| !n.is_empty())
+        .unwrap_or(board_name)
+        .to_string()
+}
+
+/// Create the (empty) roadmap for `board_name`, stored in `store`. It is
+/// called `alias` if that isn't empty, else the board's `default_name`.
+pub fn create(store: &Board, board_name: &str, alias: &str) -> Result<Roadmap> {
     let board_name = board_name.trim();
     if board_name.is_empty() {
         bail!("choose the board the roadmap is for");
     }
+    let name = match alias.trim() {
+        "" => default_name(board_name),
+        alias => alias.to_string(),
+    };
+    check_line("roadmap", &name)?;
     let roadmap = Roadmap {
-        slug: slug(board_name),
-        name: board_name.to_string(),
+        slug: slug(&name),
+        name,
         board: board_name.to_string(),
         goal: String::new(),
         sprints: false,
         milestones: Vec::new(),
     };
     if roadmap.slug.is_empty() {
-        bail!("'{board_name}' has no letters or digits to name a file with");
+        bail!(
+            "'{}' has no letters or digits to name a file with",
+            roadmap.name
+        );
     }
     if list(store)?.iter().any(|r| r.board == board_name) || roadmap.path(store).exists() {
         bail!("{board_name} already has a roadmap");
@@ -497,6 +520,9 @@ pub fn add_milestone(
         ..milestone
     };
     check_line("milestone", &milestone.name)?;
+    if milestone.name.chars().count() > MILESTONE_NAME_MAX {
+        bail!("a milestone's short name is at most {MILESTONE_NAME_MAX} characters");
+    }
     check_date(&milestone.start)?;
     check_date(&milestone.due)?;
     if !(0..=7).contains(&milestone.days_per_week) {
@@ -571,6 +597,33 @@ mod tests {
     }
 
     #[test]
+    fn roadmaps_drop_tickets_from_the_name_unless_given_an_alias() {
+        let (_dir, board) = board();
+        assert_eq!(default_name("acme-tickets"), "acme");
+        assert_eq!(default_name("-tickets"), "-tickets");
+        let r = create(&board, "acme-tickets", "").unwrap();
+        assert_eq!(
+            (r.name.as_str(), r.board.as_str()),
+            ("acme", "acme-tickets")
+        );
+        let r = create(&board, "other-tickets", " Big Plan ").unwrap();
+        assert_eq!(
+            (r.name.as_str(), r.slug.as_str(), r.board.as_str()),
+            ("Big Plan", "big-plan", "other-tickets")
+        );
+    }
+
+    #[test]
+    fn a_milestone_short_name_is_at_most_20_characters() {
+        let (_dir, board) = board();
+        create(&board, "acme-api", "").unwrap();
+        let ok = milestone(&"a".repeat(20), "", "");
+        add_milestone(&board, &board, "acme-api", ok).unwrap();
+        let long = milestone(&"b".repeat(21), "", "");
+        assert!(add_milestone(&board, &board, "acme-api", long).is_err());
+    }
+
+    #[test]
     fn slugs_are_file_names() {
         assert_eq!(slug("Q4 Launch!"), "q4-launch");
         assert_eq!(slug("  --  "), "");
@@ -579,7 +632,7 @@ mod tests {
     #[test]
     fn a_roadmap_and_its_milestones_round_trip() {
         let (_dir, board) = board();
-        create(&board, "acme-api").unwrap();
+        create(&board, "acme-api", "").unwrap();
         set_details(&board, "acme-api", "Ship the beta.\nThen the rest.", false).unwrap();
         let mut beta = milestone("Beta", "2026-10-01", "2026-11-01");
         beta.days_per_week = 4;
@@ -599,15 +652,15 @@ mod tests {
     #[test]
     fn a_board_has_one_roadmap() {
         let (_dir, board) = board();
-        create(&board, "acme-api").unwrap();
-        assert!(create(&board, "acme-api").is_err());
-        assert!(create(&board, "").is_err());
+        create(&board, "acme-api", "").unwrap();
+        assert!(create(&board, "acme-api", "").is_err());
+        assert!(create(&board, "", "").is_err());
     }
 
     #[test]
     fn a_milestone_is_an_epic_unless_the_roadmap_uses_sprints() {
         let (_dir, board) = board();
-        create(&board, "acme-api").unwrap();
+        create(&board, "acme-api", "").unwrap();
         add_milestone(&board, &board, "acme-api", milestone("Beta", "", "")).unwrap();
         let group = board.group("Beta").unwrap();
         assert_eq!(group.kind, Kind::Epic);
@@ -635,7 +688,7 @@ mod tests {
     fn the_epic_goes_on_the_target_board() {
         let (_a, store) = board();
         let (_b, target) = board();
-        create(&store, "other").unwrap();
+        create(&store, "other", "").unwrap();
         add_milestone(&store, &target, "other", milestone("Beta", "", "")).unwrap();
         assert!(target.group("Beta").is_ok());
         assert!(store.groups().unwrap().is_empty());
@@ -645,7 +698,7 @@ mod tests {
     #[test]
     fn a_refused_milestone_leaves_nothing_behind() {
         let (_dir, board) = board();
-        create(&board, "acme-api").unwrap();
+        create(&board, "acme-api", "").unwrap();
         let mut sevens = milestone("D", "", "");
         sevens.days_per_week = 9;
         let bad = [
@@ -666,7 +719,7 @@ mod tests {
     #[test]
     fn a_duplicate_milestone_is_refused() {
         let (_dir, board) = board();
-        create(&board, "acme-api").unwrap();
+        create(&board, "acme-api", "").unwrap();
         add_milestone(&board, &board, "acme-api", milestone("Beta", "", "")).unwrap();
         assert!(add_milestone(&board, &board, "acme-api", milestone("Beta", "", "")).is_err());
     }
@@ -686,13 +739,13 @@ mod tests {
         adopt(&board, "launch", "acme-api").unwrap();
         assert_eq!(list(&board).unwrap()[0].board, "acme-api");
         assert!(adopt(&board, "launch", "acme-ui").is_err());
-        assert!(create(&board, "acme-api").is_err());
+        assert!(create(&board, "acme-api", "").is_err());
     }
 
     #[test]
     fn roadmaps_are_not_tickets() {
         let (_dir, board) = board();
-        create(&board, "acme-api").unwrap();
+        create(&board, "acme-api", "").unwrap();
         assert!(board.tasks_in(Column::Backlog).unwrap().is_empty());
         assert!(board.groups().unwrap().is_empty());
     }

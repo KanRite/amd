@@ -88,6 +88,16 @@ fn Problem(problem: RwSignal<Option<String>>) -> impl IntoView {
 }
 
 /// The roadmap buttons on the left, the new-roadmap form on the right.
+/// What a roadmap is called without an alias; mirrors `roadmap::default_name`
+/// in amd-lib, which this crate can't reach.
+fn default_name(board: &str) -> String {
+    board
+        .strip_suffix("-tickets")
+        .filter(|n| !n.is_empty())
+        .unwrap_or(board)
+        .to_string()
+}
+
 #[component]
 fn RoadmapList(
     data: RoadmapsPage,
@@ -98,6 +108,7 @@ fn RoadmapList(
     let busy = RwSignal::new(false);
     let problem = RwSignal::new(None::<String>);
     let board = RwSignal::new(data.free_boards.first().cloned().unwrap_or_default());
+    let alias = RwSignal::new(String::new());
     let free = data.free_boards.clone();
 
     let create = move || {
@@ -106,10 +117,11 @@ fn RoadmapList(
         }
         busy.set(true);
         spawn_local(async move {
-            match api::create_roadmap(&board.get_untracked()).await {
+            match api::create_roadmap(&board.get_untracked(), &alias.get_untracked()).await {
                 Ok(report) => {
                     ctx.report(report);
                     problem.set(None);
+                    alias.set(String::new());
                     reload();
                 }
                 Err(e) => problem.set(Some(e)),
@@ -145,7 +157,7 @@ fn RoadmapList(
                                     class=class
                                     on:click=move |_| open.set(Some(slug.clone()))
                                 >
-                                    <span class="font-medium">{r.board.clone()}</span>
+                                    <span class="font-medium">{r.name.clone()}</span>
                                     <span class="text-xs">
                                         {r
                                             .duration
@@ -203,6 +215,16 @@ fn RoadmapList(
                                         .map(|b| view! { <option value=b.clone()>{b.clone()}</option> })
                                         .collect_view()}
                                 </select>
+                            </label>
+                            <label class="flex flex-col gap-1 text-sm">
+                                "Name (optional)"
+                                <input
+                                    type="text"
+                                    class=FIELD
+                                    placeholder=move || default_name(&board.get())
+                                    prop:value=move || alias.get()
+                                    on:input=move |ev| alias.set(event_target_value(&ev))
+                                />
                             </label>
                             <button type="submit" class=PRIMARY disabled=move || busy.get()>
                                 "Create Roadmap"
@@ -353,7 +375,7 @@ fn RoadmapView(
             <button type="button" class=SECONDARY on:click=move |_| open.set(None)>
                 "← Roadmaps"
             </button>
-            <h1 class="text-xl font-semibold">{roadmap.board.clone()}</h1>
+            <h1 class="text-xl font-semibold">{roadmap.name.clone()}</h1>
             <span class="text-sm text-slate-500">
                 {roadmap
                     .duration
@@ -449,6 +471,7 @@ fn RoadmapView(
                 <input
                     type="text"
                     required
+                    maxlength="20"
                     class=FIELD
                     prop:value=move || name.get()
                     on:input=move |ev| name.set(event_target_value(&ev))
