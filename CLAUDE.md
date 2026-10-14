@@ -491,22 +491,28 @@ redundant. Their history is in git if it is ever wanted again.
 - `scripts/demo-board.sh [DIR]` — builds a fictional "Acme" project for
   screenshots (ticket 147) through the `amd` CLI itself: tickets, code
   repositories, users, tags, two epics, a started sprint, a draft, every
-  column, a documents repository and a shared handbook, locks only in doing, creation dates spread back. Own
+  column, a documents repository and a shared handbook, ideas with votes and
+  notes, a roadmap on track, locks only in doing, creation dates spread back. Own
   `XDG_CONFIG_HOME` in `DIR/config`; refuses a DIR it didn't make
   (`.agile-md-demo` marker). Shellchecked in CI.
 - `README.md`, `LICENSE` (MIT).
-- `docs/logo/` — the logo (ticket 194), light and dark (the dark one's
-  "Agile-", "MD", tagline and bulb base lightened for GitHub's dark
-  theme), from the designer's source vector with the text turned into
-  outlines (`inkscape --export-text-to-path`), so it doesn't depend on
-  DejaVu Sans. The README shows the right one with `<picture>`.
-  `crates/amd-ui/app-icon.svg` is the logo's mark (board and git diamond,
-  no words); after changing it, `cargo tauri icon app-icon.svg` in
-  `crates/amd-ui` regenerates `icons/` (delete the `android/`, `ios/` and
-  `64x64.png` it also makes: nothing uses them).
-
-## How `amd` works (architecture)
-
+- `pages/` — the website (tickets 205, 211), published to GitHub Pages by
+  `.github/workflows/pages.yml` (only on a change under `pages/` on main, or
+  by hand; the repository's Pages source must be "GitHub Actions"). Plain
+  HTML and CSS, no build: `index.html`, `style.css`, `screenshots/` (from
+  the demo board, built at `/tmp/acme` so no home path shows in amdui's
+  header, at 1600 px wide) and `logo/`. **The logo** (ticket 194) is
+  `pages/logo/agile-md-light.svg` and `-dark.svg` (the dark one's "Agile-",
+  "MD", tagline and bulb base lightened for dark themes), from the
+  designer's source vector with the text turned into outlines (`inkscape
+  --export-text-to-path`), so it doesn't depend on DejaVu Sans; the README
+  and the site pick one with `<picture>`. `crates/amd-ui/app-icon.svg` is
+  the logo's mark (board and git diamond, no words), copied to
+  `pages/logo/icon.svg` as the favicon; after changing it, `cargo tauri
+  icon app-icon.svg` in `crates/amd-ui` regenerates `icons/` (delete the
+  `android/`, `ios/` and `64x64.png` it also makes: nothing uses them). The
+  feature list is in three places that should agree: the README's
+  Features, the site, and agile-md-documents' `docs/FEATURES.md`.
 - `Board::locate()` resolves the board as `$(git rev-parse --show-toplevel)/${AMD_DIR:-tasks}`,
   so `amd` works from any subdirectory; it errors if not inside a git repo.
 - `Board::discover()` is `locate()` plus **two** fallbacks (ticket 061 added

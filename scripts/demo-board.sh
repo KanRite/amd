@@ -2,9 +2,11 @@
 # Builds a demo project for screenshots (ticket 147): a fictional online shop,
 # "Acme", with a board that shows everything amd does — every column, an epic,
 # a running sprint, assignees, priorities, points, tags, a draft, locks,
-# related tickets, two code repositories, and documents (the project's own
-# and a shared handbook). Every name is made up and every
-# address is @example.com, so a screenshot shows nobody's real data.
+# related tickets, two code repositories, documents (the project's own and a
+# shared handbook), ideas with votes and notes, and a roadmap. Every name is
+# made up and every address is @example.com, so a screenshot shows nobody's
+# real data. For screenshots, build it outside your home folder (e.g.
+# /tmp/acme): amdui's header shows the board's path.
 #
 #   scripts/demo-board.sh [DIR]      # default: ./agile-md-demo
 #
@@ -130,6 +132,8 @@ note "${d1}" "Totals are summed from rounded line prices; round once, at the end
 # through it. Entering doing locks a ticket for whoever moved it (Alex,
 # here), and leaving it unlocks it again.
 walk "${f1}" todo doing "done"; walk "${f2}" todo doing "done"; walk "${f3}" todo doing "done"
+# One of the checkout epic's tickets is finished, so its milestone is on track.
+walk "${e2}" todo doing "done"
 walk "${d1}" todo doing; walk "${d2}" todo doing
 walk "${t1}" todo; walk "${t2}" todo
 
@@ -142,6 +146,34 @@ for f in tasks/*/[0-9]*.md tasks/backlog/*/[0-9]*.md; do
   sed -i.bak "s/^created: .*/created: \"${date}\"/" "${f}" && rm -f "${f}.bak"
 done
 git add -A tasks && save "Spread creation dates"
+
+# A roadmap (ticket 206) for the board: its milestones are the two epics,
+# with working days counted from their dates.
+ahead() { date -d "+$1 days" +%F 2>/dev/null || date -v+"$1"d +%F; }
+mkdir -p roadmaps
+cat > roadmaps/acme.md <<MD
+---
+name: "acme"
+board: "acme-tickets"
+goal: "A faster checkout, then a better first visit."
+---
+
+## checkout
+- kind: epic
+- start: $(date -d "-10 days" +%F 2>/dev/null || date -v-10d +%F)
+- due: $(ahead 40)
+
+A faster, simpler checkout.
+
+## onboarding
+- kind: epic
+- start: $(ahead 35)
+- due: $(ahead 75)
+- days-per-week: 4
+
+First-run experience for new customers.
+MD
+git add roadmaps && save "Roadmap"
 
 # Documents (ticket 129): the project's own, and a handbook every project
 # shares, named in the project's settings.
@@ -195,11 +227,50 @@ attempt 1 ──fail──▶ wait ──▶ attempt 2 ──fail──▶ tell 
 
 > Never retry a payment the customer cancelled.
 MD
-cat > "${DIR}/acme-documents/ideas/loyalty-points.md" <<'MD'
+# Ideas (ticket 131): votes are one line per person, -3 to +3; notes are
+# signed and dated.
+ago() { date -d "-$1 days" +%F 2>/dev/null || date -v-"$1"d +%F; }
+cat > "${DIR}/acme-documents/ideas/loyalty-points.md" <<MD
+---
+title: "Loyalty points"
+author: "Priya Shah <priya.shah@example.com>"
+created: "$(ago 12)"
+votes: ["Priya Shah <priya.shah@example.com> +3", "Sam Lee <sam.lee@example.com> +2", "Jordan Reyes <jordan.reyes@example.com> +1"]
+---
 # Loyalty points
 
 Customers earn a point per pound spent and redeem 100 points for £1 off. Worth an RFC once gift cards
 (ticket 013) are out of draft: both touch the basket total.
+
+## Notes
+
+- **Sam Lee**, $(ago 9): The basket total needs one place that applies discounts first.
+- **Jordan Reyes**, $(ago 4): Finance want points to expire after a year.
+MD
+cat > "${DIR}/acme-documents/ideas/share-a-wishlist.md" <<MD
+---
+title: "Share a wishlist"
+author: "Jordan Reyes <jordan.reyes@example.com>"
+created: "$(ago 8)"
+votes: ["Jordan Reyes <jordan.reyes@example.com> +2", "Alex Morgan <alex.morgan@example.com> +1"]
+---
+# Share a wishlist
+
+A link that shows someone your saved items, so friends and family can buy from it.
+MD
+cat > "${DIR}/acme-documents/ideas/same-day-delivery.md" <<MD
+---
+title: "Same-day delivery in the city"
+created: "$(ago 3)"
+votes: ["Alex Morgan <alex.morgan@example.com> +1", "Sam Lee <sam.lee@example.com> -2"]
+---
+# Same-day delivery in the city
+
+Orders before noon delivered the same evening, by a courier partner.
+
+## Notes
+
+- **Sam Lee**, $(ago 2): Couriers want a minimum volume we don't have yet.
 MD
 cat > "${DIR}/acme-documents/docs/img/release.svg" <<'SVG'
 <svg xmlns="http://www.w3.org/2000/svg" width="420" height="70" font-family="sans-serif" font-size="14">

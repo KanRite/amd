@@ -1,11 +1,26 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/agile-md-dark.svg">
-    <img src="docs/logo/agile-md-light.svg" alt="Agile-MD: plan, write, ideate, deliver" width="560">
+    <source media="(prefers-color-scheme: dark)" srcset="pages/logo/agile-md-dark.svg">
+    <img src="pages/logo/agile-md-light.svg" alt="Agile-MD: plan, write, ideate, deliver" width="560">
   </picture>
 </p>
 
-# agile-md
+# agile-md - AI friendly but not a requirement!
+
+A fully featured AI friendly agile management system featuring kanban boards, documents and ideation all backed with git. 
+
+**AI is NOT a requirement.**
+
+ Agile-MD works well with AI but there is no AI requirement and is equally beneficial and feature rich for teams and solo use.  
+
+Your tickets and documents are not hosted in someone elses cloud, they are with your work, written in markdown fully accessible to your teams and your AI without any additional costs.
+
+The tickets become your audit trail with every change to your tickets and documents pushed to your repository with consise documentation.
+
+
+Agile-md provides you with all the tooling you need to be productive in the  writtem and documents remain in your git repositories with your work and  written in markdown 
+
+
 
 A tiny **filesystem Kanban** — tasks are markdown files moved between `todo/`,
 `doing/` and `done/` directories. A single static binary plus `git`; no runtime,
@@ -24,6 +39,113 @@ no daemon, no database.
   without one it's a ticket with nothing to check out.
 - **One command, any repo.** Install `amd` once on your PATH; it finds the
   board at `<repository-root>/tasks` from wherever you are.
+
+## Features
+
+![The board: a running sprint beside the backlog, todo, doing and done](pages/screenshots/board.png)
+
+### The idea
+
+- **Tickets are markdown files in Git.** The column is the folder a ticket is
+  in (backlog, todo, doing, done), and a move is a `git mv`, so history is the
+  audit trail.
+- **It lives where you work:** a `<project>-tickets` repository beside your
+  code, not a cloud service. No server, no database, no account.
+- **Two programs over one library:** `amd` on the command line and `amdui` on
+  the desktop, sharing exactly the same rules.
+- **Open source** (MIT), with releases for Linux and macOS.
+
+### Tickets
+
+- **One flexible ticket**, rendered from templates each project can change.
+- **Fields:** priority, story points (1, 2, 3, 5, 8, 13), assignee from the
+  project's users, tags, the repository it's about, parent and related links.
+- **Who created it** is recorded; **who last edited it** comes from git.
+- **Tags** are uppercase and can be limited to the project's own list; DRAFT
+  and TRIAGE are built in.
+- **Drafts** can't leave the backlog until they're marked ready.
+- **Branches:** a ticket with a branch type gets its own git branch when it
+  moves to todo.
+- **Search and filters** by tag, assignee, repository and text.
+
+### Workflow rules
+
+- **One column at a time:** backlog → todo → doing → done, never a jump.
+- **A WIP limit on doing** (2 unless changed), with a deliberate override.
+- **Locks:** a ticket is yours while it's in doing and is released when it
+  leaves; someone else's lock is only broken on purpose.
+- **Every change is committed and pushed**, and boards stay in step: amd
+  catches up before a change, replays it if someone pushed first, and warns
+  when many tickets vanish or history is rewritten.
+
+### Planning
+
+- **Epics and sprints**, both optional; a started sprint takes nothing more
+  and gives nothing back.
+- **Roadmaps:** one per board, made of milestones that create its epics or
+  sprints, with working days, time left and whether each is on track.
+- **My work:** your todo and doing tickets across every project on your
+  machine, and work to pick up when you have none.
+
+### Documents and ideas
+
+- **A documents repository per project** for ADRs, RFCs and docs, plus an
+  optional one every project shares. Changes go straight to main, with
+  history and restore.
+- **Write in amdui:** rich text or markdown, folders, moves that keep links
+  working, archiving, a pinned start page and search.
+- **Ideas** before they're tickets: everyone votes up to ±3 and adds notes,
+  and an idea becomes a ticket in one click.
+
+### Teams and projects
+
+- **`amd init`** creates a project's repositories on GitHub; **`amd join`**
+  gives a teammate the project and adds them as a user.
+- **Several repositories per project**, and several projects side by side.
+- **Admin** settings are committed for the team; **Preferences** are your
+  own, on your machine.
+- **Archive a project** to make it read-only, on GitHub too if you like.
+
+### Bringing work in, and getting it back
+
+- **GitHub issues** arrive as TRIAGE tickets, each one only once.
+- **Import** tickets from another board and documents from a folder.
+- **`amd recover`** brings back deleted or abandoned tickets; **`amd
+  renumber`** fixes duplicate numbers.
+
+### The desktop board
+
+| | |
+|---|---|
+| ![A ticket open in the editor](pages/screenshots/ticket.png) | ![A roadmap and its milestones](pages/screenshots/roadmap.png) |
+| ![Documents, with an ADR open](pages/screenshots/documents.png) | ![Ideas, best voted first](pages/screenshots/ideas.png) |
+| ![The landing page: My work and the projects](pages/screenshots/home.png) | ![The terminal in the bottom panel](pages/screenshots/panel.png) |
+
+
+- **Drag and drop**, with the rules shown while you drag.
+- **A landing page** with My work and every project.
+- **Live:** changes made anywhere (the command line, an editor, a pull) show
+  within a second.
+- **A bottom panel** with a terminal and an AI tab running your own AI tool.
+- **Speech to text**, optional and entirely on your machine.
+- **An Editor button**, themes, accent colours and zoom.
+- **Update check:** it tells you when a newer release is out.
+
+### AI, if you want it
+
+- **`amd mcp`** lets any MCP-capable AI tool (Claude Code, Copilot, Cursor,
+  Codex, Gemini CLI) read the board, documents, ideas and what's on screen,
+  and change tickets under the same rules, each change committed. It never
+  abandons tickets, breaks locks or changes settings.
+- **Nothing built in:** amd holds no API keys, and nothing runs unless your
+  AI tool starts it.
+
+### Command line
+
+- **Everything the board does is a command**, safe in scripts and CI: it
+  never prompts without a terminal.
+- **Shell completion** for bash, zsh and fish, and `amd log` for a board's
+  history.
 
 ## Install
 
