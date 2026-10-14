@@ -162,7 +162,10 @@ redundant. Their history is in git if it is ever wanted again.
   roadmap buttons by board name with a board dropdown and Create Roadmap on
   the right while a board has none, and a roadmap's own page (goal, Use
   Sprints, milestones); commands `list_roadmaps`, `create_roadmap`,
-  `adopt_roadmap`, `save_roadmap`, `add_milestone`. No CLI or MCP tool yet.
+  `adopt_roadmap`, `save_roadmap`, `rename_roadmap`, `add_milestone`. `rename(store, slug,
+  name)` (ticket 210) changes the name and moves the file to the new name's slug
+  (`git mv`), refusing an empty name or another roadmap's; milestones, goal and
+  board stay. No CLI or MCP tool yet.
 - `crates/amd-lib/src/archive.rs` — archiving a project (ticket 157):
   `archived = on` in the tickets `.settings`, auto-committed like any
   setting. An archived project only reads: the CLI's `run()` refuses a

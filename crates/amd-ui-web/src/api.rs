@@ -757,6 +757,17 @@ pub async fn save_roadmap(roadmap: &str, goal: &str, sprints: bool) -> Result<Sy
 }
 
 #[derive(Serialize)]
+struct RenameRoadmapArgs<'a> {
+    roadmap: &'a str,
+    name: &'a str,
+}
+
+/// Gives a roadmap a new name; its file moves with it.
+pub async fn rename_roadmap(roadmap: &str, name: &str) -> Result<SyncReport, String> {
+    call("rename_roadmap", &RenameRoadmapArgs { roadmap, name }).await
+}
+
+#[derive(Serialize)]
 struct MilestoneArgs<'a> {
     roadmap: &'a str,
     milestone: &'a amd_ui_model::MilestoneCard,

@@ -27,6 +27,8 @@
 //! What the beta has to do.
 //! ```
 //!
+//! A roadmap can be renamed (`rename`); its file moves with its name.
+//!
 //! A roadmap from before it had a board (no `board:` line) still reads; it is
 //! offered for adoption by a board (`adopt`).
 
@@ -487,6 +489,37 @@ pub fn set_details(store: &Board, slug: &str, goal: &str, sprints: bool) -> Resu
     Ok(roadmap)
 }
 
+/// Give the roadmap `slug` a new name. The file is named after the name, so
+/// it moves too (`git mv` when tracked, so history follows). Its board,
+/// goal and milestones are untouched. Refused, changing nothing, if the name
+/// is empty or its file name is another roadmap's.
+pub fn rename(store: &Board, slug: &str, new_name: &str) -> Result<Roadmap> {
+    let mut roadmap = find(store, slug)?;
+    let name = new_name.trim().to_string();
+    check_line("roadmap", &name)?;
+    let new_slug = self::slug(&name);
+    if new_slug.is_empty() {
+        bail!("'{name}' has no letters or digits to name a file with");
+    }
+    let old = roadmap.path(store);
+    roadmap.name = name;
+    roadmap.slug = new_slug;
+    let new = roadmap.path(store);
+    if new != old {
+        if new.exists() {
+            bail!("there is already a roadmap called {}", roadmap.slug);
+        }
+        if crate::git::is_tracked(store.repo_root(), &old) {
+            crate::git::mv(store.repo_root(), &old, &new)?;
+        } else {
+            fs::rename(&old, &new)
+                .with_context(|| format!("moving {} to {}", old.display(), new.display()))?;
+        }
+    }
+    write(store, &roadmap)?;
+    Ok(roadmap)
+}
+
 fn write(store: &Board, roadmap: &Roadmap) -> Result<()> {
     let path = roadmap.path(store);
     fs::create_dir_all(folder(store))
@@ -621,6 +654,41 @@ mod tests {
         add_milestone(&board, &board, "acme-api", ok).unwrap();
         let long = milestone(&"b".repeat(21), "", "");
         assert!(add_milestone(&board, &board, "acme-api", long).is_err());
+    }
+
+    #[test]
+    fn renaming_a_roadmap_moves_its_file_and_keeps_the_rest() {
+        let (_dir, board) = board();
+        create(&board, "acme-api", "").unwrap();
+        set_details(&board, "acme-api", "Ship it.", true).unwrap();
+        add_milestone(&board, &board, "acme-api", milestone("Beta", "", "")).unwrap();
+        let r = rename(&board, "acme-api", " Big Plan ").unwrap();
+        assert_eq!((r.name.as_str(), r.slug.as_str()), ("Big Plan", "big-plan"));
+        let all = list(&board).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0], r);
+        assert_eq!(
+            (all[0].board.as_str(), all[0].goal.as_str(), all[0].sprints),
+            ("acme-api", "Ship it.", true)
+        );
+        assert_eq!(all[0].milestones.len(), 1);
+        assert!(!folder(&board).join("acme-api.md").exists());
+        // Only the capitals change: same file.
+        let r = rename(&board, "big-plan", "BIG PLAN").unwrap();
+        assert_eq!((r.name.as_str(), r.slug.as_str()), ("BIG PLAN", "big-plan"));
+    }
+
+    #[test]
+    fn a_roadmap_cannot_be_renamed_to_nothing_or_to_another() {
+        let (_dir, board) = board();
+        create(&board, "one", "").unwrap();
+        create(&board, "two", "").unwrap();
+        assert!(rename(&board, "one", "  ").is_err());
+        assert!(rename(&board, "one", "!!!").is_err());
+        assert!(rename(&board, "one", "Two").is_err());
+        assert!(rename(&board, "missing", "x").is_err());
+        let names: Vec<_> = list(&board).unwrap().into_iter().map(|r| r.slug).collect();
+        assert_eq!(names, ["one", "two"]);
     }
 
     #[test]
