@@ -29,6 +29,8 @@ pub enum View {
     Documents,
     /// The project's ideas, best first (ticket 131).
     Ideas,
+    /// The board's roadmaps and their milestones (ticket 206).
+    Roadmaps,
 }
 
 /// Which overlay, if any, is open over the board.
@@ -440,6 +442,10 @@ pub fn App() -> impl IntoView {
                         project_dir.track();
                         view! { <crate::ideas::IdeasView /> }.into_any()
                     }
+                    View::Roadmaps => {
+                        project_dir.track();
+                        view! { <crate::roadmap::RoadmapsView /> }.into_any()
+                    }
                 }}
             </main>
 
@@ -527,7 +533,7 @@ fn ViewTabs() -> impl IntoView {
     // the board has no tabs: only the way back while documents are open.
     let ctx = Ctx::get();
     view! {
-        <Show when=move || matches!(ctx.view.get(), View::Documents | View::Ideas)>
+        <Show when=move || matches!(ctx.view.get(), View::Documents | View::Ideas | View::Roadmaps)>
             <button
                 type="button"
                 class="rounded border border-slate-300 px-2.5 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
@@ -575,6 +581,7 @@ fn report_screen(ctx: Ctx) {
                 View::Board => "board",
                 View::Documents => "documents",
                 View::Ideas => "ideas",
+                View::Roadmaps => "roadmaps",
             }
             .to_string(),
             ticket: ctx.overlay.with(|o| match o {

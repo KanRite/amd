@@ -471,6 +471,87 @@ async fn create_epic(
     .await
 }
 
+fn roadmap_card(r: &agile_md::roadmap::Roadmap) -> amd_ui_model::RoadmapCard {
+    amd_ui_model::RoadmapCard {
+        slug: r.slug.clone(),
+        name: r.name.clone(),
+        due: r.due.clone(),
+        milestones: r
+            .milestones
+            .iter()
+            .map(|m| amd_ui_model::MilestoneCard {
+                name: m.name.clone(),
+                description: m.description.clone(),
+                kind: m.kind.as_str().to_string(),
+                start: m.start.clone(),
+                due: m.due.clone(),
+            })
+            .collect(),
+    }
+}
+
+/// The project's roadmaps (ticket 206).
+#[tauri::command]
+async fn list_roadmaps() -> Result<Vec<amd_ui_model::RoadmapCard>> {
+    blocking(|| {
+        let project = Project::open()?;
+        let roadmaps = agile_md::roadmap::list(&project.repos[0].1).map_err(err)?;
+        Ok(roadmaps.iter().map(roadmap_card).collect())
+    })
+    .await
+}
+
+/// Starts a roadmap for the project's board (ticket 206).
+#[tauri::command]
+async fn create_roadmap(
+    state: Tauri<'_, AppState>,
+    name: String,
+    due: String,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let name = name.trim().to_string();
+        committed(board, "roadmap", &name, "", || {
+            agile_md::roadmap::create(board, &name, due.trim()).map(|_| ())
+        })
+    })
+    .await
+}
+
+/// Adds a milestone to a roadmap and makes its epic (or sprint) on the
+/// board, in one commit (ticket 206).
+#[tauri::command]
+async fn add_milestone(
+    state: Tauri<'_, AppState>,
+    roadmap: String,
+    milestone: amd_ui_model::MilestoneCard,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let kind = if milestone.kind == "sprint" {
+            Kind::Sprint
+        } else {
+            Kind::Epic
+        };
+        let name = milestone.name.trim().to_string();
+        committed(board, "roadmap-milestone", &name, &roadmap, || {
+            agile_md::roadmap::add_milestone(
+                board,
+                &roadmap,
+                agile_md::roadmap::Milestone {
+                    name: milestone.name,
+                    description: milestone.description,
+                    kind,
+                    start: milestone.start.trim().to_string(),
+                    due: milestone.due.trim().to_string(),
+                },
+            )
+            .map(|_| ())
+        })
+    })
+    .await
+}
+
 /// Creates a pending sprint in `repo`'s backlog (`amd group sprint`).
 #[tauri::command]
 async fn create_sprint(
@@ -1923,6 +2004,9 @@ pub fn run() {
             clone_ticket,
             link_ticket,
             create_epic,
+            list_roadmaps,
+            create_roadmap,
+            add_milestone,
             create_sprint,
             start_sprint,
             rename_epic,

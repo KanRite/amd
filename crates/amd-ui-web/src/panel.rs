@@ -51,7 +51,12 @@ pub fn BottomPanel(project: Memo<Option<String>>) -> impl IntoView {
     let shell = TermState::new(TermKind::Shell);
     let ai = TermState::new(TermKind::Ai);
     // On every project screen: the board, Documents and Ideas (ticket 187).
-    let on_project = move || matches!(ctx.view.get(), View::Board | View::Documents | View::Ideas);
+    let on_project = move || {
+        matches!(
+            ctx.view.get(),
+            View::Board | View::Documents | View::Ideas | View::Roadmaps
+        )
+    };
     // The editor from Preferences (ticket 188); read again each time the
     // board comes back, since Preferences is where it changes.
     let editor = RwSignal::new(false);
