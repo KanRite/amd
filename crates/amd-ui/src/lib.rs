@@ -471,55 +471,131 @@ async fn create_epic(
     .await
 }
 
-fn roadmap_card(r: &agile_md::roadmap::Roadmap) -> amd_ui_model::RoadmapCard {
+fn roadmap_card(
+    r: &agile_md::roadmap::Roadmap,
+    today: time::Date,
+    target: Option<&agile_md::board::Board>,
+) -> amd_ui_model::RoadmapCard {
+    // A milestone's tickets are counted on the roadmap's own board.
+    let progress = |m: &agile_md::roadmap::Milestone| -> (usize, usize) {
+        let Some(board) = target else { return (0, 0) };
+        let tasks = board.tasks_in_group(&m.name).unwrap_or_default();
+        let done = tasks
+            .iter()
+            .filter(|t| t.column == agile_md::board::Column::Done)
+            .count();
+        (done, tasks.len())
+    };
+    let summary = r.summary(today, &progress);
     amd_ui_model::RoadmapCard {
         slug: r.slug.clone(),
         name: r.name.clone(),
-        due: r.due.clone(),
+        board: r.board.clone(),
+        goal: r.goal.clone(),
+        sprints: r.sprints,
+        duration: summary.duration,
+        remaining: summary.remaining,
+        late: summary.late,
         milestones: r
             .milestones
             .iter()
-            .map(|m| amd_ui_model::MilestoneCard {
-                name: m.name.clone(),
-                description: m.description.clone(),
-                kind: m.kind.as_str().to_string(),
-                start: m.start.clone(),
-                due: m.due.clone(),
+            .map(|m| {
+                let (done, total) = progress(m);
+                amd_ui_model::MilestoneCard {
+                    name: m.name.clone(),
+                    description: m.description.clone(),
+                    kind: m.kind.as_str().to_string(),
+                    start: m.start.clone(),
+                    due: m.due.clone(),
+                    days_per_week: m.days_per_week,
+                    duration: m.duration,
+                    total: m.working_duration(),
+                    remaining: m.remaining(today),
+                    late: m.late(today, done, total),
+                }
             })
             .collect(),
     }
 }
 
-/// The project's roadmaps (ticket 206).
+/// The project's roadmaps, and the boards without one (ticket 206).
 #[tauri::command]
-async fn list_roadmaps() -> Result<Vec<amd_ui_model::RoadmapCard>> {
+async fn list_roadmaps() -> Result<amd_ui_model::RoadmapsPage> {
     blocking(|| {
         let project = Project::open()?;
-        let roadmaps = agile_md::roadmap::list(&project.repos[0].1).map_err(err)?;
-        Ok(roadmaps.iter().map(roadmap_card).collect())
+        let today = time::OffsetDateTime::now_utc().date();
+        let mut roadmaps = agile_md::roadmap::list(&project.repos[0].1).map_err(err)?;
+        let cards: Vec<_> = roadmaps
+            .drain(..)
+            .map(|r| {
+                let target = project.board(&r.board).ok().filter(|_| !r.board.is_empty());
+                roadmap_card(&r, today, target)
+            })
+            .collect();
+        let free_boards = project
+            .repos
+            .iter()
+            .map(|(name, _)| name.clone())
+            .filter(|name| !cards.iter().any(|r| &r.board == name))
+            .collect();
+        Ok(amd_ui_model::RoadmapsPage {
+            roadmaps: cards,
+            free_boards,
+        })
     })
     .await
 }
 
-/// Starts a roadmap for the project's board (ticket 206).
+/// Starts the roadmap of a board (ticket 206).
 #[tauri::command]
-async fn create_roadmap(
+async fn create_roadmap(state: Tauri<'_, AppState>, board: String) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let store = &p.repos[0].1;
+        p.board(&board)?;
+        let board = board.trim().to_string();
+        committed(store, "roadmap", &board, "", || {
+            agile_md::roadmap::create(store, &board).map(|_| ())
+        })
+    })
+    .await
+}
+
+/// Gives a roadmap from before roadmaps had boards its board (ticket 206).
+#[tauri::command]
+async fn adopt_roadmap(
     state: Tauri<'_, AppState>,
-    name: String,
-    due: String,
+    roadmap: String,
+    board: String,
 ) -> Result<SyncReport> {
     change(&state, move |p| {
-        let board = &p.repos[0].1;
-        let name = name.trim().to_string();
-        committed(board, "roadmap", &name, "", || {
-            agile_md::roadmap::create(board, &name, due.trim()).map(|_| ())
+        let store = &p.repos[0].1;
+        p.board(&board)?;
+        committed(store, "roadmap-board", &board, &roadmap, || {
+            agile_md::roadmap::adopt(store, &roadmap, &board).map(|_| ())
+        })
+    })
+    .await
+}
+
+/// Saves a roadmap's goal and whether its milestones are sprints.
+#[tauri::command]
+async fn save_roadmap(
+    state: Tauri<'_, AppState>,
+    roadmap: String,
+    goal: String,
+    sprints: bool,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let store = &p.repos[0].1;
+        committed(store, "roadmap", &roadmap, "", || {
+            agile_md::roadmap::set_details(store, &roadmap, &goal, sprints).map(|_| ())
         })
     })
     .await
 }
 
 /// Adds a milestone to a roadmap and makes its epic (or sprint) on the
-/// board, in one commit (ticket 206).
+/// roadmap's board, in one commit per repository (ticket 206).
 #[tauri::command]
 async fn add_milestone(
     state: Tauri<'_, AppState>,
@@ -527,27 +603,43 @@ async fn add_milestone(
     milestone: amd_ui_model::MilestoneCard,
 ) -> Result<SyncReport> {
     change(&state, move |p| {
-        let board = &p.repos[0].1;
-        let kind = if milestone.kind == "sprint" {
-            Kind::Sprint
-        } else {
-            Kind::Epic
-        };
+        let store = &p.repos[0].1;
+        let found = agile_md::roadmap::list(store)
+            .map_err(err)?
+            .into_iter()
+            .find(|r| r.slug == roadmap)
+            .ok_or_else(|| format!("No roadmap called {roadmap}."))?;
+        if found.board.is_empty() {
+            return Err(format!("Give {} a board first.", found.name));
+        }
+        let target = p.board(&found.board)?;
         let name = milestone.name.trim().to_string();
-        committed(board, "roadmap-milestone", &name, &roadmap, || {
+        let add = || {
             agile_md::roadmap::add_milestone(
-                board,
+                store,
+                target,
                 &roadmap,
                 agile_md::roadmap::Milestone {
-                    name: milestone.name,
-                    description: milestone.description,
-                    kind,
+                    name: milestone.name.clone(),
+                    description: milestone.description.clone(),
+                    kind: Kind::Epic,
                     start: milestone.start.trim().to_string(),
                     due: milestone.due.trim().to_string(),
+                    days_per_week: milestone.days_per_week,
+                    duration: milestone.duration,
                 },
             )
             .map(|_| ())
-        })
+        };
+        if target.repo_root() == store.repo_root() {
+            committed(store, "roadmap-milestone", &name, &roadmap, add)
+        } else {
+            // The epic is in another repository: it takes its own commit.
+            committed(target, "roadmap-milestone", &name, &roadmap, || {
+                transition::with_auto_commit(store, "roadmap-milestone", &name, &roadmap, add)
+                    .map(|_| ())
+            })
+        }
     })
     .await
 }
@@ -2006,6 +2098,8 @@ pub fn run() {
             create_epic,
             list_roadmaps,
             create_roadmap,
+            adopt_roadmap,
+            save_roadmap,
             add_milestone,
             create_sprint,
             start_sprint,

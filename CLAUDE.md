@@ -132,21 +132,37 @@ redundant. Their history is in git if it is ever wanted again.
   note, Make a ticket then Open ticket, Open in Documents to edit), New
   idea (rich text, "Put my name on it"). Commands `list_ideas`,
   `read_idea`, `create_idea`, `vote_idea`, `note_idea`, `idea_to_ticket`.
-- `crates/amd-lib/src/roadmap.rs` — Roadmaps (ticket 206): a name and
-  an estimated due date, made of milestones. One markdown file per roadmap
-  at `<tickets repo>/roadmaps/<slug>.md`, beside `tasks/` and not in it, so
-  the ticket scan never sees it (frontmatter `name`, `due`; each milestone a
-  `## name` section with `- kind:`, `- start:`, `- due:` lines and its
-  description). `add_milestone` makes the epic of the same name on the
-  board (name only; the description and dates stay on the milestone), or,
-  for a sprint milestone, a sprint with the description (on one line) and
-  `days` = start to due (`sprint_days`; the start date itself is kept only
-  on the milestone, as `_group.md` has no field for it). It checks
-  everything before writing anything and runs inside one auto-commit
-  (`roadmap-milestone: <name> "<roadmap>"`), so the roadmap file and the
-  epic are one commit. amdui: `View::Roadmaps` (`amd-ui-web/src/roadmap.rs`),
-  from the landing page's **Roadmap** button; commands `list_roadmaps`,
-  `create_roadmap`, `add_milestone`. No CLI or MCP tool yet.
+- `crates/amd-lib/src/roadmap.rs` — Roadmaps (ticket 206): a plan for **one
+  board** (repository) of the project, made of milestones. One markdown file
+  per roadmap at `<tickets repo>/roadmaps/<board slug>.md`, beside `tasks/`
+  and not in it, so the ticket scan never sees it (frontmatter `name`,
+  `board`, `goal`, `sprints`; each milestone a `## name` section with
+  `- kind:`, `- start:`, `- due:`, `- days-per-week:`, `- duration:` lines
+  and its description). The file name is the board's, so a board has at
+  most one. A file from before roadmaps had boards (no `board:`) is listed
+  for `adopt` by a board and takes no milestones until then.
+  `add_milestone(store, target, slug, m)` makes the epic of the same name on
+  the **target** board (name only; the description and dates stay on the
+  milestone) — or, when the roadmap's `sprints` is on ("Use Sprints"), a
+  sprint with the description (one line) and `days` = duration, else start to
+  due (`sprint_days`). It checks everything before writing anything.
+  amdui commits the roadmap file in the tickets repo and, if the target board
+  is another repository, the epic there as a second commit
+  (`roadmap-milestone: <name> "<roadmap>"`). **Time** (pure, clock passed
+  in): `working_days(from, to, per_week)` counts a week's first
+  `per_week` days (Monday first, default 5), both ends counted; a
+  milestone's duration is the one given, else start to due in working days;
+  `remaining` is working days from today to its due date (negative once
+  past); `late` is past due and not all its tickets done, or fewer working
+  days left than duration × the share of its tickets not done. A roadmap's
+  duration is the sum of its milestones', its remaining runs to the last due
+  date, and it is late if any milestone is (`Roadmap::summary`; amdui shows
+  red or green). amdui: `View::Roadmaps` (`amd-ui-web/src/roadmap.rs`), from
+  the landing page's **Roadmap** button (left of Documents): a grid of
+  roadmap buttons by board name with a board dropdown and Create Roadmap on
+  the right while a board has none, and a roadmap's own page (goal, Use
+  Sprints, milestones); commands `list_roadmaps`, `create_roadmap`,
+  `adopt_roadmap`, `save_roadmap`, `add_milestone`. No CLI or MCP tool yet.
 - `crates/amd-lib/src/archive.rs` — archiving a project (ticket 157):
   `archived = on` in the tickets `.settings`, auto-committed like any
   setting. An archived project only reads: the CLI's `run()` refuses a
