@@ -298,6 +298,28 @@ fn RoadmapView(
     let per_week = RwSignal::new(String::new());
     let duration = RwSignal::new(String::new());
     let slug = StoredValue::new(roadmap.slug.clone());
+    let new_name = RwSignal::new(roadmap.name.clone());
+    let old_name = roadmap.name.clone();
+
+    // The file is named after the roadmap, so the open one has a new address:
+    // back to the list, which shows it under its new name.
+    let rename = move || {
+        if busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        spawn_local(async move {
+            match api::rename_roadmap(&slug.get_value(), &new_name.get_untracked()).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    open.set(None);
+                    reload();
+                }
+                Err(e) => problem.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
 
     let save = move || {
         if busy.get_untracked() {
@@ -384,6 +406,25 @@ fn RoadmapView(
                 {roadmap.remaining.map(|r| format!(" · {}", left(r))).unwrap_or_default()}
             </span>
         </div>
+        <section class="flex items-end gap-3 rounded border border-slate-200 p-3 dark:border-slate-700">
+            <label class="flex flex-1 flex-col gap-1 text-sm">
+                "Name"
+                <input
+                    type="text"
+                    class=FIELD
+                    prop:value=move || new_name.get()
+                    on:input=move |ev| new_name.set(event_target_value(&ev))
+                />
+            </label>
+            <button
+                type="button"
+                class=SECONDARY
+                disabled=move || busy.get() || new_name.get().trim() == old_name
+                on:click=move |_| rename()
+            >
+                "Rename"
+            </button>
+        </section>
         <section class="flex flex-col gap-3 rounded border border-slate-200 p-3 dark:border-slate-700">
             <label class="flex flex-col gap-1 text-sm">
                 "Description and goal"

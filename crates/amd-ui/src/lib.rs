@@ -598,6 +598,22 @@ async fn save_roadmap(
     .await
 }
 
+/// Renames a roadmap; its file moves to the new name's slug.
+#[tauri::command]
+async fn rename_roadmap(
+    state: Tauri<'_, AppState>,
+    roadmap: String,
+    name: String,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let store = &p.repos[0].1;
+        committed(store, "roadmap-rename", name.trim(), &roadmap, || {
+            agile_md::roadmap::rename(store, &roadmap, &name).map(|_| ())
+        })
+    })
+    .await
+}
+
 /// Adds a milestone to a roadmap and makes its epic (or sprint) on the
 /// roadmap's board, in one commit per repository (ticket 206).
 #[tauri::command]
@@ -2104,6 +2120,7 @@ pub fn run() {
             create_roadmap,
             adopt_roadmap,
             save_roadmap,
+            rename_roadmap,
             add_milestone,
             create_sprint,
             start_sprint,
