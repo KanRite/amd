@@ -2,6 +2,7 @@
 //! drop between neighbouring columns and between the backlog and its epics.
 
 use amd_ui_model::epic::{self, GroupKind, GroupState, Place, can_move};
+use amd_ui_model::waiting;
 use amd_ui_model::wip::WipLimits;
 use amd_ui_model::{Column, TicketSummary};
 use leptos::ev::DragEvent;
@@ -71,6 +72,16 @@ fn verdict(ctx: Ctx, file: &str, from: &Place, to: &Place) -> Result<(), String>
     let draft = ticket.as_ref().is_some_and(|t| epic::is_draft(&t.tags));
     let stem = file.trim_end_matches(".md");
     epic::draft_rule(from, to, group_state(ctx, to), draft, stem)?;
+    // Done waits for required tickets and children (ticket 213).
+    if let Some(t) = &ticket {
+        ctx.board.with(|b| match b {
+            Some(b) => {
+                let waits = waiting::waiting_on(t, waiting::all_tickets(b));
+                waiting::done_rule(to.column, &waits, &t.id)
+            }
+            None => Ok(()),
+        })?;
+    }
     epic::sprint_rule(
         from,
         to,
@@ -279,6 +290,10 @@ fn ColumnView(column: Column) -> impl IntoView {
             "ring-2 ring-amber-500 bg-amber-50 dark:bg-amber-950/60"
         } else if accepts(ctx, &to) {
             "ring-2 ring-accent-500 bg-accent-50 dark:bg-accent-950"
+        } else if rejects(ctx, &to) && refusal(ctx, &to).is_some() {
+            // A column it may not enter for a reason (a draft, done
+            // waiting on other tickets) says so, rather than just fading.
+            "ring-2 ring-red-400 bg-red-50/60 dark:bg-red-950/40"
         } else if rejects(ctx, &to) {
             "opacity-40"
         } else {
@@ -345,6 +360,16 @@ fn ColumnView(column: Column) -> impl IntoView {
                                 )}
                             </p>
                         </Show>
+                        {move || {
+                            refusal(ctx, &here())
+                                .map(|why| {
+                                    view! {
+                                        <p role="status" class="mx-2 mb-2 rounded bg-red-100 px-2 py-1 text-xs font-medium text-red-900 dark:bg-red-950 dark:text-red-100">
+                                            {why}
+                                        </p>
+                                    }
+                                })
+                        }}
                         <ul class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
                             <For each=tickets key=|t| t.clone() children=|ticket| view! { <Card ticket /> } />
                         </ul>
@@ -732,6 +757,26 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
 #[component]
 fn Card(ticket: TicketSummary) -> impl IntoView {
     let ctx = Ctx::get();
+    // What it waits on before it can be done (ticket 213), from the board's
+    // other cards.
+    let waits = {
+        let me = ticket.clone();
+        Memo::new(move |_| {
+            if me.column == Column::Done {
+                return Vec::new();
+            }
+            ctx.board.with(|b| {
+                b.as_ref()
+                    .map(|b| {
+                        waiting::waiting_on(&me, waiting::all_tickets(b))
+                            .iter()
+                            .map(|t| format!("{} {} ({})", t.id, t.title, t.column.title()))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+        })
+    };
     let TicketSummary {
         file,
         column,
@@ -855,6 +900,20 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                             </span>
                         }
                     })}
+                {move || {
+                    let list = waits.get();
+                    (!list.is_empty())
+                        .then(|| {
+                            view! {
+                                <span
+                                    class="rounded border border-orange-400 px-1.5 font-medium text-orange-700 dark:border-orange-500 dark:text-orange-300"
+                                    title=format!("Can't be done until these are: {}", list.join(", "))
+                                >
+                                    {format!("waits on {}", list.len())}
+                                </span>
+                            }
+                        })
+                }}
                 {match (lock, lapsed) {
                     (Some(l), _) => Some(view! { <LockBadge lock=l lapsed=false /> }),
                     (None, Some(l)) => Some(view! { <LockBadge lock=l lapsed=true /> }),

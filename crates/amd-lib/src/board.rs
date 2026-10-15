@@ -912,6 +912,18 @@ impl Board {
             );
         }
         task.ensure_not_leased()?;
+        // Done waits for what the ticket requires and for its children
+        // (ticket 213). No `force`: the way past it is to change the link.
+        if to == Column::Done {
+            let waiting = crate::links::waiting_on(self, task)?;
+            if !waiting.is_empty() {
+                return Err(crate::links::NotReady {
+                    id: task.id_display(),
+                    waiting,
+                }
+                .into());
+            }
+        }
         if !force && let Some(limit) = crate::board_settings::load(self).wip_limit(to) {
             let current = self.tasks_in(to)?.len();
             if current as u32 >= limit {

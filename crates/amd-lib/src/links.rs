@@ -19,9 +19,19 @@
 //!
 //! Only tickets on the same board can be linked: a bare id can't name a
 //! ticket on another, the same limit `amd duplicate` has.
+//!
+//! **Done waits** (ticket 213): a ticket can't move to done while a ticket
+//! it requires, or one of its children, is still on the board and not
+//! done ([`waiting_on`], checked by `Board::move_task`). There is no
+//! override: the way past it is to change the link ([`retype`], e.g. to
+//! relates-to) or remove it. An abandoned or missing ticket holds nothing
+//! back.
+
+use std::fmt;
 
 use anyhow::{Result, bail};
 
+use crate::board::{Board, Column};
 use crate::task::Task;
 
 /// How one ticket stands to another, read from the ticket that records it
@@ -280,6 +290,17 @@ pub fn apply(
     remove: bool,
     one_way: bool,
 ) -> Result<Vec<String>> {
+    Ok(apply_counted(from, kind, to, remove, one_way)?.0)
+}
+
+/// [`apply`], also saying whether either end changed.
+fn apply_counted(
+    from: &Task,
+    kind: LinkType,
+    to: &Task,
+    remove: bool,
+    one_way: bool,
+) -> Result<(Vec<String>, bool)> {
     if from.path == to.path {
         bail!("a ticket can't be linked to itself");
     }
@@ -290,7 +311,10 @@ pub fn apply(
     let mut lines = Vec::new();
     let verb = |kind: LinkType, remove: bool| {
         if remove {
-            format!("no longer {}", kind.phrase())
+            match kind.phrase().strip_prefix("is ") {
+                Some(rest) => format!("is no longer {rest}"),
+                None => format!("no longer {}", kind.phrase()),
+            }
         } else {
             kind.phrase().to_string()
         }
@@ -304,6 +328,7 @@ pub fn apply(
             lines.push(format!("{to_id} {} {from_id}", verb(inverse, remove)));
         }
     }
+    let changed = !lines.is_empty();
     if lines.is_empty() {
         lines.push(if remove {
             format!("{from_id} wasn't linked to {to_id} as {kind}")
@@ -311,8 +336,177 @@ pub fn apply(
             format!("{from_id} already {} {to_id}", kind.phrase())
         });
     }
+    Ok((lines, changed))
+}
+
+/// Change how `from` stands to `to`: the `old` link goes from both ends and
+/// the `new` one is made, as one change (the caller commits it). Checked
+/// first, so a refused `new` (a second parent, a second original) leaves
+/// the old link as it was. This is the way past [`waiting_on`]: a requires
+/// or child-of link changed to relates-to holds nothing back.
+pub fn retype(from: &Task, old: LinkType, new: LinkType, to: &Task) -> Result<Vec<String>> {
+    if old == new {
+        bail!(
+            "{} already {} {}",
+            from.id_display(),
+            new.phrase(),
+            to.id_display()
+        );
+    }
+    if from.path == to.path {
+        bail!("a ticket can't be linked to itself");
+    }
+    // The old link must be there, read from either end, before anything
+    // changes.
+    if !holds(from, old, to) && !holds(to, old.inverse(), from) {
+        bail!(
+            "{} isn't linked to {} as {old}",
+            from.id_display(),
+            to.id_display()
+        );
+    }
+    // A new parent or original is only refused if it isn't the one the old
+    // link is about to free.
+    let freed_parent = matches!(old, LinkType::ChildOf | LinkType::ParentOf);
+    let freed_clone = matches!(old, LinkType::CloneOf | LinkType::ClonedBy);
+    if !(freed_parent && matches!(new, LinkType::ChildOf | LinkType::ParentOf))
+        && !(freed_clone && matches!(new, LinkType::CloneOf | LinkType::ClonedBy))
+    {
+        preflight(from, new, to, false)?;
+    }
+    let (mut lines, _) = apply_counted(from, old, to, true, false)?;
+    let (added, _) = apply_counted(from, new, to, false, false)?;
+    lines.extend(added);
     Ok(lines)
 }
+
+/// Whether `task` itself records that it stands to `other` as `kind`.
+fn holds(task: &Task, kind: LinkType, other: &Task) -> bool {
+    match kind {
+        LinkType::ParentOf => children_stems(task).contains(&other.stem),
+        _ => all(task)
+            .iter()
+            .any(|l| l.kind == kind && same_id(&l.id, other)),
+    }
+}
+
+/// The `## Children` wikilinks a parent lists.
+fn children_stems(task: &Task) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(&task.path) else {
+        return Vec::new();
+    };
+    let mut inside = false;
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with("## ") {
+            inside = line == "## Children";
+            continue;
+        }
+        if inside && let Some(stem) = line.strip_prefix("- [[").and_then(|l| l.strip_suffix("]]")) {
+            out.push(stem.to_string());
+        }
+    }
+    out
+}
+
+/// Whether `id` (as written in a link: `012`, `12`) names `task`.
+fn same_id(id: &str, task: &Task) -> bool {
+    task.id.is_some() && id.trim().parse::<u32>().ok() == task.id
+}
+
+/// Why a ticket has to wait for another before it can be done.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Wait {
+    /// The ticket requires it.
+    Requires,
+    /// It is one of the ticket's children.
+    Child,
+}
+
+/// A ticket that has to be done first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Waiting {
+    pub id: String,
+    pub title: String,
+    pub column: Column,
+    pub why: Wait,
+}
+
+/// The tickets on `board` that must be done before `task` can be (ticket
+/// 213): those it requires (its own `requires`, or another ticket's
+/// `required-by` naming it) and its children (their `parent`, or its
+/// `## Children` list), that aren't in done. Abandoned and missing tickets
+/// aren't on the board, so they hold nothing back.
+pub fn waiting_on(board: &Board, task: &Task) -> Result<Vec<Waiting>> {
+    let mine = task.links();
+    let children = children_stems(task);
+    let mut out = Vec::new();
+    for other in board.tasks()? {
+        if other.path == task.path || other.column == Column::Done {
+            continue;
+        }
+        let requires = mine
+            .iter()
+            .any(|l| l.kind == LinkType::Requires && same_id(&l.id, &other))
+            || other
+                .links()
+                .iter()
+                .any(|l| l.kind == LinkType::RequiredBy && same_id(&l.id, task));
+        let child = other
+            .parent()
+            .is_some_and(|p| task.id.is_some() && p.trim().parse::<u32>().ok() == task.id)
+            || children.contains(&other.stem);
+        let why = match (requires, child) {
+            (true, _) => Wait::Requires,
+            (false, true) => Wait::Child,
+            _ => continue,
+        };
+        out.push(Waiting {
+            id: other.id_display(),
+            title: other.title(),
+            column: other.column,
+            why,
+        });
+    }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(out)
+}
+
+/// A move to done refused because other tickets come first (ticket 213).
+#[derive(Debug)]
+pub struct NotReady {
+    pub id: String,
+    pub waiting: Vec<Waiting>,
+}
+
+impl fmt::Display for NotReady {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let list: Vec<String> = self
+            .waiting
+            .iter()
+            .map(|w| {
+                let why = match w.why {
+                    Wait::Requires => "required",
+                    Wait::Child => "a child",
+                };
+                format!("{} ({why}, in {})", w.id, w.column)
+            })
+            .collect();
+        write!(
+            f,
+            "{} can't be done yet: {} {} done. Finish {} first, or change the link \
+             (`amd link {} <ref> --replace <type> --type relates-to`) or remove it",
+            self.id,
+            list.join(", "),
+            if list.len() == 1 { "isn't" } else { "aren't" },
+            if list.len() == 1 { "it" } else { "them" },
+            self.id
+        )
+    }
+}
+
+impl std::error::Error for NotReady {}
 
 /// Every link a ticket has, whichever key records it: `links`, plus
 /// `related`, `parent`, `clone-of` and `clones`. A parent's children aren't
@@ -583,5 +777,148 @@ mod tests {
         let (_dir, board) = board_with(&["A"]);
         let a = find(&board, "001");
         assert!(apply(&a, LinkType::Requires, &a, false, false).is_err());
+    }
+
+    /// Walks a ticket along to `to`, one column at a time.
+    fn walk(board: &Board, id: &str, to: &[Column]) {
+        for column in to {
+            board.move_task(&find(board, id), *column, true).unwrap();
+        }
+    }
+
+    #[test]
+    fn done_waits_for_what_a_ticket_requires_and_for_its_children() {
+        let (_dir, board) = board_with(&["Feature", "Dependency", "Child", "Spare"]);
+        apply(
+            &find(&board, "001"),
+            LinkType::Requires,
+            &find(&board, "002"),
+            false,
+            false,
+        )
+        .unwrap();
+        apply(
+            &find(&board, "003"),
+            LinkType::ChildOf,
+            &find(&board, "001"),
+            false,
+            false,
+        )
+        .unwrap();
+        walk(&board, "001", &[Column::Todo, Column::Doing]);
+
+        let waits = waiting_on(&board, &find(&board, "001")).unwrap();
+        let ids: Vec<(&str, Wait)> = waits.iter().map(|w| (w.id.as_str(), w.why)).collect();
+        assert_eq!(ids, [("002", Wait::Requires), ("003", Wait::Child)]);
+        // Refused, even with `force` (that's only the WIP limit).
+        let err = board
+            .move_task(&find(&board, "001"), Column::Done, true)
+            .unwrap_err();
+        let text = err.to_string();
+        assert!(err.downcast_ref::<NotReady>().is_some());
+        assert!(text.contains("002 (required, in backlog)"), "{text}");
+        assert!(text.contains("003 (a child, in backlog)"), "{text}");
+        // Other moves aren't held back.
+        assert!(waiting_on(&board, &find(&board, "004")).unwrap().is_empty());
+
+        walk(&board, "002", &[Column::Todo, Column::Doing, Column::Done]);
+        walk(&board, "003", &[Column::Todo, Column::Doing, Column::Done]);
+        board
+            .move_task(&find(&board, "001"), Column::Done, false)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_required_by_link_on_the_other_ticket_counts_and_an_abandoned_ticket_does_not() {
+        let (_dir, board) = board_with(&["Feature", "Dependency", "Dropped"]);
+        // Recorded only on 002: it is required by 001.
+        apply(
+            &find(&board, "002"),
+            LinkType::RequiredBy,
+            &find(&board, "001"),
+            false,
+            true,
+        )
+        .unwrap();
+        apply(
+            &find(&board, "001"),
+            LinkType::Requires,
+            &find(&board, "003"),
+            false,
+            false,
+        )
+        .unwrap();
+        let ids = |b: &Board| -> Vec<String> {
+            waiting_on(b, &find(b, "001"))
+                .unwrap()
+                .into_iter()
+                .map(|w| w.id)
+                .collect()
+        };
+        assert_eq!(ids(&board), ["002", "003"]);
+        board.archive(&find(&board, "003")).unwrap();
+        assert_eq!(
+            ids(&board),
+            ["002"],
+            "abandoned: it won't be done, so it can't hold 001 back"
+        );
+    }
+
+    #[test]
+    fn a_link_changes_type_on_both_tickets_and_then_holds_nothing_back() {
+        let (_dir, board) = board_with(&["Feature", "Dependency"]);
+        let (a, b) = (find(&board, "001"), find(&board, "002"));
+        apply(&a, LinkType::Requires, &b, false, false).unwrap();
+        let lines = retype(&a, LinkType::Requires, LinkType::RelatesTo, &b).unwrap();
+        assert!(
+            lines.contains(&"001 no longer requires 002".to_string()),
+            "{lines:?}"
+        );
+        assert!(
+            lines.contains(&"002 is no longer required by 001".to_string()),
+            "{lines:?}"
+        );
+        assert!(
+            lines.contains(&"001 relates to 002".to_string()),
+            "{lines:?}"
+        );
+        let (a, b) = (find(&board, "001"), find(&board, "002"));
+        assert!(a.links().is_empty() && b.links().is_empty());
+        assert_eq!(a.related(), ["002"]);
+        assert_eq!(b.related(), ["001"]);
+        assert!(waiting_on(&board, &a).unwrap().is_empty());
+
+        // Read from the other end too: 002 is required by nothing now, and
+        // a link that isn't there can't be changed.
+        let err = retype(&a, LinkType::Requires, LinkType::Supersedes, &b).unwrap_err();
+        assert!(
+            err.to_string().contains("isn't linked to 002 as requires"),
+            "{err}"
+        );
+        assert!(retype(&a, LinkType::RelatesTo, LinkType::RelatesTo, &b).is_err());
+    }
+
+    #[test]
+    fn a_child_can_be_turned_into_a_related_ticket() {
+        let (_dir, board) = board_with(&["Parent", "Child"]);
+        apply(
+            &find(&board, "002"),
+            LinkType::ChildOf,
+            &find(&board, "001"),
+            false,
+            false,
+        )
+        .unwrap();
+        // Changed from the parent's end: it is the parent of 002.
+        retype(
+            &find(&board, "001"),
+            LinkType::ParentOf,
+            LinkType::RelatesTo,
+            &find(&board, "002"),
+        )
+        .unwrap();
+        assert_eq!(find(&board, "002").parent(), None);
+        assert_eq!(find(&board, "001").related(), ["002"]);
+        assert!(waiting_on(&board, &find(&board, "001")).unwrap().is_empty());
     }
 }

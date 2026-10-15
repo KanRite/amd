@@ -477,6 +477,29 @@ pub fn link_tickets(
     Ok(outcome)
 }
 
+/// Change the type of the link between `from` and `to` from `old` to `new`
+/// (ticket 213): both ends, one commit (`relink: 012 -> 016 "…"`). The way
+/// past "done waits": a requires or child-of link changed to relates-to
+/// holds nothing back.
+pub fn retype_link(
+    board: &Board,
+    from: &Task,
+    old: crate::links::LinkType,
+    new: crate::links::LinkType,
+    to: &Task,
+) -> Result<Outcome> {
+    let subject = format!("{} -> {}", from.id_display(), to.id_display());
+    let (lines, warning) = with_auto_commit(board, "relink", &subject, &from.title(), || {
+        crate::links::retype(from, old, new, to)
+    })?;
+    let mut outcome = Outcome::default();
+    outcome.events.extend(lines.into_iter().map(Event::Info));
+    if let Some(warning) = warning {
+        outcome.events.push(Event::Warn(warning));
+    }
+    Ok(outcome)
+}
+
 /// Save every editable field of an existing ticket in one write, checked
 /// against `expected` — the fingerprint taken when the form opened — so a
 /// ticket that changed underneath it is refused with the conflict rather than

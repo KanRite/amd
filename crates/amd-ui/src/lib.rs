@@ -749,6 +749,32 @@ async fn link_ticket(
     .await
 }
 
+/// Changes the type of the link between a ticket and `other` (ticket 213),
+/// on both tickets, in one commit.
+#[tauri::command]
+async fn retype_link(
+    state: Tauri<'_, AppState>,
+    place: Place,
+    file: String,
+    other: String,
+    old: String,
+    new: String,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = p.board(&place.repo)?;
+        let task = task_at(board, &place, &file)?;
+        let parse = |kind: &str| {
+            agile_md::links::LinkType::parse(kind)
+                .ok_or_else(|| format!("unknown link type {kind:?}"))
+        };
+        let (old, new) = (parse(&old)?, parse(&new)?);
+        let other = board.find(&other).map_err(err)?;
+        let outcome = transition::retype_link(board, &task, old, new, &other).map_err(err)?;
+        Ok(report_outcome(board, message("relink", &task), &outcome))
+    })
+    .await
+}
+
 /// Takes a ticket off the board into the archive (`amd abandon`).
 #[tauri::command]
 async fn archive_ticket(
@@ -2115,6 +2141,7 @@ pub fn run() {
             create_ticket,
             clone_ticket,
             link_ticket,
+            retype_link,
             create_epic,
             list_roadmaps,
             create_roadmap,

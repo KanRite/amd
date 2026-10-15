@@ -254,6 +254,37 @@ pub async fn link_ticket(
     .await
 }
 
+#[derive(Serialize)]
+struct RetypeArgs<'a> {
+    place: &'a Place,
+    file: &'a str,
+    other: &'a str,
+    old: &'a str,
+    new: &'a str,
+}
+
+/// Changes the type of the link between a ticket and `other` from `old` to
+/// `new`, on both tickets (ticket 213).
+pub async fn retype_link(
+    place: &Place,
+    file: &str,
+    other: &str,
+    old: &str,
+    new: &str,
+) -> Result<SyncReport, String> {
+    call(
+        "retype_link",
+        &RetypeArgs {
+            place,
+            file,
+            other,
+            old,
+            new,
+        },
+    )
+    .await
+}
+
 /// Creates a ticket in `repo`'s backlog (the board's own when `None`),
 /// as a draft when `draft` (ticket 114).
 pub async fn create_ticket(

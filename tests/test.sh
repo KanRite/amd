@@ -1225,6 +1225,32 @@ assert "child-of sets the parent and lists the child" \
     && grep -q '^parent: \"0' tasks/backlog/*-link-blocked.md \
     && grep -q 'link-blocked' tasks/backlog/*-link-blocker.md"
 
+echo "done waits for required tickets and children (ticket 213):"
+dw="$(mktemp -d)"
+( cd "${dw}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init waits --local-only >/dev/null \
+  && for t in Feature Dependency Child; do "${AMD}" new "$t" >/dev/null; done \
+  && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 3 1 --type child-of >/dev/null \
+  && AMD_NO_BRANCH=1 "${AMD}" todo 1 >/dev/null && "${AMD}" doing 1 >/dev/null )
+in_dw() { (cd "${dw}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "done is refused while a required ticket and a child aren't done, naming them" \
+  bash -c "$(declare -f in_dw); dw='${dw}'; AMD='${AMD}'; out=\$(in_dw done 1 2>&1); [ \$? -ne 0 ] \
+    && printf '%s' \"\$out\" | grep -q '002 (required, in backlog), 003 (a child, in backlog) aren.t done' \
+    && test -f '${dw}'/tasks/doing/001-feature.md"
+assert "amd link --replace changes a link's type on both tickets" \
+  bash -c "$(declare -f in_dw); dw='${dw}'; AMD='${AMD}'; in_dw link 1 2 --replace requires --type relates-to >/dev/null \
+    && grep -q '^related: \[002\]' '${dw}'/tasks/doing/001-feature.md \
+    && grep -q '^related: \[001\]' '${dw}'/tasks/backlog/002-dependency.md \
+    && ! grep -q 'requires:' '${dw}'/tasks/doing/001-feature.md \
+    && git -C '${dw}' log --format=%s -1 | grep -q '^relink: 001 -> 002'"
+assert "--replace refuses a link that isn't there" \
+  bash -c "$(declare -f in_dw); dw='${dw}'; AMD='${AMD}'; ! in_dw link 1 2 --replace supersedes --type relates-to 2>/dev/null"
+assert "with the child done, the parent can be done" \
+  bash -c "$(declare -f in_dw); dw='${dw}'; AMD='${AMD}'; in_dw done 1 2>&1 | grep -q '003 (a child' \
+    && in_dw todo 3 >/dev/null && in_dw doing 3 >/dev/null && in_dw done 3 >/dev/null \
+    && in_dw done 1 >/dev/null && test -f '${dw}'/tasks/done/001-feature.md"
+rm -rf "${dw}"
+
 echo "duplicate:"
 assert "amd duplicate copies a ticket" \
   "${AMD}" duplicate 1
