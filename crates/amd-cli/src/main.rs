@@ -470,6 +470,17 @@ enum Cmd {
         #[arg(long, value_name = "DATE")]
         since: Option<String>,
     },
+    /// Draw how tickets hang together: what each requires (solid) and
+    /// what it relates to (dashed)
+    ///
+    /// With a ticket, its family: every ticket joined to it by requires or
+    /// related. Without, every family on the board. Tickets in a started
+    /// sprint aren't expanded. Each line says where the ticket is, and
+    /// "waits on" names what it requires that isn't done
+    Tree {
+        #[arg(value_name = "REF")]
+        task: Option<String>,
+    },
     /// Print a task
     Show {
         #[arg(value_name = "REF")]
@@ -520,13 +531,15 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
-    /// Set a field on a ticket: points, epic, order, title or priority
+    /// Set a field on a ticket: points, epic, order, title, priority,
+    /// repository, or requires (the tickets it requires, as a list:
+    /// `amd set 12 requires 3,7`; both ends are linked, empty clears)
     Set {
         #[arg(value_name = "REF")]
         task: String,
         #[arg(
             value_name = "FIELD",
-            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title", "priority", "repository"]),
+            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title", "priority", "repository", "requires"]),
         )]
         field: String,
         /// The new value; empty clears the field
@@ -745,9 +758,13 @@ struct NewArgs {
     /// branch is made there on entering todo
     #[arg(short = 'R', long, value_name = "REPO")]
     repository: Option<String>,
-    /// Another ticket this one depends on or relates to (repeatable)
+    /// Another ticket this one relates to (repeatable)
     #[arg(short = 'r', long = "related", value_name = "REF")]
     related: Vec<String>,
+    /// A ticket this one requires (repeatable): linked both ways, and it
+    /// must be done first
+    #[arg(long = "requires", value_name = "REF")]
+    requires: Vec<String>,
     /// Tag to add (repeatable)
     #[arg(short = 't', long = "tag", value_name = "TAG")]
     tags: Vec<String>,
@@ -1255,6 +1272,19 @@ fn run() -> Result<()> {
                 open_editor(&task.path)
             })
         }
+        Cmd::Set { task, field, value } if field == "requires" => {
+            let task = resolve(&board, Some(task), "set", &Column::ALL)?;
+            let mut wanted = Vec::new();
+            for reference in agile_md::task::parse_list(&value) {
+                let other = board.find(&reference)?;
+                if other.path == task.path {
+                    bail!("a ticket can't require itself");
+                }
+                wanted.push(other);
+            }
+            report(&transition::set_requires(&board, &task, &wanted)?);
+            Ok(())
+        }
         Cmd::Set { task, field, value } => {
             let task = resolve(&board, Some(task), "set", &Column::ALL)?;
             let (id_display, title) = (task.id_display(), task.title());
@@ -1351,6 +1381,19 @@ fn run() -> Result<()> {
         }
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
         Cmd::Log => cmd_log(&board),
+        Cmd::Tree { task } => {
+            let around = task.map(|t| board.find(&t)).transpose()?;
+            let trees = agile_md::requires::family(&board, around.as_ref())?;
+            match (&around, trees.is_empty()) {
+                (Some(t), true) => println!(
+                    "{} requires nothing and has no related tickets",
+                    t.id_display()
+                ),
+                (None, true) => println!("No ticket on this board requires or relates to another"),
+                _ => render::tree(&board, &trees),
+            }
+            Ok(())
+        }
         Cmd::Recover {
             ids,
             all,
@@ -1915,8 +1958,8 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
             Ok(())
         }),
         GroupCmd::Start { name } => with_auto_commit(board, "group-start", &name, "", || {
-            let mut group = board.group(&name)?;
-            group.start()?;
+            // Refused while its tickets require others outside it (ticket 214).
+            agile_md::requires::start_sprint(board, &name)?;
             println!("{name} started — its tickets are now fixed");
             Ok(())
         }),
@@ -2431,6 +2474,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::Tag { .. }
         | Cmd::Tags { action: None }
         | Cmd::Show { .. }
+        | Cmd::Tree { .. }
         | Cmd::Log
         | Cmd::Templates { .. }
         | Cmd::Register { .. }
@@ -2510,8 +2554,33 @@ fn resolve(
     form::select_task(&format!("Which task should amd {command}?"), choices)
 }
 
+/// Link a new ticket to each ticket it requires, both ends.
+fn requires_links(
+    board: &Board,
+    task: &agile_md::task::Task,
+    refs: &[String],
+) -> Result<Vec<String>> {
+    let mut lines = Vec::new();
+    for reference in refs {
+        let other = board.find(reference)?;
+        lines.extend(agile_md::links::apply(
+            task,
+            agile_md::links::LinkType::Requires,
+            &other,
+            false,
+            false,
+        )?);
+    }
+    Ok(lines)
+}
+
 fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     let templates = Templates::load(board)?;
+    // Resolved before anything is written, so a typo creates nothing.
+    let requires = args.requires.clone();
+    for reference in &requires {
+        board.find(reference)?;
+    }
     // A bare `amd new` (or -i) fills the whole form in; otherwise only the
     // fields the chosen template needs and the arguments didn't supply.
     let full_form = args.interactive || args.title.is_none();
@@ -2673,6 +2742,10 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     let auto_commit = board_settings::load(board).auto_commit();
     let before = auto_commit.then(|| git::dirty_paths(board.repo_root()).unwrap_or_default());
     let created = draft.write(board, body)?;
+    // What it requires (ticket 214), linked both ways in the same commit.
+    for line in requires_links(board, &created.task, &requires)? {
+        println!("{line}");
+    }
     // The same commit, push and replay-or-undo every other change gets
     // (ticket 102): a clash with a ticket someone else numbered at the same
     // moment is undone here, and fails, rather than reaching the remote.

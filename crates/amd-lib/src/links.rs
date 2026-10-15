@@ -411,7 +411,7 @@ fn children_stems(task: &Task) -> Vec<String> {
 }
 
 /// Whether `id` (as written in a link: `012`, `12`) names `task`.
-fn same_id(id: &str, task: &Task) -> bool {
+pub(crate) fn same_id(id: &str, task: &Task) -> bool {
     task.id.is_some() && id.trim().parse::<u32>().ok() == task.id
 }
 
@@ -439,20 +439,17 @@ pub struct Waiting {
 /// `## Children` list), that aren't in done. Abandoned and missing tickets
 /// aren't on the board, so they hold nothing back.
 pub fn waiting_on(board: &Board, task: &Task) -> Result<Vec<Waiting>> {
-    let mine = task.links();
+    let required: Vec<std::path::PathBuf> = crate::requires::required(board, task)?
+        .into_iter()
+        .map(|t| t.path)
+        .collect();
     let children = children_stems(task);
     let mut out = Vec::new();
     for other in board.tasks()? {
         if other.path == task.path || other.column == Column::Done {
             continue;
         }
-        let requires = mine
-            .iter()
-            .any(|l| l.kind == LinkType::Requires && same_id(&l.id, &other))
-            || other
-                .links()
-                .iter()
-                .any(|l| l.kind == LinkType::RequiredBy && same_id(&l.id, task));
+        let requires = required.contains(&other.path);
         let child = other
             .parent()
             .is_some_and(|p| task.id.is_some() && p.trim().parse::<u32>().ok() == task.id)

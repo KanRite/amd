@@ -666,9 +666,22 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
         )
     };
 
+    // What stops it starting (ticket 214): tickets in it that require
+    // others outside it, not done.
+    let gaps = Memo::new(move |_| {
+        let (repo, name) = ids.get_value();
+        ctx.board.with(|b| {
+            b.as_ref()
+                .map(|b| waiting::sprint_gaps(&waiting::all_tickets(b), &repo, &name))
+                .unwrap_or_default()
+        })
+    });
     // Starting asks once more: there is no way back.
     let confirm_start = RwSignal::new(false);
     let start = move |_| {
+        if !gaps.with_untracked(Vec::is_empty) {
+            return;
+        }
         if !confirm_start.get_untracked() {
             confirm_start.set(true);
             return;
@@ -719,15 +732,44 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
                             if confirm_start.get() {
                                 "w-full rounded bg-accent-600 px-2 py-1 text-xs font-medium text-white hover:bg-accent-500"
                             } else {
-                                "w-full rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                                "w-full rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700"
                             }
                         }
-                        title="Once started, a sprint takes no more tickets and gives none back"
+                        title=move || {
+                            if gaps.with(Vec::is_empty) {
+                                "Once started, a sprint takes no more tickets and gives none back"
+                            } else {
+                                "Its tickets require others outside it: see below"
+                            }
+                        }
+                        disabled=move || !gaps.with(Vec::is_empty)
                         on:click=start
                         on:blur=move |_| confirm_start.set(false)
                     >
                         {move || if confirm_start.get() { "Confirm: start sprint" } else { "Start sprint" }}
                     </button>
+                    {move || {
+                        let list = gaps.get();
+                        (!list.is_empty())
+                            .then(|| {
+                                view! {
+                                    <div role="status" class="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900/60 dark:text-amber-100">
+                                        <p class="font-medium">"Can't start yet: these are required but not in this sprint or done."</p>
+                                        <ul class="mt-0.5">
+                                            {list
+                                                .into_iter()
+                                                .map(|g| {
+                                                    view! {
+                                                        <li>{format!("{} requires {} ({})", g.id, g.required_id, g.required_place)}</li>
+                                                    }
+                                                })
+                                                .collect_view()}
+                                        </ul>
+                                        <p class="mt-0.5 text-amber-800 dark:text-amber-200">"Add them to the sprint, finish them, or change the link."</p>
+                                    </div>
+                                }
+                            })
+                    }}
                 </Show>
                 {move || {
                     refusal()

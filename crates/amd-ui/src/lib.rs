@@ -380,6 +380,7 @@ async fn create_ticket(
             clone_of: String::new(),
             body: String::new(),
             priority: String::new(),
+            requires: Vec::new(),
         };
         let outcome = transition::create_ticket(board, &fields).map_err(err)?;
         let name = if repo.is_empty() {
@@ -692,8 +693,9 @@ async fn start_sprint(
 ) -> Result<SyncReport> {
     change(&state, move |p| {
         let board = p.board(&repo.unwrap_or_default())?;
+        // Refused while its tickets require others outside it (ticket 214).
         committed(board, "group-start", &name, "", || {
-            board.group(&name)?.start()
+            agile_md::requires::start_sprint(board, &name)
         })
     })
     .await
@@ -2904,6 +2906,7 @@ mod tests {
             clone_of: String::new(),
             body: String::new(),
             priority: String::new(),
+            requires: Vec::new(),
         };
         let dest = transition::create_ticket(project.board("").unwrap(), &fields)
             .unwrap()

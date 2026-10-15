@@ -900,6 +900,37 @@ off**, ticket 141) to
   nothing back. The page mirrors the rule (`amd_ui_model::waiting`): a
   "waits on N" badge on the card, and `verdict` refuses a drag onto done
   with the reason, which columns now show as epics did.
+  **Requires and sprints** (ticket 214, `crates/amd-lib/src/requires.rs`):
+  there is no separate depends-on field; requires *is* the dependency,
+  called requires everywhere. `requires::required(board, task)` is the
+  one reading (own `requires` + others' `required-by`), used by
+  `waiting_on`, the sprint check and the tree. `sprint_gaps(board, name)`
+  lists each ticket in the sprint (`tasks_in_group`) that requires one
+  neither in it nor done; `requires::start_sprint` refuses with
+  `SprintNotReady` (`s1 can't start: 003 requires 001 (backlog)…`), and
+  `amd group start` and amdui's `start_sprint` both call it instead of
+  `Group::start`. Nothing is enforced outside sprints. Setting them:
+  `amd new --requires <ref>` (repeatable; resolved before writing, linked
+  in the `new:` commit), `amd set <ref> requires 3,7` (exactly that list,
+  both ends, empty clears: `transition::set_requires`),
+  `TicketFields.requires` (create only; the MCP `create_ticket`
+  `requires`). The page mirrors the check (`amd_ui_model::waiting::
+  sprint_gaps`): the sprint column disables Start sprint and lists the
+  gaps.
+  **The tree** (`requires::family(board, around)`, `amd tree [<ref>]`):
+  one board's families, tickets joined by requires or related either
+  way, as serialisable `TreeNode`s (id, title, file, column, epic, place,
+  done, edge Root/Requires/Related, unmet, stub, seen, current). `Facts`
+  reads every ticket's links once. Roots: tickets nothing in the family
+  requires, those that require something first (so a ticket only related
+  to one hangs under it); a pure cycle starts at its lowest id. Each
+  ticket drawn once (`seen` back-references carry no marks); related
+  drawn once, under whichever end comes first. Tickets in a started
+  sprint (`!accepts_changes()`) are stubs, not expanded and not walked
+  through; asking for one is refused. Parent/child aren't drawn. A lone
+  ticket has no family (empty). render.rs `tree`: `├──── ` solid,
+  `├ ─ ─ ` dashed (spaced so related stands out), both six wide; colour
+  and links only on a terminal.
 
 - **One ticket, one template.** There are no ticket types any more: `admin` and
   `development` collapsed into fields you either fill in or don't.
