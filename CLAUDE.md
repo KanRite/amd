@@ -917,6 +917,20 @@ off**, ticket 141) to
   `requires`). The page mirrors the check (`amd_ui_model::waiting::
   sprint_gaps`): the sprint column disables Start sprint and lists the
   gaps.
+  **The tree** (`requires::family(board, around)`, `amd tree [<ref>]`):
+  one board's families, tickets joined by requires or related either
+  way, as serialisable `TreeNode`s (id, title, file, column, epic, place,
+  done, edge Root/Requires/Related, unmet, stub, seen, current). `Facts`
+  reads every ticket's links once. Roots: tickets nothing in the family
+  requires, those that require something first (so a ticket only related
+  to one hangs under it); a pure cycle starts at its lowest id. Each
+  ticket drawn once (`seen` back-references carry no marks); related
+  drawn once, under whichever end comes first. Tickets in a started
+  sprint (`!accepts_changes()`) are stubs, not expanded and not walked
+  through; asking for one is refused. Parent/child aren't drawn. A lone
+  ticket has no family (empty). render.rs `tree`: `├──── ` solid,
+  `├ ─ ─ ` dashed (spaced so related stands out), both six wide; colour
+  and links only on a terminal.
 
 - **One ticket, one template.** There are no ticket types any more: `admin` and
   `development` collapsed into fields you either fill in or don't.

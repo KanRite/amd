@@ -143,6 +143,266 @@ pub fn start_sprint(board: &Board, name: &str) -> Result<()> {
     group.start()
 }
 
+/// How a node hangs from its parent in the tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Edge {
+    /// A family's top: nothing in it requires this one.
+    Root,
+    /// The parent requires it (drawn solid).
+    Requires,
+    /// Related to the parent (drawn dashed).
+    Related,
+}
+
+/// One ticket in the tree (ticket 214).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TreeNode {
+    pub id: String,
+    pub title: String,
+    pub file: String,
+    /// The column's directory name: `backlog`, `todo`, `doing`, `done`.
+    pub column: String,
+    /// The backlog folder (an epic or sprint) it's filed in, if any.
+    pub epic: Option<String>,
+    /// Where it is, in words ([`place`]).
+    pub place: String,
+    pub done: bool,
+    pub edge: Edge,
+    /// What it requires that isn't done yet.
+    pub unmet: Vec<String>,
+    /// In a started sprint, which the tree leaves out: its name. Not
+    /// expanded.
+    pub stub: Option<String>,
+    /// Already drawn above; not expanded again.
+    pub seen: bool,
+    /// The ticket the tree was asked about.
+    pub current: bool,
+    pub children: Vec<TreeNode>,
+}
+
+/// What the tree knows about each ticket, read once.
+struct Facts {
+    tasks: Vec<Task>,
+    /// For each ticket, the indices of those it requires.
+    requires: Vec<Vec<usize>>,
+    /// For each ticket, the indices of its related tickets.
+    related: Vec<Vec<usize>>,
+    /// The started sprint each ticket is in, if any.
+    started: Vec<Option<String>>,
+    places: Vec<String>,
+}
+
+impl Facts {
+    fn read(board: &Board) -> Result<Facts> {
+        let tasks = board.tasks()?;
+        let index = |id: &str| tasks.iter().position(|t| same_id(id, t));
+        let mut requires = vec![Vec::new(); tasks.len()];
+        let mut related = vec![Vec::new(); tasks.len()];
+        for (i, task) in tasks.iter().enumerate() {
+            for link in task.links() {
+                let Some(j) = index(&link.id) else { continue };
+                if i == j {
+                    continue;
+                }
+                match link.kind {
+                    LinkType::Requires => requires[i].push(j),
+                    LinkType::RequiredBy => requires[j].push(i),
+                    _ => {}
+                }
+            }
+            for id in task.related() {
+                if let Some(j) = index(&id)
+                    && i != j
+                {
+                    related[i].push(j);
+                    related[j].push(i);
+                }
+            }
+        }
+        for list in requires.iter_mut().chain(related.iter_mut()) {
+            list.sort_by_key(|&j| (tasks[j].id, tasks[j].stem.clone()));
+            list.dedup();
+        }
+        let running: Vec<String> = board
+            .groups()?
+            .into_iter()
+            .filter(|g| g.is_sprint() && !g.accepts_changes())
+            .map(|g| g.name)
+            .collect();
+        let started = tasks
+            .iter()
+            .map(|t| running.iter().find(|s| in_group(t, s)).cloned())
+            .collect();
+        let places = tasks.iter().map(|t| place(board, t)).collect();
+        Ok(Facts {
+            tasks,
+            requires,
+            related,
+            started,
+            places,
+        })
+    }
+
+    fn linked(&self, i: usize) -> bool {
+        !self.requires[i].is_empty()
+            || !self.related[i].is_empty()
+            || self.requires.iter().any(|r| r.contains(&i))
+    }
+
+    /// Every ticket joined to `start` by requires or related, either way,
+    /// not passing through a started sprint's tickets (they are stubs).
+    fn component(&self, start: usize) -> Vec<usize> {
+        let mut seen = vec![start];
+        let mut todo = vec![start];
+        while let Some(i) = todo.pop() {
+            if self.started[i].is_some() {
+                continue;
+            }
+            let near = self.requires[i]
+                .iter()
+                .chain(&self.related[i])
+                .copied()
+                .chain((0..self.tasks.len()).filter(|&j| self.requires[j].contains(&i)));
+            for j in near.collect::<Vec<_>>() {
+                if !seen.contains(&j) {
+                    seen.push(j);
+                    todo.push(j);
+                }
+            }
+        }
+        seen.sort_by_key(|&j| (self.tasks[j].id, self.tasks[j].stem.clone()));
+        seen
+    }
+
+    fn node(&self, i: usize, edge: Edge, current: Option<usize>) -> TreeNode {
+        let task = &self.tasks[i];
+        TreeNode {
+            id: task.id_display(),
+            title: task.title(),
+            file: task.file_name(),
+            column: task.column.as_str().to_string(),
+            epic: task.epic.clone(),
+            place: self.places[i].clone(),
+            done: task.column == Column::Done,
+            edge,
+            unmet: self.requires[i]
+                .iter()
+                .filter(|&&j| self.tasks[j].column != Column::Done)
+                .map(|&j| self.tasks[j].id_display())
+                .collect(),
+            stub: self.started[i].clone(),
+            seen: false,
+            current: current == Some(i),
+            children: Vec::new(),
+        }
+    }
+
+    fn grow(
+        &self,
+        i: usize,
+        edge: Edge,
+        drawn: &mut Vec<usize>,
+        current: Option<usize>,
+    ) -> TreeNode {
+        let mut node = self.node(i, edge, current);
+        drawn.push(i);
+        if node.stub.is_some() {
+            return node;
+        }
+        for &j in &self.requires[i] {
+            if drawn.contains(&j) {
+                // Only a pointer to where it is drawn: no marks of its own.
+                let mut back = self.node(j, Edge::Requires, None);
+                back.seen = true;
+                back.unmet.clear();
+                node.children.push(back);
+            } else {
+                node.children
+                    .push(self.grow(j, Edge::Requires, drawn, current));
+            }
+        }
+        // A related ticket is drawn once, under whichever end comes first.
+        for &j in &self.related[i] {
+            if !drawn.contains(&j) {
+                node.children
+                    .push(self.grow(j, Edge::Related, drawn, current));
+            }
+        }
+        node
+    }
+
+    /// The trees of one family: its roots (nothing in it requires them; a
+    /// family that is only a cycle starts at its lowest number), and then
+    /// anything not reached from them.
+    fn trees(&self, family: &[usize], current: Option<usize>) -> Vec<TreeNode> {
+        let mut drawn = Vec::new();
+        let mut out = Vec::new();
+        // Tops that require something first: they make the real trees, and
+        // a ticket only related to one is then drawn under it, dashed.
+        let mut roots: Vec<usize> = family
+            .iter()
+            .copied()
+            .filter(|&i| {
+                self.started[i].is_none() && !family.iter().any(|&j| self.requires[j].contains(&i))
+            })
+            .collect();
+        roots.sort_by_key(|&i| self.requires[i].is_empty());
+        for i in roots {
+            if !drawn.contains(&i) {
+                out.push(self.grow(i, Edge::Root, &mut drawn, current));
+            }
+        }
+        while let Some(&i) = family.iter().find(|i| !drawn.contains(i)) {
+            out.push(self.grow(i, Edge::Root, &mut drawn, current));
+        }
+        out
+    }
+}
+
+/// The requires tree (ticket 214), one board. With `around`, that ticket's
+/// family: every ticket joined to it by requires or related, either way.
+/// Without, every family on the board that has a link, lowest number first.
+/// Tickets in a started sprint aren't expanded: they appear as stubs where
+/// something links to them. Each ticket is drawn once; meeting it again is
+/// a `seen` back-reference. Parent and child aren't drawn.
+pub fn family(board: &Board, around: Option<&Task>) -> Result<Vec<TreeNode>> {
+    let facts = Facts::read(board)?;
+    match around {
+        Some(task) => {
+            let Some(i) = facts.tasks.iter().position(|t| t.path == task.path) else {
+                bail!("{} isn't on this board's columns", task.id_display());
+            };
+            if let Some(sprint) = &facts.started[i] {
+                bail!(
+                    "{} is in started sprint {sprint}, which the tree leaves out",
+                    task.id_display()
+                );
+            }
+            let family = facts.component(i);
+            if family.len() == 1 {
+                return Ok(Vec::new());
+            }
+            Ok(facts.trees(&family, Some(i)))
+        }
+        None => {
+            let mut done: Vec<usize> = Vec::new();
+            let mut out = Vec::new();
+            let mut order: Vec<usize> = (0..facts.tasks.len()).collect();
+            order.sort_by_key(|&j| (facts.tasks[j].id, facts.tasks[j].stem.clone()));
+            for i in order {
+                if done.contains(&i) || facts.started[i].is_some() || !facts.linked(i) {
+                    continue;
+                }
+                let family = facts.component(i);
+                done.extend(&family);
+                out.extend(facts.trees(&family, None));
+            }
+            Ok(out)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,5 +584,102 @@ mod tests {
         assert_eq!(find(&board, "004").links()[0].entry(), "required-by:001");
         crate::transition::set_requires(&board, &find(&board, "001"), &[]).unwrap();
         assert!(required(&board, &find(&board, "001")).unwrap().is_empty());
+    }
+
+    fn shape(node: &TreeNode, depth: usize, out: &mut Vec<String>) {
+        let edge = match node.edge {
+            Edge::Root => "root",
+            Edge::Requires => "requires",
+            Edge::Related => "related",
+        };
+        let mut line = format!("{}{} {}", "  ".repeat(depth), edge, node.id);
+        if node.seen {
+            line.push_str(" seen");
+        }
+        if let Some(s) = &node.stub {
+            line.push_str(&format!(" stub:{s}"));
+        }
+        if !node.unmet.is_empty() {
+            line.push_str(&format!(" unmet:{}", node.unmet.join(",")));
+        }
+        if node.current {
+            line.push_str(" *");
+        }
+        out.push(line);
+        for child in &node.children {
+            shape(child, depth + 1, out);
+        }
+    }
+
+    fn drawn(trees: &[TreeNode]) -> Vec<String> {
+        let mut out = Vec::new();
+        for tree in trees {
+            shape(tree, 0, &mut out);
+        }
+        out
+    }
+
+    #[test]
+    fn the_tree_draws_requires_solid_related_dashed_each_ticket_once() {
+        let (_dir, board) = board_with(&["Top", "Middle", "Shared", "Side", "Lone", "Finished"]);
+        requires(&board, "001", "002");
+        requires(&board, "001", "003");
+        requires(&board, "002", "003"); // 003 again, under 002: a back-reference
+        requires(&board, "002", "006");
+        apply(
+            &find(&board, "004"),
+            LinkType::RelatesTo,
+            &find(&board, "001"),
+            false,
+            false,
+        )
+        .unwrap();
+        walk(&board, "006", &[Column::Todo, Column::Doing, Column::Done]);
+
+        let trees = family(&board, Some(&find(&board, "003"))).unwrap();
+        assert_eq!(
+            drawn(&trees),
+            [
+                "root 001 unmet:002,003",
+                "  requires 002 unmet:003",
+                "    requires 003 *",
+                "    requires 006",
+                "  requires 003 seen",
+                "  related 004",
+            ]
+        );
+        assert!(trees[0].children[0].children[1].done);
+        assert_eq!(trees[0].place, "backlog");
+        // A ticket with no links has no family.
+        assert!(
+            family(&board, Some(&find(&board, "005")))
+                .unwrap()
+                .is_empty()
+        );
+        // Without a ticket: every family with a link, and none for 005.
+        assert_eq!(family(&board, None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_started_sprint_ticket_is_a_stub_and_a_cycle_ends() {
+        let (_dir, board) = board_with(&["A", "B", "Running"]);
+        sprint(&board, "s12");
+        file(&board, "003", "s12");
+        requires(&board, "002", "003");
+        start_sprint(&board, "s12").unwrap();
+        requires(&board, "001", "002");
+        requires(&board, "002", "001"); // a cycle
+        let trees = family(&board, Some(&find(&board, "001"))).unwrap();
+        assert_eq!(
+            drawn(&trees),
+            [
+                "root 001 unmet:002 *",
+                "  requires 002 unmet:001,003",
+                "    requires 001 seen",
+                "    requires 003 stub:s12",
+            ]
+        );
+        let err = family(&board, Some(&find(&board, "003"))).unwrap_err();
+        assert!(err.to_string().contains("started sprint s12"), "{err}");
     }
 }

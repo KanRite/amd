@@ -1280,7 +1280,29 @@ assert "amd group start is refused while a sprint ticket requires one outside it
 assert "with the required ticket in the sprint, it starts" \
   bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq set 1 points 2 >/dev/null && in_rq s1 1 >/dev/null \
     && in_rq group start s1 | grep -q 's1 started'"
+( cd "${rq}" && AMD_NO_BRANCH=1 "${AMD}" new "Loner" >/dev/null && "${AMD}" new "Friend" >/dev/null \
+  && "${AMD}" link 3 5 >/dev/null )
+assert "amd tree of a ticket in a started sprint says the tree leaves it out" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq tree 3 2>&1 | grep -q 'started sprint s1, which the tree leaves out'"
+assert "amd tree shows the started sprint's ticket as a stub where something links to it" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq tree 5 | grep -q '^└ ─ ─ 003 Top · in started sprint s1\$'"
+assert "amd tree of a ticket with no links says so" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq tree 4 | grep -qx '004 requires nothing and has no related tickets'"
 rm -rf "${rq}"
+tr="$(mktemp -d)"
+( cd "${tr}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init trees --local-only >/dev/null \
+  && for t in Alpha Beta Gamma Delta; do "${AMD}" new "$t" >/dev/null; done \
+  && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 2 3 --type requires >/dev/null \
+  && "${AMD}" link 1 4 >/dev/null \
+  && for c in todo doing "done"; do AMD_NO_BRANCH=1 "${AMD}" "$c" 3 >/dev/null; done )
+assert "amd tree draws requires solid and related dashed, with where each is and what waits" \
+  bash -c "cd '${tr}' && [ \"\$('${AMD}' tree 4)\" = \"\$(printf '%s\\n' \\
+    '001 Alpha · backlog  waits on 002' \\
+    '├──── 002 Beta · backlog' \\
+    '│     └──── 003 Gamma · done ✓' \\
+    '└ ─ ─ 004 Delta · backlog  ◀')\" ]"
+rm -rf "${tr}"
 
 echo "duplicate:"
 assert "amd duplicate copies a ticket" \
