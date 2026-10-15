@@ -127,6 +127,8 @@ pub fn AdminPanel() -> impl IntoView {
 
                 <IssuesAdmin />
 
+                <PriorityAdmin />
+
                 <EpicsAdmin />
 
                 <section class="flex flex-col gap-2">
@@ -764,6 +766,66 @@ fn ArchiveAdmin() -> impl IntoView {
             </div>
             <Show when=move || note.with(Option::is_some)>
                 <p class="text-xs text-amber-700 dark:text-amber-300">{move || note.get().unwrap_or_default()}</p>
+            </Show>
+        </section>
+    }
+}
+
+/// Auto priority (ticket 215): priorities set from requires links, and
+/// whether a priority set by hand wins.
+#[component]
+fn PriorityAdmin() -> impl IntoView {
+    let ctx = Ctx::get();
+    let auto = move || {
+        ctx.board
+            .with(|b| b.as_ref().is_some_and(|b| b.auto_priority))
+    };
+    let manual = move || {
+        ctx.board
+            .with(|b| b.as_ref().is_none_or(|b| b.priority_override))
+    };
+    let note = RwSignal::new(None::<String>);
+    let apply = move |result: Result<amd_ui_model::SyncReport, String>| match result {
+        Ok(report) => {
+            ctx.report(report);
+            note.set(None);
+            ctx.reload();
+        }
+        Err(e) => note.set(Some(e)),
+    };
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Auto priority"</h3>
+            <p class="text-xs text-slate-500">
+                "A ticket becomes at least as urgent as the most urgent ticket that requires it, down a chain, so the priorities on your goals flow to the work they wait on. Raised tickets say why, and switching it off puts them back."
+            </p>
+            <label class="flex items-center gap-2 text-sm font-semibold">
+                <input
+                    type="checkbox"
+                    prop:checked=auto
+                    on:change=move |ev| {
+                        let on = event_target_checked(&ev);
+                        spawn_local(async move { apply(api::set_auto_priority(on).await) });
+                    }
+                />
+                "Set priorities from requires links"
+            </label>
+            <label class="flex items-center gap-2 text-sm font-semibold">
+                <input
+                    type="checkbox"
+                    prop:checked=manual
+                    on:change=move |ev| {
+                        let on = event_target_checked(&ev);
+                        spawn_local(async move { apply(api::set_priority_override(on).await) });
+                    }
+                />
+                "Allow override: a priority set by hand stays"
+            </label>
+            <p class="text-xs text-slate-500">
+                "On: choosing a priority yourself pins that ticket, and Auto in its priority hands it back. Off: a priority you choose is only a floor; auto priority can still raise it."
+            </p>
+            <Show when=move || note.with(Option::is_some)>
+                <p class="text-xs text-red-700 dark:text-red-300">{move || note.get().unwrap_or_default()}</p>
             </Show>
         </section>
     }

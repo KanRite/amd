@@ -943,6 +943,31 @@ off**, ticket 141) to
   shown, `focus`/`focus_scroll`, its epic or sprint column opened, a
   folded column unfolded), which `open_ticket` now uses before opening
   the editor. Each sprint gap has "Show the tree".
+  **Auto priority** (ticket 215, `crates/amd-lib/src/auto_priority.rs`):
+  `auto-priority` (off unless on) and `priority-override` (on unless off)
+  in the tickets `.settings`, read per board. When on, a ticket not done
+  is at least as urgent as the most urgent not-done ticket that requires
+  it, down a chain (repeated to a fixpoint; three steps, so cycles end).
+  Written into `priority`, a raise recorded as `priority-from` (the
+  requirer) and `priority-own` (its own before), `Task::write_priority`
+  writing all of them in one checked write. `reconcile(board)` runs in
+  `transition::settle_priorities`, called by `with_auto_commit` after the
+  change and before the commit (and by `create_ticket` and `cmd_new`), so
+  every change carries its priority moves; a failure is only a note.
+  What it changed queues for `take_notes` (the CLI prints them after each
+  command). Off puts raised tickets back; pins stay. By hand
+  (`set_by_hand`: `amd set <ref> priority`, the MCP `edit_ticket`,
+  `transition::edit_ticket`, `save_text` when the saved priority differs):
+  the value becomes the ticket's own, raises cleared, and with override on
+  `priority-pinned: "yes"`, which reconcile leaves alone; `auto` unpins.
+  With override off a hand value is only a floor. A ticket someone else
+  has leased is left alone with a note. CLI: `amd auto-priority [on|off]`
+  (bare lists the raised), `amd priority-override [on|off]`, `amd show`
+  prints `auto_priority::note` on stderr. amdui: Admin's Auto priority
+  section (`set_auto_priority`, `set_priority_override`), the editor's
+  `auto` option (the page's `ensure_priority` accepts it) and note
+  (`TicketDocument.priority_note`), and `↑ high` on a raised card
+  (`TicketSummary.priority_from`).
 
 - **One ticket, one template.** There are no ticket types any more: `admin` and
   `development` collapsed into fields you either fill in or don't.

@@ -47,6 +47,7 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
         lapsed,
         version,
         authorship,
+        priority_note,
     } = doc;
     let path = match &epic {
         Some(name) => format!("{}/{name}/{file}", column.dir_name()),
@@ -480,11 +481,18 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                             on:change=set_field(|f, v| f.priority = v)
                         >
                             {PRIORITIES.map(|p| view! { <option value=p>{p}</option> }).collect_view()}
+                            // Hands the ticket back to auto priority (ticket 215).
+                            {move || {
+                                ctx.board
+                                    .with(|b| b.as_ref().is_some_and(|b| b.auto_priority))
+                                    .then(|| view! { <option value="auto">"auto"</option> })
+                            }}
                             // An invalid value typed in Markdown mode stays visible, so the
                             // user can see what to correct.
                             {move || {
                                 fields.with(|f| {
-                                    (!f.priority.is_empty() && !PRIORITIES.contains(&f.priority.as_str()))
+                                    (!f.priority.is_empty() && !PRIORITIES.contains(&f.priority.as_str())
+                                        && f.priority != "auto")
                                         .then(|| {
                                             let bad = f.priority.clone();
                                             view! {
@@ -496,6 +504,11 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                                 })
                             }}
                         </select>
+                        // Why it's this priority (ticket 215).
+                        {(!priority_note.is_empty())
+                            .then(|| {
+                                view! { <span class="text-xs font-normal text-slate-500">{priority_note.clone()}</span> }
+                            })}
                     </label>
                 </div>
             </Show>

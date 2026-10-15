@@ -1304,6 +1304,46 @@ assert "amd tree draws requires solid and related dashed, with where each is and
     '└ ─ ─ 004 Delta · backlog  ◀')\" ]"
 rm -rf "${tr}"
 
+echo "auto priority (ticket 215):"
+ap="$(mktemp -d)"
+( cd "${ap}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init autop --local-only >/dev/null \
+  && for t in Goal Middle Base Extra; do "${AMD}" new "$t" >/dev/null; done \
+  && "${AMD}" set 1 priority high >/dev/null \
+  && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 2 3 --type requires >/dev/null )
+in_ap() { (cd "${ap}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "auto priority is off until switched on" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap auto-priority | grep -qx 'auto priority is off' \
+    && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/003-base.md"
+assert "amd auto-priority on raises a chain in the setting's own commit, saying why" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; out=\$(in_ap auto-priority on) \
+    && printf '%s' \"\$out\" | grep -q '003 raised to high: 002 requires it' \
+    && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/003-base.md \
+    && grep -q '^priority-from: \"002\"' '${ap}'/tasks/backlog/003-base.md \
+    && git -C '${ap}' show --stat HEAD | grep -q '003-base.md'"
+assert "a new requires link raises in the link's own commit" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap link 3 4 --type requires >/dev/null \
+    && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/004-extra.md \
+    && git -C '${ap}' log --format=%s -1 | grep -q '^link: 003 -> 004'"
+assert "amd show says why a priority was raised" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap show 4 2>&1 >/dev/null | grep -q 'raised by auto priority, 003 requires it (own: low)'"
+assert "with override on, a priority set by hand pins the ticket" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap set 3 priority low | grep -q pinned \
+    && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/003-base.md \
+    && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/004-extra.md"
+assert "amd set <ref> priority auto hands it back to auto priority" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap set 3 priority auto >/dev/null \
+    && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/003-base.md"
+assert "with override off, a priority set by hand is only a floor" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap priority-override off >/dev/null \
+    && in_ap set 3 priority low >/dev/null && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/003-base.md"
+assert "amd auto-priority off puts raised tickets back" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap auto-priority off | grep -q '002 back to low' \
+    && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/002-middle.md \
+    && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/001-goal.md \
+    && ! grep -q 'priority-from' '${ap}'/tasks/backlog/00[234]-*.md"
+rm -rf "${ap}"
+
 echo "duplicate:"
 assert "amd duplicate copies a ticket" \
   "${AMD}" duplicate 1

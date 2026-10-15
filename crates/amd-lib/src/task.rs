@@ -471,6 +471,37 @@ impl Task {
         })
     }
 
+    /// Write the priority and auto priority's notes on it (ticket 215) in
+    /// one checked write: `priority`, and `priority-from`, `priority-own`
+    /// and `priority-pinned`, each set when `Some` and removed when `None`.
+    pub fn write_priority(
+        &self,
+        expected: ContentHash,
+        priority: &str,
+        from: Option<&str>,
+        own: Option<&str>,
+        pinned: bool,
+    ) -> Result<()> {
+        validate_priority(priority)?;
+        if let Some(own) = own {
+            validate_priority(own)?;
+        }
+        self.write_checked(expected, |text| {
+            let mut text = set_meta(text, "priority", &format!("{priority:?}"))?;
+            for (key, value) in [
+                ("priority-from", from.map(str::to_string)),
+                ("priority-own", own.map(str::to_string)),
+                ("priority-pinned", pinned.then(|| "yes".to_string())),
+            ] {
+                text = match value {
+                    Some(value) => set_meta(&text, key, &format!("{value:?}"))?,
+                    None => remove_meta(&text, key),
+                };
+            }
+            Ok(text)
+        })
+    }
+
     /// The epic recorded in the frontmatter. `Task::epic` — set from the
     /// folder — is the authority; this is what a reader outside the board
     /// sees, and the two are kept in step when a ticket is filed.
@@ -1010,6 +1041,32 @@ pub fn check_repository(near: &Path, name: &str) -> Result<()> {
 fn set_links(text: &str, links: &[crate::links::Link]) -> Result<String> {
     let entries: Vec<String> = links.iter().map(|link| link.entry()).collect();
     set_meta(text, "links", &format!("[{}]", entries.join(",")))
+}
+
+/// `text` without the frontmatter line for `key`, if it has one.
+pub(crate) fn remove_meta(text: &str, key: &str) -> String {
+    if !text.starts_with("---") {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut closed = false;
+    for (i, line) in text.lines().enumerate() {
+        if i > 0 && !closed && line.trim_end() == "---" {
+            closed = true;
+        } else if i > 0
+            && !closed
+            && let Some(rest) = line.strip_prefix(key)
+            && rest.starts_with(':')
+        {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !text.ends_with('\n') {
+        out.pop();
+    }
+    out
 }
 
 pub(crate) fn set_meta(text: &str, key: &str, value: &str) -> Result<String> {

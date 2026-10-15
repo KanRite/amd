@@ -193,7 +193,7 @@ pub fn tools() -> Vec<Tool> {
                 "ticket": reference,
                 "title": {"type": "string"},
                 "body": {"type": "string", "description": "The whole body after the frontmatter"},
-                "priority": {"type": "string", "enum": ["low", "medium", "high"]},
+                "priority": {"type": "string", "enum": ["low", "medium", "high", "auto"], "description": "Set by hand; with auto priority and override on it pins the ticket, and `auto` hands it back to auto priority"},
                 "points": {"type": "string", "enum": ["", "1", "2", "3", "5", "8", "13"]},
                 "tags": {"type": "array", "items": {"type": "string"}},
                 "assignee": {"type": "string"},
@@ -1053,7 +1053,7 @@ fn edit_ticket(args: &Value) -> Result<Reply> {
             if let Some(priority) = &priority
                 && priority.trim() != task.priority()
             {
-                task.set_priority(task.hash()?, priority.trim())?;
+                crate::auto_priority::set_by_hand(board, &task, priority)?;
             }
             if let Some(repository) = &repository
                 && crate::task::repo_name(repository) != task.repository().unwrap_or_default()
