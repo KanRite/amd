@@ -570,6 +570,34 @@ redundant. Their history is in git if it is ever wanted again.
   order). **`amd new` lands in `backlog/`** — new work is raised, then pulled
   into `todo` when someone means to do it. `tests/test.sh` drifted from the
   tool for exactly this reason, so it is worth stating plainly.
+- **Columns have kinds** (ticket 223, `crates/amd-lib/src/workflow.rs`):
+  `board::Column` is a small `Copy` struct, a folder (interned, so a
+  handful of names are leaked once) and a `board::Kind` (`Backlog`,
+  `Todo`, `Doing`, `Done`). The four standard columns keep the old enum's
+  names as constants (`Column::Backlog` …, `Column::STANDARD`), so they
+  read as before. A board's columns, in order and labelled, are its
+  `Workflow` (`Board::workflow()`): `columns()`, `position`, `next_to`
+  (one column at a time), `first(kind)`, `of_kind`, `find` (folder or
+  label, ignoring case), `landing()` (the standard backlog). **Rules ask
+  the kind, never the name**: the lease is taken entering any doing-kind
+  column and released leaving them (`transition::move_to`); the WIP limit
+  belongs to doing-kind columns (`wip-limit` for the standard doing,
+  `wip-limit-<folder>` for another); done waits on entering a done-kind
+  column and any done-kind ticket holds nothing back (links, requires,
+  auto priority, the tree, roadmaps); a draft can't leave the backlog
+  kinds; a started sprint's tickets only move on to a todo-kind column;
+  `home_group` runs coming back from a todo-kind column; My work covers
+  todo and doing kinds and `to_pick` the backlog kinds. Epics and sprints
+  still live only in the standard backlog folder, and new tickets land
+  there. `Workflow::parse` reads and checks the written form
+  (`Label=folder:kind`, comma separated: every kind present, folders
+  plain and unique, not `archive`/`templates`, the four standard folders
+  kept with their kinds), but nothing reads it from settings yet:
+  `Board::workflow()` is the standard four (a test-only thread-local,
+  `TEST_WORKFLOW`, gives a test a team's workflow). Ticket 224 reads it
+  from the tickets `.settings` and lets Admin and `amd column` change it;
+  until then amdui's page keeps its own four-column type
+  (`boards::from_column` maps by kind) and the MCP schemas list the four.
 - `Board::find(<ref>)` resolves a numeric id or a unique slug substring to one
   task (errors on 0 or >1 matches).
 - `Board::move_task()` uses `git mv` for tracked files (history follows the

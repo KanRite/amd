@@ -180,7 +180,7 @@ pub fn splice_body(rendered: &str, body: &str) -> String {
 
 pub fn read_lanes(board: &Board) -> Result<Vec<Vec<Card>>> {
     let mut lanes = Vec::new();
-    for column in Column::ALL {
+    for column in board.workflow().columns() {
         let mut cards: Vec<Card> = board.tasks_in(column)?.into_iter().map(card_from).collect();
         sort_cards(&mut cards);
         lanes.push(cards);
@@ -474,10 +474,7 @@ mod tests {
         write("001-a.md", "order: \"5\"\n");
         write("002-b.md", "");
         let lanes = read_lanes(&board).unwrap();
-        let todo: Vec<&str> = lanes[Column::Todo as usize]
-            .iter()
-            .map(|card| card.id.as_str())
-            .collect();
+        let todo: Vec<&str> = lanes[1].iter().map(|card| card.id.as_str()).collect();
         assert_eq!(todo, ["002", "001"]);
     }
 }

@@ -39,7 +39,7 @@ use anyhow::{Context, Result, bail};
 use time::macros::format_description;
 use time::{Date, Duration};
 
-use crate::board::{Board, Column};
+use crate::board::Board;
 use crate::group::{DEFAULT_DAYS, Group, Kind, State};
 
 /// The folder inside the tickets repository that holds the roadmaps.
@@ -369,7 +369,10 @@ impl Roadmap {
 /// many it has.
 fn tickets_done(target: &Board, milestone: &Milestone) -> (usize, usize) {
     let tasks = target.tasks_in_group(&milestone.name).unwrap_or_default();
-    let done = tasks.iter().filter(|t| t.column == Column::Done).count();
+    let done = tasks
+        .iter()
+        .filter(|t| t.column.is(crate::board::Kind::Done))
+        .count();
     (done, tasks.len())
 }
 
@@ -608,6 +611,7 @@ pub fn add_milestone(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::board::Column;
     use time::macros::date;
 
     fn board() -> (tempfile::TempDir, Board) {

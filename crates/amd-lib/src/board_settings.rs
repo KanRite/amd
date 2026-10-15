@@ -79,7 +79,7 @@
 
 use anyhow::{Result, bail};
 
-use crate::board::{Board, Column};
+use crate::board::{Board, Column, Kind};
 use crate::settings::Config;
 
 const PROJECT: &str = "project";
@@ -321,18 +321,27 @@ impl BoardSettings {
     /// means "off". Todo, backlog and done always read as unlimited — a
     /// limit on todo as well could leave work stuck with nowhere to go, so
     /// `wip-todo`/`AMD_WIP_TODO` are ignored.
+    ///
+    /// Ticket 223: the limit belongs to doing-*kind* columns. The standard
+    /// doing column reads `wip-limit` as above; another doing-kind column
+    /// (a Review, say) reads `wip-limit-<folder>`, unlimited when unset.
     pub fn wip_limit(&self, column: Column) -> Option<u32> {
-        match column {
-            Column::Doing => {
-                let parsed = crate::settings::resolved("AMD_WIP_LIMIT", &self.config, WIP_LIMIT)
-                    .and_then(|value| value.trim().parse::<u32>().ok());
-                match parsed {
-                    Some(0) => None,
-                    Some(limit) => Some(limit),
-                    None => Some(DEFAULT_WIP_LIMIT),
-                }
-            }
-            Column::Backlog | Column::Todo | Column::Done => None,
+        if !column.is(Kind::Doing) {
+            return None;
+        }
+        if column != Column::Doing {
+            return self
+                .config
+                .get(&format!("{WIP_LIMIT}-{}", column.as_str()))
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .filter(|&limit| limit > 0);
+        }
+        let parsed = crate::settings::resolved("AMD_WIP_LIMIT", &self.config, WIP_LIMIT)
+            .and_then(|value| value.trim().parse::<u32>().ok());
+        match parsed {
+            Some(0) => None,
+            Some(limit) => Some(limit),
+            None => Some(DEFAULT_WIP_LIMIT),
         }
     }
 
@@ -346,18 +355,22 @@ impl BoardSettings {
     /// not unlimited, so `Some(0)` and `None` have to reach the file as
     /// different states for the read side to tell them apart.
     pub fn set_wip_limit(&mut self, column: Column, limit: Option<u32>) -> Result<()> {
-        match column {
-            Column::Doing => {
+        match column.kind() {
+            Kind::Doing => {
+                let key = if column == Column::Doing {
+                    WIP_LIMIT.to_string()
+                } else {
+                    format!("{WIP_LIMIT}-{}", column.as_str())
+                };
                 let value = limit.map(|l| l.to_string());
-                self.config.set(WIP_LIMIT, value.as_deref().unwrap_or(""));
+                self.config.set(&key, value.as_deref().unwrap_or(""));
                 Ok(())
             }
-            Column::Todo => {
-                bail!("todo has no WIP limit: only doing is limited, so work can't get stuck")
-            }
-            Column::Backlog | Column::Done => {
-                bail!("{} has no WIP limit", column.as_str())
-            }
+            Kind::Todo => bail!(
+                "{} has no WIP limit: only doing is limited, so work can't get stuck",
+                column.as_str()
+            ),
+            Kind::Backlog | Kind::Done => bail!("{} has no WIP limit", column.as_str()),
         }
     }
 

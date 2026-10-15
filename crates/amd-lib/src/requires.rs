@@ -13,7 +13,7 @@ use std::fmt;
 
 use anyhow::{Result, bail};
 
-use crate::board::{Board, Column};
+use crate::board::{Board, Column, Kind as ColumnKind};
 use crate::group::Kind;
 use crate::links::{LinkType, same_id};
 use crate::task::Task;
@@ -81,7 +81,7 @@ pub fn sprint_gaps(board: &Board, name: &str) -> Result<Vec<Gap>> {
     let mut gaps = Vec::new();
     for task in board.tasks_in_group(name)? {
         for needed in required(board, &task)? {
-            if needed.column == Column::Done || in_group(&needed, name) {
+            if needed.column.is(ColumnKind::Done) || in_group(&needed, name) {
                 continue;
             }
             gaps.push(Gap {
@@ -249,7 +249,7 @@ impl Facts {
     /// about) stays, done or not.
     fn hide_done(&mut self, keep: Option<usize>) {
         let gone: Vec<bool> = (0..self.tasks.len())
-            .map(|i| self.tasks[i].column == Column::Done && keep != Some(i))
+            .map(|i| self.tasks[i].column.is(ColumnKind::Done) && keep != Some(i))
             .collect();
         for i in 0..self.tasks.len() {
             if gone[i] {
@@ -302,11 +302,11 @@ impl Facts {
             column: task.column.as_str().to_string(),
             epic: task.epic.clone(),
             place: self.places[i].clone(),
-            done: task.column == Column::Done,
+            done: task.column.is(ColumnKind::Done),
             edge,
             unmet: self.requires[i]
                 .iter()
-                .filter(|&&j| self.tasks[j].column != Column::Done)
+                .filter(|&&j| !self.tasks[j].column.is(ColumnKind::Done))
                 .map(|&j| self.tasks[j].id_display())
                 .collect(),
             stub: self.started[i].clone(),

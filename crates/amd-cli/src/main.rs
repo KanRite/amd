@@ -1191,7 +1191,11 @@ fn run() -> Result<()> {
         Cmd::Register { .. } | Cmd::Deregister { .. } => unreachable!("handled above"),
         Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
         Cmd::New(args) => cmd_new(&board, args),
-        Cmd::Board { tag } => render::columns(&board, &Column::ALL, &tag),
+        Cmd::Board { tag } => render::columns(
+            &board,
+            &board.workflow().columns().collect::<Vec<_>>(),
+            &tag,
+        ),
         Cmd::Tag { tag } => render::named(&format!("tag: {tag}"), board.tasks_tagged(&tag)?, &[]),
         Cmd::Tags { action } => cmd_tags(&board, action),
         Cmd::Import {
@@ -1279,7 +1283,12 @@ fn run() -> Result<()> {
             cmd_destination(&board, destination, task, &tag, false)
         }
         Cmd::Show { task } => {
-            let task = resolve(&board, task, "show", &Column::ALL)?;
+            let task = resolve(
+                &board,
+                task,
+                "show",
+                &board.workflow().columns().collect::<Vec<_>>(),
+            )?;
             let body =
                 fs::read(&task.path).with_context(|| format!("reading {}", task.path.display()))?;
             io::stdout().write_all(&body)?;
@@ -1297,7 +1306,12 @@ fn run() -> Result<()> {
             Ok(())
         }
         Cmd::Edit { task } => {
-            let task = resolve(&board, task, "edit", &Column::ALL)?;
+            let task = resolve(
+                &board,
+                task,
+                "edit",
+                &board.workflow().columns().collect::<Vec<_>>(),
+            )?;
             let (id_display, title) = (task.id_display(), task.title());
             // No separate "did it actually change" check needed: the
             // snapshot diff in with_auto_commit is already empty when the
@@ -1307,7 +1321,12 @@ fn run() -> Result<()> {
             })
         }
         Cmd::Set { task, field, value } if field == "requires" => {
-            let task = resolve(&board, Some(task), "set", &Column::ALL)?;
+            let task = resolve(
+                &board,
+                Some(task),
+                "set",
+                &board.workflow().columns().collect::<Vec<_>>(),
+            )?;
             let mut wanted = Vec::new();
             for reference in agile_md::task::parse_list(&value) {
                 let other = board.find(&reference)?;
@@ -1320,7 +1339,12 @@ fn run() -> Result<()> {
             Ok(())
         }
         Cmd::Set { task, field, value } => {
-            let task = resolve(&board, Some(task), "set", &Column::ALL)?;
+            let task = resolve(
+                &board,
+                Some(task),
+                "set",
+                &board.workflow().columns().collect::<Vec<_>>(),
+            )?;
             let (id_display, title) = (task.id_display(), task.title());
             with_auto_commit(&board, "set", &id_display, &title, || {
                 match field.as_str() {
@@ -1372,7 +1396,12 @@ fn run() -> Result<()> {
         }
         Cmd::Group { command } => cmd_group(&board, command.unwrap_or(GroupCmd::List)),
         Cmd::Assign { task, who, clear } => {
-            let task = resolve(&board, Some(task), "assign", &Column::ALL)?;
+            let task = resolve(
+                &board,
+                Some(task),
+                "assign",
+                &board.workflow().columns().collect::<Vec<_>>(),
+            )?;
             let (id_display, title) = (task.id_display(), task.title());
             // No name: the picker in a terminal (ticket 089); anywhere else
             // it unassigns, as it always has, so scripts are unchanged.
@@ -1870,7 +1899,7 @@ enum Destination {
 /// name of an epic that already exists — and say exactly what's valid when
 /// it's none of those, since that list is the whole point of the error.
 fn resolve_destination(board: &Board, name: &str) -> Result<Destination> {
-    if let Some(column) = Column::parse(name) {
+    if let Some(column) = board.workflow().find(name) {
         return Ok(Destination::Column(column));
     }
     if name.eq_ignore_ascii_case(ABANDON) {
@@ -1880,7 +1909,7 @@ fn resolve_destination(board: &Board, name: &str) -> Result<Destination> {
     if epics.iter().any(|epic| epic == name) {
         return Ok(Destination::Epic(name.to_string()));
     }
-    let columns: Vec<String> = Column::ALL.iter().map(|c| c.to_string()).collect();
+    let columns: Vec<String> = board.workflow().columns().map(|c| c.to_string()).collect();
     let epics_display = if epics.is_empty() {
         "none".to_string()
     } else {
@@ -2903,7 +2932,11 @@ fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {
             board.root.display()
         );
     }
-    let is_tasks = |dir: &Path| Column::ALL.iter().all(|c| dir.join(c.to_string()).is_dir());
+    let is_tasks = |dir: &Path| {
+        Column::STANDARD
+            .iter()
+            .all(|c| dir.join(c.to_string()).is_dir())
+    };
     if !is_tasks(path) {
         bail!(
             "{} isn't a tasks directory (it needs backlog/, todo/, doing/ and done/)",

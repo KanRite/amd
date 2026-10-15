@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 
-use crate::board::{Board, Column};
+use crate::board::{Board, Column, Kind};
 use crate::sync::Purpose;
 use crate::task::Task;
 use crate::transition::{self, Event, TicketFields};
@@ -522,7 +522,13 @@ fn screen_tool() -> Result<Reply> {
 fn board_tool(args: &Value) -> Result<Reply> {
     let project = Project::open(Purpose::Read)?;
     let only = match arg(args, "column") {
-        Some(c) => Some(Column::parse(&c).with_context(|| format!("{c} isn't a column"))?),
+        Some(c) => Some(
+            project.boards[0]
+                .2
+                .workflow()
+                .find(&c)
+                .with_context(|| format!("{c} isn't a column"))?,
+        ),
         None => None,
     };
     let repo = arg(args, "repo");
@@ -533,7 +539,7 @@ fn board_tool(args: &Value) -> Result<Reply> {
     let tag = arg(args, "tag");
     let who = arg(args, "assignee");
     let epic = arg(args, "epic");
-    let include_done = flag(args, "include_done") || only == Some(Column::Done);
+    let include_done = flag(args, "include_done") || only.is_some_and(|c| c.is(Kind::Done));
     let keep = |task: &Task| {
         tag.as_ref()
             .is_none_or(|t| task.matches_tags(std::slice::from_ref(t)))
@@ -558,7 +564,7 @@ fn board_tool(args: &Value) -> Result<Reply> {
         text.push_str(&format!("\n\n## {name}"));
         let settings = board_settings::load(board);
         let mut columns = Vec::new();
-        for column in Column::ALL {
+        for column in board.workflow().columns() {
             if only.is_some_and(|o| o != column) {
                 continue;
             }
@@ -570,11 +576,11 @@ fn board_tool(args: &Value) -> Result<Reply> {
                 .collect();
             model::sort_cards(&mut cards);
             let limit = match settings.wip_limit(column) {
-                Some(n) if column == Column::Doing => format!(", WIP limit {n}"),
+                Some(n) => format!(", WIP limit {n}"),
                 _ => String::new(),
             };
             text.push_str(&format!("\n### {column} ({}{limit})", cards.len()));
-            if column == Column::Done && !include_done {
+            if column.is(Kind::Done) && !include_done {
                 columns.push(json!({"column": column.as_str(), "count": cards.len()}));
                 continue;
             }
@@ -984,7 +990,11 @@ fn move_ticket(args: &Value) -> Result<Reply> {
     let mut project = Project::open(Purpose::Write)?;
     let (i, task) = project.find(&required(args, "ticket")?)?;
     let to = required(args, "to")?;
-    let to = Column::parse(&to).with_context(|| format!("{to} isn't a column"))?;
+    let to = project.boards[i]
+        .2
+        .workflow()
+        .find(&to)
+        .with_context(|| format!("{to} isn't a column"))?;
     let repo = project.boards[i].0.clone();
     let board = project.ready(i)?;
     let outcome = transition::move_to(board, &task, to, flag(args, "force"))?;
