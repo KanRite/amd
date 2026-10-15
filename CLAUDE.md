@@ -968,6 +968,12 @@ off**, ticket 141) to
   `auto` option (the page's `ensure_priority` accepts it) and note
   (`TicketDocument.priority_note`), and `↑ high` on a raised card
   (`TicketSummary.priority_from`).
+  **How linked a card is** (ticket 216, `waiting::relationship_count`):
+  the number of other tickets it's linked to in any way (any `links`
+  kind, related, parent and children, clones), from either end, each
+  once. A card with a tree shows it beside the tree icon; one linked
+  otherwise (a parent, a clone, a started sprint's ticket) shows a link
+  icon and the count; one with none shows a small hollow blue dot.
 
 - **One ticket, one template.** There are no ticket types any more: `admin` and
   `development` collapsed into fields you either fill in or don't.

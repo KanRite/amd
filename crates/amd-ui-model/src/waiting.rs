@@ -168,6 +168,49 @@ pub fn has_family<'a>(
         })
 }
 
+/// How many other tickets a card is linked to in any way (ticket 216):
+/// requires or required by, related, parent or child, clone, supersedes,
+/// recorded on either ticket. Each other ticket counts once.
+pub fn relationship_count<'a>(
+    ticket: &TicketSummary,
+    all: impl IntoIterator<Item = &'a TicketSummary>,
+) -> usize {
+    let me = number(&ticket.id);
+    let names_me = |id: &str| me.is_some() && number(id) == me;
+    // Every ticket number this one names, whatever the relationship.
+    let mut mine: Vec<u32> = ticket
+        .links
+        .iter()
+        .filter_map(|e| split_link(e))
+        .filter_map(|(_, id)| number(id))
+        .chain(ticket.related.iter().filter_map(|r| number(r)))
+        .chain(ticket.clones.iter().filter_map(|c| number(c)))
+        .chain(number(&ticket.parent))
+        .chain(number(&ticket.clone_of))
+        .collect();
+    for other in all {
+        if other.repo != ticket.repo || other.file == ticket.file {
+            continue;
+        }
+        let names_it = other
+            .links
+            .iter()
+            .filter_map(|e| split_link(e))
+            .any(|(_, id)| names_me(id))
+            || other.related.iter().any(|r| names_me(r))
+            || other.clones.iter().any(|c| names_me(c))
+            || names_me(&other.parent)
+            || names_me(&other.clone_of);
+        if names_it && let Some(n) = number(&other.id) {
+            mine.push(n);
+        }
+    }
+    mine.retain(|n| Some(*n) != me);
+    mine.sort_unstable();
+    mine.dedup();
+    mine.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +305,24 @@ mod tests {
         let has = |t: &TicketSummary| has_family(t, all);
         assert!(has(&a) && has(&b) && has(&c) && has(&d));
         assert!(!has(&e) && !has(&f));
+    }
+
+    #[test]
+    fn relationships_are_counted_once_per_other_ticket_from_either_end() {
+        let mut a = card("001", Column::Todo);
+        a.links = vec!["requires:002".into(), "supersedes:002".into()];
+        a.related = vec!["003".into()];
+        let b = card("002", Column::Todo);
+        let c = card("003", Column::Todo);
+        let mut child = card("004", Column::Todo);
+        child.parent = "001".into();
+        let mut copy = card("005", Column::Todo);
+        copy.clone_of = "001".into();
+        let lone = card("006", Column::Todo);
+        let all = [&a, &b, &c, &child, &copy, &lone];
+        assert_eq!(relationship_count(&a, all), 4, "002 twice is one ticket");
+        assert_eq!(relationship_count(&b, all), 1, "named only on 001");
+        assert_eq!(relationship_count(&child, all), 1);
+        assert_eq!(relationship_count(&lone, all), 0);
     }
 }

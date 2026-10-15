@@ -230,6 +230,9 @@ On the desktop board, a card that requires or relates to others has a small
 tree button that opens the same tree, with that ticket highlighted; click
 any ticket in it to go to its card. A sprint that can't start lists what's
 missing, each with "Show the tree".
+Each card also says how many tickets it's linked to (beside the tree icon,
+or a link icon when it has no tree), and a ticket linked to nothing at all
+shows a small blue circle, so loose tickets are easy to spot.
 
 **Auto priority** (off unless switched on: `amd auto-priority on`, or
 Admin → Auto priority) makes a ticket at least as urgent as the most urgent
