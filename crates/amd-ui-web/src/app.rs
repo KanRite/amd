@@ -50,11 +50,6 @@ pub enum Overlay {
     Preferences,
     /// A "(not cloned)" repository chosen in the filter: clone it? (108)
     CloneRepo(String),
-    /// A swim lane's ticket, read-only (ticket 218), and its project's root.
-    LaneTicket {
-        root: String,
-        ticket: Box<amd_ui_model::LaneTicket>,
-    },
     /// A ticket dropped on a column at its WIP limit: move it anyway?
     OverLimit {
         file: String,
@@ -123,11 +118,6 @@ pub struct Ctx {
     /// The idea open in Ideas, by its path (ticket 186: in `Ctx` so the
     /// screen note can say which).
     pub idea: RwSignal<Option<String>>,
-    /// Other projects' boards shown under this one (ticket 218), empty
-    /// while swim lanes are off.
-    pub lanes: RwSignal<Vec<amd_ui_model::Lane>>,
-    /// The lanes folded to their header, by project root, for the session.
-    pub lanes_folded: RwSignal<BTreeSet<String>>,
 }
 
 impl Ctx {
@@ -141,10 +131,6 @@ impl Ctx {
             match api::load_board().await {
                 Ok(board) => self.board.set(Some(board)),
                 Err(e) => self.error.set(Some(e)),
-            }
-            // Swim lanes (ticket 218): a failure leaves the last ones.
-            if let Ok(lanes) = api::lanes().await {
-                self.lanes.set(lanes);
             }
         });
     }
@@ -196,12 +182,6 @@ impl Ctx {
             .about
             .with(|r| r.as_ref().is_none_or(|r| *r == t.repository));
         repo_ok && self.user.with(|u| u.matches(t)) && self.search.with(|q| t.matches(q))
-    }
-
-    /// Whether a swim lane's card passes the user filter and the search
-    /// (ticket 218); the repository filter belongs to the project on screen.
-    pub fn in_lane(self, t: &TicketSummary) -> bool {
-        self.user.with(|u| u.matches(t)) && self.search.with(|q| t.matches(q))
     }
 
     /// Whether any filter differs from its default: repository, user, sort
@@ -285,8 +265,6 @@ pub fn App() -> impl IntoView {
         document: RwSignal::new(None),
         doc_scope: RwSignal::new(None),
         idea: RwSignal::new(None),
-        lanes: RwSignal::new(Vec::new()),
-        lanes_folded: RwSignal::new(BTreeSet::new()),
     };
     provide_context(ctx);
     // A document belongs to the project it was opened in (ticket 175):
@@ -495,9 +473,6 @@ pub fn App() -> impl IntoView {
                 Some(Overlay::Admin) => view! { <AdminPanel /> }.into_any(),
                 Some(Overlay::Preferences) => view! { <PreferencesPanel /> }.into_any(),
                 Some(Overlay::CloneRepo(name)) => view! { <CloneRepoDialog name /> }.into_any(),
-                Some(Overlay::LaneTicket { root, ticket }) => {
-                    view! { <crate::lanes::LaneTicketPanel root ticket=*ticket /> }.into_any()
-                }
                 Some(Overlay::Tree { place, file }) => {
                     view! { <crate::tree::TreePanel place file /> }.into_any()
                 }
