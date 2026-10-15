@@ -866,7 +866,10 @@ off**, ticket 141) to
   inverse written on the other ticket: relates-to, requires/required-by,
   parent-of/child-of, clone-of/cloned-by,
   supersedes/superseded-by (the last of each pair exists only so the other
-  end has something to say). **Four kinds keep their older fields** so
+  end has something to say). The first version's names are still read
+  (`LinkType::parse`): depends-on and blocked-by are requires,
+  depended-on-by and blocks are required-by, and an old entry is written
+  back under its new name. **Four kinds keep their older fields** so
   there is one record of each fact: relates-to is `related`, child-of the
   child's `parent` with parent-of the parent's `## Children` wikilink,
   clone-of `clone-of` with cloned-by `clones`. The rest live in a `links`
