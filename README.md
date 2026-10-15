@@ -205,6 +205,13 @@ If the link was wrong, change it (`amd link 3 7 --replace requires --type
 relates-to`) or remove it (`--remove`). On the desktop board a card that's
 waiting says "waits on N", and each link in the editor has a type picker.
 
+`amd new "Checkout" --requires 3` and `amd set 12 requires 3,7` set what a
+ticket requires directly (`set` makes the list exactly that; empty clears
+it). **A sprint can't start while one of its tickets requires a ticket
+that's neither in the sprint nor done**: `amd group start` names each one
+(`s12 can't start: 003 requires 010 (backlog)`), and so does the sprint's
+Start button on the desktop board. Outside sprints nothing more is enforced.
+
 ```markdown
 related: [001,002]
 ```

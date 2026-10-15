@@ -147,6 +147,7 @@ pub fn tools() -> Vec<Tool> {
                 "assignee": {"type": "string", "description": "A name from the project's users, or `@me`"},
                 "epic": {"type": "string", "description": "An epic or sprint to file it in"},
                 "parent": {"type": "string", "description": "The parent ticket's number"},
+                "requires": {"type": "array", "items": {"type": "string"}, "description": "Tickets this one requires (numbers): linked both ways; they must be done before it, and be in the same sprint for a sprint to start"},
                 "repository": {"type": "string", "description": "The code repository it's about"},
                 "draft": {"type": "boolean", "description": "Mark it DRAFT: it can't leave the backlog until it's ready"},
                 "board": {"type": "string", "description": "Which repository's board to put it on; the project's own when left out"}
@@ -910,6 +911,7 @@ fn create_ticket(args: &Value) -> Result<Reply> {
         clone_of: String::new(),
         body: arg(args, "body").unwrap_or_default(),
         priority: arg(args, "priority").unwrap_or_default(),
+        requires: list(args, "requires").unwrap_or_default(),
     };
     let unknown = board_settings::unknown_assignee(board, &fields.assignee);
     let outcome = transition::create_ticket(board, &fields)?;

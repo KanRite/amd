@@ -1251,6 +1251,37 @@ assert "with the child done, the parent can be done" \
     && in_dw done 1 >/dev/null && test -f '${dw}'/tasks/done/001-feature.md"
 rm -rf "${dw}"
 
+echo "requires and the sprint start check (ticket 214):"
+rq="$(mktemp -d)"
+( cd "${rq}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init reqs --local-only >/dev/null \
+  && "${AMD}" new "Base" >/dev/null && "${AMD}" new "Other" >/dev/null \
+  && "${AMD}" new "Top" --requires 1 --requires other >/dev/null )
+in_rq() { (cd "${rq}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "amd new --requires links both ends in the new ticket's own commit" \
+  bash -c "grep -q '^links: \[requires:001,requires:002\]' '${rq}'/tasks/backlog/003-top.md \
+    && grep -q '^links: \[required-by:003\]' '${rq}'/tasks/backlog/001-base.md \
+    && [ \"\$(git -C '${rq}' log --format=%s -1)\" = 'new: 003 \"Top\"' ] \
+    && git -C '${rq}' show --stat HEAD | grep -q '001-base.md'"
+assert "amd new --requires with an unknown ticket creates nothing" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; ! in_rq new 'Nope' --requires 99 2>/dev/null \
+    && ! ls '${rq}'/tasks/backlog/*-nope.md 2>/dev/null"
+assert "amd set requires makes the list exactly that, both ends, and empty clears" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq set 3 requires 2 >/dev/null \
+    && grep -q '^links: \[requires:002\]' '${rq}'/tasks/backlog/003-top.md \
+    && ! grep -q 'required-by' '${rq}'/tasks/backlog/001-base.md \
+    && in_rq set 3 requires '' >/dev/null && ! grep -q 'requires:' '${rq}'/tasks/backlog/003-top.md"
+( cd "${rq}" && AMD_NO_BRANCH=1 "${AMD}" set 3 requires 1 >/dev/null && "${AMD}" group sprint s1 >/dev/null \
+  && "${AMD}" set 3 points 3 >/dev/null && "${AMD}" s1 3 >/dev/null )
+assert "amd group start is refused while a sprint ticket requires one outside it, naming it" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; out=\$(in_rq group start s1 2>&1); [ \$? -ne 0 ] \
+    && printf '%s' \"\$out\" | grep -q 's1 can.t start: 003 requires 001 (backlog)' \
+    && grep -q '^started: \"pending\"' '${rq}'/tasks/backlog/s1/_group.md"
+assert "with the required ticket in the sprint, it starts" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq set 1 points 2 >/dev/null && in_rq s1 1 >/dev/null \
+    && in_rq group start s1 | grep -q 's1 started'"
+rm -rf "${rq}"
+
 echo "duplicate:"
 assert "amd duplicate copies a ticket" \
   "${AMD}" duplicate 1

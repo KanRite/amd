@@ -328,12 +328,19 @@ pub struct TicketFields {
     /// `low`, `medium` or `high`; empty keeps what the template (on
     /// creation) or the ticket (on an edit) says.
     pub priority: String,
+    /// On creation, refs of the tickets it requires (ticket 214), linked
+    /// both ways in the same commit. Ignored on an edit.
+    pub requires: Vec<String>,
 }
 
 /// Make a ticket the way `amd new` does: render it from the templates, write
 /// it into `backlog/`, size it, file it under its epic, and auto-commit.
 /// `outcome.dest` is where it landed.
 pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
+    // Every ticket it requires must exist before anything is written.
+    for reference in &fields.requires {
+        board.find(reference)?;
+    }
     let templates = crate::templates::Templates::load(board)?;
     let draft = crate::create::Draft::prepare(
         board,
@@ -368,6 +375,17 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
             .task
             .set_priority(created.task.hash()?, fields.priority.trim())?;
     }
+    let mut required_lines = Vec::new();
+    for reference in &fields.requires {
+        let other = board.find(reference)?;
+        required_lines.extend(crate::links::apply(
+            &created.task,
+            crate::links::LinkType::Requires,
+            &other,
+            false,
+            false,
+        )?);
+    }
     // Read what the report and the commit message need before filing it under
     // an epic: inside `backlog/` that moves the file, after which `created.task`
     // points at a path that is gone and would read back as an empty title.
@@ -392,6 +410,9 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
         "created {}/{file_name}",
         Column::Backlog
     )));
+    outcome
+        .events
+        .extend(required_lines.into_iter().map(Event::Info));
     let message = format!("new: {id_display} \"{title}\"");
     if let Some(warning) = commit_since(board, before, &message)? {
         outcome.events.push(Event::Warn(warning));
@@ -466,6 +487,40 @@ pub fn link_tickets(
         let mut lines = Vec::new();
         for other in to {
             lines.extend(crate::links::apply(from, kind, other, remove, one_way)?);
+        }
+        Ok(lines)
+    })?;
+    let mut outcome = Outcome::default();
+    outcome.events.extend(lines.into_iter().map(Event::Info));
+    if let Some(warning) = warning {
+        outcome.events.push(Event::Warn(warning));
+    }
+    Ok(outcome)
+}
+
+/// Make `task`'s requires links exactly `wanted` (ticket 214): those not
+/// there yet are made, those not listed are removed, each on both tickets,
+/// in one commit (`amd set <ref> requires 3,7`; an empty list clears them).
+pub fn set_requires(board: &Board, task: &Task, wanted: &[Task]) -> Result<Outcome> {
+    use crate::links::{LinkType, apply};
+    let have = crate::requires::required(board, task)?;
+    let (id, title) = (task.id_display(), task.title());
+    let (lines, warning) = with_auto_commit(board, "set", &id, &title, || {
+        let mut lines = Vec::new();
+        for gone in have
+            .iter()
+            .filter(|h| !wanted.iter().any(|w| w.path == h.path))
+        {
+            lines.extend(apply(task, LinkType::Requires, gone, true, false)?);
+        }
+        for new in wanted
+            .iter()
+            .filter(|w| !have.iter().any(|h| h.path == w.path))
+        {
+            lines.extend(apply(task, LinkType::Requires, new, false, false)?);
+        }
+        if lines.is_empty() {
+            lines.push(format!("{id} already requires exactly that"));
         }
         Ok(lines)
     })?;

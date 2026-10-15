@@ -36,6 +36,7 @@ pub mod project_trust;
 pub mod recover;
 pub mod registry;
 pub mod renumber;
+pub mod requires;
 pub mod richtext;
 pub mod roadmap;
 pub mod screen;
