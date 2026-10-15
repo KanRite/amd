@@ -490,15 +490,16 @@ disagree.
   `~/.config/agile-md/config`: the colour scheme (light, dark or the
   system's, with an accent colour), the zoom, the board to open when
   amdui starts outside a project, and swim lanes.
-- **Swim lanes**: with more than one project on this machine, Preferences →
-  Swim lanes shows the ones you tick as rows under your board, each with its
-  own Backlog, To do, Doing and Done lined up under yours. They're view only:
-  nothing drags in or out, a card opens read-only, and **Open on its board**
-  (or the lane's **Open board**) takes you there to change it. Search and the
+- **Swim lanes**: when a project has more than one board (a declared
+  repository with its own `tasks/`), their tickets are normally mixed into
+  the one set of columns. Preferences → Swim lanes takes the boards you tick
+  out into rows of their own under the board, each with its own Backlog,
+  To do, Doing and Done lined up under the board's, and a thick line above
+  it. They're view only: nothing drags in or out, and a card opens
+  read-only, with **Edit** to change it in the editor. Search and the
   person filter apply to them, a folded column folds in every lane, and each
-  lane folds to its counts. They follow changes on disk and pull like the
-  board does. Your choice is kept in your own config (`ui.lanes`,
-  `ui.lane-projects`), never committed.
+  lane folds to its counts. Your choice is kept in your own config
+  (`ui.lanes`, `ui.lane-boards`), never committed.
 - **Admin**, the project's settings, shared with the team through the
   tickets repository: auto-commit, tags, the WIP limit on doing, how long a
   lock lasts, renaming epics and sprints, and the ticket template (with a

@@ -1,16 +1,17 @@
-//! Swim lanes (ticket 218): other projects' boards shown under the one on
-//! screen in amdui, view only. Which projects, and whether lanes show at
-//! all, belong to you on this machine: `ui.lanes` (off unless on) and
-//! `ui.lane-projects` (board repository paths, comma separated, as
-//! `ui.hidden-projects` is) in agile-md's own config, never committed.
+//! Swim lanes (tickets 218, 220): the project's other boards (declared
+//! repositories with a board of their own) shown in amdui as rows under its
+//! tickets board, view only, instead of merged into its columns. Which
+//! boards, and whether lanes show at all, belong to you on this machine:
+//! `ui.lanes` (off unless on) and `ui.lane-boards` (board repository paths,
+//! comma separated, as `ui.hidden-projects` is) in agile-md's own config,
+//! never committed.
 
 use std::path::{Path, PathBuf};
 
-use crate::my_work::{self, Project};
 use crate::settings::Config;
 
 const ENABLED: &str = "ui.lanes";
-const CHOSEN: &str = "ui.lane-projects";
+const CHOSEN: &str = "ui.lane-boards";
 
 /// Whether swim lanes are switched on.
 pub fn enabled() -> bool {
@@ -32,7 +33,7 @@ pub fn set_enabled(on: bool) -> anyhow::Result<()> {
     config.save()
 }
 
-/// The projects chosen as lanes, by their board repository's path.
+/// The boards chosen as lanes, by their board repository's path.
 pub fn chosen() -> Vec<PathBuf> {
     chosen_in(&Config::load())
 }
@@ -50,7 +51,7 @@ fn chosen_in(config: &Config) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// Adds `root`'s project to the lanes, or takes it off. A path that no
+/// Adds `root`'s board to the lanes, or takes it off. A path that no
 /// longer exists is dropped while the list is rewritten.
 pub fn set_chosen(root: &Path, on: bool) -> anyhow::Result<()> {
     let mut config = Config::load();
@@ -72,36 +73,28 @@ fn set_chosen_in(config: &mut Config, root: &Path, on: bool) {
     }
 }
 
-/// The projects to draw as lanes under `current` (the board repository
-/// on screen): those chosen that are still registered here, in the
-/// registry's order, never `current` itself. Empty while lanes are off.
-pub fn lane_projects(current: &Path) -> Vec<Project> {
+/// Which of `boards` (repository roots, the project's own tickets board
+/// first) are drawn as lanes: the chosen ones after the first, while lanes
+/// are on.
+pub fn lane_roots<'a>(boards: impl IntoIterator<Item = &'a Path>) -> Vec<PathBuf> {
     if !enabled() {
         return Vec::new();
     }
-    pick(my_work::projects(), &chosen(), current)
+    pick(boards, &chosen())
 }
 
-fn pick(projects: Vec<Project>, chosen: &[PathBuf], current: &Path) -> Vec<Project> {
-    projects
+fn pick<'a>(boards: impl IntoIterator<Item = &'a Path>, chosen: &[PathBuf]) -> Vec<PathBuf> {
+    boards
         .into_iter()
-        .filter(|p| p.root != current && chosen.contains(&p.root))
+        .skip(1)
+        .filter(|root| chosen.iter().any(|c| c == root))
+        .map(Path::to_path_buf)
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn project(root: &str) -> Project {
-        Project {
-            name: root.trim_start_matches('/').to_string(),
-            root: PathBuf::from(root),
-            dir: PathBuf::from("/"),
-            hidden: false,
-            archived: false,
-        }
-    }
 
     #[test]
     fn lanes_are_off_until_switched_on_and_keep_their_projects() {
@@ -131,13 +124,9 @@ mod tests {
     }
 
     #[test]
-    fn the_project_on_screen_is_never_its_own_lane() {
-        let all = vec![project("/one"), project("/two"), project("/three")];
-        let chosen = [PathBuf::from("/three"), PathBuf::from("/one")];
-        let names: Vec<String> = pick(all, &chosen, Path::new("/one"))
-            .into_iter()
-            .map(|p| p.name)
-            .collect();
-        assert_eq!(names, ["three"]);
+    fn the_tickets_board_is_never_a_lane() {
+        let boards = [Path::new("/t"), Path::new("/api"), Path::new("/web")];
+        let chosen = [PathBuf::from("/web"), PathBuf::from("/t")];
+        assert_eq!(pick(boards, &chosen), [PathBuf::from("/web")]);
     }
 }

@@ -228,8 +228,9 @@ fn BoardSection() -> impl IntoView {
     }
 }
 
-/// Swim lanes (ticket 218): other projects on this machine shown as rows
-/// under the board, view only. Yours alone, on this machine.
+/// Swim lanes (tickets 218, 220): the project's other boards shown as rows
+/// under its tickets board, view only, instead of merged into its columns.
+/// Yours alone, on this machine.
 #[component]
 fn LanesSection() -> impl IntoView {
     let ctx = Ctx::get();
@@ -249,7 +250,7 @@ fn LanesSection() -> impl IntoView {
                 Some(Ok(s)) if s.projects.is_empty() => {
                     view! {
                         <p class="text-xs text-slate-500">
-                            "There's no other project on this machine to show beside this one."
+                            "This project has only one board, so there's nothing to show as a swim lane."
                         </p>
                     }
                         .into_any()
@@ -266,7 +267,7 @@ fn LanesSection() -> impl IntoView {
                                     spawn_local(async move { apply(api::set_lanes(on).await) });
                                 }
                             />
-                            "Show other projects as swim lanes under the board"
+                            "Show the project's other boards as swim lanes"
                         </label>
                         <ul class="ml-6 flex flex-col gap-1">
                             {s
@@ -292,7 +293,6 @@ fn LanesSection() -> impl IntoView {
                                                     }
                                                 />
                                                 {p.name.clone()}
-                                                {p.archived.then(|| view! { <span class="text-xs italic text-slate-500">"archived"</span> })}
                                                 <span class="truncate text-xs text-slate-500" title=p.root.clone()>{p.root.clone()}</span>
                                             </label>
                                         </li>
@@ -301,7 +301,7 @@ fn LanesSection() -> impl IntoView {
                                 .collect_view()}
                         </ul>
                         <p class="text-xs text-slate-500">
-                            "Each one is a row under your board with the same columns. View only: open a card to read it, or Open board to change it there."
+                            "Each one you tick is a row under the board with the same columns, instead of mixed into them. View only: open a card to read it, then Edit to change it."
                         </p>
                     }
                         .into_any()

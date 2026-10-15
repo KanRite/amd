@@ -1,14 +1,15 @@
-//! Swim lanes (ticket 218): other projects' boards under the one on
-//! screen, each a row whose Backlog, To do, Doing and Done line up under
-//! the board's own. View only: nothing drags, and a card opens read-only
-//! with a way to its own board. Which projects is a Preference.
+//! Swim lanes (tickets 218, 220): the project's other boards under its
+//! tickets board, each a row whose Backlog, To do, Doing and Done line up
+//! under the board's own, instead of merged into its columns. View only:
+//! nothing drags, and a card opens read-only with Edit to change it. Which
+//! boards is a Preference.
 
 use amd_ui_model::{Column, Lane, LaneTicket, TicketSummary};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
-use crate::app::{Ctx, Modal, Overlay, View};
+use crate::app::{Ctx, Modal, Overlay};
 use crate::board::{LockBadge, priority_tone};
 
 const FRAME: &str = "flex min-h-0 flex-col rounded-lg bg-slate-200/50 dark:bg-slate-800/50";
@@ -30,12 +31,12 @@ pub fn LaneRow(lane: Lane) -> impl IntoView {
     };
     let total: usize = lane.columns.iter().map(|c| c.tickets.len()).sum();
     let columns = StoredValue::new(lane.columns.clone());
-    let open_board = move |_| {
-        crate::home::open(ctx, root.get_value(), View::Board, None);
-    };
-    let small_button = "whitespace-nowrap rounded px-1.5 text-xs text-slate-600 hover:bg-slate-300 dark:text-slate-300 dark:hover:bg-slate-700";
     view! {
-        <div class="flex shrink-0 gap-3" role="region" aria-label=format!("Swim lane: {}", lane.name)>
+        // A thick rule above each lane (ticket 219), so where one board
+        // ends and the next begins is plain.
+        <div
+            class="flex shrink-0 gap-3 border-t-4 border-slate-400 pt-3 dark:border-slate-500"
+            role="region" aria-label=format!("Swim lane: {}", lane.name)>
             // Where the board has its Backlogs column (folded or not).
             <section class=move || {
                 if ctx.epics_collapsed.get() {
@@ -58,11 +59,6 @@ pub fn LaneRow(lane: Lane) -> impl IntoView {
                         {lane.name.clone()}
                     </h2>
                     <span class="rounded-full bg-slate-300 px-2 text-xs dark:bg-slate-700">{total}</span>
-                    {lane.archived.then(|| view! { <span class="text-xs italic text-slate-500">"archived"</span> })}
-                    <span class="flex-1"></span>
-                    <button class=small_button title="Go to this project's board to change its tickets" on:click=open_board>
-                        "Open board"
-                    </button>
                 </header>
                 <p class="px-3 pb-2 text-xs text-slate-500">"View only"</p>
                 {lane.error.clone().map(|e| view! { <p class="px-3 pb-2 text-xs text-red-700 dark:text-red-300">{e}</p> })}
@@ -212,14 +208,15 @@ fn LaneCard(root: String, ticket: TicketSummary) -> impl IntoView {
     }
 }
 
-/// A lane's ticket, read-only, with the way to its own board.
+/// A lane's ticket, read-only, with Edit to open it in the editor.
 #[component]
 pub fn LaneTicketPanel(root: String, ticket: LaneTicket) -> impl IntoView {
     let ctx = Ctx::get();
     let t = ticket.ticket;
     let place = amd_ui_model::waiting::place(&t);
     let target = (t.column, t.epic.clone(), t.file.clone());
-    let open_there = move |_| {
+    let board = ticket.project.clone();
+    let edit = move |_| {
         // Where the ticket is now: it may have moved since it was opened,
         // and the lanes follow the files.
         let (column, epic, file) = ctx
@@ -234,11 +231,13 @@ pub fn LaneTicketPanel(root: String, ticket: LaneTicket) -> impl IntoView {
             })
             .unwrap_or_else(|| target.clone());
         ctx.close_overlay();
-        crate::home::open(
-            ctx,
-            root.clone(),
-            View::Board,
-            Some((String::new(), column, epic, file)),
+        ctx.open_ticket(
+            amd_ui_model::epic::Place {
+                repo: board.clone(),
+                column,
+                epic,
+            },
+            file,
         );
     };
     let field = |label: &'static str, value: String| {
@@ -254,11 +253,11 @@ pub fn LaneTicketPanel(root: String, ticket: LaneTicket) -> impl IntoView {
     view! {
         <Modal title=format!("{} {}", t.id, t.title) width="max-w-3xl">
             <p class="rounded bg-slate-100 px-3 py-2 text-sm dark:bg-slate-800">
-                {format!("View only: a ticket on {}'s board. ", ticket.project)}
-                "Open it on its board to change it."
+                {format!("View only: a ticket on the {} board, shown as a swim lane. ", ticket.project)}
+                "Edit opens it in the editor."
             </p>
             <div class="flex flex-col gap-1">
-                {field("Project", ticket.project.clone())}
+                {field("Board", ticket.project.clone())}
                 {field("Where", place)}
                 {field("Priority", t.priority.clone())}
                 {field("Points", t.points.clone())}
@@ -276,9 +275,9 @@ pub fn LaneTicketPanel(root: String, ticket: LaneTicket) -> impl IntoView {
             <div class="flex justify-end gap-2">
                 <button
                     class="rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-700"
-                    on:click=open_there
+                    on:click=edit
                 >
-                    "Open on its board"
+                    "Edit"
                 </button>
                 <button
                     class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"

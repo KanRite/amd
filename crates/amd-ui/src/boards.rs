@@ -90,8 +90,15 @@ impl Project {
             .ok_or_else(|| format!("The {repo} repository has no board on this machine."))
     }
 
+    /// The boards drawn as swim lanes rather than merged into the columns
+    /// (tickets 218, 220): never the tickets board.
+    pub fn lane_roots(&self) -> Vec<std::path::PathBuf> {
+        agile_md::lanes::lane_roots(self.repos.iter().map(|(_, board)| board.repo_root()))
+    }
+
     /// Everything the window draws: every repository's tickets and epics,
-    /// merged, each labelled with its repository.
+    /// merged, each labelled with its repository; a board shown as a swim
+    /// lane is left out of them.
     pub fn summary(&self) -> Result<ui::Board> {
         let mut columns: Vec<BoardColumn> = ui::Column::ALL
             .into_iter()
@@ -102,6 +109,7 @@ impl Project {
             .collect();
         let mut epics = Vec::new();
         let mut repos = Vec::new();
+        let lanes = self.lane_roots();
         for (name, board) in &self.repos {
             let settings = board_settings::load(board);
             repos.push(RepoInfo {
@@ -112,6 +120,9 @@ impl Project {
                 },
                 lease_hours: settings.lease_hours().round().max(1.0) as u32,
             });
+            if lanes.iter().any(|r| r == board.repo_root()) {
+                continue;
+            }
             for column in Column::ALL {
                 for task in board.tasks_in(column).map_err(err)? {
                     let summary = self.summary_of(&task, name);

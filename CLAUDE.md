@@ -1438,28 +1438,31 @@ changes):
   after the project name, shows a badge per started sprint
   (`Board.epics`, kind Sprint, `started`); a click goes to the board and
   opens its column (`ctx.open_epic`).
-- **Swim lanes** (ticket 218, `crates/amd-lib/src/lanes.rs`,
-  `amd-ui-web/src/lanes.rs`): other *projects'* boards as rows under the
-  one on screen, view only. Personal: `ui.lanes` (off unless on) and
-  `ui.lane-projects` (board repository paths, like `ui.hidden-projects`) in
-  `~/.config/agile-md/config`, set from Preferences → Swim lanes
-  (`lane_settings`, `set_lanes`, `set_lane_project`). `lanes::lane_projects`
-  is `my_work::projects()` filtered to the chosen ones, never the project
-  on screen. The `lanes` command builds an `amd_ui_model::Lane` per project
-  from its own tickets board only (`lane_of`; epic and sprint tickets in
-  Backlog with `epic` set; an unreadable board is a lane with `error`);
-  `Ctx.reload` loads them after the board. `board_fingerprint` and
-  `sync_board` take in the lane boards too (`lane_boards`, from the config
-  alone so the every-second call stays cheap). `BoardView` turns into a
-  vertical scroll with the board at 62% height and a `LaneRow` per lane:
-  the header where Backlogs is (fold, Open board via `home::open`), a
-  spacer while an epic column is open, and four columns with the board's
-  width classes, folded with the board's columns. Lane cards
-  (`LaneCard`) don't drag and filter by `Ctx::in_lane` (user and search,
-  not the repository filter). A click is `read_lane_ticket` (only from a
-  lane's project; body through `documents::render`) shown in
-  `Overlay::LaneTicket`, whose Open on its board finds where the ticket is
-  now in `ctx.lanes` before switching project and opening it.
+- **Swim lanes** (tickets 218, 220, 219; `crates/amd-lib/src/lanes.rs`,
+  `amd-ui-web/src/lanes.rs`): the project's *own* other boards (the
+  declared repositories with a board, `Project.repos[1..]`) as rows under
+  its tickets board, view only, instead of merged into its columns. Ticket
+  218 first showed other projects; 220 restricted it to the project's
+  boards. Personal: `ui.lanes` (off unless on) and `ui.lane-boards` (board
+  repository paths) in `~/.config/agile-md/config`, set from Preferences →
+  Swim lanes (`lane_settings`, `set_lanes`, `set_lane_project`).
+  `lanes::lane_roots` picks the chosen ones, never the tickets board;
+  `Project::lane_roots` is what `summary` uses to leave those boards'
+  tickets and epics out of the columns (their `RepoInfo` stays), and the
+  `lanes` command builds an `amd_ui_model::Lane` per lane board
+  (`lane_of`; epic and sprint tickets in Backlog with `epic` set; cards'
+  `repo` is the board's name; an unreadable board is a lane with
+  `error`). They're in `Project.repos`, so the fingerprint and sync cover
+  them already. `Ctx.reload` loads the lanes after the board.
+  `BoardView` turns into a vertical scroll with the board at 62% height
+  and a `LaneRow` per lane: a 4 px rule above it (219), its header where
+  Backlogs is (fold), a spacer while an epic column is open, and four
+  columns with the board's width classes, folded with the board's
+  columns. Lane cards (`LaneCard`) don't drag and filter by
+  `Ctx::in_lane` (user and search, not the repository filter). A click is
+  `read_lane_ticket` (only from a lane board; body through
+  `documents::render`) shown in `Overlay::LaneTicket`, whose Edit finds
+  where the ticket is now in `ctx.lanes` and opens the editor.
 - **Which board a project opens**: `Board::discover()` from the launch directory; from
   outside any project (a desktop launcher starts in `$HOME`) it goes to the
   directory remembered as `ui.board` in `~/.config/agile-md/config`, which
