@@ -35,7 +35,11 @@ pub fn LaneRow(lane: Lane) -> impl IntoView {
     };
     let small_button = "whitespace-nowrap rounded px-1.5 text-xs text-slate-600 hover:bg-slate-300 dark:text-slate-300 dark:hover:bg-slate-700";
     view! {
-        <div class="flex shrink-0 gap-3" role="region" aria-label=format!("Swim lane: {}", lane.name)>
+        // A thick rule above each lane (ticket 219), so where one board
+        // ends and the next begins is plain.
+        <div
+            class="flex shrink-0 gap-3 border-t-4 border-slate-400 pt-3 dark:border-slate-500"
+            role="region" aria-label=format!("Swim lane: {}", lane.name)>
             // Where the board has its Backlogs column (folded or not).
             <section class=move || {
                 if ctx.epics_collapsed.get() {
