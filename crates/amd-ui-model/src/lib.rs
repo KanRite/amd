@@ -131,12 +131,10 @@ pub struct TicketSummary {
 /// the slug is what `links:` and `amd link --type` use. The same list, in
 /// the same order, as `agile_md::links::LinkType::ALL`, which `amd-ui`'s
 /// tests check, since this crate can't depend on amd-lib.
-pub const LINK_KINDS: [(&str, &str); 11] = [
+pub const LINK_KINDS: [(&str, &str); 9] = [
     ("relates-to", "Relates to"),
-    ("blocks", "Blocks"),
-    ("blocked-by", "Blocked by"),
-    ("depends-on", "Depends on"),
-    ("depended-on-by", "Depended on by"),
+    ("requires", "Requires"),
+    ("required-by", "Required by"),
     ("parent-of", "Parent of"),
     ("child-of", "Child of"),
     ("clone-of", "Clone of"),
@@ -1463,9 +1461,9 @@ mod link_tests {
 
     #[test]
     fn a_links_entry_splits_and_unknown_kinds_keep_their_slug() {
-        assert_eq!(split_link("blocks:012"), Some(("blocks", "012")));
-        assert_eq!(split_link("blocks:"), None);
-        assert_eq!(link_label("blocked-by"), "Blocked by");
+        assert_eq!(split_link("requires:012"), Some(("requires", "012")));
+        assert_eq!(split_link("requires:"), None);
+        assert_eq!(link_label("required-by"), "Required by");
         assert_eq!(link_label("mystery"), "mystery");
     }
 }

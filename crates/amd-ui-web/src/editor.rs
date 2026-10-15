@@ -1162,7 +1162,7 @@ fn AssigneePicker(
 /// click; the links wait while there are unsaved edits, so following one
 /// can't lose them.
 ///
-/// Ticket 207 adds the typed links (blocks, depends on, supersedes, …) and
+/// Ticket 207 adds the typed links (requires, supersedes, …) and
 /// a way to make and break them: **Add link** picks a type, searches the
 /// board's tickets by number or title, and a click on a result links it;
 /// the other ticket records the opposite. Each link has a × to remove it
@@ -1385,7 +1385,8 @@ fn Relationships(
                     <div class="flex flex-wrap items-center gap-2">
                         <select
                             aria-label="Link type"
-                            class="rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
+                            title="How this ticket stands to the one you pick"
+                            class="rounded border border-slate-300 bg-slate-50 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
                             prop:value=move || kind.get()
                             on:change=move |ev| kind.set(event_target_value(&ev))
                         >
