@@ -862,15 +862,15 @@ off**, ticket 141) to
 
 - **Typed links** (ticket 207, `crates/amd-lib/src/links.rs`, `amd link
   <ref> <ref>... [--type T] [--remove] [--one-way]`, the MCP `link_tickets`,
-  the editor's **Add link**). `LinkType` has eleven kinds, each with an
-  inverse written on the other ticket: relates-to, blocks/blocked-by,
-  depends-on/depended-on-by, parent-of/child-of, clone-of/cloned-by,
+  the editor's **Add link**). `LinkType` has nine kinds, each with an
+  inverse written on the other ticket: relates-to, requires/required-by,
+  parent-of/child-of, clone-of/cloned-by,
   supersedes/superseded-by (the last of each pair exists only so the other
   end has something to say). **Four kinds keep their older fields** so
   there is one record of each fact: relates-to is `related`, child-of the
   child's `parent` with parent-of the parent's `## Children` wikilink,
   clone-of `clone-of` with cloned-by `clones`. The rest live in a `links`
-  flow list of `kind:id` entries (`links: [blocks:012,depends-on:003]`,
+  flow list of `kind:id` entries (`links: [requires:012,supersedes:003]`,
   `Task::links`/`add_link`/`remove_link`; an entry it can't read is skipped).
   `links::apply` writes both ends, each hash-checked, after a `preflight`
   that refuses a second parent or a second original before touching a file;

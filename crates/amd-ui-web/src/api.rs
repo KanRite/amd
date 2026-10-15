@@ -232,7 +232,7 @@ struct LinkArgs<'a> {
     remove: bool,
 }
 
-/// Links a ticket to another as `kind` (`blocks`, `child-of`, …), or unlinks
+/// Links a ticket to another as `kind` (`requires`, `child-of`, …), or unlinks
 /// them; the other ticket records the opposite (ticket 207).
 pub async fn link_ticket(
     place: &Place,

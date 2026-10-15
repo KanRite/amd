@@ -610,11 +610,11 @@ enum Cmd {
     ///
     /// By default the tickets are just related: both get the other in
     /// `related`. `--type` says how the first stands to the others, and each
-    /// of them records the opposite (`amd link 12 13 --type blocks` makes 13
-    /// blocked-by 12). `--remove` unlinks. Both ends are one commit.
+    /// of them records the opposite (`amd link 12 13 --type requires` makes 13
+    /// required-by 12). `--remove` unlinks. Both ends are one commit.
     ///
-    /// Types: depends-on, depended-on-by, parent-of, child-of, relates-to,
-    /// clone-of, cloned-by, blocked-by, blocks, supersedes, superseded-by.
+    /// Types: requires, required-by, parent-of, child-of, relates-to,
+    /// clone-of, cloned-by, supersedes, superseded-by.
     /// A ticket has one parent and is a clone of one original.
     Link {
         #[arg(value_name = "REF")]

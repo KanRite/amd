@@ -162,7 +162,7 @@ pub fn tools() -> Vec<Tool> {
         Tool {
             name: "link_tickets",
             title: "Link two tickets",
-            description: "Link a ticket to another on the same board with a type, or remove the link, and commit it. The other ticket records the opposite (`blocks` there is `blocked-by` here), so either end shows it. Types: relates-to, blocks, blocked-by, depends-on, depended-on-by, parent-of, child-of, clone-of, cloned-by, supersedes, superseded-by. A ticket has one parent and is the clone of one original.",
+            description: "Link a ticket to another on the same board with a type, or remove the link, and commit it. The other ticket records the opposite (`requires` there is `required-by` here), so either end shows it. Types: relates-to, requires, required-by, parent-of, child-of, clone-of, cloned-by, supersedes, superseded-by. A ticket has one parent and is the clone of one original.",
             read_only: false,
             input: json!({"type": "object", "properties": {
                 "ticket": reference,
