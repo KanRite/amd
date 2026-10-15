@@ -92,14 +92,26 @@ impl Project {
 
     /// Everything the window draws: every repository's tickets and epics,
     /// merged, each labelled with its repository.
+    ///
+    /// The columns are the project's own (ticket 224): the tickets board's
+    /// workflow. A ticket on another of its boards in a folder that
+    /// workflow doesn't have shows in the first column of its kind.
     pub fn summary(&self) -> Result<ui::Board> {
-        let mut columns: Vec<BoardColumn> = ui::Column::ALL
-            .into_iter()
+        let workflow = ui_workflow(&self.repos[0].1);
+        let mut columns: Vec<BoardColumn> = workflow
+            .columns()
             .map(|column| BoardColumn {
                 column,
                 tickets: Vec::new(),
             })
             .collect();
+        let slot = |column: Column| {
+            let column = from_column(column);
+            workflow
+                .position(column)
+                .or_else(|| workflow.position(workflow.first(column.kind())))
+                .unwrap_or(0)
+        };
         let mut epics = Vec::new();
         let mut repos = Vec::new();
         for (name, board) in &self.repos {
@@ -116,7 +128,7 @@ impl Project {
                 for task in board.tasks_in(column).map_err(err)? {
                     let summary = self.summary_of(&task, name);
                     if task.epic.is_none() {
-                        columns[from_column(column).index()].tickets.push(summary);
+                        columns[slot(column)].tickets.push(summary);
                     }
                 }
             }
@@ -164,6 +176,7 @@ impl Project {
         let settings = board_settings::load(&self.repos[0].1);
         let tags = self.tag_uses(&settings)?;
         Ok(ui::Board {
+            workflow,
             project,
             tasks_dir: self.repos[0].1.root.display().to_string(),
             repos,
@@ -298,25 +311,47 @@ fn local_time(at: OffsetDateTime) -> String {
     at.to_offset(offset).format(format).unwrap_or_default()
 }
 
+/// The board's column for one of the page's: the same folder and kind.
 pub fn to_column(column: ui::Column) -> Column {
-    match column {
-        ui::Column::Backlog => Column::Backlog,
-        ui::Column::Todo => Column::Todo,
-        ui::Column::Doing => Column::Doing,
-        ui::Column::Done => Column::Done,
+    let kind = match column.kind() {
+        ui::Kind::Backlog => Kind::Backlog,
+        ui::Kind::Todo => Kind::Todo,
+        ui::Kind::Doing => Kind::Doing,
+        ui::Kind::Done => Kind::Done,
+    };
+    Column::new(column.dir_name(), kind)
+}
+
+/// The board's workflow as the page draws it (ticket 224): columns in
+/// order with their names, and a doing-kind column's own WIP limit (the
+/// standard doing's is the repository's `wip`).
+pub fn ui_workflow(board: &Board) -> ui::Workflow {
+    let settings = board_settings::load(board);
+    ui::Workflow {
+        columns: board
+            .workflow()
+            .defs()
+            .iter()
+            .map(|def| ui::ColumnInfo {
+                column: from_column(def.column),
+                label: def.label.clone(),
+                wip: (def.column.is(Kind::Doing) && def.column != Column::Doing)
+                    .then(|| settings.wip_limit(def.column))
+                    .flatten(),
+            })
+            .collect(),
     }
 }
 
-/// The page's column for one of the board's. The page still draws the
-/// standard four (ticket 223); a column of another kind's folder shows in
-/// the one of its kind until the page draws the workflow (ticket 224).
+/// The page's column for one of the board's: the same folder and kind.
 pub fn from_column(column: Column) -> ui::Column {
-    match column.kind() {
-        Kind::Backlog => ui::Column::Backlog,
-        Kind::Todo => ui::Column::Todo,
-        Kind::Doing => ui::Column::Doing,
-        Kind::Done => ui::Column::Done,
-    }
+    let kind = match column.kind() {
+        Kind::Backlog => ui::Kind::Backlog,
+        Kind::Todo => ui::Kind::Todo,
+        Kind::Doing => ui::Kind::Doing,
+        Kind::Done => ui::Kind::Done,
+    };
+    ui::Column::new(column.as_str(), kind)
 }
 
 /// The ticket at `place` called `file`. Only a plain `*.md` name directly

@@ -16,14 +16,6 @@ use crate::group::{GROUP_FILE, Group};
 use crate::task::Task;
 use crate::templates;
 
-#[cfg(test)]
-thread_local! {
-    /// A custom workflow for the boards in one test (each test is a thread
-    /// of its own), until boards read their own (ticket 224).
-    pub(crate) static TEST_WORKFLOW: std::cell::RefCell<Option<crate::workflow::Workflow>> =
-        const { std::cell::RefCell::new(None) };
-}
-
 /// Default board directory name; override with `AMD_DIR`.
 const DEFAULT_DIR: &str = "tasks";
 
@@ -317,14 +309,59 @@ impl Board {
             .unwrap_or_else(dir_name)
     }
 
-    /// The board's columns, in order, each with its kind (ticket 223).
-    /// The standard four for now; a team's own workflow is ticket 224.
+    /// The board's columns, in order, each with its kind (ticket 223): the
+    /// `columns` its `.settings` records (ticket 224), else the standard
+    /// four. One that can't be read is the standard four too, and
+    /// [`workflow_problem`](Self::workflow_problem) says why.
     pub fn workflow(&self) -> crate::workflow::Workflow {
-        #[cfg(test)]
-        if let Some(workflow) = TEST_WORKFLOW.with(|w| w.borrow().clone()) {
-            return workflow;
+        self.read_workflow().0
+    }
+
+    /// Why the board's `columns` setting couldn't be used, if it couldn't.
+    pub fn workflow_problem(&self) -> Option<String> {
+        self.read_workflow().1
+    }
+
+    /// The workflow and any problem with it, read once per change to the
+    /// settings file: every listing asks for it, often many times.
+    fn read_workflow(&self) -> (crate::workflow::Workflow, Option<String>) {
+        use crate::workflow::Workflow;
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+        type Seen = (
+            Option<(std::time::SystemTime, u64)>,
+            Workflow,
+            Option<String>,
+        );
+        static CACHE: OnceLock<Mutex<HashMap<PathBuf, Seen>>> = OnceLock::new();
+        let path = crate::board_settings::path(self);
+        let stamp = fs::metadata(&path)
+            .ok()
+            .and_then(|m| Some((m.modified().ok()?, m.len())));
+        let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Ok(seen) = cache.lock()
+            && let Some((when, workflow, problem)) = seen.get(&path)
+            && *when == stamp
+        {
+            return (workflow.clone(), problem.clone());
         }
-        crate::workflow::Workflow::standard()
+        let settings = crate::board_settings::load(self);
+        let (workflow, problem) = match settings.columns() {
+            None => (Workflow::standard(), None),
+            Some(text) => match Workflow::parse(text) {
+                Ok(workflow) => (workflow, None),
+                Err(e) => (
+                    Workflow::standard(),
+                    Some(format!(
+                        "the columns setting can't be used ({e:#}), so the board shows the standard four"
+                    )),
+                ),
+            },
+        };
+        if let Ok(mut seen) = cache.lock() {
+            seen.insert(path, (stamp, workflow.clone(), problem.clone()));
+        }
+        (workflow, problem)
     }
 
     pub fn dir(&self, column: Column) -> PathBuf {

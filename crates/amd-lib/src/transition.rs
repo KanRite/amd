@@ -46,6 +46,8 @@ pub struct TodoOptions {
     pub branch: Option<String>,
     /// Leave the branch alone entirely (`--no-branch`).
     pub no_branch: bool,
+    /// Which todo-kind column (ticket 224); the standard todo when `None`.
+    pub to: Option<Column>,
 }
 
 /// Runs `mutate`, then — if `commit` is on for this board — commits and
@@ -247,7 +249,12 @@ pub fn enter_todo(board: &Board, task: &Task, options: &TodoOptions) -> Result<O
         );
     }
 
-    let mut outcome = move_to(board, task, Column::Todo, options.force)?;
+    let mut outcome = move_to(
+        board,
+        task,
+        options.to.unwrap_or(Column::Todo),
+        options.force,
+    )?;
 
     if !branching {
         return Ok(outcome);
@@ -698,20 +705,13 @@ mod tests {
         assert!(copy.contains("## Notes\n\nkeep"), "{copy}");
     }
 
+    const TEAM: &str = "Triage=triage:backlog, Backlog=backlog:backlog, To do=todo:todo, \
+                        Doing=doing:doing, Review=review:doing, Done=done:done, Released=released:done";
+
     /// A board with a team's workflow (ticket 223): Triage before the
     /// backlog, Review after doing, Released after done. A git repository
     /// with an identity, auto-commit off, and tickets 001 to `n`.
     fn team_board(dir: &std::path::Path, n: u32) -> Board {
-        use crate::workflow::Workflow;
-        crate::board::TEST_WORKFLOW.with(|w| {
-            *w.borrow_mut() = Some(
-                Workflow::parse(
-                    "Triage=triage:backlog, Backlog=backlog:backlog, To do=todo:todo, \
-                     Doing=doing:doing, Review=review:doing, Done=done:done, Released=released:done",
-                )
-                .unwrap(),
-            )
-        });
         for args in [
             vec!["init", "-q"],
             vec!["config", "user.email", "t@t.co"],
@@ -724,9 +724,13 @@ mod tests {
                 .status()
                 .unwrap();
         }
+        std::fs::write(
+            dir.join(".settings"),
+            format!("commit = off\nsync = off\ncolumns = {TEAM}\n"),
+        )
+        .unwrap();
         let board = Board::at(dir.join("tasks"));
         board.create().unwrap();
-        std::fs::write(dir.join(".settings"), "commit = off\nsync = off\n").unwrap();
         for id in 1..=n {
             let body = format!("---\nid: \"{id:03}\"\ntitle: \"T{id}\"\n---\n\nbody\n");
             std::fs::write(board.dir(Column::Doing).join(format!("{id:03}-t.md")), body).unwrap();
@@ -762,7 +766,7 @@ mod tests {
         let board = team_board(dir.path(), 2);
         std::fs::write(
             dir.path().join(".settings"),
-            "commit = off\nsync = off\nwip-limit-review = 1\n",
+            format!("commit = off\nsync = off\ncolumns = {TEAM}\nwip-limit-review = 1\n"),
         )
         .unwrap();
         let review = board.workflow().find("review").unwrap();

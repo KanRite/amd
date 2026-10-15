@@ -4,7 +4,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::Column;
 use crate::epic::Place;
 
 /// How a node hangs from its parent.
@@ -42,11 +41,15 @@ pub struct TreeNode {
 }
 
 impl TreeNode {
-    /// Where its card is on `repo`'s board, for going to it.
-    pub fn place_in(&self, repo: &str) -> Place {
+    /// Where its card is on `repo`'s board, for going to it: its folder
+    /// among the board's columns (ticket 224).
+    pub fn place_in(&self, repo: &str, workflow: &crate::Workflow) -> Place {
         Place {
             repo: repo.to_string(),
-            column: Column::from_dir_name(&self.column).unwrap_or_default(),
+            column: workflow
+                .columns()
+                .find(|c| c.dir_name() == self.column)
+                .unwrap_or_default(),
             epic: self.epic.clone(),
         }
     }

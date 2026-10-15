@@ -30,13 +30,32 @@ use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 use time::format_description::well_known::Rfc3339;
 
-use agile_md::board::{ABANDON, Board, Column};
+use agile_md::board::{ABANDON, Board, Column, Kind};
 use agile_md::create::{Draft, NewTicket};
 use agile_md::registry::Registry;
 use agile_md::templates::{DEFAULT_TEMPLATE, TEMPLATE_SUFFIX, Templates};
 use agile_md::{board_settings, branch, git, task, templates, transition};
 
 /// `amd import --help`'s examples and what each kind does (ticket 162).
+const COLUMN_HELP: &str = "\
+A board starts with Backlog, To do, Doing and Done. A team can add its own
+columns, rename any of them, move them along and take its own ones away
+again; every rule follows a column's kind, so a Review of kind doing is
+locked while a ticket is in it and has its own WIP limit, and a Released of
+kind done counts as done everywhere. A rename only changes the name: the
+folder, and every ticket's history, stays put. The four standard columns
+can be renamed and moved but not removed.
+
+Examples:
+  amd column add Review --kind doing --after doing
+  amd column add Triage --kind backlog --before backlog
+  amd column rename todo Ready
+  amd column wip review 3
+  amd column remove review --move-to doing
+  amd review 12            move ticket 12 into Review (or: amd move 12 review)
+
+Teammates need amd 4.1 or later to see tickets in an added column.";
+
 const IMPORT_HELP: &str = "\
 Stand where the things should go; name where they come from. Nothing is
 overwritten: what's left out is printed and appended to import.log in the
@@ -277,6 +296,29 @@ enum Cmd {
     Tag {
         #[arg(value_name = "TAG")]
         tag: String,
+    },
+    /// Show or change the board's columns
+    ///
+    /// With no action, each column: its name, folder, kind (backlog, todo,
+    /// doing or done: what it does), WIP limit and how many tickets it
+    /// holds. Every change is committed like any other setting
+    #[command(after_help = COLUMN_HELP)]
+    Column {
+        #[command(subcommand)]
+        action: Option<ColumnAction>,
+    },
+    /// Move a ticket to any column by its name or folder
+    ///
+    /// The same as the column's own verb (`amd review 12`), and the way to
+    /// reach a column named like one of amd's own commands
+    Move {
+        #[arg(value_name = "REF")]
+        task: String,
+        #[arg(value_name = "COLUMN")]
+        column: String,
+        /// Move into a doing column at its WIP limit anyway
+        #[arg(long)]
+        force: bool,
     },
     /// Show or change the project's tag list
     ///
@@ -1198,6 +1240,18 @@ fn run() -> Result<()> {
         ),
         Cmd::Tag { tag } => render::named(&format!("tag: {tag}"), board.tasks_tagged(&tag)?, &[]),
         Cmd::Tags { action } => cmd_tags(&board, action),
+        Cmd::Column { action } => cmd_column(&board, action),
+        Cmd::Move {
+            task,
+            column,
+            force,
+        } => {
+            let to = board
+                .workflow()
+                .find(&column)
+                .with_context(|| column_list(&board, &column))?;
+            cmd_destination(&board, Destination::Column(to), Some(task), &[], force)
+        }
         Cmd::Import {
             first,
             path,
@@ -1267,8 +1321,10 @@ fn run() -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("usage: amd <destination> [ref] [--tag TAG]"))?;
             let mut task = None;
             let mut tag: Vec<String> = Vec::new();
+            let mut force = false;
             while let Some(arg) = args.next() {
                 match arg.as_str() {
+                    "--force" | "-f" => force = true,
                     "--tag" | "-t" => {
                         let value = args
                             .next()
@@ -1280,7 +1336,7 @@ fn run() -> Result<()> {
                 }
             }
             let destination = resolve_destination(&board, &name)?;
-            cmd_destination(&board, destination, task, &tag, false)
+            cmd_destination(&board, destination, task, &tag, force)
         }
         Cmd::Show { task } => {
             let task = resolve(
@@ -1782,6 +1838,7 @@ fn cmd_enter_todo(
             force,
             branch: override_branch,
             no_branch,
+            to: None,
         },
     )?;
     report(&outcome);
@@ -1935,6 +1992,20 @@ fn cmd_destination(
     match (destination, task) {
         (Destination::Column(column), Some(reference)) => {
             let task = board.find(&reference)?;
+            // Any todo-kind column makes the branch, as `amd todo` does.
+            if column.is(Kind::Todo) {
+                let outcome = transition::enter_todo(
+                    board,
+                    &task,
+                    &transition::TodoOptions {
+                        force,
+                        to: Some(column),
+                        ..Default::default()
+                    },
+                )?;
+                report(&outcome);
+                return Ok(());
+            }
             move_and_report(board, &task, column, force)
         }
         (Destination::Column(column), None) => render::columns(board, &[column], tag),
@@ -2251,6 +2322,211 @@ fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
         false => println!("{name} was already registered on this machine"),
     }
     Ok(())
+}
+
+/// `amd column` (ticket 224): the CLI side of Admin's Columns section.
+#[derive(Subcommand, Debug)]
+enum ColumnAction {
+    /// Add a column. Its kind decides what it does: backlog (where work
+    /// waits), todo (entering it makes the branch), doing (locked while in
+    /// it, with a WIP limit) or done (waits for what the ticket requires)
+    Add {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(long, value_name = "backlog|todo|doing|done")]
+        kind: String,
+        /// Put it after this column (the end when neither is given)
+        #[arg(long, value_name = "COLUMN", conflicts_with = "before")]
+        after: Option<String>,
+        /// Put it before this column
+        #[arg(long, value_name = "COLUMN")]
+        before: Option<String>,
+        /// Its folder under tasks/ (made from the name when left out)
+        #[arg(long, value_name = "FOLDER")]
+        folder: Option<String>,
+    },
+    /// Give a column a new name. Its folder stays as it is
+    Rename {
+        #[arg(value_name = "COLUMN")]
+        column: String,
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+    /// Remove an added column (the standard four can't go). One with
+    /// tickets needs --move-to
+    Remove {
+        #[arg(value_name = "COLUMN")]
+        column: String,
+        /// Where its tickets go first
+        #[arg(long, value_name = "COLUMN")]
+        move_to: Option<String>,
+    },
+    /// Move a column along the board
+    Move {
+        #[arg(value_name = "COLUMN")]
+        column: String,
+        #[arg(
+            long,
+            value_name = "COLUMN",
+            conflicts_with = "before",
+            required_unless_present = "before"
+        )]
+        after: Option<String>,
+        #[arg(long, value_name = "COLUMN")]
+        before: Option<String>,
+    },
+    /// Set a doing column's WIP limit, or `off`
+    Wip {
+        #[arg(value_name = "COLUMN")]
+        column: String,
+        #[arg(value_name = "N|off")]
+        limit: String,
+    },
+}
+
+/// `name`'s column on `board`, or an error listing the columns there are.
+fn find_column(board: &Board, name: &str) -> Result<Column> {
+    board
+        .workflow()
+        .find(name)
+        .with_context(|| column_list(board, name))
+}
+
+fn column_list(board: &Board, name: &str) -> String {
+    let names: Vec<String> = board
+        .workflow()
+        .defs()
+        .iter()
+        .map(|d| d.column.as_str().to_string())
+        .collect();
+    format!(
+        "'{name}' isn't a column on this board (columns: {})",
+        names.join(", ")
+    )
+}
+
+/// Lists the board's columns, or changes them (ticket 224), each change
+/// committed like a setting.
+fn cmd_column(board: &Board, action: Option<ColumnAction>) -> Result<()> {
+    use agile_md::columns::{self, Position};
+    let position = |after: Option<String>, before: Option<String>| -> Result<Position> {
+        Ok(match (after, before) {
+            (Some(a), _) => Position::After(find_column(board, &a)?),
+            (None, Some(b)) => Position::Before(find_column(board, &b)?),
+            (None, None) => Position::End,
+        })
+    };
+    match action {
+        None => {
+            let workflow = board.workflow();
+            let settings = board_settings::load(board);
+            for def in workflow.defs() {
+                let count = board.tasks_in(def.column)?.len();
+                let wip = match settings.wip_limit(def.column) {
+                    Some(n) => format!(", WIP limit {n}"),
+                    None if def.column.is(Kind::Doing) => ", no WIP limit".to_string(),
+                    None => String::new(),
+                };
+                println!(
+                    "{}  {}/  {}{wip}  ({count})",
+                    def.label,
+                    def.column.as_str(),
+                    def.column.kind().as_str()
+                );
+            }
+            if let Some(problem) = board.workflow_problem() {
+                eprintln!("amd: {problem}");
+            }
+            Ok(())
+        }
+        Some(ColumnAction::Add {
+            name,
+            kind,
+            after,
+            before,
+            folder,
+        }) => {
+            let kind = Kind::parse(&kind)
+                .with_context(|| format!("'{kind}' isn't a kind: backlog, todo, doing or done"))?;
+            let at = position(after, before)?;
+            let column = with_auto_commit(board, "column", "add", name.trim(), || {
+                columns::add(board, &name, kind, at, folder.as_deref())
+            })?;
+            println!(
+                "added {} ({}/, {})",
+                name.trim(),
+                column.as_str(),
+                kind.as_str()
+            );
+            eprintln!(
+                "amd: teammates need amd 4.1 or later to see tickets in {}/",
+                column.as_str()
+            );
+            Ok(())
+        }
+        Some(ColumnAction::Rename { column, name }) => {
+            let col = find_column(board, &column)?;
+            with_auto_commit(board, "column", "rename", name.trim(), || {
+                columns::rename(board, col, &name)
+            })?;
+            println!("{}/ is now called {}", col.as_str(), name.trim());
+            Ok(())
+        }
+        Some(ColumnAction::Remove { column, move_to }) => {
+            let col = find_column(board, &column)?;
+            let to = move_to.map(|m| find_column(board, &m)).transpose()?;
+            let label = board.workflow().label(col);
+            let moved = with_auto_commit(board, "column", "remove", &label, || {
+                columns::remove(board, col, to)
+            })?;
+            if let Some(to) = to
+                && !moved.is_empty()
+            {
+                println!("moved {} ticket(s) to {}/", moved.len(), to.as_str());
+            }
+            println!("removed {label}");
+            Ok(())
+        }
+        Some(ColumnAction::Move {
+            column,
+            after,
+            before,
+        }) => {
+            let col = find_column(board, &column)?;
+            let at = position(after, before)?;
+            let label = board.workflow().label(col);
+            with_auto_commit(board, "column", "move", &label, || {
+                columns::reorder(board, col, at)
+            })?;
+            let order: Vec<String> = board
+                .workflow()
+                .defs()
+                .iter()
+                .map(|d| d.label.clone())
+                .collect();
+            println!("{}", order.join(" | "));
+            Ok(())
+        }
+        Some(ColumnAction::Wip { column, limit }) => {
+            let col = find_column(board, &column)?;
+            let limit = match limit.trim().to_ascii_lowercase().as_str() {
+                "off" | "0" => None,
+                n => Some(
+                    n.parse::<u32>()
+                        .with_context(|| format!("'{n}' isn't a number or off"))?,
+                ),
+            };
+            let label = board.workflow().label(col);
+            with_auto_commit(board, "column", "wip", &label, || {
+                columns::set_wip(board, col, limit)
+            })?;
+            match limit {
+                Some(n) => println!("{label}: WIP limit {n}"),
+                None => println!("{label}: no WIP limit"),
+            }
+            Ok(())
+        }
+    }
 }
 
 /// `amd tags` (ticket 122): the CLI side of Admin's Tags section.
@@ -2615,6 +2891,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         Cmd::Board { .. }
         | Cmd::Tag { .. }
         | Cmd::Tags { action: None }
+        | Cmd::Column { action: None }
         | Cmd::Show { .. }
         | Cmd::Tree { .. }
         | Cmd::Log
@@ -3236,6 +3513,14 @@ fn cmd_log(board: &Board) -> Result<()> {
             _ => continue,
         };
         let Some(path) = path else { continue };
+        // A column's placeholder (`.gitkeep`) or the archive's `.gitignore`
+        // isn't a ticket: adding a column shouldn't read as a new ticket.
+        if Path::new(path)
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+        {
+            continue;
+        }
         let title = Path::new(path)
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())

@@ -1352,6 +1352,46 @@ assert "amd auto-priority off puts raised tickets back" \
     && ! grep -q 'priority-from' '${ap}'/tasks/backlog/00[234]-*.md"
 rm -rf "${ap}"
 
+echo "your own columns (ticket 224):"
+cl="$(mktemp -d)"
+( cd "${cl}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init cols --local-only >/dev/null \
+  && for t in One Two Three; do "${AMD}" new "$t" >/dev/null; done )
+in_cl() { (cd "${cl}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "amd column add puts a column where asked, in one commit, and amd board shows it" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; n=\$(git -C '${cl}' rev-list --count HEAD) \
+    && in_cl column add Review --kind doing --after doing 2>/dev/null | grep -qx 'added Review (review/, doing)' \
+    && [ \$(git -C '${cl}' rev-list --count HEAD) -eq \$((n + 1)) ] \
+    && [ -d '${cl}'/tasks/review ] \
+    && [ \"\$(in_cl board --plain | grep -E '^[A-Z]' | tr '\\n' ' ')\" = 'BACKLOG TODO DOING REVIEW DONE ' ]"
+assert "amd column lists name, folder, kind, WIP limit and count" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column | grep -qx 'Review  review/  doing, no WIP limit  (0)'"
+assert "a ticket moves into the column by its name, one step at a time, and stays locked" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl todo 1 >/dev/null && in_cl doing 1 >/dev/null \
+    && ! in_cl done 1 2>/dev/null >/dev/null \
+    && in_cl review 1 | grep -q 'moved 001-one.md -> review/' \
+    && grep -q '^locked-by: \"t@t.co\"' '${cl}'/tasks/review/001-one.md"
+assert "a doing column's own WIP limit refuses one more, and amd move --force gets past it" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column wip review 1 >/dev/null \
+    && in_cl todo 2 >/dev/null && in_cl doing 2 >/dev/null \
+    && in_cl review 2 2>&1 | grep -q 'review/ already has 1 of 1' \
+    && in_cl move 2 review --force | grep -q 'moved 002-two.md -> review/'"
+assert "a rename keeps the folder and the board shows the new name" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column rename todo Ready | grep -qx 'todo/ is now called Ready' \
+    && [ -d '${cl}'/tasks/todo ] && in_cl board --plain | grep -qx 'READY' \
+    && in_cl draft 3 | grep -q 'draft'"
+assert "only an added column can go, and its tickets need somewhere to go first" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column remove done 2>&1 | grep -q 'standard columns' \
+    && in_cl column remove review 2>&1 | grep -q 'move-to' \
+    && in_cl column remove review --move-to doing | grep -q 'moved 2 ticket(s) to doing/' \
+    && [ ! -d '${cl}'/tasks/review ] && ls '${cl}'/tasks/doing | grep -q 001-one.md \
+    && ! grep -q 'wip-limit-review' '${cl}'/.settings"
+assert "amd column move reorders, and a column can't be named like an epic" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column add Triage --kind backlog --after done >/dev/null 2>&1 \
+    && in_cl column move triage --before backlog | grep -qx 'Triage | Backlog | Ready | Doing | Done' \
+    && in_cl group epic checkout >/dev/null && ! in_cl column add Checkout --kind doing 2>/dev/null"
+rm -rf "${cl}"
+
 echo "duplicate:"
 assert "amd duplicate copies a ticket" \
   "${AMD}" duplicate 1

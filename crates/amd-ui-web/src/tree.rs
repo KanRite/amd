@@ -94,7 +94,10 @@ fn node(n: TreeNode, repo: String, last: bool) -> AnyView {
     let ctx = Ctx::get();
     let is_child = n.edge != Edge::Root;
     let edge = n.edge;
-    let target = n.place_in(&repo);
+    let target = ctx.board.with(|b| {
+        let workflow = b.as_ref().map(|b| b.workflow.clone()).unwrap_or_default();
+        n.place_in(&repo, &workflow)
+    });
     let file = n.file.clone();
     let muted = n.seen || n.stub.is_some();
     let label = if n.seen {

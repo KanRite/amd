@@ -8,7 +8,7 @@
 //! The same reading of "requires" gives `sprint_gaps` (ticket 214): what
 //! stops a sprint starting.
 
-use crate::{Board, Column, TicketSummary, split_link};
+use crate::{Board, Column, Kind, TicketSummary, Workflow, split_link};
 
 fn number(id: &str) -> Option<u32> {
     id.trim().trim_start_matches('#').parse().ok()
@@ -38,7 +38,7 @@ pub fn waiting_on<'a>(
         .filter(|other| {
             other.repo == ticket.repo
                 && other.file != ticket.file
-                && other.column != Column::Done
+                && !other.column.is(Kind::Done)
                 && (required.iter().any(|r| r.file == other.file)
                     || (me.is_some() && number(&other.parent) == me))
         })
@@ -51,7 +51,7 @@ pub fn waiting_on<'a>(
 /// Whether a ticket may be dropped in `to`: refused into done while it
 /// waits on others.
 pub fn done_rule(to: Column, waiting: &[&TicketSummary], ticket: &str) -> Result<(), String> {
-    if to != Column::Done || waiting.is_empty() {
+    if !to.is(Kind::Done) || waiting.is_empty() {
         return Ok(());
     }
     let ids: Vec<&str> = waiting.iter().map(|t| t.id.as_str()).collect();
@@ -95,11 +95,12 @@ fn in_group(ticket: &TicketSummary, name: &str) -> bool {
     }
 }
 
-/// Where a card is, for a message: `Backlog`, `Backlog › s13`, `To do`.
-pub fn place(ticket: &TicketSummary) -> String {
+/// Where a card is, for a message: `Backlog`, `Backlog › s13`, `To do`,
+/// in the board's own column names.
+pub fn place(ticket: &TicketSummary, workflow: &Workflow) -> String {
     match (&ticket.epic, ticket.column) {
-        (Some(group), Column::Backlog) => format!("Backlog › {group}"),
-        (_, column) => column.title().to_string(),
+        (Some(group), Column::Backlog) => format!("{} › {group}", workflow.label(Column::Backlog)),
+        (_, column) => workflow.label(column),
     }
 }
 
@@ -118,11 +119,16 @@ pub struct Gap {
 /// What stops sprint `name` in `repo` starting (ticket 214): the same rule
 /// as `agile_md::requires::sprint_gaps`, from the board's cards (`all`, as
 /// [`all_tickets`] gives them).
-pub fn sprint_gaps(all: &[&TicketSummary], repo: &str, name: &str) -> Vec<Gap> {
+pub fn sprint_gaps(
+    all: &[&TicketSummary],
+    repo: &str,
+    name: &str,
+    workflow: &Workflow,
+) -> Vec<Gap> {
     let mut gaps = Vec::new();
     for ticket in all.iter().filter(|t| t.repo == repo && in_group(t, name)) {
         for needed in requires(ticket, all.iter().copied()) {
-            if needed.column == Column::Done || in_group(needed, name) {
+            if needed.column.is(Kind::Done) || in_group(needed, name) {
                 continue;
             }
             gaps.push(Gap {
@@ -131,7 +137,7 @@ pub fn sprint_gaps(all: &[&TicketSummary], repo: &str, name: &str) -> Vec<Gap> {
                 column: ticket.column,
                 epic: ticket.epic.clone(),
                 required_id: needed.id.clone(),
-                required_place: place(needed),
+                required_place: place(needed, workflow),
             });
         }
     }
@@ -276,10 +282,11 @@ mod tests {
         let mut needs = card("007", Column::Backlog);
         needs.links = vec!["required-by:006".into()]; // recorded on the other end
         let all = [&a, &b, &loose, &c, &finished, &started_on, &needs];
-        let gaps: Vec<(String, String, String)> = sprint_gaps(&all, "acme-tickets", "s12")
-            .into_iter()
-            .map(|g| (g.id, g.required_id, g.required_place))
-            .collect();
+        let gaps: Vec<(String, String, String)> =
+            sprint_gaps(&all, "acme-tickets", "s12", &Workflow::standard())
+                .into_iter()
+                .map(|g| (g.id, g.required_id, g.required_place))
+                .collect();
         assert_eq!(
             gaps,
             [
@@ -287,7 +294,7 @@ mod tests {
                 ("006".into(), "007".into(), "Backlog".into())
             ]
         );
-        assert!(sprint_gaps(&all, "acme-tickets", "s13").is_empty());
+        assert!(sprint_gaps(&all, "acme-tickets", "s13", &Workflow::standard()).is_empty());
     }
 
     #[test]

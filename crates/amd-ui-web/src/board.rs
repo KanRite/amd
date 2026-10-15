@@ -4,7 +4,7 @@
 use amd_ui_model::epic::{self, GroupKind, GroupState, Place, can_move};
 use amd_ui_model::waiting;
 use amd_ui_model::wip::WipLimits;
-use amd_ui_model::{Column, TicketSummary};
+use amd_ui_model::{Column, Kind, TicketSummary};
 use leptos::ev::DragEvent;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -14,6 +14,14 @@ use crate::app::{Ctx, Overlay};
 
 #[component]
 pub fn BoardView() -> impl IntoView {
+    // The board's own columns, in its order (ticket 224).
+    let columns = Memo::new(move |_| {
+        Ctx::get().board.with(|b| {
+            b.as_ref()
+                .map(|b| b.workflow.columns().collect::<Vec<_>>())
+                .unwrap_or_default()
+        })
+    });
     view! {
         <div class="flex h-full gap-3 overflow-x-auto p-3">
             <EpicsColumn />
@@ -23,7 +31,7 @@ pub fn BoardView() -> impl IntoView {
                     .get()
                     .map(|(repo, name)| view! { <OpenEpicColumn repo name /> })
             }}
-            {Column::ALL.map(|column| view! { <ColumnView column /> }).collect_view()}
+            <For each=move || columns.get() key=|column| *column children=|column| view! { <ColumnView column /> } />
         </div>
     }
 }
@@ -52,8 +60,8 @@ fn ticket_at(ctx: Ctx, file: &str, from: &Place) -> Option<TicketSummary> {
                 .epics
                 .iter()
                 .find(|e| e.repo == from.repo && e.name == *name)
-                .map(|e| &e.tickets),
-            None => Some(&b.columns[from.column.index()].tickets),
+                .map(|e| e.tickets.as_slice()),
+            None => Some(b.tickets(from.column)),
         };
         list.and_then(|l| l.iter().find(|t| t.file == file && t.repo == from.repo))
             .cloned()
@@ -64,7 +72,10 @@ fn ticket_at(ctx: Ctx, file: &str, from: &Place) -> Option<TicketSummary> {
 /// then the draft and sprint rules. An empty error means `to` is not a
 /// target at all.
 fn verdict(ctx: Ctx, file: &str, from: &Place, to: &Place) -> Result<(), String> {
-    if !can_move(from, to) {
+    let next = ctx
+        .board
+        .with(|b| b.as_ref().is_some_and(|b| can_move(&b.workflow, from, to)));
+    if !next {
         return Err(String::new());
     }
     let ticket = ticket_at(ctx, file, from);
@@ -129,16 +140,23 @@ fn limits_of(ctx: Ctx, repo: &str) -> WipLimits {
     })
 }
 
+/// The WIP limit on `column` of `repo`'s board: the repository's own for
+/// the standard doing, the column's own for another doing-kind column
+/// (ticket 224), none for the rest.
+fn limit_of(ctx: Ctx, repo: &str, column: Column) -> Option<u32> {
+    if column == Column::Doing {
+        return limits_of(ctx, repo).of(column);
+    }
+    ctx.board
+        .with(|b| b.as_ref().and_then(|b| b.workflow.wip(column)))
+}
+
 /// How many tickets `column` of `repo`'s board holds, whatever the filters
 /// are showing.
 fn held(ctx: Ctx, repo: &str, column: Column) -> usize {
     ctx.board.with(|b| {
         b.as_ref().map_or(0, |b| {
-            b.columns[column.index()]
-                .tickets
-                .iter()
-                .filter(|t| t.repo == repo)
-                .count()
+            b.tickets(column).iter().filter(|t| t.repo == repo).count()
         })
     })
 }
@@ -151,9 +169,16 @@ fn over_limit(ctx: Ctx, file: &str, from: &Place, to: &Place) -> Option<String> 
         return None;
     }
     let count = held(ctx, &to.repo, to.column);
-    limits_of(ctx, &to.repo)
-        .admit(to.column, count, file.trim_end_matches(".md"))
-        .err()
+    let label = ctx
+        .board
+        .with(|b| b.as_ref().map(|b| b.label(to.column)).unwrap_or_default());
+    amd_ui_model::wip::admit(
+        limit_of(ctx, &to.repo, to.column),
+        &label,
+        count,
+        file.trim_end_matches(".md"),
+    )
+    .err()
 }
 
 /// Whether `to` is a valid target for the ticket being dragged but is full.
@@ -214,7 +239,7 @@ fn ColumnView(column: Column) -> impl IntoView {
     let tickets = move || {
         let list = ctx.board.with(|b| {
             b.as_ref()
-                .map(|b| b.columns[column.index()].tickets.clone())
+                .map(|b| b.tickets(column).to_vec())
                 .unwrap_or_default()
         });
         ctx.shown(list)
@@ -224,12 +249,20 @@ fn ColumnView(column: Column) -> impl IntoView {
     let count = move || {
         ctx.board.with(|b| {
             b.as_ref().map_or(0, |b| {
-                b.columns[column.index()]
-                    .tickets
-                    .iter()
-                    .filter(|t| ctx.in_view(t))
-                    .count()
+                b.tickets(column).iter().filter(|t| ctx.in_view(t)).count()
             })
+        })
+    };
+    // What the board calls it (ticket 224).
+    let title = Memo::new(move |_| {
+        ctx.board
+            .with(|b| b.as_ref().map(|b| b.label(column)))
+            .unwrap_or_else(|| column.dir_name().to_string())
+    });
+    let collapsible = move || {
+        ctx.board.with(|b| {
+            b.as_ref()
+                .is_some_and(|b| b.workflow.is_collapsible(column))
         })
     };
     let collapsed = move || ctx.collapsed.with(|c| c.contains(&column));
@@ -245,7 +278,7 @@ fn ColumnView(column: Column) -> impl IntoView {
 
     // Hide points towards the board edge the column folds into; show points
     // back out.
-    let (hide_arrow, show_arrow) = if column == Column::Done {
+    let (hide_arrow, show_arrow) = if column.is(Kind::Done) {
         ("»", "«")
     } else {
         ("«", "»")
@@ -279,7 +312,7 @@ fn ColumnView(column: Column) -> impl IntoView {
                     .map(|r| r.name.clone())
             })
         })?;
-        let limit = limits_of(ctx, &repo).of(column)?;
+        let limit = limit_of(ctx, &repo, column)?;
         Some((held(ctx, &repo, column), limit as usize))
     };
     let full = move || full_for_drag(ctx, &here());
@@ -308,14 +341,14 @@ fn ColumnView(column: Column) -> impl IntoView {
             fallback=move || {
                 view! {
                     <section
-                        aria-label=column.title()
+                        aria-label=move || title.get()
                         class=move || format!("{} min-w-48 flex-1 basis-0", frame())
                         on:dragover=on_dragover
                         on:drop=on_drop
                     >
                         <header class="flex items-center gap-2 px-3 py-2">
                             <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                                {column.title()}
+                                {move || title.get()}
                             </h2>
                             <span class="rounded-full bg-slate-300 px-2 text-xs dark:bg-slate-700">{count}</span>
                             {move || {
@@ -341,11 +374,11 @@ fn ColumnView(column: Column) -> impl IntoView {
                                     })
                             }}
                             <span class="flex-1"></span>
-                            <Show when=move || column.is_collapsible()>
+                            <Show when=collapsible>
                                 <button
                                     class="rounded px-1.5 text-slate-500 hover:bg-slate-300 dark:hover:bg-slate-700"
-                                    title=format!("Hide {}", column.title())
-                                    aria-label=format!("Hide {}", column.title())
+                                    title=move || format!("Hide {}", title.get())
+                                    aria-label=move || format!("Hide {}", title.get())
                                     on:click=move |_| set_collapsed(true)
                                 >
                                     {hide_arrow}
@@ -354,9 +387,9 @@ fn ColumnView(column: Column) -> impl IntoView {
                         </header>
                         <Show when=full>
                             <p class="mx-2 mb-2 rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900 dark:text-amber-100">
-                                {format!(
+                                {move || format!(
                                     "{} is at its WIP limit. Drop here only to move it anyway: you will be asked to confirm.",
-                                    column.title(),
+                                    title.get(),
                                 )}
                             </p>
                         </Show>
@@ -378,21 +411,21 @@ fn ColumnView(column: Column) -> impl IntoView {
             }
         >
             <section
-                aria-label=format!("{} (hidden)", column.title())
+                aria-label=move || format!("{} (hidden)", title.get())
                 class=move || format!("{} w-10 shrink-0 items-center", frame())
                 on:dragover=on_dragover
                 on:drop=on_drop
             >
                 <button
                     class="flex h-full w-full flex-col items-center gap-2 rounded-lg py-3 hover:bg-slate-300 dark:hover:bg-slate-700"
-                    title=format!("Show {}", column.title())
-                    aria-label=format!("Show {}", column.title())
+                    title=move || format!("Show {}", title.get())
+                    aria-label=move || format!("Show {}", title.get())
                     on:click=move |_| set_collapsed(false)
                 >
                     <span class="text-slate-500">{show_arrow}</span>
                     <span class="rounded-full bg-slate-300 px-1.5 text-xs dark:bg-slate-700">{count}</span>
                     <span class="text-sm font-semibold uppercase tracking-wide text-slate-600 [writing-mode:vertical-rl] dark:text-slate-300">
-                        {column.title()}
+                        {move || title.get()}
                     </span>
                 </button>
             </section>
@@ -672,7 +705,7 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
         let (repo, name) = ids.get_value();
         ctx.board.with(|b| {
             b.as_ref()
-                .map(|b| waiting::sprint_gaps(&waiting::all_tickets(b), &repo, &name))
+                .map(|b| waiting::sprint_gaps(&waiting::all_tickets(b), &repo, &name, &b.workflow))
                 .unwrap_or_default()
         })
     });
@@ -825,7 +858,7 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
     let waits = {
         let me = ticket.clone();
         Memo::new(move |_| {
-            if me.column == Column::Done {
+            if me.column.is(Kind::Done) {
                 return Vec::new();
             }
             ctx.board.with(|b| {
@@ -833,7 +866,7 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                     .map(|b| {
                         waiting::waiting_on(&me, waiting::all_tickets(b))
                             .iter()
-                            .map(|t| format!("{} {} ({})", t.id, t.title, t.column.title()))
+                            .map(|t| format!("{} {} ({})", t.id, t.title, b.label(t.column)))
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default()
