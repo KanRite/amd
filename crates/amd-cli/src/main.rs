@@ -476,10 +476,14 @@ enum Cmd {
     /// With a ticket, its family: every ticket joined to it by requires or
     /// related. Without, every family on the board. Tickets in a started
     /// sprint aren't expanded. Each line says where the ticket is, and
-    /// "waits on" names what it requires that isn't done
+    /// "waits on" names what it requires that isn't done. Done tickets are
+    /// left out unless --done
     Tree {
         #[arg(value_name = "REF")]
         task: Option<String>,
+        /// Include done tickets
+        #[arg(long)]
+        done: bool,
     },
     /// Print a task
     Show {
@@ -1415,14 +1419,26 @@ fn run() -> Result<()> {
         }
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
         Cmd::Log => cmd_log(&board),
-        Cmd::Tree { task } => {
+        Cmd::Tree { task, done } => {
             let around = task.map(|t| board.find(&t)).transpose()?;
-            let trees = agile_md::requires::family(&board, around.as_ref())?;
+            let trees = agile_md::requires::family(&board, around.as_ref(), done)?;
+            // Empty only because done tickets were left out: say so.
+            let all_done = trees.is_empty()
+                && !done
+                && !agile_md::requires::family(&board, around.as_ref(), true)?.is_empty();
             match (&around, trees.is_empty()) {
+                (Some(t), true) if all_done => println!(
+                    "Everything {} is linked to is done (amd tree {} --done shows it)",
+                    t.id_display(),
+                    t.id_display()
+                ),
                 (Some(t), true) => println!(
                     "{} requires nothing and has no related tickets",
                     t.id_display()
                 ),
+                (None, true) if all_done => {
+                    println!("Every ticket linked to another is done (amd tree --done shows them)")
+                }
                 (None, true) => println!("No ticket on this board requires or relates to another"),
                 _ => render::tree(&board, &trees),
             }

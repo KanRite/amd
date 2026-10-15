@@ -244,6 +244,24 @@ impl Facts {
         })
     }
 
+    /// Leaves done tickets out (ticket 217): their links are dropped, so
+    /// they join nothing and appear nowhere. `keep` (the ticket asked
+    /// about) stays, done or not.
+    fn hide_done(&mut self, keep: Option<usize>) {
+        let gone: Vec<bool> = (0..self.tasks.len())
+            .map(|i| self.tasks[i].column == Column::Done && keep != Some(i))
+            .collect();
+        for i in 0..self.tasks.len() {
+            if gone[i] {
+                self.requires[i].clear();
+                self.related[i].clear();
+            } else {
+                self.requires[i].retain(|&j| !gone[j]);
+                self.related[i].retain(|&j| !gone[j]);
+            }
+        }
+    }
+
     fn linked(&self, i: usize) -> bool {
         !self.requires[i].is_empty()
             || !self.related[i].is_empty()
@@ -365,14 +383,23 @@ impl Facts {
 /// Without, every family on the board that has a link, lowest number first.
 /// Tickets in a started sprint aren't expanded: they appear as stubs where
 /// something links to them. Each ticket is drawn once; meeting it again is
-/// a `seen` back-reference. Parent and child aren't drawn.
-pub fn family(board: &Board, around: Option<&Task>) -> Result<Vec<TreeNode>> {
-    let facts = Facts::read(board)?;
-    match around {
-        Some(task) => {
-            let Some(i) = facts.tasks.iter().position(|t| t.path == task.path) else {
-                bail!("{} isn't on this board's columns", task.id_display());
-            };
+/// a `seen` back-reference. Parent and child aren't drawn. Done tickets
+/// are left out unless `include_done` (ticket 217); the ticket asked about
+/// is always there.
+pub fn family(board: &Board, around: Option<&Task>, include_done: bool) -> Result<Vec<TreeNode>> {
+    let mut facts = Facts::read(board)?;
+    let asked = match around {
+        Some(task) => match facts.tasks.iter().position(|t| t.path == task.path) {
+            Some(i) => Some(i),
+            None => bail!("{} isn't on this board's columns", task.id_display()),
+        },
+        None => None,
+    };
+    if !include_done {
+        facts.hide_done(asked);
+    }
+    match (around, asked) {
+        (Some(task), Some(i)) => {
             if let Some(sprint) = &facts.started[i] {
                 bail!(
                     "{} is in started sprint {sprint}, which the tree leaves out",
@@ -385,7 +412,7 @@ pub fn family(board: &Board, around: Option<&Task>) -> Result<Vec<TreeNode>> {
             }
             Ok(facts.trees(&family, Some(i)))
         }
-        None => {
+        _ => {
             let mut done: Vec<usize> = Vec::new();
             let mut out = Vec::new();
             let mut order: Vec<usize> = (0..facts.tasks.len()).collect();
@@ -636,7 +663,7 @@ mod tests {
         .unwrap();
         walk(&board, "006", &[Column::Todo, Column::Doing, Column::Done]);
 
-        let trees = family(&board, Some(&find(&board, "003"))).unwrap();
+        let trees = family(&board, Some(&find(&board, "003")), true).unwrap();
         assert_eq!(
             drawn(&trees),
             [
@@ -652,12 +679,42 @@ mod tests {
         assert_eq!(trees[0].place, "backlog");
         // A ticket with no links has no family.
         assert!(
-            family(&board, Some(&find(&board, "005")))
+            family(&board, Some(&find(&board, "005")), true)
                 .unwrap()
                 .is_empty()
         );
         // Without a ticket: every family with a link, and none for 005.
-        assert_eq!(family(&board, None).unwrap().len(), 1);
+        assert_eq!(family(&board, None, true).unwrap().len(), 1);
+
+        // Done left out (ticket 217): 006 goes, unless it's the one asked about.
+        let trees = family(&board, Some(&find(&board, "003")), false).unwrap();
+        assert_eq!(
+            drawn(&trees),
+            [
+                "root 001 unmet:002,003",
+                "  requires 002 unmet:003",
+                "    requires 003 *",
+                "  requires 003 seen",
+                "  related 004",
+            ]
+        );
+        let trees = family(&board, Some(&find(&board, "006")), false).unwrap();
+        assert!(drawn(&trees).contains(&"    requires 006 *".to_string()));
+    }
+
+    #[test]
+    fn a_family_held_together_by_a_done_ticket_comes_apart_without_it() {
+        let (_dir, board) = board_with(&["Left", "Middle", "Right"]);
+        requires(&board, "001", "002");
+        requires(&board, "003", "002");
+        walk(&board, "002", &[Column::Todo, Column::Doing, Column::Done]);
+        assert_eq!(family(&board, None, true).unwrap().len(), 2);
+        assert!(family(&board, None, false).unwrap().is_empty());
+        assert!(
+            family(&board, Some(&find(&board, "001")), false)
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]
@@ -669,7 +726,7 @@ mod tests {
         start_sprint(&board, "s12").unwrap();
         requires(&board, "001", "002");
         requires(&board, "002", "001"); // a cycle
-        let trees = family(&board, Some(&find(&board, "001"))).unwrap();
+        let trees = family(&board, Some(&find(&board, "001")), false).unwrap();
         assert_eq!(
             drawn(&trees),
             [
@@ -679,7 +736,7 @@ mod tests {
                 "    requires 003 stub:s12",
             ]
         );
-        let err = family(&board, Some(&find(&board, "003"))).unwrap_err();
+        let err = family(&board, Some(&find(&board, "003")), false).unwrap_err();
         assert!(err.to_string().contains("started sprint s12"), "{err}");
     }
 }

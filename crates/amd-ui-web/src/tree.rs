@@ -2,7 +2,8 @@
 //! draws it: what each ticket requires on a solid line, what it relates
 //! to on a dashed one (long dashes, wide gaps, so the two are easy to tell
 //! apart), where each is, and what it still waits on. A click on a ticket
-//! goes to its card.
+//! goes to its card. Done tickets are left out until "Include done" is
+//! ticked (ticket 217).
 
 use amd_ui_model::epic::Place;
 use amd_ui_model::tree::{Edge, TreeNode};
@@ -29,11 +30,19 @@ fn line(edge: Edge, vertical: bool) -> &'static str {
 #[component]
 pub fn TreePanel(place: Place, file: String) -> impl IntoView {
     let trees = RwSignal::new(None::<Result<Vec<TreeNode>, String>>);
+    let include_done = RwSignal::new(false);
     let repo = place.repo.clone();
-    {
+    Effect::new(move |_| {
+        let done = include_done.get();
         let (place, file) = (place.clone(), file.clone());
-        spawn_local(async move { trees.set(Some(api::ticket_family(&place, &file).await)) });
-    }
+        spawn_local(async move {
+            let got = api::ticket_family(&place, &file, done).await;
+            // A later tick may have answered first: keep only the current one.
+            if include_done.get_untracked() == done {
+                trees.set(Some(got));
+            }
+        });
+    });
     view! {
         <Modal title="Requires and related".to_string() width="max-w-4xl">
             <p class="text-xs text-slate-500">
@@ -42,16 +51,26 @@ pub fn TreePanel(place: Place, file: String) -> impl IntoView {
                 <span class="ml-4 mr-1 inline-block h-0.5 w-6 align-middle text-slate-500" style=line(Edge::Related, false)></span>
                 "related"
                 <span class="ml-4">"Click a ticket to go to its card."</span>
+                <label class="ml-4 inline-flex items-center gap-1">
+                    <input
+                        type="checkbox"
+                        prop:checked=move || include_done.get()
+                        on:change=move |ev| include_done.set(event_target_checked(&ev))
+                    />
+                    "Include done"
+                </label>
             </p>
             <div class="min-h-0 overflow-y-auto">
                 {move || match trees.get() {
                     None => view! { <p class="text-sm text-slate-500">"Reading the board…"</p> }.into_any(),
                     Some(Err(e)) => view! { <p class="text-sm text-red-700 dark:text-red-300">{e}</p> }.into_any(),
                     Some(Ok(list)) if list.is_empty() => {
-                        view! {
-                            <p class="text-sm text-slate-500">"This ticket requires nothing and has no related tickets."</p>
-                        }
-                            .into_any()
+                        let says = if include_done.get_untracked() {
+                            "This ticket requires nothing and has no related tickets."
+                        } else {
+                            "Everything this ticket is linked to is done. Tick Include done to see it."
+                        };
+                        view! { <p class="text-sm text-slate-500">{says}</p> }.into_any()
                     }
                     Some(Ok(list)) => {
                         let repo = repo.clone();

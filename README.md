@@ -214,7 +214,8 @@ Start button on the desktop board. Outside sprints nothing more is enforced.
 
 `amd tree 12` draws a ticket's family, what it requires (solid) and what
 it relates to (dashed), saying where each ticket is and what's still
-waited on; `amd tree` draws every family on the board:
+waited on; `amd tree` draws every family on the board. Done tickets are
+left out unless you add `--done` (`amd tree 12 --done`):
 
 ```
 001 Alpha · backlog  waits on 002
@@ -223,12 +224,13 @@ waited on; `amd tree` draws every family on the board:
 └ ─ ─ 004 Delta · backlog
 ```
 
-Tickets in a sprint that has started aren't expanded: a link to one shows
-it as "in started sprint s12".
+That's `amd tree 4 --done`. Tickets in a sprint that has started aren't
+expanded: a link to one shows it as "in started sprint s12".
 
 On the desktop board, a card that requires or relates to others has a small
 tree button that opens the same tree, with that ticket highlighted; click
-any ticket in it to go to its card. A sprint that can't start lists what's
+any ticket in it to go to its card. Done tickets are left out until you
+tick "Include done". A sprint that can't start lists what's
 missing, each with "Show the tree".
 Each card also says how many tickets it's linked to (beside the tree icon,
 or a link icon when it has no tree), and a ticket linked to nothing at all

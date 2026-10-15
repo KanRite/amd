@@ -286,17 +286,29 @@ pub async fn retype_link(
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct FamilyArgs<'a> {
     place: &'a Place,
     file: &'a str,
+    include_done: bool,
 }
 
-/// The requires tree around a ticket (ticket 214).
+/// The requires tree around a ticket (ticket 214), done tickets only with
+/// `include_done` (ticket 217).
 pub async fn ticket_family(
     place: &Place,
     file: &str,
+    include_done: bool,
 ) -> Result<Vec<amd_ui_model::tree::TreeNode>, String> {
-    call("ticket_family", &FamilyArgs { place, file }).await
+    call(
+        "ticket_family",
+        &FamilyArgs {
+            place,
+            file,
+            include_done,
+        },
+    )
+    .await
 }
 
 /// Creates a ticket in `repo`'s backlog (the board's own when `None`),
