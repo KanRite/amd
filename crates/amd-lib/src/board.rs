@@ -346,7 +346,7 @@ impl Board {
             return (workflow.clone(), problem.clone());
         }
         let settings = crate::board_settings::load(self);
-        let (workflow, problem) = match settings.columns() {
+        let (workflow, mut problem) = match settings.columns() {
             None => (Workflow::standard(), None),
             Some(text) => match Workflow::parse(text) {
                 Ok(workflow) => (workflow, None),
@@ -357,6 +357,32 @@ impl Board {
                     )),
                 ),
             },
+        };
+        // The flow, extra moves and landing column (ticket 225); one that
+        // can't be used falls back to the defaults, saying why.
+        let flow = settings.flow().map(|f| {
+            crate::workflow::Flow::parse(f).ok_or_else(|| anyhow!("flow {f:?} isn't next or any"))
+        });
+        let configured = match flow.transpose() {
+            Ok(flow) => workflow.clone().configure(
+                flow.unwrap_or_default(),
+                settings.moves().unwrap_or(""),
+                settings.new_tickets(),
+            ),
+            Err(e) => Err(e),
+        };
+        let workflow = match configured {
+            Ok(workflow) => workflow,
+            Err(e) => {
+                let note = format!(
+                    "the flow settings can't be used ({e:#}), so moves go one column at a time"
+                );
+                problem = Some(match problem {
+                    Some(p) => format!("{p}; {note}"),
+                    None => note,
+                });
+                workflow
+            }
         };
         if let Ok(mut seen) = cache.lock() {
             seen.insert(path, (stamp, workflow.clone(), problem.clone()));
@@ -1019,9 +1045,14 @@ impl Board {
         if task.column == to {
             bail!("already in {to}/");
         }
-        if !self.workflow().next_to(task.column, to) {
+        if !self.workflow().allows(task.column, to) {
+            let extra = if self.workflow().moves().is_empty() {
+                ""
+            } else {
+                ", or by a move the team allows"
+            };
             bail!(
-                "{} cannot move from {}/ to {to}/: tickets move one column at a time",
+                "{} cannot move from {}/ to {to}/: tickets move one column at a time{extra}",
                 task.stem,
                 task.column
             );

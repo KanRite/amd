@@ -374,6 +374,7 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
             clone_of: Some(fields.clone_of.trim().to_string()).filter(|c| !c.is_empty()),
             tags: fields.tags.clone(),
             extra: Default::default(),
+            land_in: fields.epic.as_ref().map(|_| Column::Backlog),
         },
     )?;
     // `write` takes the whole file, not just the notes — the same shape `amd
@@ -424,10 +425,15 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
             "could not list {id_display} as a clone on {reason}"
         )));
     }
-    outcome.events.push(Event::Info(format!(
-        "created {}/{file_name}",
-        Column::Backlog
-    )));
+    // Where it landed (ticket 225): the board's landing column, or the
+    // backlog for one filed straight into an epic or sprint.
+    let landed = match fields.epic {
+        Some(_) => Column::Backlog,
+        None => board.workflow().landing(),
+    };
+    outcome
+        .events
+        .push(Event::Info(format!("created {landed}/{file_name}")));
     outcome
         .events
         .extend(required_lines.into_iter().map(Event::Info));

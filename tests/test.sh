@@ -1392,6 +1392,41 @@ assert "amd column move reorders, and a column can't be named like an epic" \
     && in_cl group epic checkout >/dev/null && ! in_cl column add Checkout --kind doing 2>/dev/null"
 rm -rf "${cl}"
 
+echo "flow rules, landing column and reset (ticket 225):"
+fl="$(mktemp -d)"
+( cd "${fl}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init flows --local-only >/dev/null \
+  && "${AMD}" column add Triage --kind backlog --before backlog >/dev/null 2>&1 \
+  && "${AMD}" column add Review --kind doing --after doing >/dev/null 2>&1 \
+  && "${AMD}" new One >/dev/null && "${AMD}" new Two >/dev/null )
+in_fl() { (cd "${fl}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "amd column landing triage puts new tickets in Triage" \
+  bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; in_fl column landing triage | grep -qx 'new tickets land in Triage' \
+    && in_fl new Three | grep -q '^created triage/003-three.md' && [ -f '${fl}'/tasks/triage/003-three.md ]"
+assert "from Triage a ticket can't skip to todo until the move is allowed, and then can" \
+  bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; ! in_fl todo 3 >/dev/null 2>&1 \
+    && in_fl column allow triage todo | grep -qx 'allowed Triage → To do' \
+    && in_fl todo 3 | grep -q 'moved 003-three.md -> todo/' \
+    && in_fl column | grep -qx 'flow: next, plus Triage → To do'"
+assert "an extra move is one way, and disallow takes it back" \
+  bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; ! in_fl triage 3 >/dev/null 2>&1 \
+    && in_fl column disallow triage todo >/dev/null && ! grep -q '^moves' '${fl}'/.settings"
+assert "flow any lets a ticket go from the backlog straight to doing, locked" \
+  bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; in_fl column flow any | grep -qx 'flow: any' \
+    && in_fl doing 1 | grep -q 'moved 001-one.md -> doing/' \
+    && grep -q '^locked-by: \"t@t.co\"' '${fl}'/tasks/doing/001-one.md"
+assert "amd column reset moves tickets by kind and puts every setting back, in one commit" \
+  bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; in_fl review 1 >/dev/null && in_fl new Four >/dev/null \
+    && n=\$(git -C '${fl}' rev-list --count HEAD) \
+    && out=\$(in_fl column reset) \
+    && printf '%s' \"\$out\" | grep -q 'moved 001-one.md -> doing/' \
+    && printf '%s' \"\$out\" | grep -q 'moved 004-four.md -> backlog/' \
+    && [ \$(git -C '${fl}' rev-list --count HEAD) -eq \$((n + 1)) ] \
+    && [ ! -d '${fl}'/tasks/review ] && [ ! -d '${fl}'/tasks/triage ] \
+    && ! grep -qE '^(columns|flow|moves|new-tickets)' '${fl}'/.settings \
+    && [ \"\$(in_fl board --plain | grep -E '^[A-Z]' | tr '\\n' ' ')\" = 'BACKLOG TODO DOING DONE ' ]"
+rm -rf "${fl}"
+
 echo "duplicate:"
 assert "amd duplicate copies a ticket" \
   "${AMD}" duplicate 1

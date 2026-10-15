@@ -72,9 +72,10 @@ fn ticket_at(ctx: Ctx, file: &str, from: &Place) -> Option<TicketSummary> {
 /// then the draft and sprint rules. An empty error means `to` is not a
 /// target at all.
 fn verdict(ctx: Ctx, file: &str, from: &Place, to: &Place) -> Result<(), String> {
-    let next = ctx
-        .board
-        .with(|b| b.as_ref().is_some_and(|b| can_move(&b.workflow, from, to)));
+    let next = ctx.board.with(|b| {
+        b.as_ref()
+            .is_some_and(|b| can_move(b.workflow_of(&from.repo), from, to))
+    });
     if !next {
         return Err(String::new());
     }

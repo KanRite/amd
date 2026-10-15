@@ -642,7 +642,21 @@ amd column remove review --move-to doing
 amd column                     # name, folder, kind, WIP limit and count of each
 ```
 
-Tickets still move one column at a time. A rename only changes the name: the
+**Moves and where new work arrives.** Tickets move one column at a time,
+either way, unless the team says otherwise: `amd column allow triage todo`
+adds an extra one-way move beside that, and `amd column flow any` lets a
+ticket go from any column to any other. Whatever the flow, a draft stays in
+the backlog, a started sprint's tickets only move on to todo, done waits for
+what a ticket requires, and WIP limits and locks still apply. `amd column
+landing triage` makes new tickets (from `amd new`, the desktop board, an AI
+tool or an imported GitHub issue) arrive in Triage; one filed straight into
+an epic or sprint still goes to the Backlog. `amd column reset` puts the
+board back to Backlog, To do, Doing and Done: each ticket in an added column
+moves to the standard column of the same kind, and the names, flow, extra
+moves, landing column and column WIP limits go back to standard, in one
+commit.
+
+A rename only changes the name: the
 folder, and so every ticket's history, stays where it is. The four standard
 columns can be renamed and moved but never removed, and every kind always has
 at least one column. The columns are kept in the tickets repository's
