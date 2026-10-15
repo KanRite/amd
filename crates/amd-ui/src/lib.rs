@@ -249,6 +249,7 @@ async fn open_ticket(place: Place, file: String) -> Result<TicketDocument> {
             lapsed: project.lapsed_of(&task),
             version: task.hash().map_err(err)?.to_string(),
             authorship: agile_md::authorship::summary(board, &task).unwrap_or_default(),
+            priority_note: agile_md::auto_priority::note(board, &task).unwrap_or_default(),
             content,
         })
     })
@@ -412,6 +413,7 @@ fn created_from(board: &Board, repo: String, outcome: &transition::Outcome) -> R
             lapsed: None,
             version: task.hash().map_err(err)?.to_string(),
             authorship: agile_md::authorship::summary(board, &task).unwrap_or_default(),
+            priority_note: agile_md::auto_priority::note(board, &task).unwrap_or_default(),
             content: std::fs::read_to_string(&task.path).map_err(|e| e.to_string())?,
         },
         sync,
@@ -1028,6 +1030,41 @@ async fn set_import_issues(state: Tauri<'_, AppState>, on: bool) -> Result<SyncR
             &format!("import-issues {}", if on { "on" } else { "off" }),
             |s| {
                 s.set_import_issues(on);
+                Ok(())
+            },
+        )
+    })
+    .await
+}
+
+/// Whether priorities follow requires links (ticket 215). Switching it
+/// commits the setting and every priority it moves, together.
+#[tauri::command]
+async fn set_auto_priority(state: Tauri<'_, AppState>, on: bool) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        save_setting(
+            board,
+            &format!("auto-priority {}", if on { "on" } else { "off" }),
+            |s| {
+                s.set_auto_priority(on);
+                Ok(())
+            },
+        )
+    })
+    .await
+}
+
+/// Whether a priority set by hand pins its ticket (ticket 215).
+#[tauri::command]
+async fn set_priority_override(state: Tauri<'_, AppState>, on: bool) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        save_setting(
+            board,
+            &format!("priority-override {}", if on { "on" } else { "off" }),
+            |s| {
+                s.set_priority_override(on);
                 Ok(())
             },
         )
@@ -2178,6 +2215,8 @@ pub fn run() {
             set_triage_priority,
             pull_issues,
             set_import_issues,
+            set_auto_priority,
+            set_priority_override,
             list_documents,
             document_history,
             read_document_version,

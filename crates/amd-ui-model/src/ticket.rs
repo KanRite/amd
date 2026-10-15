@@ -222,7 +222,9 @@ pub fn apply_fields(content: &str, new: &Fields) -> String {
 pub fn ensure_priority(content: &str) -> Result<String, String> {
     let priority = parse_frontmatter(content).priority;
     let priority = priority.trim();
-    if PRIORITIES.contains(&priority) {
+    // `auto` hands the ticket back to auto priority (ticket 215); amd-lib
+    // turns it into a priority as it saves.
+    if PRIORITIES.contains(&priority) || priority == "auto" {
         return Ok(content.to_string());
     }
     if !priority.is_empty() {
@@ -467,6 +469,7 @@ mod tests {
             clone_of: String::new(),
             clones: Vec::new(),
             links: Vec::new(),
+            priority_from: String::new(),
         }
     }
 

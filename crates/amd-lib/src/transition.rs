@@ -75,8 +75,18 @@ pub fn with_auto_commit<T>(
 ) -> Result<(T, Option<String>)> {
     let before = snapshot(board);
     let result = mutate()?;
+    settle_priorities(board);
     let warning = commit_since(board, before, &commit_message(verb, subject, detail))?;
     Ok((result, warning))
+}
+
+/// Auto priority (ticket 215), after a change and before its commit, so
+/// the commit carries the priorities it moved. Never undoes the change: a
+/// failure is only noted (`auto_priority::take_notes`).
+pub fn settle_priorities(board: &Board) {
+    if let Err(err) = crate::auto_priority::reconcile(board) {
+        crate::auto_priority::note_failure(&err);
+    }
 }
 
 /// `verb: subject "detail"`, or `verb: subject` when there is no detail
@@ -414,6 +424,7 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
         .events
         .extend(required_lines.into_iter().map(Event::Info));
     let message = format!("new: {id_display} \"{title}\"");
+    settle_priorities(board);
     if let Some(warning) = commit_since(board, before, &message)? {
         outcome.events.push(Event::Warn(warning));
     }
@@ -587,7 +598,7 @@ pub fn edit_ticket(
             task.set_repository(task.hash()?, repository)?;
         }
         if !fields.priority.trim().is_empty() && fields.priority.trim() != task.priority() {
-            task.set_priority(task.hash()?, fields.priority.trim())?;
+            crate::auto_priority::set_by_hand(board, task, fields.priority.trim())?;
         }
         board.set_epic(task, fields.epic.as_deref())?;
         Ok(())
@@ -620,8 +631,22 @@ pub fn save_text(
         }
         _ => text.to_string(),
     };
+    // A priority changed in the editor is set by hand (ticket 215): `auto`
+    // goes to auto priority, anything else pins when override is on.
+    let before = task.priority();
+    let wanted = crate::task::meta_in(&text, "priority")
+        .map(|p| p.trim().trim_matches('"').to_lowercase())
+        .filter(|p| !p.is_empty());
+    let text = match wanted.as_deref() {
+        Some("auto") => crate::task::set_meta(&text, "priority", &format!("{before:?}"))?,
+        _ => text,
+    };
     let ((), warning) = with_auto_commit(board, "edit", &id_display, &title, || {
-        task.set_text(expected, &text)
+        task.set_text(expected, &text)?;
+        if let Some(wanted) = wanted.filter(|w| *w == "auto" || *w != before) {
+            crate::auto_priority::set_by_hand(board, task, &wanted)?;
+        }
+        Ok(())
     })?;
     let mut outcome = Outcome::default();
     outcome

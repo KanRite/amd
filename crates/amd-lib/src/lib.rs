@@ -13,6 +13,7 @@ pub mod access;
 pub mod archive;
 pub mod assistant;
 pub mod authorship;
+pub mod auto_priority;
 pub mod board;
 pub mod board_settings;
 pub mod branch;

@@ -104,6 +104,8 @@ const TRIAGE_PRIORITY: &str = "triage-priority";
 /// Whether amdui's landing page pulls in the project's GitHub issues
 /// (ticket 173).
 const IMPORT_ISSUES: &str = "import-issues";
+const AUTO_PRIORITY: &str = "auto-priority";
+const PRIORITY_OVERRIDE: &str = "priority-override";
 /// Set once the documents `.settings/` has been carried across (ticket
 /// 182), so it's never read again.
 const MIGRATED: &str = "migrated-from-documents";
@@ -593,6 +595,42 @@ impl BoardSettings {
     pub fn set_import_issues(&mut self, on: bool) {
         self.config
             .set(IMPORT_ISSUES, if on { "on" } else { "off" });
+    }
+
+    /// Whether priorities follow requires links (ticket 215):
+    /// `auto-priority`, off unless set on.
+    pub fn auto_priority(&self) -> bool {
+        matches!(
+            self.config
+                .get(AUTO_PRIORITY)
+                .map(|v| v.trim().to_lowercase())
+                .as_deref(),
+            Some("on" | "true" | "1" | "yes")
+        )
+    }
+
+    /// Sets [`auto_priority`](Self::auto_priority).
+    pub fn set_auto_priority(&mut self, on: bool) {
+        self.config
+            .set(AUTO_PRIORITY, if on { "on" } else { "off" });
+    }
+
+    /// Whether a priority set by hand pins its ticket against auto priority
+    /// (ticket 215): `priority-override`, on unless set off.
+    pub fn priority_override(&self) -> bool {
+        !matches!(
+            self.config
+                .get(PRIORITY_OVERRIDE)
+                .map(|v| v.trim().to_lowercase())
+                .as_deref(),
+            Some("off" | "false" | "0" | "no")
+        )
+    }
+
+    /// Sets [`priority_override`](Self::priority_override).
+    pub fn set_priority_override(&mut self, on: bool) {
+        self.config
+            .set(PRIORITY_OVERRIDE, if on { "on" } else { "off" });
     }
 
     /// Whether the project is archived (ticket 157): `archived`, off unless

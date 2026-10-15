@@ -881,6 +881,7 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
         assignee,
         tags,
         priority,
+        priority_from,
         epic,
         repo,
         repository,
@@ -1097,12 +1098,22 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                     })}
                 {(!priority.is_empty())
                     .then(|| {
+                        // Raised by auto priority (ticket 215): an arrow, and
+                        // which ticket it's from.
+                        let (text, title) = if priority_from.is_empty() {
+                            (priority.clone(), "Priority".to_string())
+                        } else {
+                            (
+                                format!("↑ {priority}"),
+                                format!("{priority}, raised by auto priority: {priority_from} requires it"),
+                            )
+                        };
                         view! {
                             <span
                                 class=format!("rounded px-1.5 font-medium {}", priority_tone(&priority))
-                                title="Priority"
+                                title=title
                             >
-                                {priority.clone()}
+                                {text}
                             </span>
                         }
                     })}
