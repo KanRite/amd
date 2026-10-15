@@ -18,6 +18,7 @@ pub mod board;
 pub mod board_settings;
 pub mod branch;
 pub mod clone;
+pub mod columns;
 pub mod create;
 pub mod current_project;
 pub mod documents;

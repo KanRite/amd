@@ -403,6 +403,100 @@ pub async fn set_wip_limits(limits: WipLimits, repo: Option<&str>) -> Result<Syn
 }
 
 #[derive(Serialize)]
+struct AddColumnArgs<'a> {
+    label: &'a str,
+    kind: &'a str,
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+}
+
+/// Adds a column of `kind` to the project's board (ticket 224).
+pub async fn add_column(
+    label: &str,
+    kind: &str,
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+) -> Result<SyncReport, String> {
+    call(
+        "add_column",
+        &AddColumnArgs {
+            label,
+            kind,
+            after,
+            before,
+        },
+    )
+    .await
+}
+
+#[derive(Serialize)]
+struct RenameColumnArgs<'a> {
+    column: amd_ui_model::Column,
+    label: &'a str,
+}
+
+/// Renames one of the project's columns; its folder stays.
+pub async fn rename_column(
+    column: amd_ui_model::Column,
+    label: &str,
+) -> Result<SyncReport, String> {
+    call("rename_column", &RenameColumnArgs { column, label }).await
+}
+
+#[derive(Serialize)]
+struct MoveColumnArgs {
+    column: amd_ui_model::Column,
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+}
+
+/// Moves one of the project's columns along the board.
+pub async fn move_column(
+    column: amd_ui_model::Column,
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+) -> Result<SyncReport, String> {
+    call(
+        "move_column",
+        &MoveColumnArgs {
+            column,
+            after,
+            before,
+        },
+    )
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoveColumnArgs {
+    column: amd_ui_model::Column,
+    move_to: Option<amd_ui_model::Column>,
+}
+
+/// Removes an added column, its tickets moved to `move_to` first.
+pub async fn remove_column(
+    column: amd_ui_model::Column,
+    move_to: Option<amd_ui_model::Column>,
+) -> Result<SyncReport, String> {
+    call("remove_column", &RemoveColumnArgs { column, move_to }).await
+}
+
+#[derive(Serialize)]
+struct ColumnWipArgs {
+    column: amd_ui_model::Column,
+    limit: Option<u32>,
+}
+
+/// Sets or clears a doing-kind column's own WIP limit.
+pub async fn set_column_wip(
+    column: amd_ui_model::Column,
+    limit: Option<u32>,
+) -> Result<SyncReport, String> {
+    call("set_column_wip", &ColumnWipArgs { column, limit }).await
+}
+
+#[derive(Serialize)]
 struct TagArgs<'a> {
     tag: &'a str,
 }

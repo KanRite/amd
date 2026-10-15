@@ -618,6 +618,37 @@ Piped or redirected output stays plain text (`    [002] Guest checkout  (feat)`,
 indented by depth), so `amd board | grep` keeps working and log files don't fill
 with escape sequences. `--plain` or `NO_COLOR=1` forces that everywhere.
 
+## Your own columns
+
+A board starts with Backlog, To do, Doing and Done. A team can add its own
+(Triage, Review, Blocked, Released…), rename any column, move columns along
+and take its own ones away again, from the CLI or the desktop board's Admin →
+Columns. Each column has a **kind** that decides what it does:
+
+| Kind | What it does |
+|---|---|
+| backlog | work waiting; epics and sprints live in the Backlog itself |
+| todo | entering it makes the ticket's branch |
+| doing | the ticket is locked while it's there, and the column has a WIP limit |
+| done | a ticket can't go in while what it requires isn't done; anything here counts as done |
+
+```bash
+amd column add Review --kind doing --after doing
+amd column wip review 3
+amd column add Triage --kind backlog --before backlog
+amd column rename todo Ready
+amd review 12                  # or: amd move 12 review
+amd column remove review --move-to doing
+amd column                     # name, folder, kind, WIP limit and count of each
+```
+
+Tickets still move one column at a time. A rename only changes the name: the
+folder, and so every ticket's history, stays where it is. The four standard
+columns can be renamed and moved but never removed, and every kind always has
+at least one column. The columns are kept in the tickets repository's
+`.settings` (`columns = …`) and committed, so the whole team gets the same
+board; everyone needs amd 4.1 or later to see tickets in an added column.
+
 ## Why a directory instead of one big TODO.md?
 
 A single file gets unwieldy once tasks have real content, and every edit is a

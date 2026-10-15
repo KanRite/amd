@@ -88,6 +88,9 @@ const LEASE_HOURS: &str = "lease-hours";
 const DEFAULT_LEASE_HOURS: f64 = 8.0;
 const WIP_TODO: &str = "wip-todo";
 const WIP_LIMIT: &str = "wip-limit";
+/// The project's own columns (ticket 224), as `Workflow::parse` reads
+/// them; absent means the standard four.
+const COLUMNS: &str = "columns";
 /// Doing's WIP limit when nobody has set one.
 pub const DEFAULT_WIP_LIMIT: u32 = 2;
 const REPOS: &str = "repos";
@@ -730,6 +733,30 @@ impl BoardSettings {
     }
 
     /// Writes every setting to `<tickets-repo>/.settings` (ticket 111).
+    /// The project's own columns as written (ticket 224), if it has any.
+    pub fn columns(&self) -> Option<&str> {
+        self.config.get(COLUMNS).filter(|v| !v.trim().is_empty())
+    }
+
+    /// Records the board's columns; the standard four leave no key, so a
+    /// board that never changed them looks as it always has.
+    pub fn set_columns(&mut self, workflow: &crate::workflow::Workflow) {
+        if workflow.is_standard() {
+            self.config.remove(COLUMNS);
+        } else {
+            self.config.set(COLUMNS, &workflow.to_text());
+        }
+    }
+
+    /// Forgets a doing-kind column's own WIP limit (`wip-limit-<folder>`),
+    /// when the column goes.
+    pub fn clear_column_wip(&mut self, column: Column) {
+        if column != Column::Doing {
+            self.config
+                .remove(&format!("{WIP_LIMIT}-{}", column.as_str()));
+        }
+    }
+
     pub fn save(&self, board: &Board) -> Result<()> {
         self.config.save_to(&path(board))
     }

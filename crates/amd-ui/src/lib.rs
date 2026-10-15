@@ -863,6 +863,111 @@ fn save_setting(
     committed(board, "settings", what, "", || settings.save(board))
 }
 
+/// Where a column goes, from the page: after or before another, else last.
+fn column_position(
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+) -> agile_md::columns::Position {
+    use agile_md::columns::Position;
+    match (after, before) {
+        (Some(c), _) => Position::After(boards::to_column(c)),
+        (None, Some(c)) => Position::Before(boards::to_column(c)),
+        (None, None) => Position::End,
+    }
+}
+
+/// Adds a column to the project's board (ticket 224), of `kind`.
+#[tauri::command]
+async fn add_column(
+    state: Tauri<'_, AppState>,
+    label: String,
+    kind: String,
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let kind = agile_md::board::Kind::parse(&kind)
+            .ok_or_else(|| format!("{kind:?} isn't a kind: backlog, todo, doing or done"))?;
+        let at = column_position(after, before);
+        committed(board, "column", "add", label.trim(), || {
+            agile_md::columns::add(board, &label, kind, at, None).map(|_| ())
+        })
+    })
+    .await
+}
+
+/// Gives one of the project's columns a new name; its folder stays.
+#[tauri::command]
+async fn rename_column(
+    state: Tauri<'_, AppState>,
+    column: amd_ui_model::Column,
+    label: String,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        committed(board, "column", "rename", label.trim(), || {
+            agile_md::columns::rename(board, boards::to_column(column), &label)
+        })
+    })
+    .await
+}
+
+/// Moves one of the project's columns along the board.
+#[tauri::command]
+async fn move_column(
+    state: Tauri<'_, AppState>,
+    column: amd_ui_model::Column,
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let col = boards::to_column(column);
+        let label = board.workflow().label(col);
+        committed(board, "column", "move", &label, || {
+            agile_md::columns::reorder(board, col, column_position(after, before))
+        })
+    })
+    .await
+}
+
+/// Removes an added column, its tickets moved to `move_to` first.
+#[tauri::command]
+async fn remove_column(
+    state: Tauri<'_, AppState>,
+    column: amd_ui_model::Column,
+    move_to: Option<amd_ui_model::Column>,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let col = boards::to_column(column);
+        let label = board.workflow().label(col);
+        committed(board, "column", "remove", &label, || {
+            agile_md::columns::remove(board, col, move_to.map(boards::to_column)).map(|_| ())
+        })
+    })
+    .await
+}
+
+/// Sets a doing-kind column's own WIP limit, or clears it.
+#[tauri::command]
+async fn set_column_wip(
+    state: Tauri<'_, AppState>,
+    column: amd_ui_model::Column,
+    limit: Option<u32>,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let col = boards::to_column(column);
+        let label = board.workflow().label(col);
+        committed(board, "column", "wip", &label, || {
+            agile_md::columns::set_wip(board, col, limit)
+        })
+    })
+    .await
+}
+
 /// Adds a tag to the project's list, in UPPERCASE (ticket 122).
 #[tauri::command]
 async fn add_tag(state: Tauri<'_, AppState>, tag: String) -> Result<SyncReport> {
@@ -2198,6 +2303,11 @@ pub fn run() {
             link_ticket,
             retype_link,
             ticket_family,
+            add_column,
+            rename_column,
+            move_column,
+            remove_column,
+            set_column_wip,
             create_epic,
             list_roadmaps,
             create_roadmap,

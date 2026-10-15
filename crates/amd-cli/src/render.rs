@@ -74,9 +74,14 @@ pub fn column_forest(board: &Board, column: Column, tags: &[String]) -> Result<V
 /// Print one or more columns of the board. `tags` narrow every column to the
 /// tasks passing them.
 pub fn columns(board: &Board, columns: &[Column], tags: &[String]) -> Result<()> {
+    let workflow = board.workflow();
     let mut loaded = Vec::new();
     for column in columns {
-        loaded.push((*column, column_forest(board, *column, tags)?));
+        loaded.push((
+            *column,
+            heading(&workflow, *column),
+            column_forest(board, *column, tags)?,
+        ));
     }
     if rich() {
         // Falling back rather than failing: a rendering problem should never
@@ -196,11 +201,23 @@ fn sort(nodes: &mut [Node]) {
     }
 }
 
+/// A column's heading: its folder in capitals, as it always was, unless the
+/// team has named it something else (ticket 224), then that name.
+fn heading(workflow: &agile_md::workflow::Workflow, column: Column) -> String {
+    let label = workflow.label(column);
+    let standard = agile_md::workflow::Workflow::standard().label(column);
+    if label == standard {
+        column.as_str().to_uppercase()
+    } else {
+        label.to_uppercase()
+    }
+}
+
 /// The stable text form: `  [id] title  (labels)`, indented by depth.
-fn plain_columns(columns: &[(Column, Vec<Node>)]) {
-    for (column, nodes) in columns {
+fn plain_columns(columns: &[(Column, String, Vec<Node>)]) {
+    for (_, heading, nodes) in columns {
         println!();
-        println!("{}", column.as_str().to_uppercase());
+        println!("{heading}");
         if nodes.is_empty() {
             println!("  (empty)");
             continue;
@@ -227,13 +244,12 @@ fn plain_nodes(nodes: &[Node], depth: usize) {
     }
 }
 
-fn rich_columns(columns: &[(Column, Vec<Node>)]) -> Result<()> {
+fn rich_columns(columns: &[(Column, String, Vec<Node>)]) -> Result<()> {
     let mut console = Console::new();
     console.print("")?;
-    for (column, nodes) in columns {
+    for (column, heading, nodes) in columns {
         let count = count(nodes);
-        let mut tree = Tree::new(format!("{}  ({count})", column.as_str().to_uppercase()))
-            .guide_style(guide_style(*column));
+        let mut tree = Tree::new(format!("{heading}  ({count})")).guide_style(guide_style(*column));
         if nodes.is_empty() {
             tree.add(TreeNode::new("(empty)"));
         } else {

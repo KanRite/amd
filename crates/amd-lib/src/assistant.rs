@@ -66,7 +66,7 @@ pub fn tools() -> Vec<Tool> {
             description: "The project's board: each repository's columns (backlog, with its epics and sprints, todo, doing, done) and their tickets. Done is counted, not listed, unless asked for. Filters narrow it down.",
             read_only: true,
             input: json!({"type": "object", "properties": {
-                "column": {"type": "string", "enum": ["backlog", "todo", "doing", "done"], "description": "Only this column"},
+                "column": {"type": "string", "description": "Only this column: its name or folder, e.g. backlog, todo, doing, done, or one of the project's own"},
                 "repo": {"type": "string", "description": "Only this repository's board"},
                 "tag": {"type": "string", "description": "Only tickets with this tag; -TAG leaves them out"},
                 "assignee": {"type": "string", "description": "Only tickets assigned to this name; `nobody` for unassigned"},
@@ -176,11 +176,11 @@ pub fn tools() -> Vec<Tool> {
         Tool {
             name: "move_ticket",
             title: "Move a ticket",
-            description: "Move a ticket one column along (backlog, todo, doing, done) and commit it. Entering doing takes the user's lock on it; leaving gives it back. Refused when doing is at its WIP limit unless `force`, and refused into done while tickets it requires or its children aren't done (no override: finish them, or change or remove the link). Doesn't switch git branches.",
+            description: "Move a ticket one column along (by default backlog, todo, doing, done; a project can have its own, which `board` lists) and commit it. Entering a doing column takes the user's lock on it; leaving gives it back. Refused when a doing column is at its WIP limit unless `force`, and refused into done while tickets it requires or its children aren't done (no override: finish them, or change or remove the link). Doesn't switch git branches.",
             read_only: false,
             input: json!({"type": "object", "properties": {
                 "ticket": reference,
-                "to": {"type": "string", "enum": ["backlog", "todo", "doing", "done"]},
+                "to": {"type": "string", "description": "The column: its name or folder, e.g. backlog, todo, doing, done, or one of the project's own (`board` lists them)"},
                 "force": {"type": "boolean", "description": "Go past doing's WIP limit; only when the user says so"}
             }, "required": ["ticket", "to"]}),
         },

@@ -5,7 +5,7 @@
 //! `_group.md` inside it, and each ticket filed under it lives in that
 //! directory with `epic: "<name>"` in its frontmatter.
 
-use crate::Column;
+use crate::{Column, Kind, Workflow};
 
 /// Where a ticket sits: which repository's board, a column, and for the
 /// backlog optionally an epic. An empty `repo` means the board's own
@@ -54,13 +54,21 @@ impl Place {
 ///
 /// An epic's ticket cannot skip ahead to doing or done, nor go straight into
 /// another epic.
-pub fn can_move(from: &Place, to: &Place) -> bool {
+///
+/// "Next to" is the board's own workflow (ticket 224): a team's columns,
+/// in its order.
+pub fn can_move(workflow: &Workflow, from: &Place, to: &Place) -> bool {
     if from.repo != to.repo {
         return false;
     }
-    let backlog_level = |c: Column| matches!(c, Column::Backlog | Column::Todo);
+    // Epics and sprints live in the standard backlog: the loose backlog
+    // beside them, and a todo-kind column next to the backlog, are at
+    // their level.
+    let backlog_level = |c: Column| {
+        c == Column::Backlog || (c.is(Kind::Todo) && workflow.next_to(Column::Backlog, c))
+    };
     match (&from.epic, &to.epic) {
-        (None, None) => from.column.can_move_to(to.column),
+        (None, None) => workflow.next_to(from.column, to.column),
         (None, Some(_)) => backlog_level(from.column),
         (Some(_), None) => backlog_level(to.column),
         (Some(_), Some(_)) => false,
@@ -126,7 +134,7 @@ pub fn sprint_rule(
     }
     if let (Some(group), Some(name)) = (from_group, &from.epic)
         && group.started_sprint()
-        && to.column == Column::Backlog
+        && !to.column.is(Kind::Todo)
     {
         return Err(format!(
             "{name} has started: its tickets can only move on to todo."
@@ -158,7 +166,7 @@ pub fn draft_rule(
     if !draft {
         return Ok(());
     }
-    if from.column == Column::Backlog && to.column != Column::Backlog {
+    if from.column.is(Kind::Backlog) && !to.column.is(Kind::Backlog) {
         return Err(format!(
             "{ticket} is a draft: remove {DRAFT_TAG} to take it out of the backlog."
         ));
@@ -210,7 +218,7 @@ fn fnv1a(text: &str) -> u64 {
 /// `filed`, else only labelled), with its kind and whether it's started.
 pub fn where_it_is(
     repo: Option<&str>,
-    column: Column,
+    column: &str,
     group: Option<(&str, GroupKind, bool)>,
     filed: bool,
 ) -> String {
@@ -219,7 +227,7 @@ pub fn where_it_is(
         out.push_str(repo);
         out.push_str(" › ");
     }
-    out.push_str(column.title());
+    out.push_str(column);
     if let Some((name, kind, started)) = group {
         let kind = match kind {
             GroupKind::Epic => "epic",
@@ -359,33 +367,53 @@ mod tests {
         let todo = Place::column(Column::Todo);
         let e1 = Place::epic("One");
         let e2 = Place::epic("Two");
-        assert!(can_move(&backlog, &e1));
-        assert!(can_move(&e1, &backlog));
+        assert!(can_move(&Workflow::standard(), &backlog, &e1));
+        assert!(can_move(&Workflow::standard(), &e1, &backlog));
         assert!(
-            can_move(&e1, &todo),
+            can_move(&Workflow::standard(), &e1, &todo),
             "an epic feeds todo like the backlog does"
         );
         assert!(
-            can_move(&todo, &e1),
+            can_move(&Workflow::standard(), &todo, &e1),
             "and todo can send a ticket back into it"
         );
         assert!(
-            !can_move(&e1, &Place::column(Column::Doing)),
+            !can_move(&Workflow::standard(), &e1, &Place::column(Column::Doing)),
             "no skipping ahead"
         );
-        assert!(!can_move(&e1, &Place::column(Column::Done)));
-        assert!(!can_move(&Place::column(Column::Doing), &e1));
-        assert!(!can_move(&e1, &e2));
-        assert!(can_move(&backlog, &todo) && !can_move(&backlog, &Place::column(Column::Doing)));
+        assert!(!can_move(
+            &Workflow::standard(),
+            &e1,
+            &Place::column(Column::Done)
+        ));
+        assert!(!can_move(
+            &Workflow::standard(),
+            &Place::column(Column::Doing),
+            &e1
+        ));
+        assert!(!can_move(&Workflow::standard(), &e1, &e2));
+        assert!(
+            can_move(&Workflow::standard(), &backlog, &todo)
+                && !can_move(
+                    &Workflow::standard(),
+                    &backlog,
+                    &Place::column(Column::Doing)
+                )
+        );
     }
 
     #[test]
     fn never_between_repositories() {
         let here = Place::column(Column::Backlog).in_repo("amd-tickets");
         let there = Place::column(Column::Todo).in_repo("amd-site");
-        assert!(!can_move(&here, &there));
-        assert!(!can_move(&here, &Place::epic("UI").in_repo("amd-site")));
+        assert!(!can_move(&Workflow::standard(), &here, &there));
+        assert!(!can_move(
+            &Workflow::standard(),
+            &here,
+            &Place::epic("UI").in_repo("amd-site")
+        ));
         assert!(can_move(
+            &Workflow::standard(),
             &here,
             &Place::column(Column::Todo).in_repo("amd-tickets")
         ));
@@ -393,11 +421,11 @@ mod tests {
 
     #[test]
     fn where_a_ticket_is_reads_as_a_path() {
-        assert_eq!(where_it_is(None, Column::Doing, None, false), "Doing");
+        assert_eq!(where_it_is(None, "Doing", None, false), "Doing");
         assert_eq!(
             where_it_is(
                 Some("acme-api"),
-                Column::Backlog,
+                "Backlog",
                 Some(("s12", GroupKind::Sprint, true)),
                 true
             ),
@@ -406,11 +434,62 @@ mod tests {
         assert_eq!(
             where_it_is(
                 Some(""),
-                Column::Done,
+                "Done",
                 Some(("checkout", GroupKind::Epic, false)),
                 false
             ),
             "Done · from epic checkout"
         );
+    }
+
+    /// Ticket 224: a team's board with Triage, Review and Released.
+    #[test]
+    fn drags_follow_a_teams_columns_and_kinds() {
+        use crate::{ColumnInfo, Kind};
+        let col = |folder: &str, kind| Column::new(folder, kind);
+        let (triage, review, released) = (
+            col("triage", Kind::Backlog),
+            col("review", Kind::Doing),
+            col("released", Kind::Done),
+        );
+        let w = Workflow {
+            columns: [
+                triage,
+                Column::Backlog,
+                Column::Todo,
+                Column::Doing,
+                review,
+                Column::Done,
+                released,
+            ]
+            .into_iter()
+            .map(|column| ColumnInfo {
+                column,
+                label: column.dir_name().to_string(),
+                wip: None,
+            })
+            .collect(),
+        };
+        let at = Place::column;
+        assert!(can_move(&w, &at(Column::Doing), &at(review)));
+        assert!(can_move(&w, &at(review), &at(Column::Done)));
+        assert!(!can_move(&w, &at(Column::Doing), &at(Column::Done)));
+        assert!(can_move(&w, &at(triage), &at(Column::Backlog)));
+        // Epic tickets reach the loose backlog and todo, not Triage.
+        let in_epic = Place::epic("e");
+        assert!(can_move(&w, &in_epic, &at(Column::Todo)));
+        assert!(!can_move(&w, &in_epic, &at(triage)));
+        // A draft may go back to Triage (still the backlog), not on.
+        assert!(draft_rule(&at(Column::Backlog), &at(triage), None, true, "001").is_ok());
+        assert!(draft_rule(&at(Column::Backlog), &at(Column::Todo), None, true, "001").is_err());
+        // A started sprint's tickets only move on to a todo-kind column.
+        let started = Some(GroupState {
+            kind: GroupKind::Sprint,
+            started: true,
+        });
+        let sprint = Place::epic("s");
+        assert!(sprint_rule(&sprint, &at(Column::Todo), started, None, true, "001").is_ok());
+        assert!(sprint_rule(&sprint, &at(triage), started, None, true, "001").is_err());
+        assert!(crate::waiting::done_rule(released, &[], "001").is_ok());
     }
 }

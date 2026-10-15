@@ -72,9 +72,10 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                         found.is_some_and(|e| e.started),
                     )
                 });
+                let label = b.map(|b| b.label(column)).unwrap_or_default();
                 amd_ui_model::epic::where_it_is(
                     many.then_some(repo.as_str()),
-                    column,
+                    &label,
                     group.as_ref().map(|(n, k, s)| (n.as_str(), *k, *s)),
                     epic.is_some(),
                 )

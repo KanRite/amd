@@ -592,12 +592,35 @@ redundant. Their history is in git if it is ever wanted again.
   there. `Workflow::parse` reads and checks the written form
   (`Label=folder:kind`, comma separated: every kind present, folders
   plain and unique, not `archive`/`templates`, the four standard folders
-  kept with their kinds), but nothing reads it from settings yet:
-  `Board::workflow()` is the standard four (a test-only thread-local,
-  `TEST_WORKFLOW`, gives a test a team's workflow). Ticket 224 reads it
-  from the tickets `.settings` and lets Admin and `amd column` change it;
-  until then amdui's page keeps its own four-column type
-  (`boards::from_column` maps by kind) and the MCP schemas list the four.
+  kept with their kinds). **A team's own columns** (ticket 224):
+  `Board::workflow()` reads its board's `.settings` `columns` (cached by
+  the file's mtime and length; an unreadable value is the standard four,
+  with `workflow_problem()` saying why); `board_settings::set_columns`
+  leaves no key for the standard four. `crates/amd-lib/src/columns.rs`
+  changes it: `add` (folder from `slugify(label)`, a `.gitkeep`; refuses
+  a name a column, an epic or `abandon` answers to), `rename` (label
+  only), `reorder`, `remove` (never a standard folder; a non-empty one
+  needs `move_to`, tickets `git mv`'d there first, someone else's lease
+  stops it; its `wip-limit-<folder>` and folder go) and `set_wip`; each
+  re-checked by `Workflow::parse` before saving. CLI: `amd column [add|
+  rename|remove|move|wip]` (`cmd_column`, each one commit), `amd move
+  <ref> <column>`, and any column's name as a destination verb (`amd
+  review 12`, with `--force`; any todo-kind column goes through
+  `enter_todo`, `TodoOptions.to`). `amd board` heads a renamed column
+  with its name; `amd log` skips dotfiles (`.gitkeep`). The MCP schemas
+  take any column name. amdui: `amd_ui_model::Column` mirrors amd-lib's
+  (folder + `Kind`, the standard four as constants; on the wire a
+  standard column is its folder and another `"folder:kind"`), and
+  `Board.workflow` (`ColumnInfo {column, label, wip}`) is what the page
+  draws (`BoardView`'s `For`, labels, `is_collapsible` for backlog and
+  done kinds) and what the drag rules take (`epic::can_move(&workflow,
+  …)`, `sprint_rule`/`draft_rule` by kind, `wip::admit` with a column's
+  own limit). `boards::ui_workflow` builds it from the tickets board; a
+  declared repository's ticket in a folder that workflow lacks shows in
+  the first column of its kind. Admin → Columns (`ColumnsAdmin`; commands
+  `add_column`, `rename_column`, `move_column`, `remove_column`,
+  `set_column_wip`, all through `change()`). Flow rules and "reset to
+  standard" are ticket 225.
 - `Board::find(<ref>)` resolves a numeric id or a unique slug substring to one
   task (errors on 0 or >1 matches).
 - `Board::move_task()` uses `git mv` for tracked files (history follows the

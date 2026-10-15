@@ -105,6 +105,12 @@ impl Workflow {
         Ok(Workflow { columns })
     }
 
+    /// Columns as given, unchecked: an edit in progress, checked by
+    /// [`parse`](Self::parse) before it's saved.
+    pub(crate) fn from_defs(columns: Vec<ColumnDef>) -> Workflow {
+        Workflow { columns }
+    }
+
     /// Its written form, the inverse of [`parse`](Self::parse).
     pub fn to_text(&self) -> String {
         self.columns
