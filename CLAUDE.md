@@ -943,6 +943,12 @@ off**, ticket 141) to
   shown, `focus`/`focus_scroll`, its epic or sprint column opened, a
   folded column unfolded), which `open_ticket` now uses before opening
   the editor. Each sprint gap has "Show the tree".
+  **How linked a card is** (ticket 216, `waiting::relationship_count`):
+  the number of other tickets it's linked to in any way (any `links`
+  kind, related, parent and children, clones), from either end, each
+  once. A card with a tree shows it beside the tree icon; one linked
+  otherwise (a parent, a clone, a started sprint's ticket) shows a link
+  icon and the count; one with none shows a small hollow blue dot.
 
 - **One ticket, one template.** There are no ticket types any more: `admin` and
   `development` collapsed into fields you either fill in or don't.

@@ -861,6 +861,18 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
             })
         })
     };
+    // How many tickets it's linked to (ticket 216): beside the tree icon,
+    // or a dot when there are none.
+    let linked = {
+        let me = ticket.clone();
+        Memo::new(move |_| {
+            ctx.board.with(|b| {
+                b.as_ref()
+                    .map(|b| waiting::relationship_count(&me, waiting::all_tickets(b)))
+                    .unwrap_or(0)
+            })
+        })
+    };
     let TicketSummary {
         file,
         column,
@@ -962,32 +974,58 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                     let tree_file = file.clone();
                     move || {
                         let tree_file = tree_file.clone();
-                        family
-                            .get()
-                            .then(|| {
-                                view! {
-                                    <button
-                                        type="button"
-                                        class="shrink-0 self-start rounded px-1 text-slate-500 hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-slate-100"
-                                        title="Show what it requires and relates to"
-                                        aria-label="Show the requires tree"
-                                        on:click=move |ev| {
-                                            ev.stop_propagation();
-                                            ctx.overlay.set(Some(Overlay::Tree {
-                                                place: place.get_value(),
-                                                file: tree_file.clone(),
-                                            }));
-                                        }
-                                    >
-                                        <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-                                            <circle cx="4" cy="3" r="1.6" />
-                                            <circle cx="4" cy="13" r="1.6" />
-                                            <circle cx="12" cy="8" r="1.6" />
-                                            <path d="M4 4.6v6.8M4 8h6.4" />
-                                        </svg>
-                                    </button>
-                                }
-                            })
+                        let count = linked.get();
+                        let noun = if count == 1 { "ticket" } else { "tickets" };
+                        if family.get() {
+                            view! {
+                                <button
+                                    type="button"
+                                    class="flex shrink-0 items-center gap-0.5 self-start rounded px-1 text-xs text-slate-500 hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+                                    title=format!("Linked to {count} {noun}: show what it requires and relates to")
+                                    aria-label=format!("Linked to {count} {noun}: show the requires tree")
+                                    on:click=move |ev| {
+                                        ev.stop_propagation();
+                                        ctx.overlay.set(Some(Overlay::Tree {
+                                            place: place.get_value(),
+                                            file: tree_file.clone(),
+                                        }));
+                                    }
+                                >
+                                    <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                                        <circle cx="4" cy="3" r="1.6" />
+                                        <circle cx="4" cy="13" r="1.6" />
+                                        <circle cx="12" cy="8" r="1.6" />
+                                        <path d="M4 4.6v6.8M4 8h6.4" />
+                                    </svg>
+                                    {count}
+                                </button>
+                            }
+                                .into_any()
+                        } else if count > 0 {
+                            // Linked, but not by requires or related (a parent, a
+                            // clone, supersedes): just the count.
+                            view! {
+                                <span
+                                    class="flex shrink-0 items-center gap-0.5 self-start rounded px-1 text-xs text-slate-500"
+                                    title=format!("Linked to {count} {noun}")
+                                >
+                                    <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                                        <path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11.5l-1 1a2.5 2.5 0 01-3.5-3.5l1-1" />
+                                    </svg>
+                                    {count}
+                                </span>
+                            }
+                                .into_any()
+                        } else {
+                            view! {
+                                <span
+                                    class="mt-1 inline-block h-2 w-2 shrink-0 self-start rounded-full border-2 border-sky-500"
+                                    title="No relationships: it isn't linked to any other ticket"
+                                    aria-label="No relationships"
+                                ></span>
+                            }
+                                .into_any()
+                        }
                     }
                 }
             </div>
