@@ -285,6 +285,20 @@ pub async fn retype_link(
     .await
 }
 
+#[derive(Serialize)]
+struct FamilyArgs<'a> {
+    place: &'a Place,
+    file: &'a str,
+}
+
+/// The requires tree around a ticket (ticket 214).
+pub async fn ticket_family(
+    place: &Place,
+    file: &str,
+) -> Result<Vec<amd_ui_model::tree::TreeNode>, String> {
+    call("ticket_family", &FamilyArgs { place, file }).await
+}
+
 /// Creates a ticket in `repo`'s backlog (the board's own when `None`),
 /// as a draft when `draft` (ticket 114).
 pub async fn create_ticket(

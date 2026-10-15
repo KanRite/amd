@@ -108,6 +108,9 @@ pub fn place(ticket: &TicketSummary) -> String {
 pub struct Gap {
     pub id: String,
     pub file: String,
+    /// Where the sprint's ticket is, to open its tree.
+    pub column: Column,
+    pub epic: Option<String>,
     pub required_id: String,
     pub required_place: String,
 }
@@ -125,6 +128,8 @@ pub fn sprint_gaps(all: &[&TicketSummary], repo: &str, name: &str) -> Vec<Gap> {
             gaps.push(Gap {
                 id: ticket.id.clone(),
                 file: ticket.file.clone(),
+                column: ticket.column,
+                epic: ticket.epic.clone(),
                 required_id: needed.id.clone(),
                 required_place: place(needed),
             });
@@ -132,6 +137,35 @@ pub fn sprint_gaps(all: &[&TicketSummary], repo: &str, name: &str) -> Vec<Gap> {
     }
     gaps.sort_by(|a, b| (&a.id, &a.required_id).cmp(&(&b.id, &b.required_id)));
     gaps
+}
+
+/// Whether a card has a family for the tree (ticket 214): it requires or
+/// relates to another, or another requires or relates to it.
+pub fn has_family<'a>(
+    ticket: &TicketSummary,
+    all: impl IntoIterator<Item = &'a TicketSummary>,
+) -> bool {
+    let tied = |entries: &[String]| {
+        entries
+            .iter()
+            .filter_map(|e| split_link(e))
+            .any(|(kind, _)| matches!(kind, "requires" | "required-by"))
+    };
+    if tied(&ticket.links) || !ticket.related.is_empty() {
+        return true;
+    }
+    let me = number(&ticket.id);
+    me.is_some()
+        && all.into_iter().any(|other| {
+            other.repo == ticket.repo
+                && other.file != ticket.file
+                && (other.related.iter().any(|r| number(r) == me)
+                    || other
+                        .links
+                        .iter()
+                        .filter_map(|e| split_link(e))
+                        .any(|(k, i)| matches!(k, "requires" | "required-by") && number(i) == me))
+        })
 }
 
 #[cfg(test)]
@@ -211,5 +245,22 @@ mod tests {
             ]
         );
         assert!(sprint_gaps(&all, "acme-tickets", "s13").is_empty());
+    }
+
+    #[test]
+    fn a_card_has_a_family_when_it_requires_relates_or_is_required() {
+        let mut a = card("001", Column::Todo);
+        a.links = vec!["requires:002".into()];
+        let b = card("002", Column::Todo); // required by 001: recorded on 001 only here
+        let mut c = card("003", Column::Todo);
+        c.related = vec!["004".into()];
+        let d = card("004", Column::Todo);
+        let mut e = card("005", Column::Todo);
+        e.links = vec!["supersedes:006".into()]; // not a requires or related tie
+        let f = card("006", Column::Todo);
+        let all = [&a, &b, &c, &d, &e, &f];
+        let has = |t: &TicketSummary| has_family(t, all);
+        assert!(has(&a) && has(&b) && has(&c) && has(&d));
+        assert!(!has(&e) && !has(&f));
     }
 }

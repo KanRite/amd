@@ -931,6 +931,18 @@ off**, ticket 141) to
   ticket has no family (empty). render.rs `tree`: `├──── ` solid,
   `├ ─ ─ ` dashed (spaced so related stands out), both six wide; colour
   and links only on a terminal.
+  **amdui's tree:** the `ticket_family` command returns `family`'s nodes;
+  `amd_ui_model::tree::TreeNode` mirrors them (amd-ui's tests check the
+  JSON agrees). A card with a family (`waiting::has_family`: requires,
+  required-by or related, either end), not in a started sprint, gets a
+  tree button opening `Overlay::Tree { place, file }` (`tree.rs`'s
+  `TreePanel`): nested rows, a solid rule for requires and a dashed one
+  drawn as a repeating gradient (4 px dash, 6 px gap) for related, the
+  ticket it was opened from highlighted, waits-on marked, stubs greyed.
+  A click on a node goes to its card with `Ctx::show_card` (the board
+  shown, `focus`/`focus_scroll`, its epic or sprint column opened, a
+  folded column unfolded), which `open_ticket` now uses before opening
+  the editor. Each sprint gap has "Show the tree".
 
 - **One ticket, one template.** There are no ticket types any more: `admin` and
   `development` collapsed into fields you either fill in or don't.

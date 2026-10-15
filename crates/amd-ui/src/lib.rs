@@ -777,6 +777,16 @@ async fn retype_link(
     .await
 }
 
+/// The requires tree around a ticket (ticket 214): its family on its own
+/// board, as `amd tree <ref>` draws it.
+#[tauri::command]
+fn ticket_family(place: Place, file: String) -> Result<Vec<agile_md::requires::TreeNode>> {
+    let project = Project::open()?;
+    let board = project.board(&place.repo)?;
+    let task = task_at(board, &place, &file)?;
+    agile_md::requires::family(board, Some(&task)).map_err(err)
+}
+
 /// Takes a ticket off the board into the archive (`amd abandon`).
 #[tauri::command]
 async fn archive_ticket(
@@ -2144,6 +2154,7 @@ pub fn run() {
             clone_ticket,
             link_ticket,
             retype_link,
+            ticket_family,
             create_epic,
             list_roadmaps,
             create_roadmap,
@@ -2727,6 +2738,37 @@ mod tests {
             .map(|kind| (kind.slug(), kind.label()))
             .collect();
         assert_eq!(lib, amd_ui_model::LINK_KINDS);
+    }
+
+    /// The tree amd-lib builds reads back as the page's own copy (ticket
+    /// 214), field for field.
+    #[test]
+    fn the_pages_tree_is_amd_libs() {
+        use agile_md::requires::{Edge, TreeNode};
+        let node = |id: &str, edge: Edge, children: Vec<TreeNode>| TreeNode {
+            id: id.into(),
+            title: format!("Ticket {id}"),
+            file: format!("{id}-t.md"),
+            column: "backlog".into(),
+            epic: Some("s13".into()),
+            place: "sprint s13".into(),
+            done: false,
+            edge,
+            unmet: vec!["002".into()],
+            stub: Some("s12".into()),
+            seen: true,
+            current: true,
+            children,
+        };
+        let lib = node(
+            "001",
+            Edge::Root,
+            vec![node("002", Edge::Related, Vec::new())],
+        );
+        let json = serde_json::to_value(&lib).unwrap();
+        let page: amd_ui_model::tree::TreeNode = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(page.children[0].edge, amd_ui_model::tree::Edge::Related);
+        assert_eq!(serde_json::to_value(&page).unwrap(), json);
     }
 
     use super::*;

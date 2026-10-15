@@ -37,6 +37,12 @@ pub enum View {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Overlay {
     Editor(TicketDocument),
+    /// The requires tree around a ticket (ticket 214): where its card is,
+    /// and its file.
+    Tree {
+        place: Place,
+        file: String,
+    },
     NewTicket,
     NewEpic,
     NewSprint,
@@ -131,10 +137,23 @@ impl Ctx {
 
     /// Opens a ticket in the editor.
     pub fn open_ticket(self, place: Place, file: String) {
+        self.show_card(&place, &file);
+        spawn_local(async move {
+            match api::open_ticket(&place, &file).await {
+                Ok(doc) => self.overlay.set(Some(Overlay::Editor(doc))),
+                Err(e) => self.error.set(Some(e)),
+            }
+        });
+    }
+
+    /// Goes to a ticket's card without opening it (ticket 214: a node in
+    /// the tree): the board is shown, the card outlined and scrolled to.
+    pub fn show_card(self, place: &Place, file: &str) {
+        self.view.set(View::Board);
         // Where it is on the board (ticket 163): its card is outlined, and
         // one filed in an epic or sprint has that group's column opened.
         // A folded column is unfolded, so the card is there to see.
-        self.focus.set(Some((place.repo.clone(), file.clone())));
+        self.focus.set(Some((place.repo.clone(), file.to_string())));
         self.focus_scroll.set(true);
         if place.column == Column::Backlog
             && let Some(group) = &place.epic
@@ -146,12 +165,6 @@ impl Ctx {
                 c.remove(&place.column);
             });
         }
-        spawn_local(async move {
-            match api::open_ticket(&place, &file).await {
-                Ok(doc) => self.overlay.set(Some(Overlay::Editor(doc))),
-                Err(e) => self.error.set(Some(e)),
-            }
-        });
     }
 
     /// The cards to show from a list: those matching the search, in the
@@ -460,6 +473,9 @@ pub fn App() -> impl IntoView {
                 Some(Overlay::Admin) => view! { <AdminPanel /> }.into_any(),
                 Some(Overlay::Preferences) => view! { <PreferencesPanel /> }.into_any(),
                 Some(Overlay::CloneRepo(name)) => view! { <CloneRepoDialog name /> }.into_any(),
+                Some(Overlay::Tree { place, file }) => {
+                    view! { <crate::tree::TreePanel place file /> }.into_any()
+                }
                 Some(Overlay::OverLimit { file, from, to, reason }) => {
                     view! { <OverLimitDialog file from to reason /> }.into_any()
                 }

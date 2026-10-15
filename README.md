@@ -226,6 +226,11 @@ waited on; `amd tree` draws every family on the board:
 Tickets in a sprint that has started aren't expanded: a link to one shows
 it as "in started sprint s12".
 
+On the desktop board, a card that requires or relates to others has a small
+tree button that opens the same tree, with that ticket highlighted; click
+any ticket in it to go to its card. A sprint that can't start lists what's
+missing, each with "Show the tree".
+
 ```markdown
 related: [001,002]
 ```
