@@ -780,13 +780,18 @@ async fn retype_link(
 }
 
 /// The requires tree around a ticket (ticket 214): its family on its own
-/// board, as `amd tree <ref>` draws it.
+/// board, as `amd tree <ref>` draws it; done tickets only with
+/// `include_done` (ticket 217).
 #[tauri::command]
-fn ticket_family(place: Place, file: String) -> Result<Vec<agile_md::requires::TreeNode>> {
+fn ticket_family(
+    place: Place,
+    file: String,
+    include_done: bool,
+) -> Result<Vec<agile_md::requires::TreeNode>> {
     let project = Project::open()?;
     let board = project.board(&place.repo)?;
     let task = task_at(board, &place, &file)?;
-    agile_md::requires::family(board, Some(&task)).map_err(err)
+    agile_md::requires::family(board, Some(&task), include_done).map_err(err)
 }
 
 /// Takes a ticket off the board into the archive (`amd abandon`).

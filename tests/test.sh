@@ -1296,12 +1296,20 @@ tr="$(mktemp -d)"
   && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 2 3 --type requires >/dev/null \
   && "${AMD}" link 1 4 >/dev/null \
   && for c in todo doing "done"; do AMD_NO_BRANCH=1 "${AMD}" "$c" 3 >/dev/null; done )
-assert "amd tree draws requires solid and related dashed, with where each is and what waits" \
-  bash -c "cd '${tr}' && [ \"\$('${AMD}' tree 4)\" = \"\$(printf '%s\\n' \\
+assert "amd tree --done draws requires solid and related dashed, with where each is and what waits" \
+  bash -c "cd '${tr}' && [ \"\$('${AMD}' tree 4 --done)\" = \"\$(printf '%s\\n' \\
     '001 Alpha · backlog  waits on 002' \\
     '├──── 002 Beta · backlog' \\
     '│     └──── 003 Gamma · done ✓' \\
     '└ ─ ─ 004 Delta · backlog  ◀')\" ]"
+assert "amd tree leaves done tickets out without --done" \
+  bash -c "cd '${tr}' && [ \"\$('${AMD}' tree 4)\" = \"\$(printf '%s\\n' \\
+    '001 Alpha · backlog  waits on 002' \\
+    '├──── 002 Beta · backlog' \\
+    '└ ─ ─ 004 Delta · backlog  ◀')\" ]"
+assert "amd tree of a ticket linked only to done ones says they're done" \
+  bash -c "cd '${tr}' && '${AMD}' new Epsilon >/dev/null && '${AMD}' link 5 3 >/dev/null \
+    && '${AMD}' tree 5 | grep -qx 'Everything 005 is linked to is done (amd tree 005 --done shows it)'"
 rm -rf "${tr}"
 
 echo "auto priority (ticket 215):"

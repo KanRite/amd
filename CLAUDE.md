@@ -928,7 +928,12 @@ off**, ticket 141) to
   drawn once, under whichever end comes first. Tickets in a started
   sprint (`!accepts_changes()`) are stubs, not expanded and not walked
   through; asking for one is refused. Parent/child aren't drawn. A lone
-  ticket has no family (empty). render.rs `tree`: `├──── ` solid,
+  ticket has no family (empty). Done tickets are left out unless
+  `include_done` (ticket 217, `Facts::hide_done`: their links dropped, so
+  a family held together only by a done ticket comes apart), except the
+  ticket asked about; `amd tree --done`, and the panel's "Include done"
+  checkbox (off each time it opens). An empty answer only because of
+  done tickets says so. render.rs `tree`: `├──── ` solid,
   `├ ─ ─ ` dashed (spaced so related stands out), both six wide; colour
   and links only on a terminal.
   **amdui's tree:** the `ticket_family` command returns `family`'s nodes;
