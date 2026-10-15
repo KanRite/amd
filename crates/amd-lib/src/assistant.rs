@@ -176,7 +176,7 @@ pub fn tools() -> Vec<Tool> {
         Tool {
             name: "move_ticket",
             title: "Move a ticket",
-            description: "Move a ticket one column along (by default backlog, todo, doing, done; a project can have its own, which `board` lists) and commit it. Entering a doing column takes the user's lock on it; leaving gives it back. Refused when a doing column is at its WIP limit unless `force`, and refused into done while tickets it requires or its children aren't done (no override: finish them, or change or remove the link). Doesn't switch git branches.",
+            description: "Move a ticket one column along (by default backlog, todo, doing, done; a project can have its own columns and allow other moves, which `board` lists) and commit it. Entering a doing column takes the user's lock on it; leaving gives it back. Refused when a doing column is at its WIP limit unless `force`, and refused into done while tickets it requires or its children aren't done (no override: finish them, or change or remove the link). Doesn't switch git branches.",
             read_only: false,
             input: json!({"type": "object", "properties": {
                 "ticket": reference,
@@ -562,6 +562,28 @@ fn board_tool(args: &Value) -> Result<Reply> {
             continue;
         }
         text.push_str(&format!("\n\n## {name}"));
+        // The team's flow (ticket 225), so a move is asked for only where
+        // it's allowed.
+        let workflow = board.workflow();
+        let flow = match workflow.flow() {
+            crate::workflow::Flow::Any => "any column to any other".to_string(),
+            crate::workflow::Flow::Next if workflow.moves().is_empty() => {
+                "one column at a time".to_string()
+            }
+            crate::workflow::Flow::Next => format!(
+                "one column at a time, plus {}",
+                workflow
+                    .moves()
+                    .iter()
+                    .map(|(f, t)| format!("{} → {}", workflow.label(*f), workflow.label(*t)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        };
+        text.push_str(&format!(
+            "\nMoves: {flow}. New tickets land in {}.",
+            workflow.label(workflow.landing())
+        ));
         let settings = board_settings::load(board);
         let mut columns = Vec::new();
         for column in board.workflow().columns() {

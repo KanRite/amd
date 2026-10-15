@@ -68,7 +68,7 @@ pub fn can_move(workflow: &Workflow, from: &Place, to: &Place) -> bool {
         c == Column::Backlog || (c.is(Kind::Todo) && workflow.next_to(Column::Backlog, c))
     };
     match (&from.epic, &to.epic) {
-        (None, None) => workflow.next_to(from.column, to.column),
+        (None, None) => workflow.allows(from.column, to.column),
         (None, Some(_)) => backlog_level(from.column),
         (Some(_), None) => backlog_level(to.column),
         (Some(_), Some(_)) => false,
@@ -469,6 +469,7 @@ mod tests {
                 wip: None,
             })
             .collect(),
+            ..Workflow::standard()
         };
         let at = Place::column;
         assert!(can_move(&w, &at(Column::Doing), &at(review)));
@@ -491,5 +492,13 @@ mod tests {
         assert!(sprint_rule(&sprint, &at(Column::Todo), started, None, true, "001").is_ok());
         assert!(sprint_rule(&sprint, &at(triage), started, None, true, "001").is_err());
         assert!(crate::waiting::done_rule(released, &[], "001").is_ok());
+        // Ticket 225: an extra move, then any.
+        let mut w = w;
+        assert!(!can_move(&w, &at(triage), &at(Column::Todo)));
+        w.moves.push((triage, Column::Todo));
+        assert!(can_move(&w, &at(triage), &at(Column::Todo)));
+        assert!(!can_move(&w, &at(Column::Todo), &at(triage)));
+        w.any = true;
+        assert!(can_move(&w, &at(Column::Backlog), &at(released)));
     }
 }

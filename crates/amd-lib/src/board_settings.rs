@@ -91,6 +91,12 @@ const WIP_LIMIT: &str = "wip-limit";
 /// The project's own columns (ticket 224), as `Workflow::parse` reads
 /// them; absent means the standard four.
 const COLUMNS: &str = "columns";
+/// Which moves the board allows (ticket 225): `next` (default) or `any`.
+const FLOW: &str = "flow";
+/// Extra one-way moves under `next`: `triage>todo, review>doing`.
+const MOVES: &str = "moves";
+/// The backlog column new tickets land in (ticket 225).
+const NEW_TICKETS: &str = "new-tickets";
 /// Doing's WIP limit when nobody has set one.
 pub const DEFAULT_WIP_LIMIT: u32 = 2;
 const REPOS: &str = "repos";
@@ -745,6 +751,64 @@ impl BoardSettings {
             self.config.remove(COLUMNS);
         } else {
             self.config.set(COLUMNS, &workflow.to_text());
+        }
+    }
+
+    /// The flow, extra moves and landing column as written (ticket 225).
+    pub fn flow(&self) -> Option<&str> {
+        self.config.get(FLOW).filter(|v| !v.trim().is_empty())
+    }
+
+    pub fn moves(&self) -> Option<&str> {
+        self.config.get(MOVES).filter(|v| !v.trim().is_empty())
+    }
+
+    pub fn new_tickets(&self) -> Option<&str> {
+        self.config
+            .get(NEW_TICKETS)
+            .filter(|v| !v.trim().is_empty())
+    }
+
+    /// Records the flow; `next`, the default, leaves no key.
+    pub fn set_flow(&mut self, flow: crate::workflow::Flow) {
+        match flow {
+            crate::workflow::Flow::Next => {
+                self.config.remove(FLOW);
+            }
+            other => self.config.set(FLOW, other.as_str()),
+        }
+    }
+
+    /// Records the extra moves; none leaves no key.
+    pub fn set_moves(&mut self, moves: &[(Column, Column)]) {
+        if moves.is_empty() {
+            self.config.remove(MOVES);
+        } else {
+            self.config
+                .set(MOVES, &crate::workflow::Workflow::moves_text(moves));
+        }
+    }
+
+    /// Records where new tickets land; the standard backlog leaves no key.
+    pub fn set_new_tickets(&mut self, column: Column) {
+        if column == Column::Backlog {
+            self.config.remove(NEW_TICKETS);
+        } else {
+            self.config.set(NEW_TICKETS, column.as_str());
+        }
+    }
+
+    /// Forgets every column's own WIP limit (`wip-limit-<folder>`), as a
+    /// reset to the standard board does; `wip-limit` itself stays.
+    pub fn clear_column_wips(&mut self) {
+        let keys: Vec<String> = self
+            .config
+            .keys()
+            .filter(|k| k.starts_with(&format!("{WIP_LIMIT}-")))
+            .map(str::to_string)
+            .collect();
+        for key in keys {
+            self.config.remove(&key);
         }
     }
 

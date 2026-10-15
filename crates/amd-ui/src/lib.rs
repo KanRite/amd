@@ -968,6 +968,76 @@ async fn set_column_wip(
     .await
 }
 
+/// Any column to any other, or the next column plus the extra moves
+/// (ticket 225).
+#[tauri::command]
+async fn set_flow(state: Tauri<'_, AppState>, any: bool) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let flow = if any {
+            agile_md::workflow::Flow::Any
+        } else {
+            agile_md::workflow::Flow::Next
+        };
+        committed(board, "column", "flow", flow.as_str(), || {
+            agile_md::columns::set_flow(board, flow)
+        })
+    })
+    .await
+}
+
+/// Allows an extra one-way move, or stops allowing it.
+#[tauri::command]
+async fn allow_move(
+    state: Tauri<'_, AppState>,
+    from: amd_ui_model::Column,
+    to: amd_ui_model::Column,
+    on: bool,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let (f, t) = (boards::to_column(from), boards::to_column(to));
+        let what = format!("{}>{}", f.as_str(), t.as_str());
+        committed(
+            board,
+            "column",
+            if on { "allow" } else { "disallow" },
+            &what,
+            || agile_md::columns::allow_move(board, f, t, on),
+        )
+    })
+    .await
+}
+
+/// Where new tickets land: a backlog-kind column.
+#[tauri::command]
+async fn set_landing(
+    state: Tauri<'_, AppState>,
+    column: amd_ui_model::Column,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let col = boards::to_column(column);
+        let label = board.workflow().label(col);
+        committed(board, "column", "landing", &label, || {
+            agile_md::columns::set_landing(board, col)
+        })
+    })
+    .await
+}
+
+/// Back to the standard four columns, tickets moved by kind.
+#[tauri::command]
+async fn reset_columns(state: Tauri<'_, AppState>) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        committed(board, "column", "reset", "standard", || {
+            agile_md::columns::reset(board).map(|_| ())
+        })
+    })
+    .await
+}
+
 /// Adds a tag to the project's list, in UPPERCASE (ticket 122).
 #[tauri::command]
 async fn add_tag(state: Tauri<'_, AppState>, tag: String) -> Result<SyncReport> {
@@ -2308,6 +2378,10 @@ pub fn run() {
             move_column,
             remove_column,
             set_column_wip,
+            set_flow,
+            allow_move,
+            set_landing,
+            reset_columns,
             create_epic,
             list_roadmaps,
             create_roadmap,

@@ -53,6 +53,14 @@ Examples:
   amd column wip review 3
   amd column remove review --move-to doing
   amd review 12            move ticket 12 into Review (or: amd move 12 review)
+  amd column allow triage todo    an extra one-way move, beside the next column
+  amd column flow any             any column to any other
+  amd column landing triage       new tickets arrive in Triage
+  amd column reset                back to the standard four
+
+Whatever the flow, a draft stays in the backlog, a started sprint's tickets
+only move on to todo, done waits for what a ticket requires, and WIP limits
+and locks apply.
 
 Teammates need amd 4.1 or later to see tickets in an added column.";
 
@@ -2382,6 +2390,37 @@ enum ColumnAction {
         #[arg(value_name = "N|off")]
         limit: String,
     },
+    /// Which moves are allowed: `next` (the next column either way, plus
+    /// any moves allowed with `amd column allow`; the default) or `any`
+    /// (any column to any other). Shows it with no value
+    Flow {
+        #[arg(value_name = "next|any")]
+        flow: Option<String>,
+    },
+    /// Allow an extra one-way move under the `next` flow, e.g. `amd column
+    /// allow triage todo`
+    Allow {
+        #[arg(value_name = "FROM")]
+        from: String,
+        #[arg(value_name = "TO")]
+        to: String,
+    },
+    /// Stop allowing an extra move
+    Disallow {
+        #[arg(value_name = "FROM")]
+        from: String,
+        #[arg(value_name = "TO")]
+        to: String,
+    },
+    /// Where new tickets land: a backlog column (Backlog unless changed)
+    Landing {
+        #[arg(value_name = "COLUMN")]
+        column: String,
+    },
+    /// Back to the standard four: tickets in added columns move to the
+    /// standard column of the same kind, and the names, flow, extra moves,
+    /// landing column and column WIP limits go back to standard
+    Reset,
 }
 
 /// `name`'s column on `board`, or an error listing the columns there are.
@@ -2434,9 +2473,82 @@ fn cmd_column(board: &Board, action: Option<ColumnAction>) -> Result<()> {
                     def.column.kind().as_str()
                 );
             }
+            let workflow = board.workflow();
+            let label = |c: Column| workflow.label(c);
+            match workflow.flow() {
+                agile_md::workflow::Flow::Any => println!("flow: any (any column to any other)"),
+                agile_md::workflow::Flow::Next => {
+                    let extra: Vec<String> = workflow
+                        .moves()
+                        .iter()
+                        .map(|(f, t)| format!("{} → {}", label(*f), label(*t)))
+                        .collect();
+                    if extra.is_empty() {
+                        println!("flow: next (one column at a time)");
+                    } else {
+                        println!("flow: next, plus {}", extra.join(", "));
+                    }
+                }
+            }
+            println!("new tickets land in: {}", label(workflow.landing()));
             if let Some(problem) = board.workflow_problem() {
                 eprintln!("amd: {problem}");
             }
+            Ok(())
+        }
+        Some(ColumnAction::Flow { flow: None }) => {
+            println!("{}", board.workflow().flow().as_str());
+            Ok(())
+        }
+        Some(ColumnAction::Flow { flow: Some(flow) }) => {
+            let flow = agile_md::workflow::Flow::parse(&flow)
+                .with_context(|| format!("'{flow}' isn't a flow: next or any"))?;
+            with_auto_commit(board, "column", "flow", flow.as_str(), || {
+                columns::set_flow(board, flow)
+            })?;
+            println!("flow: {}", flow.as_str());
+            Ok(())
+        }
+        Some(ColumnAction::Allow { from, to }) => {
+            let (f, t) = (find_column(board, &from)?, find_column(board, &to)?);
+            let what = format!("{}>{}", f.as_str(), t.as_str());
+            with_auto_commit(board, "column", "allow", &what, || {
+                columns::allow_move(board, f, t, true)
+            })?;
+            let w = board.workflow();
+            println!("allowed {} → {}", w.label(f), w.label(t));
+            if w.flow() == agile_md::workflow::Flow::Any {
+                eprintln!("amd: the flow is any, so every move is allowed anyway");
+            }
+            Ok(())
+        }
+        Some(ColumnAction::Disallow { from, to }) => {
+            let (f, t) = (find_column(board, &from)?, find_column(board, &to)?);
+            let what = format!("{}>{}", f.as_str(), t.as_str());
+            with_auto_commit(board, "column", "disallow", &what, || {
+                columns::allow_move(board, f, t, false)
+            })?;
+            let w = board.workflow();
+            println!("no longer allowed: {} → {}", w.label(f), w.label(t));
+            Ok(())
+        }
+        Some(ColumnAction::Landing { column }) => {
+            let col = find_column(board, &column)?;
+            let label = board.workflow().label(col);
+            with_auto_commit(board, "column", "landing", &label, || {
+                columns::set_landing(board, col)
+            })?;
+            println!("new tickets land in {label}");
+            Ok(())
+        }
+        Some(ColumnAction::Reset) => {
+            let moved = with_auto_commit(board, "column", "reset", "standard", || {
+                columns::reset(board)
+            })?;
+            for (file, to) in &moved {
+                println!("moved {file} -> {to}/");
+            }
+            println!("columns back to Backlog | To do | Doing | Done");
             Ok(())
         }
         Some(ColumnAction::Add {
@@ -2892,6 +3004,9 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::Tag { .. }
         | Cmd::Tags { action: None }
         | Cmd::Column { action: None }
+        | Cmd::Column {
+            action: Some(ColumnAction::Flow { flow: None }),
+        }
         | Cmd::Show { .. }
         | Cmd::Tree { .. }
         | Cmd::Log
@@ -3132,6 +3247,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
             clone_of: None,
             tags,
             extra,
+            land_in: None,
         },
     )?;
 
@@ -3182,7 +3298,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     for id in &created.linked {
         println!("{id} now links to {}", created.task.id_display());
     }
-    println!("created {}/{name}{note}", Column::Backlog);
+    println!("created {}/{name}{note}", created.task.column);
     if let Some(warning) = created
         .task
         .assignee()

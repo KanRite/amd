@@ -497,6 +497,47 @@ pub async fn set_column_wip(
 }
 
 #[derive(Serialize)]
+struct FlowArgs {
+    any: bool,
+}
+
+/// Any column to any other, or the next column plus the extra moves.
+pub async fn set_flow(any: bool) -> Result<SyncReport, String> {
+    call("set_flow", &FlowArgs { any }).await
+}
+
+#[derive(Serialize)]
+struct AllowMoveArgs {
+    from: amd_ui_model::Column,
+    to: amd_ui_model::Column,
+    on: bool,
+}
+
+/// Allows an extra one-way move, or stops allowing it.
+pub async fn allow_move(
+    from: amd_ui_model::Column,
+    to: amd_ui_model::Column,
+    on: bool,
+) -> Result<SyncReport, String> {
+    call("allow_move", &AllowMoveArgs { from, to, on }).await
+}
+
+#[derive(Serialize)]
+struct LandingArgs {
+    column: amd_ui_model::Column,
+}
+
+/// Where new tickets land.
+pub async fn set_landing(column: amd_ui_model::Column) -> Result<SyncReport, String> {
+    call("set_landing", &LandingArgs { column }).await
+}
+
+/// Back to the standard four columns.
+pub async fn reset_columns() -> Result<SyncReport, String> {
+    call("reset_columns", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
 struct TagArgs<'a> {
     tag: &'a str,
 }

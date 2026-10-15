@@ -619,8 +619,29 @@ redundant. Their history is in git if it is ever wanted again.
   declared repository's ticket in a folder that workflow lacks shows in
   the first column of its kind. Admin → Columns (`ColumnsAdmin`; commands
   `add_column`, `rename_column`, `move_column`, `remove_column`,
-  `set_column_wip`, all through `change()`). Flow rules and "reset to
-  standard" are ticket 225.
+  `set_column_wip`, all through `change()`). **Flow, landing and reset**
+  (ticket 225): `flow = next|any` (`workflow::Flow`; `next`, the
+  default, is the next column plus `moves = triage>todo, …`, extra
+  one-way moves) and `new-tickets = <backlog-kind folder>` in the tickets
+  `.settings`, applied by `Workflow::configure` in `Board::read_workflow`
+  (a bad value falls back, reported by `workflow_problem`).
+  `Workflow::allows` replaces `next_to` in `Board::move_task`; every other
+  rule (drafts, started sprints, done waits, WIP, leases, the branch on a
+  todo kind) still applies. New tickets land in `workflow.landing()`
+  (`NewTicket.land_in`, `Draft.column`); one given an epic lands in the
+  standard backlog (`create_ticket`). `columns::{set_flow, allow_move,
+  set_landing, reset}`: `reset` moves each ticket in an added column to
+  the standard column of its kind (`git mv`, lease checked first), then
+  clears `columns`, `flow`, `moves`, `new-tickets` and every
+  `wip-limit-<folder>`; `remove` drops moves naming the column and a
+  landing there. CLI `amd column flow|allow|disallow|landing|reset`.
+  amdui: `ui::Workflow {any, moves, landing}` and `allows`, which
+  `epic::can_move` uses; each `RepoInfo` carries its own board's
+  workflow and drags follow the ticket's own (`Board::workflow_of`), as
+  amd-lib does, since a declared repository's board reads its own
+  `.settings`. Admin → Columns: Moves select, extra moves (× and Allow),
+  New tickets land in, Reset to standard (with a confirm). The MCP
+  `board` says the flow and landing column.
 - `Board::find(<ref>)` resolves a numeric id or a unique slug substring to one
   task (errors on 0 or >1 matches).
 - `Board::move_task()` uses `git mv` for tracked files (history follows the

@@ -565,6 +565,166 @@ fn ColumnsAdmin() -> impl IntoView {
                     "Add column"
                 </button>
             </div>
+            // Flow rules, landing column and reset (ticket 225).
+            {move || {
+                let workflow = ctx.board.with(|b| b.as_ref().map(|b| b.workflow.clone()))?;
+                let any = workflow.any;
+                let label = {
+                    let workflow = workflow.clone();
+                    move |c: Column| workflow.label(c)
+                };
+                let backlogs: Vec<(String, String)> = workflow
+                    .columns
+                    .iter()
+                    .filter(|i| i.column.is(Kind::Backlog))
+                    .map(|i| (i.column.dir_name().to_string(), i.label.clone()))
+                    .collect();
+                let all: Vec<(String, String)> = workflow
+                    .columns
+                    .iter()
+                    .map(|i| (i.column.dir_name().to_string(), i.label.clone()))
+                    .collect();
+                let landing = workflow.landing.dir_name().to_string();
+                let move_from = RwSignal::new(String::new());
+                let move_to = RwSignal::new(String::new());
+                let standard = workflow.columns.len() == 4
+                    && workflow.columns.iter().all(|i| Column::STANDARD.contains(&i.column))
+                    && !any
+                    && workflow.moves.is_empty()
+                    && workflow.landing == Column::Backlog;
+                let moving: usize = rows.with(|r| {
+                    r.iter()
+                        .filter(|(i, _)| !Column::STANDARD.contains(&i.column))
+                        .map(|(_, held)| held)
+                        .sum()
+                });
+                let confirming = RwSignal::new(false);
+                Some(view! {
+                    <div class="flex flex-col gap-2 border-t border-slate-200 pt-2 dark:border-slate-700">
+                        <label class="flex items-center gap-2 text-sm">
+                            "Moves"
+                            <select
+                                class=format!("{field} appearance-none")
+                                aria-label="Which moves are allowed"
+                                prop:value=if any { "any" } else { "next" }
+                                on:change=move |ev| {
+                                    let any = event_target_value(&ev) == "any";
+                                    run(Box::pin(async move { api::set_flow(any).await }), "Flow saved.");
+                                }
+                            >
+                                <option value="next">"Next column only, plus the moves below"</option>
+                                <option value="any">"Any column to any column"</option>
+                            </select>
+                        </label>
+                        {(!any)
+                            .then(|| {
+                                let label = label.clone();
+                                let all = all.clone();
+                                view! {
+                                    <ul class="flex flex-wrap gap-2">
+                                        {workflow
+                                            .moves
+                                            .iter()
+                                            .map(|(from, to)| {
+                                                let (from, to) = (*from, *to);
+                                                view! {
+                                                    <li class="flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+                                                        {format!("{} → {}", label(from), label(to))}
+                                                        <button
+                                                            class="text-slate-500 hover:text-red-600"
+                                                            aria-label=format!("Stop allowing {} to {}", label(from), label(to))
+                                                            disabled=move || busy.get()
+                                                            on:click=move |_| {
+                                                                run(Box::pin(async move { api::allow_move(from, to, false).await }), "Move no longer allowed.");
+                                                            }
+                                                        >
+                                                            "×"
+                                                        </button>
+                                                    </li>
+                                                }
+                                            })
+                                            .collect_view()}
+                                    </ul>
+                                    <div class="flex flex-wrap items-center gap-2 text-sm">
+                                        "Also allow"
+                                        <select class=format!("{field} appearance-none") aria-label="Move from" on:change=move |ev| move_from.set(event_target_value(&ev))>
+                                            <option value="">"from…"</option>
+                                            {all.iter().map(|(f, n)| view! { <option value=f.clone()>{n.clone()}</option> }).collect_view()}
+                                        </select>
+                                        "→"
+                                        <select class=format!("{field} appearance-none") aria-label="Move to" on:change=move |ev| move_to.set(event_target_value(&ev))>
+                                            <option value="">"to…"</option>
+                                            {all.iter().map(|(f, n)| view! { <option value=f.clone()>{n.clone()}</option> }).collect_view()}
+                                        </select>
+                                        <button
+                                            class=small
+                                            disabled=move || busy.get() || move_from.with(String::is_empty) || move_to.with(String::is_empty)
+                                            on:click=move |_| {
+                                                let (Some(f), Some(t)) = (column_named(&move_from.get_untracked()), column_named(&move_to.get_untracked())) else {
+                                                    return;
+                                                };
+                                                run(Box::pin(async move { api::allow_move(f, t, true).await }), "Move allowed.");
+                                            }
+                                        >
+                                            "Allow"
+                                        </button>
+                                    </div>
+                                }
+                            })}
+                        <label class="flex items-center gap-2 text-sm">
+                            "New tickets land in"
+                            <select
+                                class=format!("{field} appearance-none")
+                                aria-label="Where new tickets land"
+                                prop:value=landing
+                                on:change=move |ev| {
+                                    if let Some(c) = column_named(&event_target_value(&ev)) {
+                                        run(Box::pin(async move { api::set_landing(c).await }), "Landing column saved.");
+                                    }
+                                }
+                            >
+                                {backlogs.into_iter().map(|(f, n)| view! { <option value=f>{n}</option> }).collect_view()}
+                            </select>
+                        </label>
+                        {(!standard)
+                            .then(|| {
+                                view! {
+                                    <div class="flex flex-wrap items-center gap-2 text-sm">
+                                        <Show
+                                            when=move || confirming.get()
+                                            fallback=move || {
+                                                view! {
+                                                    <button class=small disabled=move || busy.get() on:click=move |_| confirming.set(true)>
+                                                        "Reset to standard"
+                                                    </button>
+                                                }
+                                            }
+                                        >
+                                            <span>
+                                                {format!(
+                                                    "Back to Backlog, To do, Doing and Done? {moving} ticket(s) in added columns move to the standard column of the same kind.",
+                                                )}
+                                            </span>
+                                            <button
+                                                class=format!("{small} text-red-700 dark:text-red-300")
+                                                disabled=move || busy.get()
+                                                on:click=move |_| {
+                                                    confirming.set(false);
+                                                    run(Box::pin(async move { api::reset_columns().await }), "Columns reset to standard.");
+                                                }
+                                            >
+                                                "Reset"
+                                            </button>
+                                            <button class=small on:click=move |_| confirming.set(false)>
+                                                "Cancel"
+                                            </button>
+                                        </Show>
+                                    </div>
+                                }
+                            })}
+                    </div>
+                })
+            }}
             {move || note.get().map(|n| view! { <p class="text-xs">{n}</p> })}
         </section>
     }

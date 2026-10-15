@@ -177,6 +177,16 @@ pub struct ColumnInfo {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Workflow {
     pub columns: Vec<ColumnInfo>,
+    /// Any column to any other (ticket 225); else the next column, plus
+    /// `moves`.
+    #[serde(default)]
+    pub any: bool,
+    /// Extra one-way moves the team allows.
+    #[serde(default)]
+    pub moves: Vec<(Column, Column)>,
+    /// Where new tickets land.
+    #[serde(default)]
+    pub landing: Column,
 }
 
 impl Default for Workflow {
@@ -196,7 +206,19 @@ impl Workflow {
                     wip: None,
                 })
                 .collect(),
+            any: false,
+            moves: Vec::new(),
+            landing: Column::Backlog,
         }
+    }
+
+    /// Whether a ticket may move straight from `from` to `to` (ticket 225),
+    /// as amd-lib's `Workflow::allows`.
+    pub fn allows(&self, from: Column, to: Column) -> bool {
+        if from == to || self.position(from).is_none() || self.position(to).is_none() {
+            return false;
+        }
+        self.any || self.next_to(from, to) || self.moves.contains(&(from, to))
     }
 
     pub fn columns(&self) -> impl Iterator<Item = Column> + '_ {
@@ -536,6 +558,15 @@ pub struct BoardColumn {
 }
 
 impl Board {
+    /// The workflow `repo`'s tickets move by: that board's own, else the
+    /// one drawn.
+    pub fn workflow_of(&self, repo: &str) -> &Workflow {
+        self.repos
+            .iter()
+            .find(|r| r.name == repo && r.available)
+            .map_or(&self.workflow, |r| &r.workflow)
+    }
+
     /// What `column` is called on this board.
     pub fn label(&self, column: Column) -> String {
         self.workflow.label(column)
@@ -751,6 +782,10 @@ pub struct RepoInfo {
     /// How long a lock lasts on its board, in hours.
     #[serde(default = "default_lease_hours")]
     pub lease_hours: u32,
+    /// Its board's own workflow, which its tickets' moves follow (ticket
+    /// 225): each board reads its own `.settings`, as amd does.
+    #[serde(default)]
+    pub workflow: Workflow,
 }
 
 /// How long a lock lasts unless a board says otherwise: a working day.
@@ -1309,6 +1344,11 @@ mod tests {
                 wip: Some(1),
             },
         );
+        assert!(!team.allows(review, Column::Doing) || team.next_to(review, Column::Doing));
+        team.moves.push((Column::Done, review));
+        assert!(team.allows(Column::Done, review) && !team.allows(review, review));
+        team.any = true;
+        assert!(team.allows(Column::Backlog, Column::Done));
         assert!(team.next_to(Column::Doing, review) && team.next_to(review, Column::Done));
         assert!(!team.next_to(Column::Doing, Column::Done));
         assert_eq!(team.wip(review), Some(1));

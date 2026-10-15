@@ -22,9 +22,42 @@ pub struct ColumnDef {
     pub label: String,
 }
 
+/// Which moves the board allows (ticket 225), on top of every other rule
+/// (drafts, started sprints, done waits, WIP limits, leases).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Flow {
+    /// The next column either way, plus the extra moves the team lists.
+    #[default]
+    Next,
+    /// Any column to any other.
+    Any,
+}
+
+impl Flow {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Flow::Next => "next",
+            Flow::Any => "any",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Flow> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "next" => Some(Flow::Next),
+            "any" => Some(Flow::Any),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Workflow {
     columns: Vec<ColumnDef>,
+    flow: Flow,
+    /// Extra one-way moves allowed under [`Flow::Next`].
+    moves: Vec<(Column, Column)>,
+    /// Where new tickets land, when not the standard backlog.
+    landing: Option<Column>,
 }
 
 /// Folders a column can't use: they're the board's own.
@@ -41,6 +74,9 @@ impl Workflow {
                     column,
                 })
                 .collect(),
+            flow: Flow::Next,
+            moves: Vec::new(),
+            landing: None,
         }
     }
 
@@ -102,13 +138,82 @@ impl Workflow {
                 ),
             }
         }
-        Ok(Workflow { columns })
+        Ok(Workflow::from_defs(columns))
+    }
+
+    /// The same columns with the team's flow (ticket 225): `flow`, extra
+    /// `moves` as written (`triage>todo, review>doing`, by folder or
+    /// name) and the column new tickets land in, each checked against the
+    /// columns.
+    pub fn configure(mut self, flow: Flow, moves: &str, landing: Option<&str>) -> Result<Workflow> {
+        self.flow = flow;
+        self.moves = Vec::new();
+        for entry in moves.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+            let Some((from, to)) = entry.split_once('>') else {
+                bail!("move {entry:?} needs a from and a to: from>to");
+            };
+            let (Some(from), Some(to)) = (self.find(from), self.find(to)) else {
+                bail!("move {entry:?} names a column this board doesn't have");
+            };
+            if from == to {
+                bail!("move {entry:?} goes nowhere");
+            }
+            if !self.moves.contains(&(from, to)) {
+                self.moves.push((from, to));
+            }
+        }
+        self.landing = match landing.map(str::trim).filter(|l| !l.is_empty()) {
+            None => None,
+            Some(name) => match self.find(name) {
+                Some(column) if column.is(Kind::Backlog) => Some(column),
+                Some(_) => bail!("new tickets can only land in a backlog column, not {name:?}"),
+                None => bail!("new tickets can't land in {name:?}: there's no such column"),
+            },
+        };
+        Ok(self)
+    }
+
+    /// Which moves the board allows.
+    pub fn flow(&self) -> Flow {
+        self.flow
+    }
+
+    /// The extra one-way moves the team allows under [`Flow::Next`].
+    pub fn moves(&self) -> &[(Column, Column)] {
+        &self.moves
+    }
+
+    /// The extra moves as written (`triage>todo, review>doing`).
+    pub fn moves_text(moves: &[(Column, Column)]) -> String {
+        moves
+            .iter()
+            .map(|(from, to)| format!("{}>{}", from.as_str(), to.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Whether a ticket may move straight from `from` to `to` (ticket
+    /// 225): the next column, or an extra move, or anywhere under
+    /// [`Flow::Any`]. Every other rule still applies on top.
+    pub fn allows(&self, from: Column, to: Column) -> bool {
+        if from == to || self.position(from).is_none() || self.position(to).is_none() {
+            return false;
+        }
+        match self.flow {
+            Flow::Any => true,
+            Flow::Next => self.next_to(from, to) || self.moves.contains(&(from, to)),
+        }
     }
 
     /// Columns as given, unchecked: an edit in progress, checked by
     /// [`parse`](Self::parse) before it's saved.
     pub(crate) fn from_defs(columns: Vec<ColumnDef>) -> Workflow {
-        Workflow { columns }
+        Workflow {
+            columns,
+            flow: Flow::Next,
+            moves: Vec::new(),
+            landing: None,
+        }
     }
 
     /// Its written form, the inverse of [`parse`](Self::parse).
@@ -127,9 +232,10 @@ impl Workflow {
             .join(", ")
     }
 
-    /// Whether it's the standard four, as they come.
+    /// Whether its columns are the standard four, as they come (the flow
+    /// and landing column aside).
     pub fn is_standard(&self) -> bool {
-        *self == Workflow::standard()
+        self.columns == Workflow::standard().columns
     }
 
     /// The columns, left to right.
@@ -196,9 +302,10 @@ impl Workflow {
         self.columns().find(|c| c.as_str() == folder)
     }
 
-    /// Where new tickets land: the standard backlog.
+    /// Where new tickets land: the team's choice of backlog column
+    /// (ticket 225), else the standard backlog.
     pub fn landing(&self) -> Column {
-        Column::Backlog
+        self.landing.unwrap_or(Column::Backlog)
     }
 }
 
@@ -295,6 +402,44 @@ mod tests {
         refused(
             "backlog:backlog, todo:todo, doing:doing, done:done, archive:done",
             "board's own",
+        );
+    }
+
+    #[test]
+    fn the_flow_adds_moves_or_opens_every_move() {
+        let w = Workflow::parse(TEAM).unwrap();
+        let (triage, review) = (w.find("triage").unwrap(), w.find("review").unwrap());
+        assert!(!w.allows(triage, Column::Todo));
+        let w = w
+            .configure(
+                Flow::Next,
+                "triage>todo, Review>Doing, triage>todo",
+                Some("triage"),
+            )
+            .unwrap();
+        assert!(w.allows(triage, Column::Todo));
+        assert!(!w.allows(Column::Todo, triage), "an extra move is one way");
+        assert!(w.allows(review, Column::Doing) && w.allows(Column::Doing, review));
+        assert_eq!(w.moves().len(), 2);
+        assert_eq!(Workflow::moves_text(w.moves()), "triage>todo, review>doing");
+        assert_eq!(w.landing(), triage);
+        let any = w.clone().configure(Flow::Any, "", None).unwrap();
+        assert!(any.allows(Column::Backlog, Column::Done));
+        assert!(!any.allows(Column::Done, Column::Done));
+        assert_eq!(any.landing(), Column::Backlog);
+        assert!(
+            w.clone()
+                .configure(Flow::Next, "triage>nowhere", None)
+                .is_err()
+        );
+        assert!(w.clone().configure(Flow::Next, "todo>todo", None).is_err());
+        assert!(w.clone().configure(Flow::Next, "", Some("doing")).is_err());
+        assert!(
+            !w.is_standard()
+                && Workflow::standard()
+                    .configure(Flow::Any, "", None)
+                    .unwrap()
+                    .is_standard()
         );
     }
 }

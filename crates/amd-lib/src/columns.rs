@@ -154,6 +154,17 @@ pub fn remove(board: &Board, column: Column, move_to: Option<Column>) -> Result<
     save(board, defs)?;
     let mut settings = board_settings::load(board);
     settings.clear_column_wip(column);
+    // Moves that name it, and landing there, go with it (ticket 225).
+    let moves: Vec<(Column, Column)> = workflow
+        .moves()
+        .iter()
+        .copied()
+        .filter(|(from, to)| *from != column && *to != column)
+        .collect();
+    settings.set_moves(&moves);
+    if workflow.landing() == column {
+        settings.set_new_tickets(Column::Backlog);
+    }
     settings.save(board)?;
     // Its folder, now empty but for the placeholder.
     let dir = board.dir(column);
@@ -187,6 +198,110 @@ pub fn set_wip(board: &Board, column: Column, limit: Option<u32>) -> Result<()> 
     };
     settings.set_wip_limit(column, stored)?;
     settings.save(board)
+}
+
+/// Sets which moves the board allows (ticket 225).
+pub fn set_flow(board: &Board, flow: crate::workflow::Flow) -> Result<()> {
+    let mut settings = board_settings::load(board);
+    settings.set_flow(flow);
+    settings.save(board)
+}
+
+/// Allows (or, with `on` false, stops allowing) the extra one-way move
+/// `from` → `to` under the `next` flow.
+pub fn allow_move(board: &Board, from: Column, to: Column, on: bool) -> Result<()> {
+    let workflow = board.workflow();
+    for c in [from, to] {
+        if workflow.position(c).is_none() {
+            bail!("{c} isn't one of this board's columns");
+        }
+    }
+    if from == to {
+        bail!("a move needs two different columns");
+    }
+    let mut moves = workflow.moves().to_vec();
+    moves.retain(|m| *m != (from, to));
+    if on {
+        moves.push((from, to));
+    }
+    let mut settings = board_settings::load(board);
+    settings.set_moves(&moves);
+    settings.save(board)
+}
+
+/// Where new tickets land: a backlog-kind column.
+pub fn set_landing(board: &Board, column: Column) -> Result<()> {
+    let workflow = board.workflow();
+    if workflow.position(column).is_none() {
+        bail!("{column} isn't one of this board's columns");
+    }
+    if !column.is(Kind::Backlog) {
+        bail!(
+            "new tickets can only land in a backlog column, not {}",
+            workflow.label(column)
+        );
+    }
+    let mut settings = board_settings::load(board);
+    settings.set_new_tickets(column);
+    settings.save(board)
+}
+
+/// Puts the board back to the standard four (ticket 225): each ticket in
+/// an added column goes to the standard column of its kind, then the
+/// columns, names, flow, extra moves, landing column and every column's
+/// own WIP limit go back to standard. A ticket someone else holds stops it
+/// before anything moves. Returns each ticket moved and where to.
+pub fn reset(board: &Board) -> Result<Vec<(String, Column)>> {
+    let workflow = board.workflow();
+    let added: Vec<Column> = workflow
+        .columns()
+        .filter(|c| !Column::STANDARD.contains(c))
+        .collect();
+    let mut tickets = Vec::new();
+    for column in &added {
+        for task in board.tasks_in(*column)? {
+            task.ensure_not_leased()?;
+            tickets.push((task, Column::STANDARD[column.kind() as usize]));
+        }
+    }
+    let mut moved = Vec::new();
+    for (task, to) in &tickets {
+        let dest = board.dir(*to).join(task.file_name());
+        if dest.exists() {
+            bail!("{} already exists", dest.display());
+        }
+        if git::is_tracked(&board.root, &task.path) {
+            git::mv(&board.root, &task.path, &dest)?;
+        } else {
+            fs::rename(&task.path, &dest)
+                .with_context(|| format!("moving {}", task.path.display()))?;
+        }
+        moved.push((task.file_name(), *to));
+    }
+    let mut settings = board_settings::load(board);
+    settings.set_columns(&Workflow::standard());
+    settings.set_flow(crate::workflow::Flow::Next);
+    settings.set_moves(&[]);
+    settings.set_new_tickets(Column::Backlog);
+    settings.clear_column_wips();
+    settings.save(board)?;
+    for column in added {
+        let dir = board.dir(column);
+        let keep = dir.join(".gitkeep");
+        if keep.exists() {
+            if git::is_tracked(&board.root, &keep) {
+                let _ = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(&board.root)
+                    .args(["rm", "-q", "--cached", "--"])
+                    .arg(&keep)
+                    .status();
+            }
+            let _ = fs::remove_file(&keep);
+        }
+        let _ = fs::remove_dir(&dir);
+    }
+    Ok(moved)
 }
 
 /// A label without the characters the written form uses.
@@ -396,5 +511,115 @@ mod tests {
         assert!(board.workflow().is_standard());
         let problem = board.workflow_problem().unwrap();
         assert!(problem.contains("standard four"), "{problem}");
+    }
+
+    #[test]
+    fn extra_moves_and_landing_follow_the_board_and_go_with_a_column() {
+        use crate::workflow::Flow;
+        let (_dir, board) = board();
+        let triage = add(
+            &board,
+            "Triage",
+            Kind::Backlog,
+            Position::Before(Column::Backlog),
+            None,
+        )
+        .unwrap();
+        allow_move(&board, triage, Column::Todo, true).unwrap();
+        allow_move(&board, triage, Column::Todo, true).unwrap();
+        set_landing(&board, triage).unwrap();
+        let w = board.workflow();
+        assert!(w.allows(triage, Column::Todo));
+        assert_eq!(w.moves().len(), 1);
+        assert_eq!(w.landing(), triage);
+        assert!(set_landing(&board, Column::Doing).is_err());
+        set_flow(&board, Flow::Any).unwrap();
+        assert!(board.workflow().allows(Column::Backlog, Column::Done));
+        set_flow(&board, Flow::Next).unwrap();
+        allow_move(&board, triage, Column::Todo, false).unwrap();
+        assert!(!board.workflow().allows(triage, Column::Todo));
+        allow_move(&board, triage, Column::Todo, true).unwrap();
+        remove(&board, triage, None).unwrap();
+        let settings = fs::read_to_string(board_settings::path(&board)).unwrap();
+        assert!(!settings.contains("moves"), "{settings}");
+        assert!(!settings.contains("new-tickets"), "{settings}");
+    }
+
+    #[test]
+    fn a_reset_moves_tickets_by_kind_and_forgets_everything() {
+        use crate::workflow::Flow;
+        let (_dir, board) = board();
+        let triage = add(
+            &board,
+            "Triage",
+            Kind::Backlog,
+            Position::Before(Column::Backlog),
+            None,
+        )
+        .unwrap();
+        let review = add(
+            &board,
+            "Review",
+            Kind::Doing,
+            Position::After(Column::Doing),
+            None,
+        )
+        .unwrap();
+        let released = add(&board, "Released", Kind::Done, Position::End, None).unwrap();
+        rename(&board, Column::Todo, "Ready").unwrap();
+        set_wip(&board, review, Some(2)).unwrap();
+        set_flow(&board, Flow::Any).unwrap();
+        set_landing(&board, triage).unwrap();
+        ticket(&board, triage, 1);
+        ticket(&board, review, 2);
+        ticket(&board, released, 3);
+        let moved = reset(&board).unwrap();
+        assert_eq!(moved.len(), 3);
+        assert!(board.dir(Column::Backlog).join("001-t.md").exists());
+        assert!(board.dir(Column::Doing).join("002-t.md").exists());
+        assert!(board.dir(Column::Done).join("003-t.md").exists());
+        let w = board.workflow();
+        assert!(w.is_standard() && w.flow() == Flow::Next && w.landing() == Column::Backlog);
+        assert!(!board.dir(review).exists());
+        let settings = fs::read_to_string(board_settings::path(&board)).unwrap();
+        for key in [
+            "columns",
+            "flow",
+            "moves",
+            "new-tickets",
+            "wip-limit-review",
+        ] {
+            assert!(!settings.contains(key), "{key}: {settings}");
+        }
+    }
+
+    #[test]
+    fn a_new_ticket_lands_where_the_team_says_unless_it_goes_into_an_epic() {
+        use crate::create::{Draft, NewTicket};
+        use crate::templates::{DEFAULT_TEMPLATE, Templates};
+        let (_dir, board) = board();
+        let triage = add(
+            &board,
+            "Triage",
+            Kind::Backlog,
+            Position::Before(Column::Backlog),
+            None,
+        )
+        .unwrap();
+        set_landing(&board, triage).unwrap();
+        let templates = Templates::load(&board).unwrap();
+        let new = |land_in| NewTicket {
+            title: "Fresh".into(),
+            template: DEFAULT_TEMPLATE.into(),
+            land_in,
+            ..NewTicket::default()
+        };
+        let draft = Draft::prepare(&board, &templates, new(None)).unwrap();
+        assert_eq!(draft.column, triage);
+        let created = draft.write(&board, None).unwrap();
+        assert_eq!(created.task.column, triage);
+        assert!(board.dir(triage).join(created.task.file_name()).exists());
+        let filed = Draft::prepare(&board, &templates, new(Some(Column::Backlog))).unwrap();
+        assert_eq!(filed.column, Column::Backlog);
     }
 }

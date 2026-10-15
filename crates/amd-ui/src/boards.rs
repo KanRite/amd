@@ -123,6 +123,7 @@ impl Project {
                     doing: settings.wip_limit(Column::Doing).unwrap_or(0),
                 },
                 lease_hours: settings.lease_hours().round().max(1.0) as u32,
+                workflow: ui_workflow(board),
             });
             for column in board.workflow().columns() {
                 for task in board.tasks_in(column).map_err(err)? {
@@ -159,6 +160,7 @@ impl Project {
             available: false,
             wip: WipLimits::default(),
             lease_hours: ui::DEFAULT_LEASE_HOURS,
+            workflow: ui::Workflow::standard(),
         }));
         for column in &mut columns {
             column.tickets.sort_by(ui::ticket::default_order);
@@ -327,7 +329,15 @@ pub fn to_column(column: ui::Column) -> Column {
 /// standard doing's is the repository's `wip`).
 pub fn ui_workflow(board: &Board) -> ui::Workflow {
     let settings = board_settings::load(board);
+    let workflow = board.workflow();
     ui::Workflow {
+        any: workflow.flow() == agile_md::workflow::Flow::Any,
+        moves: workflow
+            .moves()
+            .iter()
+            .map(|(f, t)| (from_column(*f), from_column(*t)))
+            .collect(),
+        landing: from_column(workflow.landing()),
         columns: board
             .workflow()
             .defs()
