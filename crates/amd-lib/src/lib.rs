@@ -29,7 +29,6 @@ pub mod import;
 pub mod import_documents;
 pub mod import_issues;
 pub mod import_log;
-pub mod lanes;
 pub mod links;
 pub mod model;
 pub mod my_work;

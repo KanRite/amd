@@ -14,33 +14,16 @@ use crate::app::{Ctx, Overlay};
 
 #[component]
 pub fn BoardView() -> impl IntoView {
-    let ctx = Ctx::get();
-    // Swim lanes (ticket 218): other projects' boards in rows below, view
-    // only. With them, the board keeps most of the height and the page
-    // scrolls down to the lanes.
-    let lanes = move || ctx.lanes.with(|l| !l.is_empty());
     view! {
-        <div class=move || {
-            if lanes() {
-                "flex h-full flex-col gap-3 overflow-auto p-3"
-            } else {
-                "flex h-full flex-col overflow-x-auto p-3"
-            }
-        }>
-            <div class=move || {
-                if lanes() { "flex h-[62%] min-h-80 shrink-0 gap-3" } else { "flex h-full min-h-0 gap-3" }
-            }>
-                <EpicsColumn />
-                {move || {
-                    ctx.open_epic.get().map(|(repo, name)| view! { <OpenEpicColumn repo name /> })
-                }}
-                {Column::ALL.map(|column| view! { <ColumnView column /> }).collect_view()}
-            </div>
-            <For
-                each=move || ctx.lanes.get()
-                key=|lane| (lane.root.clone(), format!("{:?}", lane.columns), lane.error.clone())
-                children=|lane| view! { <crate::lanes::LaneRow lane /> }
-            />
+        <div class="flex h-full gap-3 overflow-x-auto p-3">
+            <EpicsColumn />
+            {move || {
+                Ctx::get()
+                    .open_epic
+                    .get()
+                    .map(|(repo, name)| view! { <OpenEpicColumn repo name /> })
+            }}
+            {Column::ALL.map(|column| view! { <ColumnView column /> }).collect_view()}
         </div>
     }
 }
@@ -1258,7 +1241,7 @@ const EPIC_COLOURS: [(&str, &str); 6] = [
 
 /// Badge colours, quietest for low; an unknown value is shown in red so it
 /// stands out as needing correction.
-pub(crate) fn priority_tone(priority: &str) -> &'static str {
+fn priority_tone(priority: &str) -> &'static str {
     match priority {
         "low" => "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200",
         "medium" => "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200",

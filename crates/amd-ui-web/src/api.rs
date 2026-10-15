@@ -311,57 +311,6 @@ pub async fn ticket_family(
     .await
 }
 
-/// Other projects' boards as swim lanes (ticket 218).
-pub async fn lanes() -> Result<Vec<amd_ui_model::Lane>, String> {
-    call("lanes", &NoArgs {}).await
-}
-
-#[derive(Serialize)]
-struct LaneTicketArgs<'a> {
-    root: &'a str,
-    column: amd_ui_model::Column,
-    epic: Option<&'a str>,
-    file: &'a str,
-}
-
-/// A swim lane's ticket, read-only (ticket 218).
-pub async fn read_lane_ticket(
-    root: &str,
-    column: amd_ui_model::Column,
-    epic: Option<&str>,
-    file: &str,
-) -> Result<amd_ui_model::LaneTicket, String> {
-    call(
-        "read_lane_ticket",
-        &LaneTicketArgs {
-            root,
-            column,
-            epic,
-            file,
-        },
-    )
-    .await
-}
-
-/// The swim lane settings (ticket 218).
-pub async fn lane_settings() -> Result<amd_ui_model::LaneSettings, String> {
-    call("lane_settings", &NoArgs {}).await
-}
-
-pub async fn set_lanes(on: bool) -> Result<amd_ui_model::LaneSettings, String> {
-    call("set_lanes", &OnArgs { on }).await
-}
-
-#[derive(Serialize)]
-struct LaneProjectArgs<'a> {
-    root: &'a str,
-    on: bool,
-}
-
-pub async fn set_lane_project(root: &str, on: bool) -> Result<amd_ui_model::LaneSettings, String> {
-    call("set_lane_project", &LaneProjectArgs { root, on }).await
-}
-
 /// Creates a ticket in `repo`'s backlog (the board's own when `None`),
 /// as a draft when `draft` (ticket 114).
 pub async fn create_ticket(

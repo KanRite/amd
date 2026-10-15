@@ -251,7 +251,7 @@ fn open_documents(ctx: Ctx, root: String, shared: bool, folder: &str) {
 
 /// Opens `root`'s project at `view` (its board or its documents), then,
 /// if given, one of its tickets.
-pub(crate) fn open(
+fn open(
     ctx: Ctx,
     root: String,
     view: View,
