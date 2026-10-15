@@ -759,8 +759,29 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
                                             {list
                                                 .into_iter()
                                                 .map(|g| {
+                                                    let place = Place {
+                                                        repo: ids.get_value().0,
+                                                        column: g.column,
+                                                        epic: g.epic.clone(),
+                                                    };
+                                                    let file = g.file.clone();
                                                     view! {
-                                                        <li>{format!("{} requires {} ({})", g.id, g.required_id, g.required_place)}</li>
+                                                        <li class="flex flex-wrap items-baseline gap-x-2">
+                                                            {format!("{} requires {} ({})", g.id, g.required_id, g.required_place)}
+                                                            // The tree around it (ticket 214).
+                                                            <button
+                                                                type="button"
+                                                                class="underline hover:no-underline"
+                                                                on:click=move |_| {
+                                                                    ctx.overlay.set(Some(Overlay::Tree {
+                                                                        place: place.clone(),
+                                                                        file: file.clone(),
+                                                                    }))
+                                                                }
+                                                            >
+                                                                "Show the tree"
+                                                            </button>
+                                                        </li>
                                                     }
                                                 })
                                                 .collect_view()}
@@ -816,6 +837,27 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default()
+            })
+        })
+    };
+    // A tree button when it has a family (ticket 214), unless it's in a
+    // started sprint, which the tree leaves out.
+    let family = {
+        let me = ticket.clone();
+        Memo::new(move |_| {
+            ctx.board.with(|b| {
+                b.as_ref().is_some_and(|b| {
+                    let sprint = me
+                        .epic
+                        .clone()
+                        .or_else(|| (!me.epic_label.is_empty()).then(|| me.epic_label.clone()));
+                    let started = sprint.is_some_and(|name| {
+                        b.epics
+                            .iter()
+                            .any(|e| e.repo == me.repo && e.name == name && e.started)
+                    });
+                    !started && waiting::has_family(&me, waiting::all_tickets(b))
+                })
             })
         })
     };
@@ -916,6 +958,38 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
             <div class="flex items-baseline gap-2">
                 <span class="font-mono text-xs text-slate-500">{id}</span>
                 <span class="flex-1 font-medium">{title}</span>
+                {
+                    let tree_file = file.clone();
+                    move || {
+                        let tree_file = tree_file.clone();
+                        family
+                            .get()
+                            .then(|| {
+                                view! {
+                                    <button
+                                        type="button"
+                                        class="shrink-0 self-start rounded px-1 text-slate-500 hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+                                        title="Show what it requires and relates to"
+                                        aria-label="Show the requires tree"
+                                        on:click=move |ev| {
+                                            ev.stop_propagation();
+                                            ctx.overlay.set(Some(Overlay::Tree {
+                                                place: place.get_value(),
+                                                file: tree_file.clone(),
+                                            }));
+                                        }
+                                    >
+                                        <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                                            <circle cx="4" cy="3" r="1.6" />
+                                            <circle cx="4" cy="13" r="1.6" />
+                                            <circle cx="12" cy="8" r="1.6" />
+                                            <path d="M4 4.6v6.8M4 8h6.4" />
+                                        </svg>
+                                    </button>
+                                }
+                            })
+                    }
+                }
             </div>
             // The repository it's about (ticket 101), unless the filter
             // already says so.

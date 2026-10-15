@@ -11,6 +11,7 @@ pub mod rich;
 pub mod screen;
 pub mod terminal;
 pub mod ticket;
+pub mod tree;
 pub mod waiting;
 pub mod wip;
 pub mod zoom;
