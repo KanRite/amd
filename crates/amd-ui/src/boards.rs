@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use agile_md::board::{Board, Column};
+use agile_md::board::{Board, Column, Kind};
 use agile_md::board_settings;
 use agile_md::current_project;
 use agile_md::group::{GROUP_FILE, State};
@@ -112,11 +112,11 @@ impl Project {
                 },
                 lease_hours: settings.lease_hours().round().max(1.0) as u32,
             });
-            for column in Column::ALL {
+            for column in board.workflow().columns() {
                 for task in board.tasks_in(column).map_err(err)? {
                     let summary = self.summary_of(&task, name);
                     if task.epic.is_none() {
-                        columns[column.index()].tickets.push(summary);
+                        columns[from_column(column).index()].tickets.push(summary);
                     }
                 }
             }
@@ -307,12 +307,15 @@ pub fn to_column(column: ui::Column) -> Column {
     }
 }
 
+/// The page's column for one of the board's. The page still draws the
+/// standard four (ticket 223); a column of another kind's folder shows in
+/// the one of its kind until the page draws the workflow (ticket 224).
 pub fn from_column(column: Column) -> ui::Column {
-    match column {
-        Column::Backlog => ui::Column::Backlog,
-        Column::Todo => ui::Column::Todo,
-        Column::Doing => ui::Column::Doing,
-        Column::Done => ui::Column::Done,
+    match column.kind() {
+        Kind::Backlog => ui::Column::Backlog,
+        Kind::Todo => ui::Column::Todo,
+        Kind::Doing => ui::Column::Doing,
+        Kind::Done => ui::Column::Done,
     }
 }
 

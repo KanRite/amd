@@ -1975,7 +1975,8 @@ async fn home() -> Result<amd_ui_model::Home> {
             project: w.project,
             project_root: w.project_root.display().to_string(),
             repo: w.repo,
-            column: agile_md::board::Column::parse(&w.column)
+            column: agile_md::workflow::Workflow::standard()
+                .find(&w.column)
                 .map(boards::from_column)
                 .unwrap_or(amd_ui_model::Column::Todo),
             id: w.id,

@@ -21,7 +21,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use time::macros::format_description;
 
-use crate::board::{Board, Column};
+use crate::board::Board;
 
 /// The one built-in ticket. A board can add its own templates, but there is no
 /// longer a type of ticket: what varies is the fields you fill in.
@@ -223,7 +223,7 @@ impl Templates {
 /// Render the board's README (used by `amd init`).
 pub fn render_board_readme(board: &Board) -> Result<String> {
     let templates = Templates::load(board)?;
-    let columns: Vec<&str> = Column::ALL.iter().map(|c| c.as_str()).collect();
+    let columns: Vec<&str> = board.workflow().columns().map(|c| c.as_str()).collect();
     templates.render(
         BOARD_README,
         context! {

@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 
-use crate::board::{Board, Column};
+use crate::board::{Board, Column, Kind};
 use crate::task::Task;
 use crate::{board_settings, branch, git};
 
@@ -173,7 +173,8 @@ pub fn move_to(board: &Board, task: &Task, to: Column, force: bool) -> Result<Ou
         // lease is claimed on entering doing ("I'm working on this now"),
         // not earlier, since todo only means it's next. A move onto a
         // ticket someone else has leased is refused earlier, in move_task.
-        if to == Column::Doing
+        // Any doing-kind column (ticket 223): Doing to Review renews it.
+        if to.is(Kind::Doing)
             && let Some(moved) = Task::from_path(&dest, to)
             && let Some(warning) = maybe_take_lease(board, &moved)
         {
@@ -182,8 +183,8 @@ pub fn move_to(board: &Board, task: &Task, to: Column, force: bool) -> Result<Ou
         // ...and given back on leaving doing in any direction, or on
         // reaching done or the backlog (ticket 092), in the same commit as
         // the move. Only your own lease is ever released.
-        if (from == Column::Doing || matches!(to, Column::Done | Column::Backlog))
-            && to != Column::Doing
+        if (from.is(Kind::Doing) || to.is(Kind::Done) || to.is(Kind::Backlog))
+            && !to.is(Kind::Doing)
             && let Some(moved) = Task::from_path(&dest, to)
             && let Err(err) = moved.release_if_mine()
         {
@@ -695,6 +696,149 @@ mod tests {
             "{copy}"
         );
         assert!(copy.contains("## Notes\n\nkeep"), "{copy}");
+    }
+
+    /// A board with a team's workflow (ticket 223): Triage before the
+    /// backlog, Review after doing, Released after done. A git repository
+    /// with an identity, auto-commit off, and tickets 001 to `n`.
+    fn team_board(dir: &std::path::Path, n: u32) -> Board {
+        use crate::workflow::Workflow;
+        crate::board::TEST_WORKFLOW.with(|w| {
+            *w.borrow_mut() = Some(
+                Workflow::parse(
+                    "Triage=triage:backlog, Backlog=backlog:backlog, To do=todo:todo, \
+                     Doing=doing:doing, Review=review:doing, Done=done:done, Released=released:done",
+                )
+                .unwrap(),
+            )
+        });
+        for args in [
+            vec!["init", "-q"],
+            vec!["config", "user.email", "t@t.co"],
+            vec!["config", "user.name", "t"],
+        ] {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .status()
+                .unwrap();
+        }
+        let board = Board::at(dir.join("tasks"));
+        board.create().unwrap();
+        std::fs::write(dir.join(".settings"), "commit = off\nsync = off\n").unwrap();
+        for id in 1..=n {
+            let body = format!("---\nid: \"{id:03}\"\ntitle: \"T{id}\"\n---\n\nbody\n");
+            std::fs::write(board.dir(Column::Doing).join(format!("{id:03}-t.md")), body).unwrap();
+        }
+        board
+    }
+
+    fn column_of(board: &Board, id: &str) -> Column {
+        board.find(id).unwrap().column
+    }
+
+    #[test]
+    fn a_team_workflow_leases_in_every_doing_kind_column_and_releases_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = team_board(dir.path(), 1);
+        let review = board.workflow().find("review").unwrap();
+        // The board made the extra folders too.
+        assert!(board.dir(review).is_dir());
+        move_to(&board, &board.find("001").unwrap(), review, false).unwrap();
+        let task = board.find("001").unwrap();
+        assert_eq!(task.column, review);
+        assert!(task.lease_active(), "Review is a doing-kind column: locked");
+        move_to(&board, &task, Column::Done, false).unwrap();
+        let task = board.find("001").unwrap();
+        assert!(!task.lease_active(), "released on reaching done");
+        // Doing to Done skips Review: one column at a time.
+        assert!(!board.workflow().next_to(Column::Doing, Column::Done));
+    }
+
+    #[test]
+    fn a_doing_kind_column_has_its_own_wip_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = team_board(dir.path(), 2);
+        std::fs::write(
+            dir.path().join(".settings"),
+            "commit = off\nsync = off\nwip-limit-review = 1\n",
+        )
+        .unwrap();
+        let review = board.workflow().find("review").unwrap();
+        move_to(&board, &board.find("001").unwrap(), review, false).unwrap();
+        let err = move_to(&board, &board.find("002").unwrap(), review, false).unwrap_err();
+        assert!(
+            err.downcast_ref::<crate::board::WipLimitExceeded>()
+                .is_some(),
+            "{err:#}"
+        );
+        assert_eq!(column_of(&board, "002"), Column::Doing);
+    }
+
+    #[test]
+    fn done_waits_in_every_done_kind_column_and_any_of_them_counts_as_done() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = team_board(dir.path(), 2);
+        let review = board.workflow().find("review").unwrap();
+        let released = board.workflow().find("released").unwrap();
+        crate::links::apply(
+            &board.find("001").unwrap(),
+            crate::links::LinkType::Requires,
+            &board.find("002").unwrap(),
+            false,
+            false,
+        )
+        .unwrap();
+        move_to(&board, &board.find("001").unwrap(), review, false).unwrap();
+        let err = move_to(&board, &board.find("001").unwrap(), Column::Done, false).unwrap_err();
+        assert!(err.to_string().contains("002"), "{err:#}");
+        // 002 goes all the way to Released: done for every rule.
+        for to in [review, Column::Done, released] {
+            move_to(&board, &board.find("002").unwrap(), to, false).unwrap();
+        }
+        move_to(&board, &board.find("001").unwrap(), Column::Done, false).unwrap();
+        assert_eq!(column_of(&board, "001"), Column::Done);
+    }
+
+    #[test]
+    fn a_started_sprints_tickets_only_move_on_and_a_draft_stays_in_backlog_kinds() {
+        use crate::group::{Group, Kind as GroupKind, State};
+        let dir = tempfile::tempdir().unwrap();
+        let board = team_board(dir.path(), 2);
+        let triage = board.workflow().find("triage").unwrap();
+        for id in ["001", "002"] {
+            let task = board.find(id).unwrap();
+            let to = board.dir(Column::Backlog).join(task.file_name());
+            std::fs::rename(&task.path, to).unwrap();
+        }
+        board
+            .create_group(&Group {
+                dir: board.dir(Column::Backlog).join("s1"),
+                name: "s1".into(),
+                kind: GroupKind::Sprint,
+                description: String::new(),
+                days: 10,
+                state: State::Pending,
+            })
+            .unwrap();
+        let task = board.find("001").unwrap();
+        task.set_points(task.hash().unwrap(), "3").unwrap();
+        board
+            .set_epic(&board.find("001").unwrap(), Some("s1"))
+            .unwrap();
+        board.group("s1").unwrap().start().unwrap();
+        let err = board
+            .move_task(&board.find("001").unwrap(), triage, false)
+            .unwrap_err();
+        assert!(err.to_string().contains("started sprint s1"), "{err:#}");
+        // A draft may go back to Triage (still the backlog) but not on.
+        let task = board.find("002").unwrap();
+        task.set_draft(task.hash().unwrap(), true).unwrap();
+        board
+            .move_task(&board.find("002").unwrap(), triage, false)
+            .unwrap();
+        assert_eq!(column_of(&board, "002"), triage);
     }
 
     #[test]

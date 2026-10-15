@@ -16,6 +16,14 @@ use crate::group::{GROUP_FILE, Group};
 use crate::task::Task;
 use crate::templates;
 
+#[cfg(test)]
+thread_local! {
+    /// A custom workflow for the boards in one test (each test is a thread
+    /// of its own), until boards read their own (ticket 224).
+    pub(crate) static TEST_WORKFLOW: std::cell::RefCell<Option<crate::workflow::Workflow>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 /// Default board directory name; override with `AMD_DIR`.
 const DEFAULT_DIR: &str = "tasks";
 
@@ -42,43 +50,113 @@ fn read_counter(path: &Path) -> Option<u32> {
     fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Column {
+/// What a column is for (ticket 223): the behaviour every rule keys on.
+/// A board's columns each have one; a team can have several of a kind
+/// (Review and QA both `Doing`), but the rules only ever ask the kind.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Kind {
+    /// Where new tickets land, and where epics and sprints live.
     Backlog,
+    /// Entering one makes the ticket's branch.
     Todo,
+    /// Locked while in one, and held to its WIP limit.
     Doing,
+    /// Finished: done waits for what a ticket requires, and a done ticket
+    /// holds nothing back.
     Done,
 }
 
-impl Column {
-    pub const ALL: [Column; 4] = [Column::Backlog, Column::Todo, Column::Doing, Column::Done];
+impl Kind {
+    pub const ALL: [Kind; 4] = [Kind::Backlog, Kind::Todo, Kind::Doing, Kind::Done];
 
     pub fn as_str(self) -> &'static str {
         match self {
-            Column::Backlog => "backlog",
-            Column::Todo => "todo",
-            Column::Doing => "doing",
-            Column::Done => "done",
+            Kind::Backlog => "backlog",
+            Kind::Todo => "todo",
+            Kind::Doing => "doing",
+            Kind::Done => "done",
         }
     }
 
-    pub fn parse(name: &str) -> Option<Column> {
-        Column::ALL
+    pub fn parse(name: &str) -> Option<Kind> {
+        Kind::ALL
             .into_iter()
-            .find(|column| column.as_str() == name.to_ascii_lowercase())
+            .find(|kind| kind.as_str() == name.trim().to_ascii_lowercase())
+    }
+}
+
+/// One column of a board (ticket 223): the folder its tickets live in and
+/// what kind of column it is. Status is still the folder; the board's
+/// [`Workflow`](crate::workflow::Workflow) says which folders there are, in
+/// what order, and what each is called on screen.
+///
+/// Small and `Copy`: folder names are interned (a board has a handful), so
+/// a column can be passed around and compared as freely as the enum it
+/// replaced. The four standard columns keep that enum's names.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Column {
+    folder: &'static str,
+    kind: Kind,
+}
+
+#[allow(non_upper_case_globals)]
+impl Column {
+    pub const Backlog: Column = Column::standard("backlog", Kind::Backlog);
+    pub const Todo: Column = Column::standard("todo", Kind::Todo);
+    pub const Doing: Column = Column::standard("doing", Kind::Doing);
+    pub const Done: Column = Column::standard("done", Kind::Done);
+
+    /// The four every board has, in order: its standard workflow.
+    pub const STANDARD: [Column; 4] = [Column::Backlog, Column::Todo, Column::Doing, Column::Done];
+
+    const fn standard(folder: &'static str, kind: Kind) -> Column {
+        Column { folder, kind }
     }
 
-    /// Position on the board, left to right.
-    pub fn index(self) -> usize {
-        self as usize
+    /// A column in `folder` of `kind`. The folder name is interned.
+    pub fn new(folder: &str, kind: Kind) -> Column {
+        Column {
+            folder: intern(folder),
+            kind,
+        }
     }
 
-    /// Whether a ticket may move straight from this column to `to`: one
-    /// column at a time, forwards or back (ticket 083). Work goes through
-    /// every column, so the history shows each step.
-    pub fn next_to(self, to: Column) -> bool {
-        self.index().abs_diff(to.index()) == 1
+    /// Its folder under the board, which is its name in the CLI and in git.
+    pub fn as_str(self) -> &'static str {
+        self.folder
     }
+
+    pub fn kind(self) -> Kind {
+        self.kind
+    }
+
+    /// Whether it's a column of `kind`.
+    pub fn is(self, kind: Kind) -> bool {
+        self.kind == kind
+    }
+}
+
+/// `name` as a `&'static str`, leaked once per distinct name: column
+/// folders are few and live as long as the process.
+fn intern(name: &str) -> &'static str {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+    static NAMES: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+    for standard in Column::STANDARD {
+        if standard.folder == name {
+            return standard.folder;
+        }
+    }
+    let mut names = NAMES
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(&known) = names.get(name) {
+        return known;
+    }
+    let leaked: &'static str = Box::leak(name.to_string().into_boxed_str());
+    names.insert(leaked);
+    leaked
 }
 
 impl fmt::Display for Column {
@@ -239,6 +317,16 @@ impl Board {
             .unwrap_or_else(dir_name)
     }
 
+    /// The board's columns, in order, each with its kind (ticket 223).
+    /// The standard four for now; a team's own workflow is ticket 224.
+    pub fn workflow(&self) -> crate::workflow::Workflow {
+        #[cfg(test)]
+        if let Some(workflow) = TEST_WORKFLOW.with(|w| w.borrow().clone()) {
+            return workflow;
+        }
+        crate::workflow::Workflow::standard()
+    }
+
     pub fn dir(&self, column: Column) -> PathBuf {
         self.root.join(column.as_str())
     }
@@ -320,7 +408,7 @@ impl Board {
     /// Scaffold the columns, the board-local settings file's counter, and
     /// the repository's README. Idempotent.
     pub fn create(&self) -> Result<()> {
-        for column in Column::ALL {
+        for column in self.workflow().columns() {
             let dir = self.dir(column);
             fs::create_dir_all(&dir).with_context(|| format!("creating {}", dir.display()))?;
             let keep = dir.join(".gitkeep");
@@ -448,7 +536,7 @@ impl Board {
     /// Create an epic or a sprint. The directory name is the identity, so a
     /// second group of the same name is a mistake rather than a merge.
     pub fn create_group(&self, group: &Group) -> Result<()> {
-        check_group_name(&group.name)?;
+        check_group_name(self, &group.name)?;
         if group.dir.exists() {
             bail!("{} already exists", group.name);
         }
@@ -466,7 +554,7 @@ impl Board {
         if to == from {
             bail!("{from} is already called that");
         }
-        check_group_name(to)?;
+        check_group_name(self, to)?;
         let dest = self.dir(Column::Backlog).join(to);
         // A different spelling of the same name is fine (`ui` → `UI`), but
         // never another group's folder.
@@ -667,7 +755,7 @@ impl Board {
 
     pub fn tasks(&self) -> Result<Vec<Task>> {
         let mut all = Vec::new();
-        for column in Column::ALL {
+        for column in self.workflow().columns() {
             all.extend(self.tasks_in(column)?);
         }
         Ok(all)
@@ -894,16 +982,16 @@ impl Board {
         if task.column == to {
             bail!("already in {to}/");
         }
-        if !task.column.next_to(to) {
+        if !self.workflow().next_to(task.column, to) {
             bail!(
                 "{} cannot move from {}/ to {to}/: tickets move one column at a time",
                 task.stem,
                 task.column
             );
         }
-        // A draft stays in the backlog until it's ready (ticket 114). Moves
-        // go one column at a time, so backlog -> todo is the only way out.
-        if task.column == Column::Backlog && task.is_draft() {
+        // A draft stays in the backlog until it's ready (ticket 114): any
+        // backlog-kind column (a Triage, say) is still the backlog.
+        if task.column.is(Kind::Backlog) && !to.is(Kind::Backlog) && task.is_draft() {
             bail!(
                 "{} is a draft: remove {} (`amd ready {}`) to take it out of the backlog",
                 task.id_display(),
@@ -911,10 +999,26 @@ impl Board {
                 task.id_display()
             );
         }
+        // A started sprint's tickets only move on, to todo (ticket 083): with
+        // a backlog-kind column before the backlog, that's not the only
+        // neighbour any more.
+        if task.column == Column::Backlog
+            && !to.is(Kind::Todo)
+            && let Some(name) = &task.epic
+            && let Ok(group) = self.group(name)
+            && group.is_sprint()
+            && !group.accepts_changes()
+        {
+            bail!(
+                "{} is in started sprint {name}: its tickets only move on, to todo",
+                task.id_display()
+            );
+        }
         task.ensure_not_leased()?;
         // Done waits for what the ticket requires and for its children
         // (ticket 213). No `force`: the way past it is to change the link.
-        if to == Column::Done {
+        // Any done-kind column (ticket 223).
+        if to.is(Kind::Done) && !task.column.is(Kind::Done) {
             let waiting = crate::links::waiting_on(self, task)?;
             if !waiting.is_empty() {
                 return Err(crate::links::NotReady {
@@ -957,7 +1061,7 @@ impl Board {
     /// the backlog: the one its `epic` names, if that still exists and will
     /// take it.
     fn home_group(&self, task: &Task, to: Column) -> Option<Group> {
-        if task.column != Column::Todo || to != Column::Backlog {
+        if !task.column.is(Kind::Todo) || to != Column::Backlog {
             return None;
         }
         let group = self.group(&task.epic_meta()?).ok()?;
@@ -969,7 +1073,7 @@ impl Board {
 /// Whether `name` can name an epic or sprint: it becomes a directory and a
 /// destination verb, so it must be neither empty, nor a path, nor a verb
 /// the board already uses.
-fn check_group_name(name: &str) -> Result<()> {
+fn check_group_name(board: &Board, name: &str) -> Result<()> {
     if name.trim().is_empty() {
         bail!("a group needs a name");
     }
@@ -979,7 +1083,7 @@ fn check_group_name(name: &str) -> Result<()> {
     // The destination-verb dispatch (`amd <name> <ref>`) is checked
     // against columns, `abandon`, and epics in that order — a group
     // sharing a name with the first two would be silently unreachable.
-    if Column::parse(name).is_some() || name.eq_ignore_ascii_case(ABANDON) {
+    if board.workflow().find(name).is_some() || name.eq_ignore_ascii_case(ABANDON) {
         bail!("'{name}' collides with the destination verb of the same name — pick another name");
     }
     Ok(())
@@ -1062,11 +1166,15 @@ mod tests {
             if task.column == to {
                 return;
             }
-            let next = Column::ALL[if to.index() > task.column.index() {
-                task.column.index() + 1
-            } else {
-                task.column.index() - 1
-            }];
+            let workflow = board.workflow();
+            let (here, there) = (
+                workflow.position(task.column).unwrap(),
+                workflow.position(to).unwrap(),
+            );
+            let next = workflow
+                .columns()
+                .nth(if there > here { here + 1 } else { here - 1 })
+                .unwrap();
             board.move_task(&task, next, false).unwrap();
         }
     }
@@ -2053,10 +2161,11 @@ mod tests {
 
     #[test]
     fn columns_parse_case_insensitively() {
-        assert_eq!(Column::parse("DONE"), Some(Column::Done));
-        assert_eq!(Column::parse("todo"), Some(Column::Todo));
-        assert_eq!(Column::parse("Backlog"), Some(Column::Backlog));
-        assert_eq!(Column::parse("archive"), None);
+        let workflow = Board::at(PathBuf::from("/b")).workflow();
+        assert_eq!(workflow.find("DONE"), Some(Column::Done));
+        assert_eq!(workflow.find("todo"), Some(Column::Todo));
+        assert_eq!(workflow.find("Backlog"), Some(Column::Backlog));
+        assert_eq!(workflow.find("archive"), None);
     }
 
     /// A child that qualifies as a project sibling: a git repo with a board

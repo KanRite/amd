@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 use anyhow::Result;
 use richrs::prelude::{Console, Style, Tree, TreeNode};
 
-use agile_md::board::{Board, Column};
+use agile_md::board::{Board, Column, Kind};
 use agile_md::task::Task;
 
 static PLAIN: OnceLock<bool> = OnceLock::new();
@@ -285,13 +285,14 @@ fn count(nodes: &[Node]) -> usize {
 
 /// Columns read left-to-right as work progresses, so they're coloured that way.
 fn guide_style(column: Column) -> Style {
-    let spec = match column {
+    // By kind (ticket 223), so a team's Review reads as work in progress.
+    let spec = match column.kind() {
         // The backlog is everything not yet committed to, so it reads as the
         // quietest column rather than another stage of progress.
-        Column::Backlog => "bright_black",
-        Column::Todo => "blue",
-        Column::Doing => "yellow",
-        Column::Done => "green",
+        Kind::Backlog => "bright_black",
+        Kind::Todo => "blue",
+        Kind::Doing => "yellow",
+        Kind::Done => "green",
     };
     Style::parse(spec).unwrap_or_default()
 }

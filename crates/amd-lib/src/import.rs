@@ -78,7 +78,7 @@ pub fn import(dest: &Board, source_root: &Path, dry_run: bool) -> Result<ImportS
     let mut skipped: Vec<(PathBuf, String)> = Vec::new();
     let mut next = dest.next_id()?;
 
-    for column in Column::ALL {
+    for column in source.workflow().columns() {
         for task in source.tasks_in(column)? {
             let Some(old_number) = task.id else {
                 continue;

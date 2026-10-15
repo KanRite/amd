@@ -21,7 +21,7 @@ use std::cell::RefCell;
 
 use anyhow::{Result, bail};
 
-use crate::board::{Board, Column};
+use crate::board::{Board, Kind};
 use crate::board_settings;
 use crate::links::{LinkType, same_id};
 use crate::task::{PRIORITIES, Task, meta_in};
@@ -68,7 +68,7 @@ impl Seen {
             from: get(FROM),
             own: get(OWN),
             pinned: get(PINNED).is_some_and(|v| v != "no" && v != "false"),
-            done: task.column == Column::Done,
+            done: task.column.is(Kind::Done),
             task,
         })
     }
@@ -272,6 +272,7 @@ pub fn note(board: &Board, task: &Task) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::board::Column;
     use crate::create::{Draft, NewTicket};
     use crate::links::apply;
     use crate::templates::Templates;

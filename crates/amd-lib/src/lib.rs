@@ -47,3 +47,4 @@ pub mod task;
 pub mod templates;
 pub mod transition;
 pub mod update;
+pub mod workflow;

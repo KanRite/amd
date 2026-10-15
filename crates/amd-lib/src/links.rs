@@ -31,7 +31,7 @@ use std::fmt;
 
 use anyhow::{Result, bail};
 
-use crate::board::{Board, Column};
+use crate::board::{Board, Column, Kind};
 use crate::task::Task;
 
 /// How one ticket stands to another, read from the ticket that records it
@@ -446,7 +446,7 @@ pub fn waiting_on(board: &Board, task: &Task) -> Result<Vec<Waiting>> {
     let children = children_stems(task);
     let mut out = Vec::new();
     for other in board.tasks()? {
-        if other.path == task.path || other.column == Column::Done {
+        if other.path == task.path || other.column.is(Kind::Done) {
             continue;
         }
         let requires = required.contains(&other.path);
