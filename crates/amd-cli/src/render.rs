@@ -321,6 +321,82 @@ fn labels(node: &Node, root: bool) -> String {
     .join(" ")
 }
 
+/// `amd tree` (ticket 214): the requires tree, solid edges for what a
+/// ticket requires and dashed ones (spaced, to stand out) for related. On a
+/// terminal: ids link to their tickets, a started sprint's stub is dimmed
+/// and "waits on" is in colour. In a pipe: the same characters, no colour,
+/// and a stub says it's in a started sprint.
+pub fn tree(board: &Board, trees: &[agile_md::requires::TreeNode]) {
+    let colour = rich();
+    for (n, root) in trees.iter().enumerate() {
+        if n > 0 {
+            println!();
+        }
+        println!("{}", tree_line(board, root, colour));
+        tree_children(board, &root.children, "", colour);
+    }
+}
+
+fn tree_children(
+    board: &Board,
+    children: &[agile_md::requires::TreeNode],
+    prefix: &str,
+    colour: bool,
+) {
+    use agile_md::requires::Edge;
+    for (n, child) in children.iter().enumerate() {
+        let last = n + 1 == children.len();
+        let branch = match (last, child.edge) {
+            (false, Edge::Related) => "├ ─ ─ ",
+            (true, Edge::Related) => "└ ─ ─ ",
+            (false, _) => "├──── ",
+            (true, _) => "└──── ",
+        };
+        println!("{prefix}{branch}{}", tree_line(board, child, colour));
+        let deeper = format!("{prefix}{}", if last { "      " } else { "│     " });
+        tree_children(board, &child.children, &deeper, colour);
+    }
+}
+
+fn tree_line(board: &Board, node: &agile_md::requires::TreeNode, colour: bool) -> String {
+    let (dim, yellow, bold, reset) = if colour {
+        ("\x1b[2m", "\x1b[33m", "\x1b[1m", "\x1b[0m")
+    } else {
+        ("", "", "", "")
+    };
+    let id = if colour {
+        board
+            .find(&node.id)
+            .map(|t| link(&t))
+            .unwrap_or_else(|_| node.id.clone())
+    } else {
+        node.id.clone()
+    };
+    if node.seen {
+        return format!("{dim}↑ {} {} (above){reset}", node.id, node.title);
+    }
+    if let Some(sprint) = &node.stub {
+        return format!(
+            "{dim}{} {} · in started sprint {sprint}{reset}",
+            node.id, node.title
+        );
+    }
+    let mut line = format!("{id} {} · {}", node.title, node.place);
+    if node.current {
+        line = format!("{bold}{line}{reset}  ◀");
+    }
+    if node.done {
+        line.push_str(" ✓");
+    }
+    if !node.unmet.is_empty() {
+        line.push_str(&format!(
+            "  {yellow}waits on {}{reset}",
+            node.unmet.join(", ")
+        ));
+    }
+    line
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

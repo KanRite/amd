@@ -470,6 +470,17 @@ enum Cmd {
         #[arg(long, value_name = "DATE")]
         since: Option<String>,
     },
+    /// Draw how tickets hang together: what each requires (solid) and
+    /// what it relates to (dashed)
+    ///
+    /// With a ticket, its family: every ticket joined to it by requires or
+    /// related. Without, every family on the board. Tickets in a started
+    /// sprint aren't expanded. Each line says where the ticket is, and
+    /// "waits on" names what it requires that isn't done
+    Tree {
+        #[arg(value_name = "REF")]
+        task: Option<String>,
+    },
     /// Print a task
     Show {
         #[arg(value_name = "REF")]
@@ -1370,6 +1381,19 @@ fn run() -> Result<()> {
         }
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
         Cmd::Log => cmd_log(&board),
+        Cmd::Tree { task } => {
+            let around = task.map(|t| board.find(&t)).transpose()?;
+            let trees = agile_md::requires::family(&board, around.as_ref())?;
+            match (&around, trees.is_empty()) {
+                (Some(t), true) => println!(
+                    "{} requires nothing and has no related tickets",
+                    t.id_display()
+                ),
+                (None, true) => println!("No ticket on this board requires or relates to another"),
+                _ => render::tree(&board, &trees),
+            }
+            Ok(())
+        }
         Cmd::Recover {
             ids,
             all,
@@ -2450,6 +2474,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::Tag { .. }
         | Cmd::Tags { action: None }
         | Cmd::Show { .. }
+        | Cmd::Tree { .. }
         | Cmd::Log
         | Cmd::Templates { .. }
         | Cmd::Register { .. }
