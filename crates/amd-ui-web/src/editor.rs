@@ -1305,6 +1305,25 @@ fn Relationships(
             busy.set(false);
         });
     };
+    // Changing a link's type (ticket 213): both tickets, one commit.
+    let retype = move |other: String, old: String, new: String| {
+        busy.set(true);
+        failure.set(None);
+        spawn_local(async move {
+            let (place, file) = (place.get_value(), file.get_value());
+            match api::retype_link(&place, &file, &other, &old, &new).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    ctx.reload();
+                }
+                Err(e) => {
+                    failure.set(Some(e));
+                    ctx.reload();
+                }
+            }
+            busy.set(false);
+        });
+    };
     let found = move || {
         let me = ticket_number(&id.get());
         link_candidates(&tickets(), me, &query.get(), 8)
@@ -1336,7 +1355,27 @@ fn Relationships(
                 {unlink
                     .map(|slug| {
                         let label = format!("Remove the link to {other}");
+                        let retype_to = other.clone();
+                        let picker = format!("Change how this ticket stands to {other}");
                         view! {
+                            <select
+                                aria-label=picker.clone()
+                                title=move || {
+                                    if dirty.get() { "Save or discard your edits first".to_string() } else { picker.clone() }
+                                }
+                                class="ml-1 rounded border border-slate-300 bg-slate-50 px-1 py-0 text-xs disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900"
+                                disabled=wait
+                                on:change=move |ev| {
+                                    let new = event_target_value(&ev);
+                                    if new != slug {
+                                        retype(retype_to.clone(), slug.to_string(), new);
+                                    }
+                                }
+                            >
+                                {LINK_KINDS
+                                    .map(|(s, l)| view! { <option value=s selected=s == slug>{l}</option> })
+                                    .collect_view()}
+                            </select>
                             <button
                                 type="button"
                                 aria-label=label.clone()

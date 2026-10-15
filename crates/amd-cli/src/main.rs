@@ -616,6 +616,11 @@ enum Cmd {
     /// Types: requires, required-by, parent-of, child-of, relates-to,
     /// clone-of, cloned-by, supersedes, superseded-by.
     /// A ticket has one parent and is a clone of one original.
+    ///
+    /// A ticket can't move to done until the tickets it requires and its
+    /// children are done. `--replace <type> --type relates-to` changes such
+    /// a link (`amd link 12 16 --replace requires --type relates-to`), and
+    /// `--remove` takes it away.
     Link {
         #[arg(value_name = "REF")]
         task: String,
@@ -632,11 +637,20 @@ enum Cmd {
         )]
         kind: String,
         /// Take the link away instead of adding it
-        #[arg(long)]
+        #[arg(long, conflicts_with = "replace")]
         remove: bool,
         /// Only record the link on the first ticket
-        #[arg(long)]
+        #[arg(long, conflicts_with = "replace")]
         one_way: bool,
+        /// Change an existing link of this type to --type, on both tickets
+        #[arg(
+            long,
+            value_name = "TYPE",
+            value_parser = clap::builder::PossibleValuesParser::new(
+                agile_md::links::LinkType::ALL.map(agile_md::links::LinkType::slug)
+            ),
+        )]
+        replace: Option<String>,
     },
     /// Duplicate a ticket into the backlog, linked to it as a clone
     ///
@@ -1325,7 +1339,11 @@ fn run() -> Result<()> {
             kind,
             remove,
             one_way,
-        } => cmd_link(&board, &task, &to, &kind, remove, one_way),
+            replace,
+        } => match replace {
+            Some(old) => cmd_relink(&board, &task, &to, &old, &kind),
+            None => cmd_link(&board, &task, &to, &kind, remove, one_way),
+        },
         Cmd::Duplicate { task } => {
             let original = board.find(&task)?;
             report(&transition::clone_ticket(&board, &original)?);
@@ -1684,6 +1702,20 @@ fn cmd_link(
     report(&transition::link_tickets(
         board, &task, kind, &others, remove, one_way,
     )?);
+    Ok(())
+}
+
+/// `amd link <ref> <ref>... --replace OLD --type NEW` (ticket 213): change
+/// each link's type on both ends, in one commit.
+fn cmd_relink(board: &Board, reference: &str, to: &[String], old: &str, new: &str) -> Result<()> {
+    use agile_md::links::LinkType;
+    let old = LinkType::parse(old).with_context(|| format!("unknown link type '{old}'"))?;
+    let new = LinkType::parse(new).with_context(|| format!("unknown link type '{new}'"))?;
+    let task = board.find(reference)?;
+    for other in to {
+        let other = board.find(other)?;
+        report(&transition::retype_link(board, &task, old, new, &other)?);
+    }
     Ok(())
 }
 

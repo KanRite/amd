@@ -887,6 +887,19 @@ off**, ticket 141) to
   panel shows a group per kind with a × on each, and both Add link and ×
   wait while the editor has unsaved edits, since they rewrite the file.
   The command is `link_ticket`.
+  **Done waits** (ticket 213): `Board::move_task` refuses a move to done
+  while `links::waiting_on` finds tickets on the board, not done, that the
+  ticket requires (its own `requires`, or another's `required-by` naming
+  it) or that are its children (their `parent`, or its `## Children`
+  list), returning `links::NotReady` naming each with why and where.
+  **No override**, `force` included (that's only the WIP limit): the way
+  past it is to change the link (`links::retype`, `transition::retype_link`
+  → `relink: 001 -> 002`; `amd link A B --replace OLD --type NEW`, the MCP
+  `link_tickets` `replace`, amdui's per-link type picker and its
+  `retype_link` command) or remove it. Abandoned or missing tickets hold
+  nothing back. The page mirrors the rule (`amd_ui_model::waiting`): a
+  "waits on N" badge on the card, and `verdict` refuses a drag onto done
+  with the reason, which columns now show as epics did.
 
 - **One ticket, one template.** There are no ticket types any more: `admin` and
   `development` collapsed into fields you either fill in or don't.

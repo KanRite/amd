@@ -162,11 +162,12 @@ pub fn tools() -> Vec<Tool> {
         Tool {
             name: "link_tickets",
             title: "Link two tickets",
-            description: "Link a ticket to another on the same board with a type, or remove the link, and commit it. The other ticket records the opposite (`requires` there is `required-by` here), so either end shows it. Types: relates-to, requires, required-by, parent-of, child-of, clone-of, cloned-by, supersedes, superseded-by. A ticket has one parent and is the clone of one original.",
+            description: "Link a ticket to another on the same board with a type, or remove the link, and commit it. The other ticket records the opposite (`requires` there is `required-by` here), so either end shows it. Types: relates-to, requires, required-by, parent-of, child-of, clone-of, cloned-by, supersedes, superseded-by. A ticket has one parent and is the clone of one original. A ticket can't move to done while tickets it requires or its children aren't done; `replace` changes such a link's type (e.g. to relates-to) instead of adding one.",
             read_only: false,
             input: json!({"type": "object", "properties": {
                 "ticket": reference,
                 "to": {"type": "string", "description": "The other ticket: its number, or part of its file name"},
+                "replace": {"type": "string", "enum": crate::links::LinkType::ALL.map(crate::links::LinkType::slug), "description": "Change the existing link of this type to `type`, on both tickets"},
                 "type": {"type": "string", "enum": crate::links::LinkType::ALL.map(crate::links::LinkType::slug), "description": "How `ticket` stands to `to`; relates-to when left out"},
                 "remove": {"type": "boolean", "description": "Take the link away instead of adding it"}
             }, "required": ["ticket", "to"]}),
@@ -174,7 +175,7 @@ pub fn tools() -> Vec<Tool> {
         Tool {
             name: "move_ticket",
             title: "Move a ticket",
-            description: "Move a ticket one column along (backlog, todo, doing, done) and commit it. Entering doing takes the user's lock on it; leaving gives it back. Refused when doing is at its WIP limit unless `force`. Doesn't switch git branches.",
+            description: "Move a ticket one column along (backlog, todo, doing, done) and commit it. Entering doing takes the user's lock on it; leaving gives it back. Refused when doing is at its WIP limit unless `force`, and refused into done while tickets it requires or its children aren't done (no override: finish them, or change or remove the link). Doesn't switch git branches.",
             read_only: false,
             input: json!({"type": "object", "properties": {
                 "ticket": reference,
@@ -958,6 +959,13 @@ fn link_tickets(args: &Value) -> Result<Reply> {
     let remove = args.get("remove").and_then(Value::as_bool).unwrap_or(false);
     let board = project.ready(i)?;
     let other = board.find(&required(args, "to")?)?;
+    if let Some(old) = arg(args, "replace").filter(|o| !o.trim().is_empty()) {
+        let old = crate::links::LinkType::parse(&old)
+            .with_context(|| format!("unknown link type '{old}'"))?;
+        let outcome = transition::retype_link(board, &task, old, kind, &other)?;
+        let data = card(&repo, &task);
+        return Ok(project.reply(events_text(&outcome).join("\n"), data));
+    }
     let outcome = transition::link_tickets(
         board,
         &task,

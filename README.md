@@ -197,6 +197,14 @@ ticket 7, so it reads the same from either end and you can't forget the other
 half. Refs are resolved when they're recorded, so a typo is an error rather
 than a dangling link found later.
 
+A link can say more than "related": `--type requires`, `parent-of`,
+`child-of`, `clone-of`, `supersedes` and their opposites, each recorded the
+other way round on the other ticket. **A ticket can't move to done until the
+tickets it requires and its children are done**, and nothing overrides that.
+If the link was wrong, change it (`amd link 3 7 --replace requires --type
+relates-to`) or remove it (`--remove`). On the desktop board a card that's
+waiting says "waits on N", and each link in the editor has a type picker.
+
 ```markdown
 related: [001,002]
 ```

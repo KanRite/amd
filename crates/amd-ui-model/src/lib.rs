@@ -11,13 +11,17 @@ pub mod rich;
 pub mod screen;
 pub mod terminal;
 pub mod ticket;
+pub mod waiting;
 pub mod wip;
 pub mod zoom;
 
 /// A board column. Each one is a directory under `tasks/`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Column {
+    #[default]
     Backlog,
     Todo,
     Doing,
@@ -70,7 +74,7 @@ impl Column {
 }
 
 /// What a card on the board shows.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TicketSummary {
     /// The repository whose board it is on.
     #[serde(default)]
