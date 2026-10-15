@@ -353,6 +353,53 @@ pub struct BoardColumn {
     pub tickets: Vec<TicketSummary>,
 }
 
+/// Another project's board, drawn as a swim lane under the one on screen
+/// (ticket 218), view only.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Lane {
+    /// The project's name.
+    pub name: String,
+    /// Its board's repository, which identifies it (and opens it).
+    pub root: String,
+    /// Archived for everyone (ticket 157).
+    #[serde(default)]
+    pub archived: bool,
+    /// Backlog, todo, doing, done; a backlog ticket in an epic or sprint is
+    /// in Backlog with its `epic` set.
+    pub columns: Vec<BoardColumn>,
+    /// Why the board couldn't be read, instead of columns.
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// The swim lane settings (ticket 218), from your own config: whether
+/// lanes show, and every other project on this machine with whether it's
+/// one of them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaneSettings {
+    pub on: bool,
+    pub projects: Vec<LaneChoice>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaneChoice {
+    pub name: String,
+    pub root: String,
+    pub archived: bool,
+    pub chosen: bool,
+}
+
+/// A lane's ticket opened read-only (ticket 218).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LaneTicket {
+    /// The project's name.
+    pub project: String,
+    pub ticket: TicketSummary,
+    /// The body, rendered as the documents reader renders markdown (raw
+    /// HTML shown as text).
+    pub html: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Board {
     /// The project's name (`project` in its `.settings`), shown in the

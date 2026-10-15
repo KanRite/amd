@@ -186,6 +186,13 @@ async fn board_fingerprint() -> Result<String> {
         for (name, board) in &project.repos {
             std::hash::Hash::hash(&(name, agile_md::model::fingerprint(board)), &mut hasher);
         }
+        // Swim lanes (ticket 218) follow their boards' files the same way.
+        for board in lane_boards(&project) {
+            std::hash::Hash::hash(
+                &(&board.root, agile_md::model::fingerprint(&board)),
+                &mut hasher,
+            );
+        }
         Ok(format!("{:016x}", std::hash::Hasher::finish(&hasher)))
     })
     .await
@@ -203,7 +210,12 @@ async fn sync_board(state: Tauri<'_, AppState>) -> Result<Vec<String>> {
             .lock()
             .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
         let mut warnings = Vec::new();
-        for (_, board) in &Project::open()?.repos {
+        let project = Project::open()?;
+        // The swim lanes' boards too (ticket 218), so teammates' moves
+        // reach them.
+        let lanes = lane_boards(&project);
+        let boards = project.repos.iter().map(|(_, board)| board).chain(&lanes);
+        for board in boards {
             match agile_md::sync::catch_up(board, agile_md::sync::Purpose::Read) {
                 Ok(events) => warnings.extend(events.into_iter().filter_map(|event| match event {
                     Event::Warn(text) => Some(text),
@@ -792,6 +804,166 @@ fn ticket_family(
     let board = project.board(&place.repo)?;
     let task = task_at(board, &place, &file)?;
     agile_md::requires::family(board, Some(&task), include_done).map_err(err)
+}
+
+/// Other projects' boards as swim lanes under the one on screen (ticket
+/// 218), view only: empty while lanes are off. A board that can't be read
+/// is a lane saying why, never an error for the rest.
+#[tauri::command]
+async fn lanes() -> Result<Vec<amd_ui_model::Lane>> {
+    blocking(|| {
+        let project = Project::open()?;
+        let current = project.repos[0].1.repo_root().to_path_buf();
+        Ok(agile_md::lanes::lane_projects(&current)
+            .into_iter()
+            .map(|p| lane_of(&project, &p))
+            .collect())
+    })
+    .await
+}
+
+/// One project's board as a lane: its own tickets board only, epic and
+/// sprint tickets in Backlog with their `epic`.
+fn lane_of(project: &Project, p: &agile_md::my_work::Project) -> amd_ui_model::Lane {
+    let board = Board::in_repo(&p.root);
+    let columns: anyhow::Result<Vec<amd_ui_model::BoardColumn>> = {
+        Column::ALL
+            .into_iter()
+            .map(|column| {
+                let mut tickets: Vec<_> = board
+                    .tasks_in(column)?
+                    .iter()
+                    .map(|task| amd_ui_model::TicketSummary {
+                        repo: String::new(),
+                        ..project.summary_of(task, "")
+                    })
+                    .collect();
+                tickets.sort_by(amd_ui_model::ticket::default_order);
+                Ok(amd_ui_model::BoardColumn {
+                    column: boards::from_column(column),
+                    tickets,
+                })
+            })
+            .collect()
+    };
+    let (columns, error) = match columns {
+        Ok(columns) => (columns, None),
+        Err(e) => (Vec::new(), Some(format!("{e:#}"))),
+    };
+    amd_ui_model::Lane {
+        name: p.name.clone(),
+        root: p.root.display().to_string(),
+        archived: p.archived,
+        columns,
+        error,
+    }
+}
+
+/// The lane boards to watch and sync: the chosen projects' boards, while
+/// lanes are on, never the one on screen. Read from the config alone, so
+/// the every-second fingerprint stays cheap.
+fn lane_boards(project: &Project) -> Vec<Board> {
+    if !agile_md::lanes::enabled() {
+        return Vec::new();
+    }
+    let current = project.repos[0].1.repo_root();
+    agile_md::lanes::chosen()
+        .into_iter()
+        .filter(|root| root != current && root.is_dir())
+        .map(|root| Board::in_repo(&root))
+        .filter(|board| board.root.is_dir())
+        .collect()
+}
+
+/// A lane's ticket, read-only (ticket 218): only from a project that is
+/// one of the lanes.
+#[tauri::command]
+async fn read_lane_ticket(
+    root: String,
+    column: amd_ui_model::Column,
+    epic: Option<String>,
+    file: String,
+) -> Result<amd_ui_model::LaneTicket> {
+    blocking(move || {
+        let project = Project::open()?;
+        let current = project.repos[0].1.repo_root().to_path_buf();
+        let Some(lane) = agile_md::lanes::lane_projects(&current)
+            .into_iter()
+            .find(|p| p.root == Path::new(&root))
+        else {
+            return Err("That project isn't one of your swim lanes.".to_string());
+        };
+        let board = Board::in_repo(&lane.root);
+        let place = Place {
+            repo: String::new(),
+            column,
+            epic,
+        };
+        let task = task_at(&board, &place, &file)?;
+        let body = task.body().map_err(err)?;
+        let relative = task
+            .path
+            .strip_prefix(board.repo_root())
+            .unwrap_or(&task.path)
+            .display()
+            .to_string();
+        Ok(amd_ui_model::LaneTicket {
+            project: lane.name,
+            ticket: amd_ui_model::TicketSummary {
+                repo: String::new(),
+                ..project.summary_of(&task, "")
+            },
+            html: documents::render(board.repo_root(), &relative, &body),
+        })
+    })
+    .await
+}
+
+/// The swim lane settings (ticket 218): on or off, and every other
+/// project on this machine with whether it's a lane.
+fn lane_settings_now() -> amd_ui_model::LaneSettings {
+    let current = Project::open()
+        .ok()
+        .map(|p| p.repos[0].1.repo_root().to_path_buf());
+    let chosen = agile_md::lanes::chosen();
+    amd_ui_model::LaneSettings {
+        on: agile_md::lanes::enabled(),
+        projects: agile_md::my_work::projects()
+            .into_iter()
+            .filter(|p| current.as_ref() != Some(&p.root))
+            .map(|p| amd_ui_model::LaneChoice {
+                chosen: chosen.contains(&p.root),
+                name: p.name,
+                root: p.root.display().to_string(),
+                archived: p.archived,
+            })
+            .collect(),
+    }
+}
+
+#[tauri::command]
+async fn lane_settings() -> Result<amd_ui_model::LaneSettings> {
+    blocking(|| Ok(lane_settings_now())).await
+}
+
+/// Switches swim lanes on or off, in your own config.
+#[tauri::command]
+async fn set_lanes(on: bool) -> Result<amd_ui_model::LaneSettings> {
+    blocking(move || {
+        agile_md::lanes::set_enabled(on).map_err(err)?;
+        Ok(lane_settings_now())
+    })
+    .await
+}
+
+/// Makes a project one of your swim lanes, or not.
+#[tauri::command]
+async fn set_lane_project(root: String, on: bool) -> Result<amd_ui_model::LaneSettings> {
+    blocking(move || {
+        agile_md::lanes::set_chosen(Path::new(&root), on).map_err(err)?;
+        Ok(lane_settings_now())
+    })
+    .await
 }
 
 /// Takes a ticket off the board into the archive (`amd abandon`).
@@ -2197,6 +2369,11 @@ pub fn run() {
             link_ticket,
             retype_link,
             ticket_family,
+            lanes,
+            read_lane_ticket,
+            lane_settings,
+            set_lanes,
+            set_lane_project,
             create_epic,
             list_roadmaps,
             create_roadmap,
@@ -3003,6 +3180,58 @@ mod tests {
 
     fn column(c: UiColumn) -> Place {
         Place::column(c)
+    }
+
+    /// Swim lanes (ticket 218): another project's board, its epic tickets
+    /// in Backlog with their epic, and a board that can't be read is a lane
+    /// saying so.
+    #[test]
+    fn a_lane_is_another_projects_board_with_epic_tickets_in_backlog() {
+        let (_dir, here) = project();
+        let (_other_dir, other) = project();
+        new_ticket(&other, "Loose");
+        let filed = new_ticket(&other, "Filed");
+        let board = other.board("").unwrap();
+        board
+            .create_group(&Group {
+                dir: board.dir(Column::Backlog).join("billing"),
+                name: "billing".into(),
+                kind: Kind::Epic,
+                description: String::new(),
+                days: DEFAULT_DAYS,
+                state: State::Pending,
+            })
+            .unwrap();
+        board
+            .set_epic(
+                &board.find(filed.trim_end_matches(".md")).unwrap(),
+                Some("billing"),
+            )
+            .unwrap();
+        let lane_project = agile_md::my_work::Project {
+            name: "other".into(),
+            root: board.repo_root().to_path_buf(),
+            dir: board.repo_root().parent().unwrap().to_path_buf(),
+            hidden: false,
+            archived: false,
+        };
+        let lane = lane_of(&here, &lane_project);
+        assert_eq!(lane.error, None);
+        let backlog = &lane.columns[0].tickets;
+        let epics: Vec<_> = backlog
+            .iter()
+            .map(|t| (t.title.as_str(), t.epic.as_deref()))
+            .collect();
+        assert!(epics.contains(&("Loose", None)), "{epics:?}");
+        assert!(epics.contains(&("Filed", Some("billing"))), "{epics:?}");
+        assert!(backlog.iter().all(|t| t.repo.is_empty()));
+
+        let gone = agile_md::my_work::Project {
+            root: board.repo_root().join("nowhere"),
+            ..lane_project
+        };
+        let lane = lane_of(&here, &gone);
+        assert!(lane.error.is_some() || lane.columns.iter().all(|c| c.tickets.is_empty()));
     }
 
     #[test]
