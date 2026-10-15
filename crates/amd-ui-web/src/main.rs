@@ -11,6 +11,7 @@ mod documents;
 mod editor;
 mod home;
 mod ideas;
+mod lanes;
 mod panel;
 mod preferences;
 mod rich_dom;

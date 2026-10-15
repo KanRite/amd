@@ -18,6 +18,7 @@ pub fn PreferencesPanel() -> impl IntoView {
                 <AppearanceSection />
                 <ZoomSection />
                 <BoardSection />
+                <LanesSection />
                 <AiSection />
                 <SpeechSection />
                 <EditorSection />
@@ -223,6 +224,89 @@ fn BoardSection() -> impl IntoView {
                 "A directory holding backlog/, todo/, doing/ and done/. Opened when amdui starts outside a project, and remembered for next time."
             </p>
             {move || status.get().map(|s| view! { <p class="text-xs">{s}</p> })}
+        </section>
+    }
+}
+
+/// Swim lanes (ticket 218): other projects on this machine shown as rows
+/// under the board, view only. Yours alone, on this machine.
+#[component]
+fn LanesSection() -> impl IntoView {
+    let ctx = Ctx::get();
+    let settings = RwSignal::new(None::<Result<amd_ui_model::LaneSettings, String>>);
+    spawn_local(async move { settings.set(Some(api::lane_settings().await)) });
+    // Saves, then reloads the board so the lanes follow at once.
+    let apply = move |result: Result<amd_ui_model::LaneSettings, String>| {
+        settings.set(Some(result));
+        ctx.reload();
+    };
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Swim lanes"</h3>
+            {move || match settings.get() {
+                None => view! { <p class="text-xs text-slate-500">"Reading…"</p> }.into_any(),
+                Some(Err(e)) => view! { <p class="text-xs text-red-700 dark:text-red-300">{e}</p> }.into_any(),
+                Some(Ok(s)) if s.projects.is_empty() => {
+                    view! {
+                        <p class="text-xs text-slate-500">
+                            "There's no other project on this machine to show beside this one."
+                        </p>
+                    }
+                        .into_any()
+                }
+                Some(Ok(s)) => {
+                    let on = s.on;
+                    view! {
+                        <label class="flex items-center gap-2 text-sm">
+                            <input
+                                type="checkbox"
+                                prop:checked=on
+                                on:change=move |ev| {
+                                    let on = event_target_checked(&ev);
+                                    spawn_local(async move { apply(api::set_lanes(on).await) });
+                                }
+                            />
+                            "Show other projects as swim lanes under the board"
+                        </label>
+                        <ul class="ml-6 flex flex-col gap-1">
+                            {s
+                                .projects
+                                .into_iter()
+                                .map(|p| {
+                                    let root = p.root.clone();
+                                    view! {
+                                        <li>
+                                            <label class=format!(
+                                                "flex items-center gap-2 text-sm {}",
+                                                if on { "" } else { "opacity-50" },
+                                            )>
+                                                <input
+                                                    type="checkbox"
+                                                    prop:checked=p.chosen
+                                                    disabled=!on
+                                                    on:change=move |ev| {
+                                                        let (root, chosen) = (root.clone(), event_target_checked(&ev));
+                                                        spawn_local(async move {
+                                                            apply(api::set_lane_project(&root, chosen).await)
+                                                        });
+                                                    }
+                                                />
+                                                {p.name.clone()}
+                                                {p.archived.then(|| view! { <span class="text-xs italic text-slate-500">"archived"</span> })}
+                                                <span class="truncate text-xs text-slate-500" title=p.root.clone()>{p.root.clone()}</span>
+                                            </label>
+                                        </li>
+                                    }
+                                })
+                                .collect_view()}
+                        </ul>
+                        <p class="text-xs text-slate-500">
+                            "Each one is a row under your board with the same columns. View only: open a card to read it, or Open board to change it there."
+                        </p>
+                    }
+                        .into_any()
+                }
+            }}
         </section>
     }
 }
