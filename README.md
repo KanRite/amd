@@ -231,6 +231,16 @@ tree button that opens the same tree, with that ticket highlighted; click
 any ticket in it to go to its card. A sprint that can't start lists what's
 missing, each with "Show the tree".
 
+**Auto priority** (off unless switched on: `amd auto-priority on`, or
+Admin → Auto priority) makes a ticket at least as urgent as the most urgent
+ticket that requires it, down a chain, so the priorities you set on your
+goals flow to the work they wait on. A raised ticket records why
+(`priority-from`, `priority-own`; `amd show` says it, and its card shows
+`↑ high`), and switching it off puts them back. With **allow override** on
+(the default, `amd priority-override`), a priority you set by hand pins that
+ticket; `amd set 12 priority auto` (or "auto" in the editor) hands it back.
+With it off, a hand-set priority is only a floor.
+
 ```markdown
 related: [001,002]
 ```

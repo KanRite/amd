@@ -581,6 +581,16 @@ pub async fn set_import_issues(on: bool) -> Result<SyncReport, String> {
     call("set_import_issues", &OnArgs { on }).await
 }
 
+/// Whether priorities follow requires links (ticket 215).
+pub async fn set_auto_priority(on: bool) -> Result<SyncReport, String> {
+    call("set_auto_priority", &OnArgs { on }).await
+}
+
+/// Whether a priority set by hand pins its ticket (ticket 215).
+pub async fn set_priority_override(on: bool) -> Result<SyncReport, String> {
+    call("set_priority_override", &OnArgs { on }).await
+}
+
 /// Sets the priority imported GitHub issues start at (ticket 158).
 pub async fn set_triage_priority(priority: &str) -> Result<SyncReport, String> {
     call("set_triage_priority", &PriorityArgs { priority }).await

@@ -179,6 +179,8 @@ impl Project {
             shared_documents: settings.shared_documents().unwrap_or_default(),
             triage_priority: settings.triage_priority(),
             import_issues: settings.import_issues(),
+            auto_priority: settings.auto_priority(),
+            priority_override: settings.priority_override(),
             archived: settings.archived(),
         })
     }
@@ -257,6 +259,7 @@ impl Project {
             clone_of: task.clone_of().unwrap_or_default(),
             clones: task.clones(),
             links: task.links().iter().map(|link| link.entry()).collect(),
+            priority_from: task.meta("priority-from").unwrap_or_default(),
         }
     }
 

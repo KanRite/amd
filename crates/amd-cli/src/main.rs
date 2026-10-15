@@ -557,6 +557,25 @@ enum Cmd {
         #[arg(value_name = "N")]
         limit: u32,
     },
+    /// Show or switch auto priority: priorities set from requires links
+    ///
+    /// When on, a ticket is at least as urgent as the most urgent ticket
+    /// that requires it, down a chain; raised tickets record why
+    /// (`priority-from`, `priority-own`). Switching it off puts them back.
+    /// With no value, says whether it's on and lists the raised tickets
+    AutoPriority {
+        #[arg(value_name = "on|off", value_parser = PossibleValuesParser::new(["on", "off"]))]
+        action: Option<String>,
+    },
+    /// Show or switch whether a priority set by hand wins over auto priority
+    ///
+    /// On (the default): `amd set <ref> priority low` pins the ticket and
+    /// auto priority leaves it; `amd set <ref> priority auto` unpins it.
+    /// Off: a hand-set priority is only a floor auto priority can raise
+    PriorityOverride {
+        #[arg(value_name = "on|off", value_parser = PossibleValuesParser::new(["on", "off"]))]
+        action: Option<String>,
+    },
     /// Show or set the priority imported GitHub issues start at
     ///
     /// low, medium or high, for tickets `amd import issues` makes. With no
@@ -874,7 +893,12 @@ fn main() -> ExitCode {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
 
-    match run() {
+    let result = run();
+    // What auto priority moved along with the change (ticket 215).
+    for note in agile_md::auto_priority::take_notes() {
+        println!("{note}");
+    }
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("amd: {err:#}");
@@ -1158,6 +1182,8 @@ fn run() -> Result<()> {
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
         Cmd::SharedDocuments { name, clear } => cmd_shared_documents(&board, name, clear),
         Cmd::TriagePriority { priority } => cmd_triage_priority(&board, priority),
+        Cmd::AutoPriority { action } => cmd_auto_priority(&board, action.as_deref()),
+        Cmd::PriorityOverride { action } => cmd_priority_override(&board, action.as_deref()),
         Cmd::Register { .. } | Cmd::Deregister { .. } => unreachable!("handled above"),
         Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
         Cmd::New(args) => cmd_new(&board, args),
@@ -1256,6 +1282,10 @@ fn run() -> Result<()> {
             if let Some(line) = lock_note(&board, &task) {
                 eprintln!("{line}");
             }
+            // Why its priority is what it is (ticket 215).
+            if let Some(line) = agile_md::auto_priority::note(&board, &task) {
+                eprintln!("{line}");
+            }
             // Who to ask about it (ticket 155), on stderr like the lock note.
             if let Some(line) = agile_md::authorship::summary(&board, &task) {
                 eprintln!("{line}");
@@ -1312,9 +1342,13 @@ fn run() -> Result<()> {
                         task.set_title(task.hash()?, &value)?;
                         println!("{} retitled", task.id_display());
                     }
+                    // By hand (ticket 215): pins it against auto priority
+                    // when override is on; `auto` unpins.
                     "priority" => {
-                        task.set_priority(task.hash()?, &value)?;
-                        println!("{} priority {value}", task.id_display());
+                        println!(
+                            "{}",
+                            agile_md::auto_priority::set_by_hand(&board, &task, &value)?
+                        );
                     }
                     "repository" => {
                         task.set_repository(task.hash()?, &value)?;
@@ -2034,6 +2068,67 @@ fn cmd_shared_documents(board: &Board, name: Option<String>, clear: bool) -> Res
     Ok(())
 }
 
+/// `amd auto-priority [on|off]` (ticket 215): switching commits the
+/// setting and every priority it moves, together.
+fn cmd_auto_priority(board: &Board, action: Option<&str>) -> Result<()> {
+    let Some(action) = action else {
+        let on = board_settings::load(board).auto_priority();
+        println!("auto priority is {}", if on { "on" } else { "off" });
+        for task in board.tasks()? {
+            if let Some(note) = agile_md::auto_priority::note(board, &task) {
+                println!("{}: {note}", task.id_display());
+            }
+        }
+        return Ok(());
+    };
+    let on = action == "on";
+    with_auto_commit(board, "settings", "auto-priority", action, || {
+        let mut settings = board_settings::load(board);
+        settings.set_auto_priority(on);
+        settings.save(board)
+    })?;
+    println!(
+        "{}",
+        if on {
+            "auto priority is on: a ticket is at least as urgent as what requires it"
+        } else {
+            "auto priority is off: raised priorities are put back"
+        }
+    );
+    Ok(())
+}
+
+/// `amd priority-override [on|off]` (ticket 215).
+fn cmd_priority_override(board: &Board, action: Option<&str>) -> Result<()> {
+    let Some(action) = action else {
+        let on = board_settings::load(board).priority_override();
+        println!(
+            "priority override is {}",
+            if on {
+                "on: a priority set by hand pins the ticket"
+            } else {
+                "off: a priority set by hand is a floor auto priority can raise"
+            }
+        );
+        return Ok(());
+    };
+    let on = action == "on";
+    with_auto_commit(board, "settings", "priority-override", action, || {
+        let mut settings = board_settings::load(board);
+        settings.set_priority_override(on);
+        settings.save(board)
+    })?;
+    println!(
+        "{}",
+        if on {
+            "priority override is on: a priority set by hand pins the ticket"
+        } else {
+            "priority override is off: a priority set by hand is a floor"
+        }
+    );
+    Ok(())
+}
+
 /// Sets the priority imported GitHub issues start at (ticket 158),
 /// committed and pushed like any setting; with no value, says which it is.
 fn cmd_triage_priority(board: &Board, priority: Option<String>) -> Result<()> {
@@ -2443,6 +2538,8 @@ fn changes_board(command: &Cmd) -> bool {
             command,
             Cmd::WipLimit { .. }
                 | Cmd::TriagePriority { priority: Some(_) }
+                | Cmd::AutoPriority { action: Some(_) }
+                | Cmd::PriorityOverride { action: Some(_) }
                 | Cmd::SharedDocuments { name: Some(_), .. }
                 | Cmd::SharedDocuments { clear: true, .. }
                 | Cmd::Templates {
@@ -2482,6 +2579,8 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::WipLimit { .. }
         | Cmd::SharedDocuments { .. }
         | Cmd::TriagePriority { .. }
+        | Cmd::AutoPriority { action: None }
+        | Cmd::PriorityOverride { action: None }
         | Cmd::Group {
             command: None | Some(GroupCmd::List),
         } => Read,
@@ -2746,6 +2845,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     for line in requires_links(board, &created.task, &requires)? {
         println!("{line}");
     }
+    transition::settle_priorities(board);
     // The same commit, push and replay-or-undo every other change gets
     // (ticket 102): a clash with a ticket someone else numbered at the same
     // moment is undone here, and fails, rather than reaching the remote.

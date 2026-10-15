@@ -130,6 +130,9 @@ pub struct TicketSummary {
     /// Its typed links (`links:`), each `kind:id` as written (ticket 207).
     #[serde(default)]
     pub links: Vec<String>,
+    /// The ticket auto priority raised it from (ticket 215), or empty.
+    #[serde(default)]
+    pub priority_from: String,
 }
 
 /// The kinds of link a ticket can have (ticket 207), as `(slug, label)`:
@@ -404,6 +407,12 @@ pub struct Board {
     /// (ticket 173).
     #[serde(default)]
     pub import_issues: bool,
+    /// Priorities follow requires links (ticket 215).
+    #[serde(default)]
+    pub auto_priority: bool,
+    /// A priority set by hand pins its ticket against auto priority.
+    #[serde(default)]
+    pub priority_override: bool,
     /// The project is archived (ticket 157): read-only until unarchived.
     #[serde(default)]
     pub archived: bool,
@@ -593,6 +602,10 @@ pub struct TicketDocument {
     /// "created by … on …; last edited by … on …" (ticket 155), or empty.
     #[serde(default)]
     pub authorship: String,
+    /// Why its priority is what it is, when auto priority raised or a hand
+    /// pinned it (ticket 215), or empty.
+    #[serde(default)]
+    pub priority_note: String,
 }
 
 /// What happened in git after a ticket change was written to disk.
@@ -1170,6 +1183,7 @@ mod assigned_tests {
             clone_of: String::new(),
             clones: Vec::new(),
             links: Vec::new(),
+            priority_from: String::new(),
         }
     }
 
@@ -1234,6 +1248,8 @@ mod assigned_tests {
             shared_documents: String::new(),
             triage_priority: String::new(),
             import_issues: true,
+            auto_priority: false,
+            priority_override: true,
             archived: false,
         };
         board.epics.push(Epic {
@@ -1288,6 +1304,7 @@ mod search_tests {
             clone_of: String::new(),
             clones: Vec::new(),
             links: Vec::new(),
+            priority_from: String::new(),
         }
     }
 
@@ -1413,6 +1430,7 @@ mod link_tests {
             clone_of: String::new(),
             clones: Vec::new(),
             links: Vec::new(),
+            priority_from: String::new(),
         }
     }
 
