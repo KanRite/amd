@@ -400,6 +400,109 @@ async fn create_ticket(
     .await
 }
 
+/// Where a new repository would go, and its defaults (ticket 228).
+#[tauri::command]
+async fn repo_defaults() -> Result<amd_ui_model::RepoDefaults> {
+    blocking(|| {
+        let project = Project::open()?;
+        let board = &project.repos[0].1;
+        let prefix = board_settings::load(board)
+            .project()
+            .map(|p| format!("{p}-"))
+            .unwrap_or_default();
+        let admin = boards::admin_access(board);
+        if !admin.allowed {
+            return Ok(amd_ui_model::RepoDefaults {
+                prefix,
+                refused: Some("Only the project's admins can make repositories.".into()),
+                ..Default::default()
+            });
+        }
+        use agile_md::new_repo::{self, Forge};
+        Ok(match new_repo::defaults(board, &mut new_repo::gh) {
+            Ok(d) => amd_ui_model::RepoDefaults {
+                place: match d.forge {
+                    Forge::GitHub { owner } => format!("on GitHub, under {owner}"),
+                    Forge::Local => "beside the tickets repository's remote".into(),
+                    Forge::None => {
+                        "on this machine only (the tickets repository has no remote)".into()
+                    }
+                },
+                private: d.private,
+                prefix,
+                refused: None,
+            },
+            Err(e) => amd_ui_model::RepoDefaults {
+                prefix,
+                refused: Some(format!("{e:#}")),
+                ..Default::default()
+            },
+        })
+    })
+    .await
+}
+
+/// Makes (or connects) a repository for the project and registers it
+/// (ticket 228): the ticket at `place`/`file`, if given, gets it as its
+/// repository and a note. Admins only.
+#[tauri::command]
+async fn create_repository(
+    state: Tauri<'_, AppState>,
+    name: String,
+    description: String,
+    private: bool,
+    readme: bool,
+    place: Option<Place>,
+    file: Option<String>,
+) -> Result<SyncReport> {
+    change(&state, move |project| {
+        use agile_md::new_repo::{self, NewRepo};
+        let board = &project.repos[0].1;
+        if !boards::admin_access(board).allowed {
+            return Err("Only the project's admins can make repositories.".into());
+        }
+        let task = match (&place, &file) {
+            (Some(place), Some(file)) => {
+                let on = project.board(&place.repo)?;
+                Some((on, task_at(on, place, file)?))
+            }
+            _ => None,
+        };
+        let new = NewRepo {
+            name: name.trim().to_string(),
+            description: description.trim().to_string(),
+            private: Some(private),
+            readme,
+            for_ticket: task.as_ref().map(|(_, t)| (t.id_display(), t.title())),
+        };
+        let made = new_repo::create(board, &new, &mut new_repo::gh).map_err(err)?;
+        new_repo::register(&made).map_err(err)?;
+        let same_board = task.as_ref().is_none_or(|(on, _)| on.root == board.root);
+        let mut report = committed(board, "repo", "new", &made.name, || {
+            new_repo::declare(board, &made.name)?;
+            if same_board && let Some((_, task)) = &task {
+                new_repo::record_on_ticket(board, task, &made)?;
+            }
+            Ok(())
+        })?;
+        // A ticket on one of the project's other boards: its own commit.
+        if !same_board && let Some((on, task)) = &task {
+            committed(on, "repo", "new", &made.name, || {
+                new_repo::record_on_ticket(on, task, &made)
+            })?;
+        }
+        if !made.notes.is_empty() {
+            let notes = made.notes.join("; ");
+            report.warning = Some(match report.warning {
+                Some(w) => format!("{w}; {notes}"),
+                None => notes,
+            });
+        }
+        Ok(report)
+    })
+    .await
+}
+
 /// What the page needs to open a ticket that was just made: where it landed,
 /// its text, and the report of what the change did.
 fn created_from(board: &Board, repo: String, outcome: &transition::Outcome) -> Result<Created> {
@@ -2379,6 +2482,8 @@ pub fn run() {
             link_ticket,
             retype_link,
             ticket_family,
+            repo_defaults,
+            create_repository,
             add_column,
             rename_column,
             move_column,

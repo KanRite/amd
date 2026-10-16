@@ -1198,6 +1198,40 @@ pub fn slugify(title: &str) -> String {
     slug
 }
 
+/// `body` with `note` added at the end of its `## Notes` section, which is
+/// made at the end if there isn't one.
+pub fn with_note(body: &str, note: &str) -> String {
+    let lines: Vec<&str> = body.lines().collect();
+    let Some(start) = lines.iter().position(|l| l.trim() == "## Notes") else {
+        let mut out = body.trim_end().to_string();
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        return format!("{out}## Notes\n\n{note}\n");
+    };
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find(|(_, l)| l.starts_with("## "))
+        .map_or(lines.len(), |(i, _)| i);
+    // Back over the blank lines before the next section.
+    let mut at = end;
+    while at > start + 1 && lines[at - 1].trim().is_empty() {
+        at -= 1;
+    }
+    let mut out: Vec<String> = lines[..at].iter().map(|l| l.to_string()).collect();
+    out.push(String::new());
+    out.push(note.to_string());
+    if end < lines.len() {
+        out.push(String::new());
+        out.extend(lines[end..].iter().map(|l| l.to_string()));
+    }
+    let mut text = out.join("\n");
+    text.push('\n');
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

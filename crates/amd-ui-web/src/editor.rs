@@ -34,6 +34,10 @@ enum Mode {
     Markdown,
 }
 
+/// The Repository select's "＋ New repository…" (ticket 228): not a name
+/// a repository can have.
+const NEW_REPO: &str = "＋new";
+
 #[component]
 pub fn Editor(doc: TicketDocument) -> impl IntoView {
     let ctx = Ctx::get();
@@ -217,6 +221,7 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
     };
 
     let file_for_new = file.clone();
+    let file_for_repo = file.clone();
     let save = move |_| {
         let file = file.clone();
         // Same rule the backend applies; checking here keeps the editor open
@@ -278,6 +283,43 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                 saving.set(false);
             });
         }
+    };
+
+    // A new repository for this ticket (ticket 228): saved first if it has
+    // edits, as Save and New does, then the dialog.
+    let new_repo = {
+        let file = file_for_repo;
+        Callback::new(move |()| {
+            let target = crate::app::NewRepoFor {
+                place: place.get_value(),
+                file: file.clone(),
+                id: id.get_untracked(),
+                title: fields.with_untracked(|f| f.title.clone()),
+            };
+            let open = move || ctx.overlay.set(Some(Overlay::NewRepo(target.clone())));
+            if !dirty.get_untracked() {
+                open();
+                return;
+            }
+            let content = match ticket::ensure_priority(&current()) {
+                Ok(content) => content,
+                Err(e) => return save_error.set(Some(e)),
+            };
+            let file = file.clone();
+            saving.set(true);
+            spawn_local(async move {
+                let opened = version.get_untracked();
+                match api::save_ticket(&place.get_value(), &file, &content, &opened).await {
+                    Ok(report) => {
+                        ctx.report(report);
+                        ctx.reload();
+                        open();
+                    }
+                    Err(e) => save_error.set(Some(e)),
+                }
+                saving.set(false);
+            });
+        })
     };
 
     let set_field = move |f: fn(&mut Fields, String)| {
@@ -430,7 +472,23 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                             class=input
                             title="The repository the work is in; only one cloned on this machine can be chosen"
                             prop:value=move || fields.with(|f| f.repository.clone())
-                            on:change=set_field(|f, v| f.repository = v)
+                            on:change=move |ev| {
+                                let value = event_target_value(&ev);
+                                if value == NEW_REPO {
+                                    // Put the select back; the dialog decides.
+                                    let current = fields.with_untracked(|f| f.repository.clone());
+                                    if let Some(select) = ev
+                                        .target()
+                                        .and_then(|t| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlSelectElement>(t).ok())
+                                    {
+                                        select.set_value(&current);
+                                    }
+                                    new_repo.run(());
+                                } else {
+                                    fields.update(|f| f.repository = value);
+                                    refresh_dirty();
+                                }
+                            }
                         >
                             <option value="">"none"</option>
                             {move || {
@@ -465,6 +523,21 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                                         }
                                     })
                                     .collect_view()
+                            }}
+                            // Ticket 228: a repository the project hasn't got yet.
+                            {move || {
+                                let admin = ctx
+                                    .board
+                                    .with(|b| b.as_ref().is_none_or(|b| b.admin.allowed));
+                                view! {
+                                    <option
+                                        value=NEW_REPO
+                                        disabled=!admin
+                                        title=(!admin).then_some("Only the project's admins can make repositories")
+                                    >
+                                        {if admin { "＋ New repository…" } else { "＋ New repository… (admins only)" }}
+                                    </option>
+                                }
                             }}
                         </select>
                     </label>
