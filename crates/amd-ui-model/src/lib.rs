@@ -1190,6 +1190,21 @@ pub struct Created {
     pub sync: SyncReport,
 }
 
+/// Where a new repository would be made, for the dialog (ticket 228).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoDefaults {
+    /// In words: "on GitHub, under acme-org", "beside the tickets
+    /// repository's remote", "on this machine only".
+    pub place: String,
+    /// The same as the tickets repository's.
+    pub private: bool,
+    /// What a name starts with, the project's: "acme-".
+    pub prefix: String,
+    /// Why it can't be done here, if it can't (not an admin, another forge).
+    #[serde(default)]
+    pub refused: Option<String>,
+}
+
 /// The template new tickets are rendered from.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketTemplate {

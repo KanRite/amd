@@ -52,6 +52,8 @@ pub enum Overlay {
     Preferences,
     /// A "(not cloned)" repository chosen in the filter: clone it? (108)
     CloneRepo(String),
+    /// A new repository for the project, from a ticket (ticket 228).
+    NewRepo(NewRepoFor),
     /// A ticket dropped on a column at its WIP limit: move it anyway?
     OverLimit {
         file: String,
@@ -66,6 +68,15 @@ pub enum Overlay {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LinkBack {
     pub repo: String,
+    pub id: String,
+    pub title: String,
+}
+
+/// The ticket a new repository is made for (ticket 228).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NewRepoFor {
+    pub place: Place,
+    pub file: String,
     pub id: String,
     pub title: String,
 }
@@ -493,6 +504,9 @@ pub fn App() -> impl IntoView {
                 Some(Overlay::Admin) => view! { <AdminPanel /> }.into_any(),
                 Some(Overlay::Preferences) => view! { <PreferencesPanel /> }.into_any(),
                 Some(Overlay::CloneRepo(name)) => view! { <CloneRepoDialog name /> }.into_any(),
+                Some(Overlay::NewRepo(ticket)) => {
+                    view! { <crate::dialog::NewRepoDialog ticket /> }.into_any()
+                }
                 Some(Overlay::Tree { place, file }) => {
                     view! { <crate::tree::TreePanel place file /> }.into_any()
                 }

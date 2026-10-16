@@ -7,7 +7,6 @@
 mod completions;
 mod docs;
 mod form;
-mod github;
 mod idea;
 mod init;
 mod join;
@@ -314,6 +313,12 @@ enum Cmd {
     Column {
         #[command(subcommand)]
         action: Option<ColumnAction>,
+    },
+    /// Make a new repository for the project (or connect one that already
+    /// exists), clone it beside the tickets repository and register it
+    Repo {
+        #[command(subcommand)]
+        action: RepoAction,
     },
     /// Move a ticket to any column by its name or folder
     ///
@@ -1249,6 +1254,7 @@ fn run() -> Result<()> {
         Cmd::Tag { tag } => render::named(&format!("tag: {tag}"), board.tasks_tagged(&tag)?, &[]),
         Cmd::Tags { action } => cmd_tags(&board, action),
         Cmd::Column { action } => cmd_column(&board, action),
+        Cmd::Repo { action } => cmd_repo(&board, action),
         Cmd::Move {
             task,
             column,
@@ -2328,6 +2334,80 @@ fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
     match added {
         true => println!("registered {name}"),
         false => println!("{name} was already registered on this machine"),
+    }
+    Ok(())
+}
+
+/// `amd repo` (ticket 228).
+#[derive(Subcommand, Debug)]
+enum RepoAction {
+    /// Make a repository on GitHub under the tickets repository's owner (or
+    /// beside a local origin), or connect it if it's already there; clone
+    /// it beside the tickets repository, declare it for the project and
+    /// register it here. With --for, the ticket's repository is set and a
+    /// note says so
+    New {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(long, value_name = "TEXT")]
+        description: Option<String>,
+        /// Public, whatever the tickets repository is
+        #[arg(long, conflicts_with = "private")]
+        public: bool,
+        /// Private, whatever the tickets repository is
+        #[arg(long)]
+        private: bool,
+        /// No starter README
+        #[arg(long)]
+        no_readme: bool,
+        /// The ticket it's for: its repository is set, and a note added
+        #[arg(long = "for", value_name = "REF")]
+        for_ticket: Option<String>,
+    },
+}
+
+/// Makes or connects a repository for the project (ticket 228), in one
+/// commit on the tickets repository with the ticket it's for.
+fn cmd_repo(board: &Board, action: RepoAction) -> Result<()> {
+    use agile_md::new_repo::{self, NewRepo};
+    let RepoAction::New {
+        name,
+        description,
+        public,
+        private,
+        no_readme,
+        for_ticket,
+    } = action;
+    let task = for_ticket.map(|r| board.find(&r)).transpose()?;
+    let new = NewRepo {
+        name: name.clone(),
+        description: description
+            .clone()
+            .unwrap_or_else(|| task.as_ref().map(|t| t.title()).unwrap_or_default()),
+        private: match (public, private) {
+            (true, _) => Some(false),
+            (_, true) => Some(true),
+            _ => None,
+        },
+        readme: !no_readme,
+        for_ticket: task.as_ref().map(|t| (t.id_display(), t.title())),
+    };
+    let made = new_repo::create(board, &new, &mut new_repo::gh)?;
+    new_repo::register(&made)?;
+    with_auto_commit(board, "repo", "new", &made.name, || {
+        new_repo::declare(board, &made.name)?;
+        if let Some(task) = &task {
+            new_repo::record_on_ticket(board, task, &made)?;
+        }
+        Ok(())
+    })?;
+    let what = if made.created { "created" } else { "connected" };
+    println!("{what} {} at {}", made.name, made.path.display());
+    if let Some(task) = &task {
+        println!("{} is now about {}", task.id_display(), made.name);
+    }
+    for note in &made.notes {
+        eprintln!("amd: {note}");
     }
     Ok(())
 }

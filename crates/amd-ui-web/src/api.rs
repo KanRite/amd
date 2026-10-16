@@ -505,6 +505,44 @@ pub async fn set_column_wip(
     call("set_column_wip", &ColumnWipArgs { column, limit }).await
 }
 
+/// Where a new repository would be made, and its defaults (ticket 228).
+pub async fn repo_defaults() -> Result<amd_ui_model::RepoDefaults, String> {
+    call("repo_defaults", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct NewRepoArgs<'a> {
+    name: &'a str,
+    description: &'a str,
+    private: bool,
+    readme: bool,
+    place: Option<&'a Place>,
+    file: Option<&'a str>,
+}
+
+/// Makes (or connects) a repository for the project, for the ticket at
+/// `place`/`file` when given.
+pub async fn create_repository(
+    name: &str,
+    description: &str,
+    private: bool,
+    readme: bool,
+    ticket: Option<(&Place, &str)>,
+) -> Result<SyncReport, String> {
+    call(
+        "create_repository",
+        &NewRepoArgs {
+            name,
+            description,
+            private,
+            readme,
+            place: ticket.map(|(p, _)| p),
+            file: ticket.map(|(_, f)| f),
+        },
+    )
+    .await
+}
+
 #[derive(Serialize)]
 struct FlowArgs {
     any: bool,

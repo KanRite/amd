@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
-use crate::app::{Ctx, LinkBack, LinkKind, Modal, Overlay};
+use crate::app::{Ctx, LinkBack, LinkKind, Modal, NewRepoFor, Overlay};
 
 #[component]
 pub fn NewTicketDialog(link: Option<LinkBack>) -> impl IntoView {
@@ -457,5 +457,140 @@ fn ProblemNote(problem: RwSignal<Option<String>>) -> impl IntoView {
                 </p>
             }
         })
+    }
+}
+
+/// A new repository for the project, from a ticket (ticket 228): made on
+/// GitHub (or beside a local remote, or only here), cloned beside the
+/// tickets repository, registered, and set as the ticket's repository with
+/// a note. One already there is connected instead.
+#[component]
+pub fn NewRepoDialog(ticket: NewRepoFor) -> impl IntoView {
+    let ctx = Ctx::get();
+    let defaults = RwSignal::new(None::<Result<amd_ui_model::RepoDefaults, String>>);
+    let name = RwSignal::new(String::new());
+    let description = RwSignal::new(ticket.title.clone());
+    let private = RwSignal::new(true);
+    let readme = RwSignal::new(true);
+    let busy = RwSignal::new(false);
+    let problem = RwSignal::new(None::<String>);
+    let slug = amd_ui_model::slugify(&ticket.title);
+    spawn_local(async move {
+        let got = api::repo_defaults().await;
+        if let Ok(d) = &got {
+            private.set(d.private);
+            name.set(format!("{}{slug}", d.prefix));
+        }
+        defaults.set(Some(got));
+    });
+    let ticket = StoredValue::new(ticket);
+    let create = move || {
+        if busy.get_untracked() {
+            return;
+        }
+        let (n, d, p, r) = (
+            name.get_untracked(),
+            description.get_untracked(),
+            private.get_untracked(),
+            readme.get_untracked(),
+        );
+        let t = ticket.get_value();
+        busy.set(true);
+        problem.set(None);
+        spawn_local(async move {
+            match api::create_repository(&n, &d, p, r, Some((&t.place, &t.file))).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    ctx.reload();
+                    // The ticket again, now with its repository and the note.
+                    ctx.open_ticket(t.place.clone(), t.file.clone());
+                }
+                Err(e) => {
+                    problem.set(Some(e));
+                    busy.set(false);
+                }
+            }
+        });
+    };
+    let field = "rounded border border-slate-300 bg-slate-50 px-2 py-1.5 dark:border-slate-600 dark:bg-slate-900";
+    view! {
+        <Modal title=format!("New repository for {}", ticket.get_value().id) width="max-w-lg">
+            {move || match defaults.get() {
+                None => view! { <p class="text-sm text-slate-500">"Checking where it would go…"</p> }.into_any(),
+                Some(Err(e)) => view! { <p class="text-sm text-red-700 dark:text-red-300">{e}</p> }.into_any(),
+                Some(Ok(d)) if d.refused.is_some() => {
+                    view! { <p class="text-sm text-red-700 dark:text-red-300">{d.refused.clone()}</p> }.into_any()
+                }
+                Some(Ok(d)) => {
+                    view! {
+                        <form
+                            class="flex flex-col gap-3"
+                            on:submit=move |ev| {
+                                ev.prevent_default();
+                                create();
+                            }
+                        >
+                            <label class="flex flex-col gap-1 text-sm">
+                                "Name"
+                                <input
+                                    type="text"
+                                    autofocus
+                                    class=format!("{field} font-mono")
+                                    prop:value=move || name.get()
+                                    on:input=move |ev| name.set(event_target_value(&ev))
+                                />
+                            </label>
+                            <label class="flex flex-col gap-1 text-sm">
+                                "Description"
+                                <input
+                                    type="text"
+                                    class=field
+                                    prop:value=move || description.get()
+                                    on:input=move |ev| description.set(event_target_value(&ev))
+                                />
+                            </label>
+                            <div class="flex gap-4 text-sm">
+                                <label class="flex items-center gap-1">
+                                    <input type="radio" name="visibility" prop:checked=move || private.get() on:change=move |_| private.set(true) />
+                                    "Private"
+                                </label>
+                                <label class="flex items-center gap-1">
+                                    <input type="radio" name="visibility" prop:checked=move || !private.get() on:change=move |_| private.set(false) />
+                                    "Public"
+                                </label>
+                            </div>
+                            <label class="flex items-center gap-2 text-sm">
+                                <input type="checkbox" prop:checked=move || readme.get() on:change=move |ev| readme.set(event_target_checked(&ev)) />
+                                "Add a starter README"
+                            </label>
+                            <p class="text-xs text-slate-500">
+                                {format!(
+                                    "It's made {}, cloned beside the tickets repository and added to the project for everyone. If it's already there, it's connected instead. The ticket gets it as its repository, with a note.",
+                                    d.place,
+                                )}
+                            </p>
+                            <ProblemNote problem />
+                            <div class="flex justify-end gap-2">
+                                <button
+                                    type="button"
+                                    class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                                    on:click=move |_| ctx.close_overlay()
+                                >
+                                    "Cancel"
+                                </button>
+                                <button
+                                    type="submit"
+                                    class="rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
+                                    disabled=move || busy.get() || name.with(|n| n.trim().is_empty())
+                                >
+                                    {move || if busy.get() { "Creating…" } else { "Create" }}
+                                </button>
+                            </div>
+                        </form>
+                    }
+                        .into_any()
+                }
+            }}
+        </Modal>
     }
 }

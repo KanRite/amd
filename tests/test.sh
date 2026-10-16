@@ -836,6 +836,52 @@ assert "amd clone --all clones every one still missing" \
     && in_cl clone 2>/dev/null | grep -q 'every declared repository is cloned here'"
 rm -rf "${cl}"
 
+echo "amd repo new makes a repository for the project (ticket 228):"
+# A tickets repository cloned from a local bare remote: new repositories go
+# beside that remote, as they would beside a GitHub one.
+rn="$(mktemp -d)"
+(
+  set -e
+  export XDG_CONFIG_HOME="${rn}/config"
+  git init -q --bare -b main "${rn}/remote/p-tickets.git"
+  git clone -q "${rn}/remote/p-tickets.git" "${rn}/work/p-tickets" 2>/dev/null
+  cd "${rn}/work/p-tickets"
+  git config user.email t@t.co && git config user.name t && git config commit.gpgsign false
+  "${AMD}" init p --local-only >/dev/null 2>&1
+  git add -A && git commit -q -m "seed for ticket 228" && git push -q origin HEAD:main 2>/dev/null
+  git branch -q --set-upstream-to=origin/main
+  "${AMD}" new "Take card payments" --no-edit >/dev/null 2>&1
+  # One that already exists on the remote, not cloned here.
+  git init -q --bare -b main "${rn}/remote/p-existing.git"
+  git clone -q "${rn}/remote/p-existing.git" "${rn}/seed" 2>/dev/null
+  git -C "${rn}/seed" -c user.email=t@t.co -c user.name=t commit -q --allow-empty -m "already here"
+  git -C "${rn}/seed" push -q origin HEAD:main 2>/dev/null
+)
+in_rn() { (cd "${rn}/work/p-tickets" && env XDG_CONFIG_HOME="${rn}/config" AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "amd repo new --for makes it beside the remote, clones it beside the tickets repository, with a README" \
+  bash -c "$(declare -f in_rn); rn='${rn}'; AMD='${AMD}'; in_rn repo new p-payments --for 1 2>/dev/null \
+    | grep -q \"created p-payments at ${rn}/work/p-payments\" \
+    && [ -d '${rn}/remote/p-payments.git' ] && [ -f '${rn}/work/p-payments/README.md' ] \
+    && grep -q 'ticket 001, Take card payments' '${rn}/work/p-payments/README.md' \
+    && [ \"\$(git -C '${rn}/remote/p-payments.git' log -1 --format=%s main)\" = 'Start the repository' ]"
+assert "...declares and registers it, and the ticket says so, in one commit" \
+  bash -c "rn='${rn}'; grep -q '^repos = .*p-payments' '${rn}/work/p-tickets/.settings' \
+    && grep -q '/work/p-payments\$' '${rn}/config/agile-md/repos' \
+    && grep -q '^repository: \"p-payments\"' '${rn}'/work/p-tickets/tasks/backlog/001-*.md \
+    && grep -q 'Created repository p-payments (private).' '${rn}'/work/p-tickets/tasks/backlog/001-*.md \
+    && [ \"\$(git -C '${rn}/work/p-tickets' log -1 --format=%s)\" = 'repo: new \"p-payments\"' ] \
+    && git -C '${rn}/work/p-tickets' show --stat --format= HEAD | grep -q '.settings' \
+    && git -C '${rn}/work/p-tickets' show --stat --format= HEAD | grep -q '001-'"
+assert "making it again is refused" \
+  bash -c "$(declare -f in_rn); rn='${rn}'; AMD='${AMD}'; in_rn repo new p-payments 2>&1 | grep -q 'p-payments is already cloned'"
+assert "a repository already on the remote is connected, not made again" \
+  bash -c "$(declare -f in_rn); rn='${rn}'; AMD='${AMD}'; in_rn repo new p-existing 2>/dev/null | grep -q '^connected p-existing' \
+    && [ \"\$(git -C '${rn}/work/p-existing' log -1 --format=%s)\" = 'already here' ] \
+    && [ ! -f '${rn}/work/p-existing/README.md' ]"
+assert "a name with a slash or a space is refused" \
+  bash -c "$(declare -f in_rn); rn='${rn}'; AMD='${AMD}'; ! in_rn repo new 'bad name' >/dev/null 2>&1 && ! in_rn repo new a/b >/dev/null 2>&1"
+rm -rf "${rn}"
+
 echo "board settings live in the tickets repository (ticket 111):"
 # A project whose documents repository still holds settings from before
 # 111: repos and wip-limit there, an older repos value in tickets.
