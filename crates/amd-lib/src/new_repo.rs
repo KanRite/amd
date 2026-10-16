@@ -240,7 +240,18 @@ pub fn create(board: &Board, new: &NewRepo, gh: Gh) -> Result<Made> {
             &["symbolic-ref", "HEAD", "refs/heads/main"],
             None,
         )?;
-        git::commit_all(&target, "Start the repository")?;
+        // As whoever the tickets repository knows: a machine without a
+        // global identity may have one set only there.
+        let mut commit = vec!["-c".to_string(), "commit.gpgsign=false".to_string()];
+        for key in ["user.name", "user.email"] {
+            if let Some(value) = git::config(tickets, key) {
+                commit.extend(["-c".to_string(), format!("{key}={value}")]);
+            }
+        }
+        commit.extend(["commit", "-q", "-m", "Start the repository"].map(str::to_string));
+        run_git(Some(&target), &["add", "README.md"], None)?;
+        let commit: Vec<&str> = commit.iter().map(String::as_str).collect();
+        run_git(Some(&target), &commit, None)?;
         if defaults.forge != Forge::None {
             match run_git(Some(&target), &["push", "-q", "-u", "origin", "main"], None) {
                 Ok(()) => pushed = true,
