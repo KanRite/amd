@@ -34,6 +34,10 @@ enum Mode {
     Markdown,
 }
 
+/// The Repository select's "＋ New repository…" (ticket 228): not a name
+/// a repository can have.
+const NEW_REPO: &str = "＋new";
+
 #[component]
 pub fn Editor(doc: TicketDocument) -> impl IntoView {
     let ctx = Ctx::get();
@@ -47,6 +51,7 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
         lapsed,
         version,
         authorship,
+        priority_note,
     } = doc;
     let path = match &epic {
         Some(name) => format!("{}/{name}/{file}", column.dir_name()),
@@ -71,9 +76,10 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                         found.is_some_and(|e| e.started),
                     )
                 });
+                let label = b.map(|b| b.label(column)).unwrap_or_default();
                 amd_ui_model::epic::where_it_is(
                     many.then_some(repo.as_str()),
-                    column,
+                    &label,
                     group.as_ref().map(|(n, k, s)| (n.as_str(), *k, *s)),
                     epic.is_some(),
                 )
@@ -214,6 +220,8 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
         }
     };
 
+    let file_for_new = file.clone();
+    let file_for_repo = file.clone();
     let save = move |_| {
         let file = file.clone();
         // Same rule the backend applies; checking here keeps the editor open
@@ -235,6 +243,83 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
             }
             saving.set(false);
         });
+    };
+
+    // Save and New (ticket 227): saves this ticket if it has edits, then
+    // opens New ticket linked back to it, for a ticket found to depend on
+    // one that's missing.
+    let save_and_new = {
+        let file = file_for_new;
+        move |_| {
+            let back = crate::app::LinkBack {
+                repo: place.get_value().repo,
+                id: id.get_untracked(),
+                title: fields.with_untracked(|f| f.title.clone()),
+            };
+            let open_new = move || {
+                ctx.overlay
+                    .set(Some(Overlay::NewTicket(Some(back.clone()))))
+            };
+            if !dirty.get_untracked() {
+                open_new();
+                return;
+            }
+            let content = match ticket::ensure_priority(&current()) {
+                Ok(content) => content,
+                Err(e) => return save_error.set(Some(e)),
+            };
+            let file = file.clone();
+            saving.set(true);
+            spawn_local(async move {
+                let opened = version.get_untracked();
+                match api::save_ticket(&place.get_value(), &file, &content, &opened).await {
+                    Ok(report) => {
+                        ctx.report(report);
+                        ctx.reload();
+                        open_new();
+                    }
+                    Err(e) => save_error.set(Some(e)),
+                }
+                saving.set(false);
+            });
+        }
+    };
+
+    // A new repository for this ticket (ticket 228): saved first if it has
+    // edits, as Save and New does, then the dialog.
+    let new_repo = {
+        let file = file_for_repo;
+        Callback::new(move |()| {
+            let target = crate::app::NewRepoFor {
+                place: place.get_value(),
+                file: file.clone(),
+                id: id.get_untracked(),
+                title: fields.with_untracked(|f| f.title.clone()),
+            };
+            let open = move || ctx.overlay.set(Some(Overlay::NewRepo(target.clone())));
+            if !dirty.get_untracked() {
+                open();
+                return;
+            }
+            let content = match ticket::ensure_priority(&current()) {
+                Ok(content) => content,
+                Err(e) => return save_error.set(Some(e)),
+            };
+            let file = file.clone();
+            saving.set(true);
+            spawn_local(async move {
+                let opened = version.get_untracked();
+                match api::save_ticket(&place.get_value(), &file, &content, &opened).await {
+                    Ok(report) => {
+                        ctx.report(report);
+                        ctx.reload();
+                        open();
+                    }
+                    Err(e) => save_error.set(Some(e)),
+                }
+                saving.set(false);
+            });
+        })
     };
 
     let set_field = move |f: fn(&mut Fields, String)| {
@@ -387,7 +472,23 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                             class=input
                             title="The repository the work is in; only one cloned on this machine can be chosen"
                             prop:value=move || fields.with(|f| f.repository.clone())
-                            on:change=set_field(|f, v| f.repository = v)
+                            on:change=move |ev| {
+                                let value = event_target_value(&ev);
+                                if value == NEW_REPO {
+                                    // Put the select back; the dialog decides.
+                                    let current = fields.with_untracked(|f| f.repository.clone());
+                                    if let Some(select) = ev
+                                        .target()
+                                        .and_then(|t| wasm_bindgen::JsCast::dyn_into::<web_sys::HtmlSelectElement>(t).ok())
+                                    {
+                                        select.set_value(&current);
+                                    }
+                                    new_repo.run(());
+                                } else {
+                                    fields.update(|f| f.repository = value);
+                                    refresh_dirty();
+                                }
+                            }
                         >
                             <option value="">"none"</option>
                             {move || {
@@ -422,6 +523,21 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                                         }
                                     })
                                     .collect_view()
+                            }}
+                            // Ticket 228: a repository the project hasn't got yet.
+                            {move || {
+                                let admin = ctx
+                                    .board
+                                    .with(|b| b.as_ref().is_none_or(|b| b.admin.allowed));
+                                view! {
+                                    <option
+                                        value=NEW_REPO
+                                        disabled=!admin
+                                        title=(!admin).then_some("Only the project's admins can make repositories")
+                                    >
+                                        {if admin { "＋ New repository…" } else { "＋ New repository… (admins only)" }}
+                                    </option>
+                                }
                             }}
                         </select>
                     </label>
@@ -480,11 +596,18 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                             on:change=set_field(|f, v| f.priority = v)
                         >
                             {PRIORITIES.map(|p| view! { <option value=p>{p}</option> }).collect_view()}
+                            // Hands the ticket back to auto priority (ticket 215).
+                            {move || {
+                                ctx.board
+                                    .with(|b| b.as_ref().is_some_and(|b| b.auto_priority))
+                                    .then(|| view! { <option value="auto">"auto"</option> })
+                            }}
                             // An invalid value typed in Markdown mode stays visible, so the
                             // user can see what to correct.
                             {move || {
                                 fields.with(|f| {
-                                    (!f.priority.is_empty() && !PRIORITIES.contains(&f.priority.as_str()))
+                                    (!f.priority.is_empty() && !PRIORITIES.contains(&f.priority.as_str())
+                                        && f.priority != "auto")
                                         .then(|| {
                                             let bad = f.priority.clone();
                                             view! {
@@ -496,6 +619,11 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                                 })
                             }}
                         </select>
+                        // Why it's this priority (ticket 215).
+                        {(!priority_note.is_empty())
+                            .then(|| {
+                                view! { <span class="text-xs font-normal text-slate-500">{priority_note.clone()}</span> }
+                            })}
                     </label>
                 </div>
             </Show>
@@ -637,6 +765,14 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                     on:click=move |_| ctx.close_overlay()
                 >
                     "Close"
+                </button>
+                <button
+                    class="rounded border border-accent-600 px-3 py-1.5 text-sm font-medium text-accent-700 hover:bg-accent-50 disabled:opacity-50 dark:text-accent-300 dark:hover:bg-accent-950"
+                    disabled=move || saving.get() || (dirty.get() && held())
+                    title="Save this ticket, then make a new one linked to it"
+                    on:click=save_and_new
+                >
+                    "Save and New"
                 </button>
                 <button
                     class="rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
@@ -1162,7 +1298,7 @@ fn AssigneePicker(
 /// click; the links wait while there are unsaved edits, so following one
 /// can't lose them.
 ///
-/// Ticket 207 adds the typed links (blocks, depends on, supersedes, …) and
+/// Ticket 207 adds the typed links (requires, supersedes, …) and
 /// a way to make and break them: **Add link** picks a type, searches the
 /// board's tickets by number or title, and a click on a result links it;
 /// the other ticket records the opposite. Each link has a × to remove it
@@ -1305,6 +1441,25 @@ fn Relationships(
             busy.set(false);
         });
     };
+    // Changing a link's type (ticket 213): both tickets, one commit.
+    let retype = move |other: String, old: String, new: String| {
+        busy.set(true);
+        failure.set(None);
+        spawn_local(async move {
+            let (place, file) = (place.get_value(), file.get_value());
+            match api::retype_link(&place, &file, &other, &old, &new).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    ctx.reload();
+                }
+                Err(e) => {
+                    failure.set(Some(e));
+                    ctx.reload();
+                }
+            }
+            busy.set(false);
+        });
+    };
     let found = move || {
         let me = ticket_number(&id.get());
         link_candidates(&tickets(), me, &query.get(), 8)
@@ -1325,7 +1480,7 @@ fn Relationships(
             <li class="flex items-center gap-1">
                 <button
                     type="button"
-                    class="text-left text-sm text-accent-700 hover:underline disabled:cursor-not-allowed disabled:opacity-60 dark:text-accent-300"
+                    class="text-left text-sm text-accent-700 hover:underline disabled:cursor-default disabled:opacity-60 dark:text-accent-300"
                     disabled=move || dirty.get()
                     title=move || if dirty.get() { "Save or discard your edits first" } else { "Open this ticket" }
                     on:click=move |_| ctx.open_ticket(target.clone(), file.clone())
@@ -1336,14 +1491,34 @@ fn Relationships(
                 {unlink
                     .map(|slug| {
                         let label = format!("Remove the link to {other}");
+                        let retype_to = other.clone();
+                        let picker = format!("Change how this ticket stands to {other}");
                         view! {
+                            <select
+                                aria-label=picker.clone()
+                                title=move || {
+                                    if dirty.get() { "Save or discard your edits first".to_string() } else { picker.clone() }
+                                }
+                                class="ml-1 rounded border border-slate-300 bg-slate-50 px-1 py-0 text-xs disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900"
+                                disabled=wait
+                                on:change=move |ev| {
+                                    let new = event_target_value(&ev);
+                                    if new != slug {
+                                        retype(retype_to.clone(), slug.to_string(), new);
+                                    }
+                                }
+                            >
+                                {LINK_KINDS
+                                    .map(|(s, l)| view! { <option value=s selected=s == slug>{l}</option> })
+                                    .collect_view()}
+                            </select>
                             <button
                                 type="button"
                                 aria-label=label.clone()
                                 title=move || {
                                     if dirty.get() { "Save or discard your edits first".to_string() } else { label.clone() }
                                 }
-                                class="ml-1 rounded px-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-800"
+                                class="ml-1 rounded px-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-red-700 disabled:cursor-default disabled:opacity-50 dark:hover:bg-slate-800"
                                 disabled=wait
                                 on:click=move |_| change_link(other.clone(), slug.to_string(), true)
                             >
@@ -1385,7 +1560,8 @@ fn Relationships(
                     <div class="flex flex-wrap items-center gap-2">
                         <select
                             aria-label="Link type"
-                            class="rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
+                            title="How this ticket stands to the one you pick"
+                            class="rounded border border-slate-300 bg-slate-50 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900"
                             prop:value=move || kind.get()
                             on:change=move |ev| kind.set(event_target_value(&ev))
                         >
@@ -1413,7 +1589,7 @@ fn Relationships(
                                         <li class="flex items-center gap-2">
                                             <button
                                                 type="button"
-                                                class="text-left text-sm hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                                                class="text-left text-sm hover:underline disabled:cursor-default disabled:opacity-50"
                                                 disabled=wait
                                                 title=move || format!("{} this ticket", link_label(&kind.get()))
                                                 on:click=move |_| change_link(other.clone(), kind.get_untracked(), false)

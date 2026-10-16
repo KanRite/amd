@@ -44,6 +44,11 @@ impl Config {
         Config { entries }
     }
 
+    /// Every key set, in file order.
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        self.entries.iter().map(|(k, _)| k.as_str())
+    }
+
     pub fn get(&self, key: &str) -> Option<&str> {
         self.entries
             .iter()

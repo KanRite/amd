@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use crate::board::{Board, Column};
+use crate::board::{Board, Column, Kind};
 use crate::current_project;
 use crate::git;
 use crate::registry::{self, Registry};
@@ -205,7 +205,13 @@ fn names_for(board: &Board, email: &str, fallback: Option<&str>) -> Vec<String> 
 pub fn my_work(email: &str, name: Option<&str>, include_hidden: bool, sort: Sort) -> Vec<WorkItem> {
     let mut items = Vec::new();
     each_board(include_hidden, email, name, |project, repo, board, mine| {
-        for column in [Column::Todo, Column::Doing] {
+        // Todo- and doing-kind columns (ticket 223).
+        let columns: Vec<Column> = board
+            .workflow()
+            .columns()
+            .filter(|c| c.is(Kind::Todo) || c.is(Kind::Doing))
+            .collect();
+        for column in columns {
             let Ok(tasks) = board.tasks_in(column) else {
                 continue;
             };
@@ -235,8 +241,15 @@ pub fn to_pick(email: &str, name: Option<&str>, unassigned: bool) -> Vec<WorkIte
     let mut backlog = Vec::new();
     each_board(true, email, name, |project, repo, board, mine| {
         let me = git::config(board.repo_root(), "user.email").unwrap_or_else(|| email.to_string());
-        for column in [Column::Todo, Column::Doing, Column::Backlog] {
-            if column != Column::Backlog && !unassigned {
+        // Started work first, then the backlog-kind columns (ticket 223).
+        let workflow = board.workflow();
+        let columns: Vec<Column> = workflow
+            .columns()
+            .filter(|c| c.is(Kind::Todo) || c.is(Kind::Doing))
+            .chain(workflow.of_kind(Kind::Backlog))
+            .collect();
+        for column in columns {
+            if !column.is(Kind::Backlog) && !unassigned {
                 continue;
             }
             let Ok(tasks) = board.tasks_in(column) else {
@@ -246,7 +259,7 @@ pub fn to_pick(email: &str, name: Option<&str>, unassigned: bool) -> Vec<WorkIte
                 let assignee = task.assignee().unwrap_or_default();
                 // In todo and doing, only work nobody has taken: your own
                 // there is already My work.
-                if column != Column::Backlog && !assignee.trim().is_empty() {
+                if !column.is(Kind::Backlog) && !assignee.trim().is_empty() {
                     continue;
                 }
                 let lock = task.lease_active().then(|| task.locked_by()).flatten();
@@ -259,7 +272,7 @@ pub fn to_pick(email: &str, name: Option<&str>, unassigned: bool) -> Vec<WorkIte
                     unassigned,
                 ) {
                     let found = item(project, repo, &task);
-                    if column == Column::Backlog {
+                    if column.is(Kind::Backlog) {
                         backlog.push(found);
                     } else {
                         started.push(found);

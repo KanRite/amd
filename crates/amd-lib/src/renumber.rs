@@ -529,24 +529,24 @@ mod tests {
     fn typed_links_follow_the_ticket_they_can_prove_they_mean() {
         let dir = tempfile::tempdir().unwrap();
         let board = board_at(dir.path());
-        // Two tickets hold 002. The later one blocks 004, which says so back;
-        // the older one links to nothing. 001 blocks "002": the later one,
-        // whose own links say it is blocked by 001.
-        ticket(&board, "001-source.md", "links: [blocks:002]\n", "");
+        // Two tickets hold 002. The later one requires 004, which says so back;
+        // the older one links to nothing. 001 requires "002": the later one,
+        // whose own links say it is required by 001.
+        ticket(&board, "001-source.md", "links: [requires:002]\n", "");
         ticket(&board, "002-alpha.md", "created: \"2026-01-01\"\n", "");
         ticket(
             &board,
             "002-beta.md",
-            "created: \"2026-02-01\"\nlinks: [blocked-by:001,blocks:004]\n",
+            "created: \"2026-02-01\"\nlinks: [required-by:001,requires:004]\n",
             "",
         );
-        ticket(&board, "004-other.md", "links: [blocked-by:002]\n", "");
+        ticket(&board, "004-other.md", "links: [required-by:002]\n", "");
 
         let clashes = plan(&board, None).unwrap();
         apply(&board, &clashes).unwrap();
 
-        assert!(text(&board, "004-other.md").contains("links: [blocked-by:005]"));
-        assert!(text(&board, "001-source.md").contains("links: [blocks:005]"));
+        assert!(text(&board, "004-other.md").contains("links: [required-by:005]"));
+        assert!(text(&board, "001-source.md").contains("links: [requires:005]"));
         assert!(board.duplicate_ids().unwrap().is_empty());
     }
 

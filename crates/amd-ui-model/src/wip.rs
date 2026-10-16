@@ -43,16 +43,24 @@ impl WipLimits {
     /// tickets (not counting this one). The refusal names the limit and
     /// the count.
     pub fn admit(self, column: Column, count: usize, ticket: &str) -> Result<(), String> {
-        match self.of(column) {
-            Some(limit) if count >= limit as usize => Err(format!(
-                "{} is full: its limit is {limit} and it holds {count}. \
-                 Move a ticket on first, or move {ticket} anyway.",
-                column.title()
-            )),
-            _ => Ok(()),
-        }
+        admit(self.of(column), "Doing", count, ticket)
     }
 }
+
+/// Whether `ticket` may move into a column called `label` with `limit`
+/// (none is no limit), already holding `count`: any doing-kind column has
+/// one of its own (ticket 224).
+pub fn admit(limit: Option<u32>, label: &str, count: usize, ticket: &str) -> Result<(), String> {
+    match limit {
+        Some(limit) if count >= limit as usize => Err(format!(
+            "{label} is full: its limit is {limit} and it holds {count}. \
+             Move a ticket on first, or move {ticket} anyway."
+        )),
+        _ => Ok(()),
+    }
+}
+
+impl WipLimits {}
 
 #[cfg(test)]
 mod tests {

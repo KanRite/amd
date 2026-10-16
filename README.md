@@ -319,6 +319,62 @@ ticket 7, so it reads the same from either end and you can't forget the other
 half. Refs are resolved when they're recorded, so a typo is an error rather
 than a dangling link found later.
 
+A link can say more than "related": `--type requires`, `parent-of`,
+`child-of`, `clone-of`, `supersedes` and their opposites, each recorded the
+other way round on the other ticket. **A ticket can't move to done until the
+tickets it requires and its children are done**, and nothing overrides that.
+If the link was wrong, change it (`amd link 3 7 --replace requires --type
+relates-to`) or remove it (`--remove`). On the desktop board a card that's
+waiting says "waits on N", and each link in the editor has a type picker.
+
+`amd new "Checkout" --requires 3` and `amd set 12 requires 3,7` set what a
+ticket requires directly (`set` makes the list exactly that; empty clears
+it). **A sprint can't start while one of its tickets requires a ticket
+that's neither in the sprint nor done**: `amd group start` names each one
+(`s12 can't start: 003 requires 010 (backlog)`), and so does the sprint's
+Start button on the desktop board. Outside sprints nothing more is enforced.
+
+`amd tree 12` draws a ticket's family, what it requires (solid) and what
+it relates to (dashed), saying where each ticket is and what's still
+waited on; `amd tree` draws every family on the board. Done tickets are
+left out unless you add `--done` (`amd tree 12 --done`):
+
+```
+001 Alpha · backlog  waits on 002
+├──── 002 Beta · backlog
+│     └──── 003 Gamma · done ✓
+└ ─ ─ 004 Delta · backlog
+```
+
+That's `amd tree 4 --done`. Tickets in a sprint that has started aren't
+expanded: a link to one shows it as "in started sprint s12".
+
+On the desktop board, a card that requires or relates to others has a small
+tree button that opens the same tree, with that ticket highlighted; click
+any ticket in it to go to its card. Done tickets are left out until you
+tick "Include done". A sprint that can't start lists what's
+missing, each with "Show the tree".
+Each card also says how many tickets it's linked to (beside the tree icon,
+or a link icon when it has no tree), and a ticket linked to nothing at all
+shows a small blue circle, so loose tickets are easy to spot.
+
+**Auto priority** (off unless switched on: `amd auto-priority on`, or
+Admin → Auto priority) makes a ticket at least as urgent as the most urgent
+ticket that requires it, down a chain, so the priorities you set on your
+goals flow to the work they wait on. A raised ticket records why
+(`priority-from`, `priority-own`; `amd show` says it, and its card shows
+`↑ high`), and switching it off puts them back. With **allow override** on
+(the default, `amd priority-override`), a priority you set by hand pins that
+ticket; `amd set 12 priority auto` (or "auto" in the editor) hands it back.
+With it off, a hand-set priority is only a floor.
+
+Auto priority only passes urgency down: if the ticket at the top of a chain
+is low, everything it needs stays low. To see the work in the order it has
+to be done, pick **Automatic: what's needed first** in the desktop board's
+Sort (the default on a board with auto priority on): within each column, a
+ticket comes after the tickets it requires, and otherwise highest priority
+first, then oldest.
+
 ```markdown
 related: [001,002]
 ```
@@ -355,6 +411,23 @@ in `~/.config/agile-md/repos`, written only when a repository is first seen:
 /Users/you/code/agile-md
 /Users/you/code/other-repo
 ```
+
+**A repository the project hasn't got yet** can be made from the ticket that
+needs it: the editor's Repository list has **＋ New repository…** (for the
+project's admins), and the command line has `amd repo new`:
+
+```bash
+amd repo new acme-payments --for 12          # make it, clone it, add it to the project, set ticket 12
+amd repo new acme-payments --public --description "Card payments"
+```
+
+It's made under the tickets repository's owner on GitHub (through `gh`),
+private or public as the tickets repository is unless you say otherwise,
+with a starter README (`--no-readme` leaves it out) and `main` protected
+where GitHub allows. A repository of that name that's already there is
+connected instead. It's cloned beside the tickets repository, added to the
+project for everyone, and the ticket gets it as its repository with a dated
+note saying so, all in one commit.
 
 The tickets themselves are never copied into a store. They're markdown in each
 repo, they change when you check out a branch or pull someone's work, and an
@@ -555,7 +628,10 @@ disagree.
   type, tags, points, priority), its relationships (parent, children,
   related, and tickets that link to it), each a click away, and its body as
   rich text, with a switch to the raw markdown. Lock, renew, unlock — or break someone else's lock, after
-  a confirmation — from the same window.
+  a confirmation — from the same window. **Save and New** saves the ticket
+  and opens New ticket linked back to it ("012 requires this" unless you
+  pick related or no link), for when you find it depends on a ticket that
+  doesn't exist yet.
 - **Filters** across the top: repository, person, a search, the sort order,
   and Reset.
 - **New ticket**, **+ Sprint**, **+ Epic**; start a sprint from its box.
@@ -690,6 +766,51 @@ TODO  (3)
 Piped or redirected output stays plain text (`    [002] Guest checkout  (feat)`,
 indented by depth), so `amd board | grep` keeps working and log files don't fill
 with escape sequences. `--plain` or `NO_COLOR=1` forces that everywhere.
+
+## Your own columns
+
+A board starts with Backlog, To do, Doing and Done. A team can add its own
+(Triage, Review, Blocked, Released…), rename any column, move columns along
+and take its own ones away again, from the CLI or the desktop board's Admin →
+Columns. Each column has a **kind** that decides what it does:
+
+| Kind | What it does |
+|---|---|
+| backlog | work waiting; epics and sprints live in the Backlog itself |
+| todo | entering it makes the ticket's branch |
+| doing | the ticket is locked while it's there, and the column has a WIP limit |
+| done | a ticket can't go in while what it requires isn't done; anything here counts as done |
+
+```bash
+amd column add Review --kind doing --after doing
+amd column wip review 3
+amd column add Triage --kind backlog --before backlog
+amd column rename todo Ready
+amd review 12                  # or: amd move 12 review
+amd column remove review --move-to doing
+amd column                     # name, folder, kind, WIP limit and count of each
+```
+
+**Moves and where new work arrives.** Tickets move one column at a time,
+either way, unless the team says otherwise: `amd column allow triage todo`
+adds an extra one-way move beside that, and `amd column flow any` lets a
+ticket go from any column to any other. Whatever the flow, a draft stays in
+the backlog, a started sprint's tickets only move on to todo, done waits for
+what a ticket requires, and WIP limits and locks still apply. `amd column
+landing triage` makes new tickets (from `amd new`, the desktop board, an AI
+tool or an imported GitHub issue) arrive in Triage; one filed straight into
+an epic or sprint still goes to the Backlog. `amd column reset` puts the
+board back to Backlog, To do, Doing and Done: each ticket in an added column
+moves to the standard column of the same kind, and the names, flow, extra
+moves, landing column and column WIP limits go back to standard, in one
+commit.
+
+A rename only changes the name: the
+folder, and so every ticket's history, stays where it is. The four standard
+columns can be renamed and moved but never removed, and every kind always has
+at least one column. The columns are kept in the tickets repository's
+`.settings` (`columns = …`) and committed, so the whole team gets the same
+board; everyone needs amd 4.1 or later to see tickets in an added column.
 
 ## Why a directory instead of one big TODO.md?
 

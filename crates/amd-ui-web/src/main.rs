@@ -17,6 +17,7 @@ mod rich_dom;
 mod rich_editor;
 mod roadmap;
 mod term_view;
+mod tree;
 
 #[cfg(target_arch = "wasm32")]
 fn main() {

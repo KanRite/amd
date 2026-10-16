@@ -11,66 +11,275 @@ pub mod rich;
 pub mod screen;
 pub mod terminal;
 pub mod ticket;
+pub mod tree;
+pub mod waiting;
 pub mod wip;
 pub mod zoom;
 
-/// A board column. Each one is a directory under `tasks/`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+/// What a column is for (ticket 223): the behaviour its rules key on, as
+/// amd-lib's `board::Kind`.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
-pub enum Column {
+pub enum Kind {
+    #[default]
     Backlog,
     Todo,
     Doing,
     Done,
 }
 
+impl Kind {
+    pub const ALL: [Kind; 4] = [Kind::Backlog, Kind::Todo, Kind::Doing, Kind::Done];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Kind::Backlog => "backlog",
+            Kind::Todo => "todo",
+            Kind::Doing => "doing",
+            Kind::Done => "done",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Kind> {
+        Kind::ALL.into_iter().find(|k| k.as_str() == name)
+    }
+}
+
+/// A board column (tickets 223, 224): its folder under `tasks/` and its
+/// kind, as amd-lib's `board::Column`. `Copy`: folder names are interned.
+/// The four standard columns keep their old names. On the wire a standard
+/// column is its folder (`"backlog"`, as it always was) and another is
+/// `"folder:kind"` (`"review:doing"`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Column {
+    folder: &'static str,
+    kind: Kind,
+}
+
+#[allow(non_upper_case_globals)]
 impl Column {
-    /// Every column, in board order.
-    pub const ALL: [Column; 4] = [Column::Backlog, Column::Todo, Column::Doing, Column::Done];
+    pub const Backlog: Column = Column {
+        folder: "backlog",
+        kind: Kind::Backlog,
+    };
+    pub const Todo: Column = Column {
+        folder: "todo",
+        kind: Kind::Todo,
+    };
+    pub const Doing: Column = Column {
+        folder: "doing",
+        kind: Kind::Doing,
+    };
+    pub const Done: Column = Column {
+        folder: "done",
+        kind: Kind::Done,
+    };
+    /// The four every board has, in their standard order.
+    pub const STANDARD: [Column; 4] = [Column::Backlog, Column::Todo, Column::Doing, Column::Done];
+
+    pub fn new(folder: &str, kind: Kind) -> Column {
+        Column {
+            folder: intern(folder),
+            kind,
+        }
+    }
 
     /// The directory name under `tasks/`.
     pub fn dir_name(self) -> &'static str {
-        match self {
-            Column::Backlog => "backlog",
-            Column::Todo => "todo",
-            Column::Doing => "doing",
-            Column::Done => "done",
-        }
+        self.folder
     }
 
-    /// The heading shown on the board.
-    pub fn title(self) -> &'static str {
-        match self {
-            Column::Backlog => "Backlog",
-            Column::Todo => "To do",
-            Column::Doing => "Doing",
-            Column::Done => "Done",
-        }
+    pub fn kind(self) -> Kind {
+        self.kind
     }
 
-    /// Looks a column up by its directory name.
+    pub fn is(self, kind: Kind) -> bool {
+        self.kind == kind
+    }
+
+    /// The standard column whose folder is `name`.
     pub fn from_dir_name(name: &str) -> Option<Column> {
-        Column::ALL.into_iter().find(|c| c.dir_name() == name)
+        Column::STANDARD.into_iter().find(|c| c.folder == name)
     }
 
-    /// Position on the board, left to right.
-    pub fn index(self) -> usize {
-        self as usize
+    fn is_standard(self) -> bool {
+        Column::STANDARD.contains(&self)
+    }
+}
+
+impl Default for Column {
+    fn default() -> Column {
+        Column::Backlog
+    }
+}
+
+impl Serialize for Column {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        if self.is_standard() {
+            s.serialize_str(self.folder)
+        } else {
+            s.serialize_str(&format!("{}:{}", self.folder, self.kind.as_str()))
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Column {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Column, D::Error> {
+        let text = String::deserialize(d)?;
+        match text.split_once(':') {
+            Some((folder, kind)) => {
+                let kind = Kind::parse(kind).ok_or_else(|| {
+                    serde::de::Error::custom(format!("unknown column kind {kind:?}"))
+                })?;
+                Ok(Column::new(folder, kind))
+            }
+            None => Column::from_dir_name(&text)
+                .ok_or_else(|| serde::de::Error::custom(format!("unknown column {text:?}"))),
+        }
+    }
+}
+
+/// `name` as a `&'static str`, leaked once per distinct name.
+fn intern(name: &str) -> &'static str {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+    static NAMES: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+    if let Some(standard) = Column::from_dir_name(name) {
+        return standard.folder;
+    }
+    let mut names = NAMES
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(&known) = names.get(name) {
+        return known;
+    }
+    let leaked: &'static str = Box::leak(name.to_string().into_boxed_str());
+    names.insert(leaked);
+    leaked
+}
+
+/// One column as the board shows it: what it's called, and a doing-kind
+/// column's own WIP limit (the standard doing's is the repository's
+/// `wip`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColumnInfo {
+    pub column: Column,
+    pub label: String,
+    #[serde(default)]
+    pub wip: Option<u32>,
+}
+
+/// The board's columns, in order (tickets 223, 224): what the page draws
+/// and every drag rule's sense of "next to".
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Workflow {
+    pub columns: Vec<ColumnInfo>,
+    /// Any column to any other (ticket 225); else the next column, plus
+    /// `moves`.
+    #[serde(default)]
+    pub any: bool,
+    /// Extra one-way moves the team allows.
+    #[serde(default)]
+    pub moves: Vec<(Column, Column)>,
+    /// Where new tickets land.
+    #[serde(default)]
+    pub landing: Column,
+}
+
+impl Default for Workflow {
+    fn default() -> Workflow {
+        Workflow::standard()
+    }
+}
+
+impl Workflow {
+    pub fn standard() -> Workflow {
+        Workflow {
+            columns: Column::STANDARD
+                .into_iter()
+                .map(|column| ColumnInfo {
+                    column,
+                    label: standard_label(column).to_string(),
+                    wip: None,
+                })
+                .collect(),
+            any: false,
+            moves: Vec::new(),
+            landing: Column::Backlog,
+        }
     }
 
-    /// Only the outer columns can be collapsed out of the way.
-    pub fn is_collapsible(self) -> bool {
-        matches!(self, Column::Backlog | Column::Done)
+    /// Whether a ticket may move straight from `from` to `to` (ticket 225),
+    /// as amd-lib's `Workflow::allows`.
+    pub fn allows(&self, from: Column, to: Column) -> bool {
+        if from == to || self.position(from).is_none() || self.position(to).is_none() {
+            return false;
+        }
+        self.any || self.next_to(from, to) || self.moves.contains(&(from, to))
     }
 
-    /// A ticket moves one column at a time, forwards or back.
-    pub fn can_move_to(self, to: Column) -> bool {
-        self.index().abs_diff(to.index()) == 1
+    pub fn columns(&self) -> impl Iterator<Item = Column> + '_ {
+        self.columns.iter().map(|c| c.column)
+    }
+
+    /// What `column` is called; its folder when it isn't one of these.
+    pub fn label(&self, column: Column) -> String {
+        self.columns
+            .iter()
+            .find(|c| c.column == column)
+            .map(|c| c.label.clone())
+            .unwrap_or_else(|| standard_label(column).to_string())
+    }
+
+    pub fn position(&self, column: Column) -> Option<usize> {
+        self.columns.iter().position(|c| c.column == column)
+    }
+
+    /// One column at a time, forwards or back.
+    pub fn next_to(&self, from: Column, to: Column) -> bool {
+        match (self.position(from), self.position(to)) {
+            (Some(a), Some(b)) => a.abs_diff(b) == 1,
+            _ => false,
+        }
+    }
+
+    /// The first column of `kind`.
+    pub fn first(&self, kind: Kind) -> Column {
+        self.columns()
+            .find(|c| c.is(kind))
+            .unwrap_or(Column::STANDARD[kind as usize])
+    }
+
+    /// Only the backlog and done kinds fold out of the way.
+    pub fn is_collapsible(&self, column: Column) -> bool {
+        column.is(Kind::Backlog) || column.is(Kind::Done)
+    }
+
+    /// A doing-kind column's own limit (not the standard doing's).
+    pub fn wip(&self, column: Column) -> Option<u32> {
+        self.columns
+            .iter()
+            .find(|c| c.column == column)
+            .and_then(|c| c.wip)
+    }
+}
+
+/// The standard columns' names, a folder's own otherwise.
+fn standard_label(column: Column) -> &'static str {
+    match column.dir_name() {
+        "backlog" => "Backlog",
+        "todo" => "To do",
+        "doing" => "Doing",
+        "done" => "Done",
+        other => other,
     }
 }
 
 /// What a card on the board shows.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TicketSummary {
     /// The repository whose board it is on.
     #[serde(default)]
@@ -125,18 +334,19 @@ pub struct TicketSummary {
     /// Its typed links (`links:`), each `kind:id` as written (ticket 207).
     #[serde(default)]
     pub links: Vec<String>,
+    /// The ticket auto priority raised it from (ticket 215), or empty.
+    #[serde(default)]
+    pub priority_from: String,
 }
 
 /// The kinds of link a ticket can have (ticket 207), as `(slug, label)`:
 /// the slug is what `links:` and `amd link --type` use. The same list, in
 /// the same order, as `agile_md::links::LinkType::ALL`, which `amd-ui`'s
 /// tests check, since this crate can't depend on amd-lib.
-pub const LINK_KINDS: [(&str, &str); 11] = [
+pub const LINK_KINDS: [(&str, &str); 9] = [
     ("relates-to", "Relates to"),
-    ("blocks", "Blocks"),
-    ("blocked-by", "Blocked by"),
-    ("depends-on", "Depends on"),
-    ("depended-on-by", "Depended on by"),
+    ("requires", "Requires"),
+    ("required-by", "Required by"),
     ("parent-of", "Parent of"),
     ("child-of", "Child of"),
     ("clone-of", "Clone of"),
@@ -347,6 +557,30 @@ pub struct BoardColumn {
     pub tickets: Vec<TicketSummary>,
 }
 
+impl Board {
+    /// The workflow `repo`'s tickets move by: that board's own, else the
+    /// one drawn.
+    pub fn workflow_of(&self, repo: &str) -> &Workflow {
+        self.repos
+            .iter()
+            .find(|r| r.name == repo && r.available)
+            .map_or(&self.workflow, |r| &r.workflow)
+    }
+
+    /// What `column` is called on this board.
+    pub fn label(&self, column: Column) -> String {
+        self.workflow.label(column)
+    }
+
+    /// The loose tickets in `column` (those in an epic are under `epics`).
+    pub fn tickets(&self, column: Column) -> &[TicketSummary] {
+        self.columns
+            .iter()
+            .find(|c| c.column == column)
+            .map_or(&[], |c| c.tickets.as_slice())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Board {
     /// The project's name (`project` in its `.settings`), shown in the
@@ -359,6 +593,10 @@ pub struct Board {
     /// and epics from all available ones are merged into the lists below.
     #[serde(default)]
     pub repos: Vec<RepoInfo>,
+    /// The board's columns in order, with their names and own WIP limits
+    /// (tickets 223, 224): what the page draws. `columns` follows it.
+    #[serde(default)]
+    pub workflow: Workflow,
     /// The columns' loose tickets; tickets inside an epic are under `epics`.
     pub columns: Vec<BoardColumn>,
     /// The backlog's epics, by name.
@@ -401,6 +639,12 @@ pub struct Board {
     /// (ticket 173).
     #[serde(default)]
     pub import_issues: bool,
+    /// Priorities follow requires links (ticket 215).
+    #[serde(default)]
+    pub auto_priority: bool,
+    /// A priority set by hand pins its ticket against auto priority.
+    #[serde(default)]
+    pub priority_override: bool,
     /// The project is archived (ticket 157): read-only until unarchived.
     #[serde(default)]
     pub archived: bool,
@@ -538,6 +782,10 @@ pub struct RepoInfo {
     /// How long a lock lasts on its board, in hours.
     #[serde(default = "default_lease_hours")]
     pub lease_hours: u32,
+    /// Its board's own workflow, which its tickets' moves follow (ticket
+    /// 225): each board reads its own `.settings`, as amd does.
+    #[serde(default)]
+    pub workflow: Workflow,
 }
 
 /// How long a lock lasts unless a board says otherwise: a working day.
@@ -590,6 +838,10 @@ pub struct TicketDocument {
     /// "created by … on …; last edited by … on …" (ticket 155), or empty.
     #[serde(default)]
     pub authorship: String,
+    /// Why its priority is what it is, when auto priority raised or a hand
+    /// pinned it (ticket 215), or empty.
+    #[serde(default)]
+    pub priority_note: String,
 }
 
 /// What happened in git after a ticket change was written to disk.
@@ -938,6 +1190,21 @@ pub struct Created {
     pub sync: SyncReport,
 }
 
+/// Where a new repository would be made, for the dialog (ticket 228).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoDefaults {
+    /// In words: "on GitHub, under acme-org", "beside the tickets
+    /// repository's remote", "on this machine only".
+    pub place: String,
+    /// The same as the tickets repository's.
+    pub private: bool,
+    /// What a name starts with, the project's: "acme-".
+    pub prefix: String,
+    /// Why it can't be done here, if it can't (not an admin, another forge).
+    #[serde(default)]
+    pub refused: Option<String>,
+}
+
 /// The template new tickets are rendered from.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TicketTemplate {
@@ -1075,28 +1342,49 @@ mod tests {
 
     #[test]
     fn moves_only_to_adjacent_columns() {
-        assert!(Column::Backlog.can_move_to(Column::Todo));
-        assert!(Column::Todo.can_move_to(Column::Backlog));
-        assert!(Column::Doing.can_move_to(Column::Done));
-        assert!(!Column::Backlog.can_move_to(Column::Doing));
-        assert!(!Column::Backlog.can_move_to(Column::Done));
-        assert!(!Column::Todo.can_move_to(Column::Todo));
+        let w = Workflow::standard();
+        assert!(w.next_to(Column::Backlog, Column::Todo));
+        assert!(w.next_to(Column::Todo, Column::Backlog));
+        assert!(w.next_to(Column::Doing, Column::Done));
+        assert!(!w.next_to(Column::Backlog, Column::Doing));
+        assert!(!w.next_to(Column::Backlog, Column::Done));
+        assert!(!w.next_to(Column::Todo, Column::Todo));
+        let mut team = Workflow::standard();
+        let review = Column::new("review", Kind::Doing);
+        team.columns.insert(
+            3,
+            ColumnInfo {
+                column: review,
+                label: "Review".into(),
+                wip: Some(1),
+            },
+        );
+        assert!(!team.allows(review, Column::Doing) || team.next_to(review, Column::Doing));
+        team.moves.push((Column::Done, review));
+        assert!(team.allows(Column::Done, review) && !team.allows(review, review));
+        team.any = true;
+        assert!(team.allows(Column::Backlog, Column::Done));
+        assert!(team.next_to(Column::Doing, review) && team.next_to(review, Column::Done));
+        assert!(!team.next_to(Column::Doing, Column::Done));
+        assert_eq!(team.wip(review), Some(1));
+        assert_eq!(team.label(review), "Review");
     }
 
     #[test]
-    fn only_outer_columns_collapse() {
-        let collapsible: Vec<_> = Column::ALL
-            .into_iter()
-            .filter(|c| c.is_collapsible())
-            .collect();
+    fn only_backlog_and_done_kinds_collapse() {
+        let w = Workflow::standard();
+        let collapsible: Vec<_> = w.columns().filter(|c| w.is_collapsible(*c)).collect();
         assert_eq!(collapsible, [Column::Backlog, Column::Done]);
     }
 
     #[test]
-    fn column_dir_names_round_trip() {
-        for c in Column::ALL {
-            assert_eq!(Column::from_dir_name(c.dir_name()), Some(c));
-        }
+    fn a_column_travels_as_its_folder_or_folder_and_kind() {
+        let json =
+            serde_json::to_string(&[Column::Todo, Column::new("review", Kind::Doing)]).unwrap();
+        assert_eq!(json, r#"["todo","review:doing"]"#);
+        let back: Vec<Column> = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, [Column::Todo, Column::new("review", Kind::Doing)]);
+        assert!(serde_json::from_str::<Column>(r#""archive""#).is_err());
         assert_eq!(Column::from_dir_name("archive"), None);
     }
 
@@ -1167,6 +1455,7 @@ mod assigned_tests {
             clone_of: String::new(),
             clones: Vec::new(),
             links: Vec::new(),
+            priority_from: String::new(),
         }
     }
 
@@ -1211,6 +1500,7 @@ mod assigned_tests {
             project: String::new(),
             tasks_dir: String::new(),
             repos: Vec::new(),
+            workflow: Workflow::standard(),
             columns: vec![BoardColumn {
                 column: Column::Todo,
                 tickets: vec![
@@ -1231,6 +1521,8 @@ mod assigned_tests {
             shared_documents: String::new(),
             triage_priority: String::new(),
             import_issues: true,
+            auto_priority: false,
+            priority_override: true,
             archived: false,
         };
         board.epics.push(Epic {
@@ -1285,6 +1577,7 @@ mod search_tests {
             clone_of: String::new(),
             clones: Vec::new(),
             links: Vec::new(),
+            priority_from: String::new(),
         }
     }
 
@@ -1410,6 +1703,7 @@ mod link_tests {
             clone_of: String::new(),
             clones: Vec::new(),
             links: Vec::new(),
+            priority_from: String::new(),
         }
     }
 
@@ -1463,9 +1757,9 @@ mod link_tests {
 
     #[test]
     fn a_links_entry_splits_and_unknown_kinds_keep_their_slug() {
-        assert_eq!(split_link("blocks:012"), Some(("blocks", "012")));
-        assert_eq!(split_link("blocks:"), None);
-        assert_eq!(link_label("blocked-by"), "Blocked by");
+        assert_eq!(split_link("requires:012"), Some(("requires", "012")));
+        assert_eq!(split_link("requires:"), None);
+        assert_eq!(link_label("required-by"), "Required by");
         assert_eq!(link_label("mystery"), "mystery");
     }
 }

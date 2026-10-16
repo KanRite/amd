@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use agile_md::board::{Board, Column};
+use agile_md::board::{Board, Column, Kind};
 use agile_md::board_settings;
 use agile_md::current_project;
 use agile_md::group::{GROUP_FILE, State};
@@ -92,14 +92,26 @@ impl Project {
 
     /// Everything the window draws: every repository's tickets and epics,
     /// merged, each labelled with its repository.
+    ///
+    /// The columns are the project's own (ticket 224): the tickets board's
+    /// workflow. A ticket on another of its boards in a folder that
+    /// workflow doesn't have shows in the first column of its kind.
     pub fn summary(&self) -> Result<ui::Board> {
-        let mut columns: Vec<BoardColumn> = ui::Column::ALL
-            .into_iter()
+        let workflow = ui_workflow(&self.repos[0].1);
+        let mut columns: Vec<BoardColumn> = workflow
+            .columns()
             .map(|column| BoardColumn {
                 column,
                 tickets: Vec::new(),
             })
             .collect();
+        let slot = |column: Column| {
+            let column = from_column(column);
+            workflow
+                .position(column)
+                .or_else(|| workflow.position(workflow.first(column.kind())))
+                .unwrap_or(0)
+        };
         let mut epics = Vec::new();
         let mut repos = Vec::new();
         for (name, board) in &self.repos {
@@ -111,12 +123,13 @@ impl Project {
                     doing: settings.wip_limit(Column::Doing).unwrap_or(0),
                 },
                 lease_hours: settings.lease_hours().round().max(1.0) as u32,
+                workflow: ui_workflow(board),
             });
-            for column in Column::ALL {
+            for column in board.workflow().columns() {
                 for task in board.tasks_in(column).map_err(err)? {
                     let summary = self.summary_of(&task, name);
                     if task.epic.is_none() {
-                        columns[column.index()].tickets.push(summary);
+                        columns[slot(column)].tickets.push(summary);
                     }
                 }
             }
@@ -147,6 +160,7 @@ impl Project {
             available: false,
             wip: WipLimits::default(),
             lease_hours: ui::DEFAULT_LEASE_HOURS,
+            workflow: ui::Workflow::standard(),
         }));
         for column in &mut columns {
             column.tickets.sort_by(ui::ticket::default_order);
@@ -164,6 +178,7 @@ impl Project {
         let settings = board_settings::load(&self.repos[0].1);
         let tags = self.tag_uses(&settings)?;
         Ok(ui::Board {
+            workflow,
             project,
             tasks_dir: self.repos[0].1.root.display().to_string(),
             repos,
@@ -179,6 +194,8 @@ impl Project {
             shared_documents: settings.shared_documents().unwrap_or_default(),
             triage_priority: settings.triage_priority(),
             import_issues: settings.import_issues(),
+            auto_priority: settings.auto_priority(),
+            priority_override: settings.priority_override(),
             archived: settings.archived(),
         })
     }
@@ -257,6 +274,7 @@ impl Project {
             clone_of: task.clone_of().unwrap_or_default(),
             clones: task.clones(),
             links: task.links().iter().map(|link| link.entry()).collect(),
+            priority_from: task.meta("priority-from").unwrap_or_default(),
         }
     }
 
@@ -295,22 +313,55 @@ fn local_time(at: OffsetDateTime) -> String {
     at.to_offset(offset).format(format).unwrap_or_default()
 }
 
+/// The board's column for one of the page's: the same folder and kind.
 pub fn to_column(column: ui::Column) -> Column {
-    match column {
-        ui::Column::Backlog => Column::Backlog,
-        ui::Column::Todo => Column::Todo,
-        ui::Column::Doing => Column::Doing,
-        ui::Column::Done => Column::Done,
+    let kind = match column.kind() {
+        ui::Kind::Backlog => Kind::Backlog,
+        ui::Kind::Todo => Kind::Todo,
+        ui::Kind::Doing => Kind::Doing,
+        ui::Kind::Done => Kind::Done,
+    };
+    Column::new(column.dir_name(), kind)
+}
+
+/// The board's workflow as the page draws it (ticket 224): columns in
+/// order with their names, and a doing-kind column's own WIP limit (the
+/// standard doing's is the repository's `wip`).
+pub fn ui_workflow(board: &Board) -> ui::Workflow {
+    let settings = board_settings::load(board);
+    let workflow = board.workflow();
+    ui::Workflow {
+        any: workflow.flow() == agile_md::workflow::Flow::Any,
+        moves: workflow
+            .moves()
+            .iter()
+            .map(|(f, t)| (from_column(*f), from_column(*t)))
+            .collect(),
+        landing: from_column(workflow.landing()),
+        columns: board
+            .workflow()
+            .defs()
+            .iter()
+            .map(|def| ui::ColumnInfo {
+                column: from_column(def.column),
+                label: def.label.clone(),
+                wip: (def.column.is(Kind::Doing) && def.column != Column::Doing)
+                    .then(|| settings.wip_limit(def.column))
+                    .flatten(),
+            })
+            .collect(),
     }
 }
 
+/// The page's column for one of the board's: the same folder and kind.
 pub fn from_column(column: Column) -> ui::Column {
-    match column {
-        Column::Backlog => ui::Column::Backlog,
-        Column::Todo => ui::Column::Todo,
-        Column::Doing => ui::Column::Doing,
-        Column::Done => ui::Column::Done,
-    }
+    let kind = match column.kind() {
+        Kind::Backlog => ui::Kind::Backlog,
+        Kind::Todo => ui::Kind::Todo,
+        Kind::Doing => ui::Kind::Doing,
+        Kind::Done => ui::Kind::Done,
+    };
+    ui::Column::new(column.as_str(), kind)
 }
 
 /// The ticket at `place` called `file`. Only a plain `*.md` name directly
@@ -345,7 +396,7 @@ pub fn task_at(board: &Board, place: &Place, file: &str) -> Result<Task> {
 /// takes a moment, and the board reloads every time a file changes. The
 /// project's `admins` list is read fresh each time, so editing it shows at
 /// once.
-fn admin_access(board: &Board) -> ui::AdminAccess {
+pub fn admin_access(board: &Board) -> ui::AdminAccess {
     use agile_md::access::{self, GitHub};
     static ASKED: Mutex<Vec<(std::path::PathBuf, GitHub)>> = Mutex::new(Vec::new());
     let decided = access::admin_access_with(board, |repo| {

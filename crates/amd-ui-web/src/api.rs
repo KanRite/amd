@@ -152,11 +152,14 @@ struct SaveArgs<'a> {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TitleArgs<'a> {
     title: &'a str,
     repo: Option<&'a str>,
     repository: Option<&'a str>,
     draft: bool,
+    required_by: Option<&'a str>,
+    related_to: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -232,7 +235,7 @@ struct LinkArgs<'a> {
     remove: bool,
 }
 
-/// Links a ticket to another as `kind` (`blocks`, `child-of`, …), or unlinks
+/// Links a ticket to another as `kind` (`requires`, `child-of`, …), or unlinks
 /// them; the other ticket records the opposite (ticket 207).
 pub async fn link_ticket(
     place: &Place,
@@ -254,14 +257,75 @@ pub async fn link_ticket(
     .await
 }
 
+#[derive(Serialize)]
+struct RetypeArgs<'a> {
+    place: &'a Place,
+    file: &'a str,
+    other: &'a str,
+    old: &'a str,
+    new: &'a str,
+}
+
+/// Changes the type of the link between a ticket and `other` from `old` to
+/// `new`, on both tickets (ticket 213).
+pub async fn retype_link(
+    place: &Place,
+    file: &str,
+    other: &str,
+    old: &str,
+    new: &str,
+) -> Result<SyncReport, String> {
+    call(
+        "retype_link",
+        &RetypeArgs {
+            place,
+            file,
+            other,
+            old,
+            new,
+        },
+    )
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FamilyArgs<'a> {
+    place: &'a Place,
+    file: &'a str,
+    include_done: bool,
+}
+
+/// The requires tree around a ticket (ticket 214), done tickets only with
+/// `include_done` (ticket 217).
+pub async fn ticket_family(
+    place: &Place,
+    file: &str,
+    include_done: bool,
+) -> Result<Vec<amd_ui_model::tree::TreeNode>, String> {
+    call(
+        "ticket_family",
+        &FamilyArgs {
+            place,
+            file,
+            include_done,
+        },
+    )
+    .await
+}
+
 /// Creates a ticket in `repo`'s backlog (the board's own when `None`),
 /// as a draft when `draft` (ticket 114).
+/// `link` ties it back to the ticket it was made from (ticket 227): that
+/// ticket's id, and whether it requires the new one or relates to it.
 pub async fn create_ticket(
     title: &str,
     repo: Option<&str>,
     repository: Option<&str>,
     draft: bool,
+    link: Option<(&str, crate::app::LinkKind)>,
 ) -> Result<Created, String> {
+    use crate::app::LinkKind;
     call(
         "create_ticket",
         &TitleArgs {
@@ -269,6 +333,8 @@ pub async fn create_ticket(
             repo,
             repository,
             draft,
+            required_by: link.and_then(|(id, k)| (k == LinkKind::Requires).then_some(id)),
+            related_to: link.and_then(|(id, k)| (k == LinkKind::Related).then_some(id)),
         },
     )
     .await
@@ -343,6 +409,179 @@ struct WipArgs<'a> {
 
 pub async fn set_wip_limits(limits: WipLimits, repo: Option<&str>) -> Result<SyncReport, String> {
     call("set_wip_limits", &WipArgs { limits, repo }).await
+}
+
+#[derive(Serialize)]
+struct AddColumnArgs<'a> {
+    label: &'a str,
+    kind: &'a str,
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+}
+
+/// Adds a column of `kind` to the project's board (ticket 224).
+pub async fn add_column(
+    label: &str,
+    kind: &str,
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+) -> Result<SyncReport, String> {
+    call(
+        "add_column",
+        &AddColumnArgs {
+            label,
+            kind,
+            after,
+            before,
+        },
+    )
+    .await
+}
+
+#[derive(Serialize)]
+struct RenameColumnArgs<'a> {
+    column: amd_ui_model::Column,
+    label: &'a str,
+}
+
+/// Renames one of the project's columns; its folder stays.
+pub async fn rename_column(
+    column: amd_ui_model::Column,
+    label: &str,
+) -> Result<SyncReport, String> {
+    call("rename_column", &RenameColumnArgs { column, label }).await
+}
+
+#[derive(Serialize)]
+struct MoveColumnArgs {
+    column: amd_ui_model::Column,
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+}
+
+/// Moves one of the project's columns along the board.
+pub async fn move_column(
+    column: amd_ui_model::Column,
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+) -> Result<SyncReport, String> {
+    call(
+        "move_column",
+        &MoveColumnArgs {
+            column,
+            after,
+            before,
+        },
+    )
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoveColumnArgs {
+    column: amd_ui_model::Column,
+    move_to: Option<amd_ui_model::Column>,
+}
+
+/// Removes an added column, its tickets moved to `move_to` first.
+pub async fn remove_column(
+    column: amd_ui_model::Column,
+    move_to: Option<amd_ui_model::Column>,
+) -> Result<SyncReport, String> {
+    call("remove_column", &RemoveColumnArgs { column, move_to }).await
+}
+
+#[derive(Serialize)]
+struct ColumnWipArgs {
+    column: amd_ui_model::Column,
+    limit: Option<u32>,
+}
+
+/// Sets or clears a doing-kind column's own WIP limit.
+pub async fn set_column_wip(
+    column: amd_ui_model::Column,
+    limit: Option<u32>,
+) -> Result<SyncReport, String> {
+    call("set_column_wip", &ColumnWipArgs { column, limit }).await
+}
+
+/// Where a new repository would be made, and its defaults (ticket 228).
+pub async fn repo_defaults() -> Result<amd_ui_model::RepoDefaults, String> {
+    call("repo_defaults", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct NewRepoArgs<'a> {
+    name: &'a str,
+    description: &'a str,
+    private: bool,
+    readme: bool,
+    place: Option<&'a Place>,
+    file: Option<&'a str>,
+}
+
+/// Makes (or connects) a repository for the project, for the ticket at
+/// `place`/`file` when given.
+pub async fn create_repository(
+    name: &str,
+    description: &str,
+    private: bool,
+    readme: bool,
+    ticket: Option<(&Place, &str)>,
+) -> Result<SyncReport, String> {
+    call(
+        "create_repository",
+        &NewRepoArgs {
+            name,
+            description,
+            private,
+            readme,
+            place: ticket.map(|(p, _)| p),
+            file: ticket.map(|(_, f)| f),
+        },
+    )
+    .await
+}
+
+#[derive(Serialize)]
+struct FlowArgs {
+    any: bool,
+}
+
+/// Any column to any other, or the next column plus the extra moves.
+pub async fn set_flow(any: bool) -> Result<SyncReport, String> {
+    call("set_flow", &FlowArgs { any }).await
+}
+
+#[derive(Serialize)]
+struct AllowMoveArgs {
+    from: amd_ui_model::Column,
+    to: amd_ui_model::Column,
+    on: bool,
+}
+
+/// Allows an extra one-way move, or stops allowing it.
+pub async fn allow_move(
+    from: amd_ui_model::Column,
+    to: amd_ui_model::Column,
+    on: bool,
+) -> Result<SyncReport, String> {
+    call("allow_move", &AllowMoveArgs { from, to, on }).await
+}
+
+#[derive(Serialize)]
+struct LandingArgs {
+    column: amd_ui_model::Column,
+}
+
+/// Where new tickets land.
+pub async fn set_landing(column: amd_ui_model::Column) -> Result<SyncReport, String> {
+    call("set_landing", &LandingArgs { column }).await
+}
+
+/// Back to the standard four columns.
+pub async fn reset_columns() -> Result<SyncReport, String> {
+    call("reset_columns", &NoArgs {}).await
 }
 
 #[derive(Serialize)]
@@ -534,6 +773,16 @@ pub async fn pull_issues() -> Result<Vec<SyncReport>, String> {
 /// Whether the landing page pulls in this project's GitHub issues.
 pub async fn set_import_issues(on: bool) -> Result<SyncReport, String> {
     call("set_import_issues", &OnArgs { on }).await
+}
+
+/// Whether priorities follow requires links (ticket 215).
+pub async fn set_auto_priority(on: bool) -> Result<SyncReport, String> {
+    call("set_auto_priority", &OnArgs { on }).await
+}
+
+/// Whether a priority set by hand pins its ticket (ticket 215).
+pub async fn set_priority_override(on: bool) -> Result<SyncReport, String> {
+    call("set_priority_override", &OnArgs { on }).await
 }
 
 /// Sets the priority imported GitHub issues start at (ticket 158).

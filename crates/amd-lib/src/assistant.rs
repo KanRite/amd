@@ -17,9 +17,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 
-use crate::board::{Board, Column};
+use crate::board::{Board, Column, Kind};
 use crate::sync::Purpose;
 use crate::task::Task;
+use crate::task::with_note;
 use crate::transition::{self, Event, TicketFields};
 use crate::{
     archive, authorship, board_settings, documents, documents_edit, ideas, model, my_work,
@@ -66,7 +67,7 @@ pub fn tools() -> Vec<Tool> {
             description: "The project's board: each repository's columns (backlog, with its epics and sprints, todo, doing, done) and their tickets. Done is counted, not listed, unless asked for. Filters narrow it down.",
             read_only: true,
             input: json!({"type": "object", "properties": {
-                "column": {"type": "string", "enum": ["backlog", "todo", "doing", "done"], "description": "Only this column"},
+                "column": {"type": "string", "description": "Only this column: its name or folder, e.g. backlog, todo, doing, done, or one of the project's own"},
                 "repo": {"type": "string", "description": "Only this repository's board"},
                 "tag": {"type": "string", "description": "Only tickets with this tag; -TAG leaves them out"},
                 "assignee": {"type": "string", "description": "Only tickets assigned to this name; `nobody` for unassigned"},
@@ -147,6 +148,7 @@ pub fn tools() -> Vec<Tool> {
                 "assignee": {"type": "string", "description": "A name from the project's users, or `@me`"},
                 "epic": {"type": "string", "description": "An epic or sprint to file it in"},
                 "parent": {"type": "string", "description": "The parent ticket's number"},
+                "requires": {"type": "array", "items": {"type": "string"}, "description": "Tickets this one requires (numbers): linked both ways; they must be done before it, and be in the same sprint for a sprint to start"},
                 "repository": {"type": "string", "description": "The code repository it's about"},
                 "draft": {"type": "boolean", "description": "Mark it DRAFT: it can't leave the backlog until it's ready"},
                 "board": {"type": "string", "description": "Which repository's board to put it on; the project's own when left out"}
@@ -162,11 +164,12 @@ pub fn tools() -> Vec<Tool> {
         Tool {
             name: "link_tickets",
             title: "Link two tickets",
-            description: "Link a ticket to another on the same board with a type, or remove the link, and commit it. The other ticket records the opposite (`blocks` there is `blocked-by` here), so either end shows it. Types: relates-to, blocks, blocked-by, depends-on, depended-on-by, parent-of, child-of, clone-of, cloned-by, supersedes, superseded-by. A ticket has one parent and is the clone of one original.",
+            description: "Link a ticket to another on the same board with a type, or remove the link, and commit it. The other ticket records the opposite (`requires` there is `required-by` here), so either end shows it. Types: relates-to, requires, required-by, parent-of, child-of, clone-of, cloned-by, supersedes, superseded-by. A ticket has one parent and is the clone of one original. A ticket can't move to done while tickets it requires or its children aren't done; `replace` changes such a link's type (e.g. to relates-to) instead of adding one.",
             read_only: false,
             input: json!({"type": "object", "properties": {
                 "ticket": reference,
                 "to": {"type": "string", "description": "The other ticket: its number, or part of its file name"},
+                "replace": {"type": "string", "enum": crate::links::LinkType::ALL.map(crate::links::LinkType::slug), "description": "Change the existing link of this type to `type`, on both tickets"},
                 "type": {"type": "string", "enum": crate::links::LinkType::ALL.map(crate::links::LinkType::slug), "description": "How `ticket` stands to `to`; relates-to when left out"},
                 "remove": {"type": "boolean", "description": "Take the link away instead of adding it"}
             }, "required": ["ticket", "to"]}),
@@ -174,11 +177,11 @@ pub fn tools() -> Vec<Tool> {
         Tool {
             name: "move_ticket",
             title: "Move a ticket",
-            description: "Move a ticket one column along (backlog, todo, doing, done) and commit it. Entering doing takes the user's lock on it; leaving gives it back. Refused when doing is at its WIP limit unless `force`. Doesn't switch git branches.",
+            description: "Move a ticket one column along (by default backlog, todo, doing, done; a project can have its own columns and allow other moves, which `board` lists) and commit it. Entering a doing column takes the user's lock on it; leaving gives it back. Refused when a doing column is at its WIP limit unless `force`, and refused into done while tickets it requires or its children aren't done (no override: finish them, or change or remove the link). Doesn't switch git branches.",
             read_only: false,
             input: json!({"type": "object", "properties": {
                 "ticket": reference,
-                "to": {"type": "string", "enum": ["backlog", "todo", "doing", "done"]},
+                "to": {"type": "string", "description": "The column: its name or folder, e.g. backlog, todo, doing, done, or one of the project's own (`board` lists them)"},
                 "force": {"type": "boolean", "description": "Go past doing's WIP limit; only when the user says so"}
             }, "required": ["ticket", "to"]}),
         },
@@ -191,7 +194,7 @@ pub fn tools() -> Vec<Tool> {
                 "ticket": reference,
                 "title": {"type": "string"},
                 "body": {"type": "string", "description": "The whole body after the frontmatter"},
-                "priority": {"type": "string", "enum": ["low", "medium", "high"]},
+                "priority": {"type": "string", "enum": ["low", "medium", "high", "auto"], "description": "Set by hand; with auto priority and override on it pins the ticket, and `auto` hands it back to auto priority"},
                 "points": {"type": "string", "enum": ["", "1", "2", "3", "5", "8", "13"]},
                 "tags": {"type": "array", "items": {"type": "string"}},
                 "assignee": {"type": "string"},
@@ -520,7 +523,13 @@ fn screen_tool() -> Result<Reply> {
 fn board_tool(args: &Value) -> Result<Reply> {
     let project = Project::open(Purpose::Read)?;
     let only = match arg(args, "column") {
-        Some(c) => Some(Column::parse(&c).with_context(|| format!("{c} isn't a column"))?),
+        Some(c) => Some(
+            project.boards[0]
+                .2
+                .workflow()
+                .find(&c)
+                .with_context(|| format!("{c} isn't a column"))?,
+        ),
         None => None,
     };
     let repo = arg(args, "repo");
@@ -531,7 +540,7 @@ fn board_tool(args: &Value) -> Result<Reply> {
     let tag = arg(args, "tag");
     let who = arg(args, "assignee");
     let epic = arg(args, "epic");
-    let include_done = flag(args, "include_done") || only == Some(Column::Done);
+    let include_done = flag(args, "include_done") || only.is_some_and(|c| c.is(Kind::Done));
     let keep = |task: &Task| {
         tag.as_ref()
             .is_none_or(|t| task.matches_tags(std::slice::from_ref(t)))
@@ -554,9 +563,31 @@ fn board_tool(args: &Value) -> Result<Reply> {
             continue;
         }
         text.push_str(&format!("\n\n## {name}"));
+        // The team's flow (ticket 225), so a move is asked for only where
+        // it's allowed.
+        let workflow = board.workflow();
+        let flow = match workflow.flow() {
+            crate::workflow::Flow::Any => "any column to any other".to_string(),
+            crate::workflow::Flow::Next if workflow.moves().is_empty() => {
+                "one column at a time".to_string()
+            }
+            crate::workflow::Flow::Next => format!(
+                "one column at a time, plus {}",
+                workflow
+                    .moves()
+                    .iter()
+                    .map(|(f, t)| format!("{} → {}", workflow.label(*f), workflow.label(*t)))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        };
+        text.push_str(&format!(
+            "\nMoves: {flow}. New tickets land in {}.",
+            workflow.label(workflow.landing())
+        ));
         let settings = board_settings::load(board);
         let mut columns = Vec::new();
-        for column in Column::ALL {
+        for column in board.workflow().columns() {
             if only.is_some_and(|o| o != column) {
                 continue;
             }
@@ -568,11 +599,11 @@ fn board_tool(args: &Value) -> Result<Reply> {
                 .collect();
             model::sort_cards(&mut cards);
             let limit = match settings.wip_limit(column) {
-                Some(n) if column == Column::Doing => format!(", WIP limit {n}"),
+                Some(n) => format!(", WIP limit {n}"),
                 _ => String::new(),
             };
             text.push_str(&format!("\n### {column} ({}{limit})", cards.len()));
-            if column == Column::Done && !include_done {
+            if column.is(Kind::Done) && !include_done {
                 columns.push(json!({"column": column.as_str(), "count": cards.len()}));
                 continue;
             }
@@ -909,6 +940,8 @@ fn create_ticket(args: &Value) -> Result<Reply> {
         clone_of: String::new(),
         body: arg(args, "body").unwrap_or_default(),
         priority: arg(args, "priority").unwrap_or_default(),
+        requires: list(args, "requires").unwrap_or_default(),
+        required_by: Vec::new(),
     };
     let unknown = board_settings::unknown_assignee(board, &fields.assignee);
     let outcome = transition::create_ticket(board, &fields)?;
@@ -958,6 +991,13 @@ fn link_tickets(args: &Value) -> Result<Reply> {
     let remove = args.get("remove").and_then(Value::as_bool).unwrap_or(false);
     let board = project.ready(i)?;
     let other = board.find(&required(args, "to")?)?;
+    if let Some(old) = arg(args, "replace").filter(|o| !o.trim().is_empty()) {
+        let old = crate::links::LinkType::parse(&old)
+            .with_context(|| format!("unknown link type '{old}'"))?;
+        let outcome = transition::retype_link(board, &task, old, kind, &other)?;
+        let data = card(&repo, &task);
+        return Ok(project.reply(events_text(&outcome).join("\n"), data));
+    }
     let outcome = transition::link_tickets(
         board,
         &task,
@@ -974,7 +1014,11 @@ fn move_ticket(args: &Value) -> Result<Reply> {
     let mut project = Project::open(Purpose::Write)?;
     let (i, task) = project.find(&required(args, "ticket")?)?;
     let to = required(args, "to")?;
-    let to = Column::parse(&to).with_context(|| format!("{to} isn't a column"))?;
+    let to = project.boards[i]
+        .2
+        .workflow()
+        .find(&to)
+        .with_context(|| format!("{to} isn't a column"))?;
     let repo = project.boards[i].0.clone();
     let board = project.ready(i)?;
     let outcome = transition::move_to(board, &task, to, flag(args, "force"))?;
@@ -1043,7 +1087,7 @@ fn edit_ticket(args: &Value) -> Result<Reply> {
             if let Some(priority) = &priority
                 && priority.trim() != task.priority()
             {
-                task.set_priority(task.hash()?, priority.trim())?;
+                crate::auto_priority::set_by_hand(board, &task, priority)?;
             }
             if let Some(repository) = &repository
                 && crate::task::repo_name(repository) != task.repository().unwrap_or_default()
@@ -1089,40 +1133,6 @@ fn assign_ticket(args: &Value) -> Result<Reply> {
     );
     let data = card(&repo, &task);
     Ok(project.reply(lines.join("\n"), data))
-}
-
-/// `body` with `note` added at the end of its `## Notes` section, which is
-/// made at the end if there isn't one.
-fn with_note(body: &str, note: &str) -> String {
-    let lines: Vec<&str> = body.lines().collect();
-    let Some(start) = lines.iter().position(|l| l.trim() == "## Notes") else {
-        let mut out = body.trim_end().to_string();
-        if !out.is_empty() {
-            out.push_str("\n\n");
-        }
-        return format!("{out}## Notes\n\n{note}\n");
-    };
-    let end = lines
-        .iter()
-        .enumerate()
-        .skip(start + 1)
-        .find(|(_, l)| l.starts_with("## "))
-        .map_or(lines.len(), |(i, _)| i);
-    // Back over the blank lines before the next section.
-    let mut at = end;
-    while at > start + 1 && lines[at - 1].trim().is_empty() {
-        at -= 1;
-    }
-    let mut out: Vec<String> = lines[..at].iter().map(|l| l.to_string()).collect();
-    out.push(String::new());
-    out.push(note.to_string());
-    if end < lines.len() {
-        out.push(String::new());
-        out.extend(lines[end..].iter().map(|l| l.to_string()));
-    }
-    let mut text = out.join("\n");
-    text.push('\n');
-    text
 }
 
 fn add_note(args: &Value) -> Result<Reply> {

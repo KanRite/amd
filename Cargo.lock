@@ -159,6 +159,7 @@ dependencies = [
  "deunicode",
  "pulldown-cmark",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

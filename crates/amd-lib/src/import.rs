@@ -78,7 +78,7 @@ pub fn import(dest: &Board, source_root: &Path, dry_run: bool) -> Result<ImportS
     let mut skipped: Vec<(PathBuf, String)> = Vec::new();
     let mut next = dest.next_id()?;
 
-    for column in Column::ALL {
+    for column in source.workflow().columns() {
         for task in source.tasks_in(column)? {
             let Some(old_number) = task.id else {
                 continue;
@@ -585,8 +585,11 @@ mod tests {
     #[test]
     fn typed_links_are_remapped_within_the_batch() {
         let map: HashMap<String, String> = [("001".to_string(), "011".to_string())].into();
-        let text = "---\nid: \"002\"\nlinks: [blocks:001,depends-on:009]\n---\n\nbody\n";
+        let text = "---\nid: \"002\"\nlinks: [requires:001,supersedes:009]\n---\n\nbody\n";
         let out = remap_links(text, &map).unwrap();
-        assert!(out.contains("links: [blocks:011,depends-on:009]"), "{out}");
+        assert!(
+            out.contains("links: [requires:011,supersedes:009]"),
+            "{out}"
+        );
     }
 }

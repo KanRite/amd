@@ -46,12 +46,18 @@ pub struct NewTicket {
     pub tags: Vec<String>,
     /// Values for the template's own `extra.*` fields.
     pub extra: BTreeMap<String, String>,
+    /// Which column it lands in (ticket 225): the board's landing column
+    /// when `None`. One going straight into an epic or sprint lands in the
+    /// standard backlog, where groups live.
+    pub land_in: Option<Column>,
 }
 
 /// A ticket that has been resolved and rendered, but not yet written.
 #[derive(Debug)]
 pub struct Draft {
     pub path: PathBuf,
+    /// The column it lands in (ticket 225).
+    pub column: Column,
     pub id: String,
     /// The same id as a number, for the board's counter.
     pub number: u32,
@@ -129,7 +135,8 @@ impl Draft {
         let number = board.next_id()?;
         let id = format!("{number:03}");
         let slug = task::slugify(&ticket.title);
-        let dir = board.dir(Column::Backlog);
+        let column = ticket.land_in.unwrap_or_else(|| board.workflow().landing());
+        let dir = board.dir(column);
         let path = dir.join(format!("{id}-{slug}.md"));
         if path.exists() {
             bail!("{} already exists", path.display());
@@ -173,6 +180,7 @@ impl Draft {
 
         Ok(Draft {
             path,
+            column,
             id,
             number,
             slug,
@@ -247,7 +255,7 @@ impl Draft {
             }
         }
 
-        let task = Task::from_path(&self.path, Column::Backlog)
+        let task = Task::from_path(&self.path, self.column)
             .ok_or_else(|| anyhow::anyhow!("{} is not a task file", self.path.display()))?;
         Ok(Created {
             task,

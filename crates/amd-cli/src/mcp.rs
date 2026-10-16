@@ -28,7 +28,7 @@ const INSTRUCTIONS: &str = "agile-md is a Kanban board kept as markdown files in
 These tools read the project's board, tickets, documents and ideas, and change tickets \
 the way the `amd` command and the amdui desktop board do: each change is committed and \
 pushed. Call `screen` to find what the user is looking at in amdui (\"this ticket\"). \
-Tickets move one column at a time: backlog, todo, doing, done. Ask before a change the \
+Tickets move one column at a time: backlog, todo, doing, done, or the project's own columns (`board` lists them). Ask before a change the \
 user didn't request.";
 
 /// Runs the server until the client closes stdin.

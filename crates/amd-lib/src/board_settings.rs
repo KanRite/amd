@@ -79,7 +79,7 @@
 
 use anyhow::{Result, bail};
 
-use crate::board::{Board, Column};
+use crate::board::{Board, Column, Kind};
 use crate::settings::Config;
 
 const PROJECT: &str = "project";
@@ -88,6 +88,15 @@ const LEASE_HOURS: &str = "lease-hours";
 const DEFAULT_LEASE_HOURS: f64 = 8.0;
 const WIP_TODO: &str = "wip-todo";
 const WIP_LIMIT: &str = "wip-limit";
+/// The project's own columns (ticket 224), as `Workflow::parse` reads
+/// them; absent means the standard four.
+const COLUMNS: &str = "columns";
+/// Which moves the board allows (ticket 225): `next` (default) or `any`.
+const FLOW: &str = "flow";
+/// Extra one-way moves under `next`: `triage>todo, review>doing`.
+const MOVES: &str = "moves";
+/// The backlog column new tickets land in (ticket 225).
+const NEW_TICKETS: &str = "new-tickets";
 /// Doing's WIP limit when nobody has set one.
 pub const DEFAULT_WIP_LIMIT: u32 = 2;
 const REPOS: &str = "repos";
@@ -104,6 +113,8 @@ const TRIAGE_PRIORITY: &str = "triage-priority";
 /// Whether amdui's landing page pulls in the project's GitHub issues
 /// (ticket 173).
 const IMPORT_ISSUES: &str = "import-issues";
+const AUTO_PRIORITY: &str = "auto-priority";
+const PRIORITY_OVERRIDE: &str = "priority-override";
 /// Set once the documents `.settings/` has been carried across (ticket
 /// 182), so it's never read again.
 const MIGRATED: &str = "migrated-from-documents";
@@ -319,18 +330,27 @@ impl BoardSettings {
     /// means "off". Todo, backlog and done always read as unlimited — a
     /// limit on todo as well could leave work stuck with nowhere to go, so
     /// `wip-todo`/`AMD_WIP_TODO` are ignored.
+    ///
+    /// Ticket 223: the limit belongs to doing-*kind* columns. The standard
+    /// doing column reads `wip-limit` as above; another doing-kind column
+    /// (a Review, say) reads `wip-limit-<folder>`, unlimited when unset.
     pub fn wip_limit(&self, column: Column) -> Option<u32> {
-        match column {
-            Column::Doing => {
-                let parsed = crate::settings::resolved("AMD_WIP_LIMIT", &self.config, WIP_LIMIT)
-                    .and_then(|value| value.trim().parse::<u32>().ok());
-                match parsed {
-                    Some(0) => None,
-                    Some(limit) => Some(limit),
-                    None => Some(DEFAULT_WIP_LIMIT),
-                }
-            }
-            Column::Backlog | Column::Todo | Column::Done => None,
+        if !column.is(Kind::Doing) {
+            return None;
+        }
+        if column != Column::Doing {
+            return self
+                .config
+                .get(&format!("{WIP_LIMIT}-{}", column.as_str()))
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .filter(|&limit| limit > 0);
+        }
+        let parsed = crate::settings::resolved("AMD_WIP_LIMIT", &self.config, WIP_LIMIT)
+            .and_then(|value| value.trim().parse::<u32>().ok());
+        match parsed {
+            Some(0) => None,
+            Some(limit) => Some(limit),
+            None => Some(DEFAULT_WIP_LIMIT),
         }
     }
 
@@ -344,18 +364,22 @@ impl BoardSettings {
     /// not unlimited, so `Some(0)` and `None` have to reach the file as
     /// different states for the read side to tell them apart.
     pub fn set_wip_limit(&mut self, column: Column, limit: Option<u32>) -> Result<()> {
-        match column {
-            Column::Doing => {
+        match column.kind() {
+            Kind::Doing => {
+                let key = if column == Column::Doing {
+                    WIP_LIMIT.to_string()
+                } else {
+                    format!("{WIP_LIMIT}-{}", column.as_str())
+                };
                 let value = limit.map(|l| l.to_string());
-                self.config.set(WIP_LIMIT, value.as_deref().unwrap_or(""));
+                self.config.set(&key, value.as_deref().unwrap_or(""));
                 Ok(())
             }
-            Column::Todo => {
-                bail!("todo has no WIP limit: only doing is limited, so work can't get stuck")
-            }
-            Column::Backlog | Column::Done => {
-                bail!("{} has no WIP limit", column.as_str())
-            }
+            Kind::Todo => bail!(
+                "{} has no WIP limit: only doing is limited, so work can't get stuck",
+                column.as_str()
+            ),
+            Kind::Backlog | Kind::Done => bail!("{} has no WIP limit", column.as_str()),
         }
     }
 
@@ -595,6 +619,42 @@ impl BoardSettings {
             .set(IMPORT_ISSUES, if on { "on" } else { "off" });
     }
 
+    /// Whether priorities follow requires links (ticket 215):
+    /// `auto-priority`, off unless set on.
+    pub fn auto_priority(&self) -> bool {
+        matches!(
+            self.config
+                .get(AUTO_PRIORITY)
+                .map(|v| v.trim().to_lowercase())
+                .as_deref(),
+            Some("on" | "true" | "1" | "yes")
+        )
+    }
+
+    /// Sets [`auto_priority`](Self::auto_priority).
+    pub fn set_auto_priority(&mut self, on: bool) {
+        self.config
+            .set(AUTO_PRIORITY, if on { "on" } else { "off" });
+    }
+
+    /// Whether a priority set by hand pins its ticket against auto priority
+    /// (ticket 215): `priority-override`, on unless set off.
+    pub fn priority_override(&self) -> bool {
+        !matches!(
+            self.config
+                .get(PRIORITY_OVERRIDE)
+                .map(|v| v.trim().to_lowercase())
+                .as_deref(),
+            Some("off" | "false" | "0" | "no")
+        )
+    }
+
+    /// Sets [`priority_override`](Self::priority_override).
+    pub fn set_priority_override(&mut self, on: bool) {
+        self.config
+            .set(PRIORITY_OVERRIDE, if on { "on" } else { "off" });
+    }
+
     /// Whether the project is archived (ticket 157): `archived`, off unless
     /// set on. amd and amdui refuse changes to an archived project.
     pub fn archived(&self) -> bool {
@@ -679,6 +739,88 @@ impl BoardSettings {
     }
 
     /// Writes every setting to `<tickets-repo>/.settings` (ticket 111).
+    /// The project's own columns as written (ticket 224), if it has any.
+    pub fn columns(&self) -> Option<&str> {
+        self.config.get(COLUMNS).filter(|v| !v.trim().is_empty())
+    }
+
+    /// Records the board's columns; the standard four leave no key, so a
+    /// board that never changed them looks as it always has.
+    pub fn set_columns(&mut self, workflow: &crate::workflow::Workflow) {
+        if workflow.is_standard() {
+            self.config.remove(COLUMNS);
+        } else {
+            self.config.set(COLUMNS, &workflow.to_text());
+        }
+    }
+
+    /// The flow, extra moves and landing column as written (ticket 225).
+    pub fn flow(&self) -> Option<&str> {
+        self.config.get(FLOW).filter(|v| !v.trim().is_empty())
+    }
+
+    pub fn moves(&self) -> Option<&str> {
+        self.config.get(MOVES).filter(|v| !v.trim().is_empty())
+    }
+
+    pub fn new_tickets(&self) -> Option<&str> {
+        self.config
+            .get(NEW_TICKETS)
+            .filter(|v| !v.trim().is_empty())
+    }
+
+    /// Records the flow; `next`, the default, leaves no key.
+    pub fn set_flow(&mut self, flow: crate::workflow::Flow) {
+        match flow {
+            crate::workflow::Flow::Next => {
+                self.config.remove(FLOW);
+            }
+            other => self.config.set(FLOW, other.as_str()),
+        }
+    }
+
+    /// Records the extra moves; none leaves no key.
+    pub fn set_moves(&mut self, moves: &[(Column, Column)]) {
+        if moves.is_empty() {
+            self.config.remove(MOVES);
+        } else {
+            self.config
+                .set(MOVES, &crate::workflow::Workflow::moves_text(moves));
+        }
+    }
+
+    /// Records where new tickets land; the standard backlog leaves no key.
+    pub fn set_new_tickets(&mut self, column: Column) {
+        if column == Column::Backlog {
+            self.config.remove(NEW_TICKETS);
+        } else {
+            self.config.set(NEW_TICKETS, column.as_str());
+        }
+    }
+
+    /// Forgets every column's own WIP limit (`wip-limit-<folder>`), as a
+    /// reset to the standard board does; `wip-limit` itself stays.
+    pub fn clear_column_wips(&mut self) {
+        let keys: Vec<String> = self
+            .config
+            .keys()
+            .filter(|k| k.starts_with(&format!("{WIP_LIMIT}-")))
+            .map(str::to_string)
+            .collect();
+        for key in keys {
+            self.config.remove(&key);
+        }
+    }
+
+    /// Forgets a doing-kind column's own WIP limit (`wip-limit-<folder>`),
+    /// when the column goes.
+    pub fn clear_column_wip(&mut self, column: Column) {
+        if column != Column::Doing {
+            self.config
+                .remove(&format!("{WIP_LIMIT}-{}", column.as_str()));
+        }
+    }
+
     pub fn save(&self, board: &Board) -> Result<()> {
         self.config.save_to(&path(board))
     }

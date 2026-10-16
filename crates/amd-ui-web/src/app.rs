@@ -37,13 +37,23 @@ pub enum View {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Overlay {
     Editor(TicketDocument),
-    NewTicket,
+    /// The requires tree around a ticket (ticket 214): where its card is,
+    /// and its file.
+    Tree {
+        place: Place,
+        file: String,
+    },
+    /// New ticket; from the editor's Save and New, linked back to the
+    /// ticket it came from (ticket 227).
+    NewTicket(Option<LinkBack>),
     NewEpic,
     NewSprint,
     Admin,
     Preferences,
     /// A "(not cloned)" repository chosen in the filter: clone it? (108)
     CloneRepo(String),
+    /// A new repository for the project, from a ticket (ticket 228).
+    NewRepo(NewRepoFor),
     /// A ticket dropped on a column at its WIP limit: move it anyway?
     OverLimit {
         file: String,
@@ -51,6 +61,33 @@ pub enum Overlay {
         to: Place,
         reason: String,
     },
+}
+
+/// The ticket a new one is made from with Save and New (ticket 227): on
+/// its board, by id and title.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinkBack {
+    pub repo: String,
+    pub id: String,
+    pub title: String,
+}
+
+/// The ticket a new repository is made for (ticket 228).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NewRepoFor {
+    pub place: Place,
+    pub file: String,
+    pub id: String,
+    pub title: String,
+}
+
+/// How a ticket made with Save and New is tied to the one it came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkKind {
+    /// That ticket requires the new one: it was found to depend on it.
+    Requires,
+    Related,
+    None,
 }
 
 /// State shared by every component, provided as context. All fields are
@@ -82,6 +119,9 @@ pub struct Ctx {
     pub dragging: RwSignal<Option<(String, Place)>>,
     /// How every column and epic is ordered (the Sort dropdown).
     pub sort: RwSignal<SortOrder>,
+    /// Whether the sort was picked in the dropdown (ticket 230); until it
+    /// is, it follows the board's default.
+    pub sort_chosen: RwSignal<bool>,
     /// The search box: only matching cards are shown while it has text.
     pub search: RwSignal<String>,
     /// Which repository's *board* new tickets, epics and WIP limits go to;
@@ -131,10 +171,23 @@ impl Ctx {
 
     /// Opens a ticket in the editor.
     pub fn open_ticket(self, place: Place, file: String) {
+        self.show_card(&place, &file);
+        spawn_local(async move {
+            match api::open_ticket(&place, &file).await {
+                Ok(doc) => self.overlay.set(Some(Overlay::Editor(doc))),
+                Err(e) => self.error.set(Some(e)),
+            }
+        });
+    }
+
+    /// Goes to a ticket's card without opening it (ticket 214: a node in
+    /// the tree): the board is shown, the card outlined and scrolled to.
+    pub fn show_card(self, place: &Place, file: &str) {
+        self.view.set(View::Board);
         // Where it is on the board (ticket 163): its card is outlined, and
         // one filed in an epic or sprint has that group's column opened.
         // A folded column is unfolded, so the card is there to see.
-        self.focus.set(Some((place.repo.clone(), file.clone())));
+        self.focus.set(Some((place.repo.clone(), file.to_string())));
         self.focus_scroll.set(true);
         if place.column == Column::Backlog
             && let Some(group) = &place.epic
@@ -146,21 +199,27 @@ impl Ctx {
                 c.remove(&place.column);
             });
         }
-        spawn_local(async move {
-            match api::open_ticket(&place, &file).await {
-                Ok(doc) => self.overlay.set(Some(Overlay::Editor(doc))),
-                Err(e) => self.error.set(Some(e)),
-            }
-        });
     }
 
     /// The cards to show from a list: those matching the search, in the
     /// order chosen in the Sort dropdown.
     pub fn shown(self, mut list: Vec<TicketSummary>) -> Vec<TicketSummary> {
         list.retain(|t| self.in_view(t));
-        let order = self.sort.get();
-        list.sort_by(|a, b| order.compare(a, b));
+        self.sort.get().sort(&mut list);
         list
+    }
+
+    /// The board's own sort (ticket 230): Automatic where auto priority is
+    /// on, else priority then oldest.
+    pub fn default_sort(self) -> SortOrder {
+        if self
+            .board
+            .with(|b| b.as_ref().is_some_and(|b| b.auto_priority))
+        {
+            SortOrder::Automatic
+        } else {
+            SortOrder::Default
+        }
     }
 
     /// Whether a card passes the repository and user filters and the search.
@@ -176,7 +235,7 @@ impl Ctx {
     pub fn filters_changed(self) -> bool {
         self.about.with(Option::is_some)
             || self.user.with(|u| *u != Assigned::Anyone)
-            || self.sort.get() != SortOrder::default()
+            || self.sort.get() != self.default_sort()
             || self.searching()
     }
 
@@ -185,7 +244,8 @@ impl Ctx {
     pub fn reset_filters(self) {
         self.about.set(None);
         self.user.set(Assigned::Anyone);
-        self.sort.set(SortOrder::default());
+        self.sort_chosen.set(false);
+        self.sort.set(self.default_sort());
         self.search.set(String::new());
     }
 
@@ -240,6 +300,7 @@ pub fn App() -> impl IntoView {
         focus_scroll: RwSignal::new(false),
         dragging: RwSignal::new(None),
         sort: RwSignal::new(SortOrder::default()),
+        sort_chosen: RwSignal::new(false),
         search: RwSignal::new(String::new()),
         repo: RwSignal::new(None),
         about: RwSignal::new(None),
@@ -254,6 +315,14 @@ pub fn App() -> impl IntoView {
         idea: RwSignal::new(None),
     };
     provide_context(ctx);
+    // The sort follows the board's default (ticket 230: Automatic with auto
+    // priority on) until one is picked in the dropdown.
+    Effect::new(move |_| {
+        let wanted = ctx.default_sort();
+        if !ctx.sort_chosen.get_untracked() && ctx.sort.get_untracked() != wanted {
+            ctx.sort.set(wanted);
+        }
+    });
     // A document belongs to the project it was opened in (ticket 175):
     // whatever switches project (the landing page's picker or buttons, the
     // header's switcher, a Projects row), the open document goes with it,
@@ -353,7 +422,7 @@ pub fn App() -> impl IntoView {
                     <button
                         class="whitespace-nowrap rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
                         disabled=move || ctx.board.with(|b| b.as_ref().is_none_or(|b| b.archived))
-                        on:click=move |_| ctx.overlay.set(Some(Overlay::NewTicket))
+                        on:click=move |_| ctx.overlay.set(Some(Overlay::NewTicket(None)))
                     >
                         "New ticket"
                     </button>
@@ -454,12 +523,18 @@ pub fn App() -> impl IntoView {
 
             {move || match ctx.overlay.get() {
                 Some(Overlay::Editor(doc)) => view! { <Editor doc /> }.into_any(),
-                Some(Overlay::NewTicket) => view! { <NewTicketDialog /> }.into_any(),
+                Some(Overlay::NewTicket(link)) => view! { <NewTicketDialog link /> }.into_any(),
                 Some(Overlay::NewEpic) => view! { <NewEpicDialog /> }.into_any(),
                 Some(Overlay::NewSprint) => view! { <NewSprintDialog /> }.into_any(),
                 Some(Overlay::Admin) => view! { <AdminPanel /> }.into_any(),
                 Some(Overlay::Preferences) => view! { <PreferencesPanel /> }.into_any(),
                 Some(Overlay::CloneRepo(name)) => view! { <CloneRepoDialog name /> }.into_any(),
+                Some(Overlay::NewRepo(ticket)) => {
+                    view! { <crate::dialog::NewRepoDialog ticket /> }.into_any()
+                }
+                Some(Overlay::Tree { place, file }) => {
+                    view! { <crate::tree::TreePanel place file /> }.into_any()
+                }
                 Some(Overlay::OverLimit { file, from, to, reason }) => {
                     view! { <OverLimitDialog file from to reason /> }.into_any()
                 }
@@ -1070,7 +1145,7 @@ fn FilterBar() -> impl IntoView {
             <Marked active=Signal::derive(move || ctx.searching())>
                 <SearchBox />
             </Marked>
-            <Marked active=Signal::derive(move || ctx.sort.get() != SortOrder::default())>
+            <Marked active=Signal::derive(move || ctx.sort.get() != ctx.default_sort())>
             // WebKit draws a native (white) box for a <select> unless its
             // appearance is turned off, so the select is unstyled and
             // painted indigo itself, with its own arrow.
@@ -1082,7 +1157,10 @@ fn FilterBar() -> impl IntoView {
                 <select
                     class="cursor-pointer appearance-none border-0 bg-accent-600 pr-5 font-medium text-white group-hover:bg-accent-500 focus:outline-none"
                     prop:value=move || ctx.sort.get().key()
-                    on:change=move |ev| ctx.sort.set(SortOrder::from_key(&event_target_value(&ev)))
+                    on:change=move |ev| {
+                        ctx.sort_chosen.set(true);
+                        ctx.sort.set(SortOrder::from_key(&event_target_value(&ev)));
+                    }
                 >
                     // The open list is indigo too, with white text.
                     {SortOrder::ALL

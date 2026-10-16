@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 
-use crate::board::{Board, Column};
+use crate::board::{Board, Column, Kind};
 use crate::task::Task;
 use crate::{board_settings, branch, git};
 
@@ -46,6 +46,8 @@ pub struct TodoOptions {
     pub branch: Option<String>,
     /// Leave the branch alone entirely (`--no-branch`).
     pub no_branch: bool,
+    /// Which todo-kind column (ticket 224); the standard todo when `None`.
+    pub to: Option<Column>,
 }
 
 /// Runs `mutate`, then — if `commit` is on for this board — commits and
@@ -75,8 +77,18 @@ pub fn with_auto_commit<T>(
 ) -> Result<(T, Option<String>)> {
     let before = snapshot(board);
     let result = mutate()?;
+    settle_priorities(board);
     let warning = commit_since(board, before, &commit_message(verb, subject, detail))?;
     Ok((result, warning))
+}
+
+/// Auto priority (ticket 215), after a change and before its commit, so
+/// the commit carries the priorities it moved. Never undoes the change: a
+/// failure is only noted (`auto_priority::take_notes`).
+pub fn settle_priorities(board: &Board) {
+    if let Err(err) = crate::auto_priority::reconcile(board) {
+        crate::auto_priority::note_failure(&err);
+    }
 }
 
 /// `verb: subject "detail"`, or `verb: subject` when there is no detail
@@ -163,7 +175,8 @@ pub fn move_to(board: &Board, task: &Task, to: Column, force: bool) -> Result<Ou
         // lease is claimed on entering doing ("I'm working on this now"),
         // not earlier, since todo only means it's next. A move onto a
         // ticket someone else has leased is refused earlier, in move_task.
-        if to == Column::Doing
+        // Any doing-kind column (ticket 223): Doing to Review renews it.
+        if to.is(Kind::Doing)
             && let Some(moved) = Task::from_path(&dest, to)
             && let Some(warning) = maybe_take_lease(board, &moved)
         {
@@ -172,8 +185,8 @@ pub fn move_to(board: &Board, task: &Task, to: Column, force: bool) -> Result<Ou
         // ...and given back on leaving doing in any direction, or on
         // reaching done or the backlog (ticket 092), in the same commit as
         // the move. Only your own lease is ever released.
-        if (from == Column::Doing || matches!(to, Column::Done | Column::Backlog))
-            && to != Column::Doing
+        if (from.is(Kind::Doing) || to.is(Kind::Done) || to.is(Kind::Backlog))
+            && !to.is(Kind::Doing)
             && let Some(moved) = Task::from_path(&dest, to)
             && let Err(err) = moved.release_if_mine()
         {
@@ -236,7 +249,12 @@ pub fn enter_todo(board: &Board, task: &Task, options: &TodoOptions) -> Result<O
         );
     }
 
-    let mut outcome = move_to(board, task, Column::Todo, options.force)?;
+    let mut outcome = move_to(
+        board,
+        task,
+        options.to.unwrap_or(Column::Todo),
+        options.force,
+    )?;
 
     if !branching {
         return Ok(outcome);
@@ -328,12 +346,23 @@ pub struct TicketFields {
     /// `low`, `medium` or `high`; empty keeps what the template (on
     /// creation) or the ticket (on an edit) says.
     pub priority: String,
+    /// On creation, refs of the tickets it requires (ticket 214), linked
+    /// both ways in the same commit. Ignored on an edit.
+    pub requires: Vec<String>,
+    /// On creation, refs of tickets that require it (ticket 227: amdui's
+    /// Save and New, for a ticket found to depend on one that's missing),
+    /// linked in the same commit.
+    pub required_by: Vec<String>,
 }
 
 /// Make a ticket the way `amd new` does: render it from the templates, write
 /// it into `backlog/`, size it, file it under its epic, and auto-commit.
 /// `outcome.dest` is where it landed.
 pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
+    // Every ticket it requires must exist before anything is written.
+    for reference in fields.requires.iter().chain(&fields.required_by) {
+        board.find(reference)?;
+    }
     let templates = crate::templates::Templates::load(board)?;
     let draft = crate::create::Draft::prepare(
         board,
@@ -349,6 +378,7 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
             clone_of: Some(fields.clone_of.trim().to_string()).filter(|c| !c.is_empty()),
             tags: fields.tags.clone(),
             extra: Default::default(),
+            land_in: fields.epic.as_ref().map(|_| Column::Backlog),
         },
     )?;
     // `write` takes the whole file, not just the notes — the same shape `amd
@@ -367,6 +397,28 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
         created
             .task
             .set_priority(created.task.hash()?, fields.priority.trim())?;
+    }
+    let mut required_lines = Vec::new();
+    for reference in &fields.required_by {
+        let other = board.find(reference)?;
+        required_lines.extend(crate::links::apply(
+            &other,
+            crate::links::LinkType::Requires,
+            &crate::task::Task::from_path(&created.task.path, created.task.column)
+                .unwrap_or_else(|| created.task.clone()),
+            false,
+            false,
+        )?);
+    }
+    for reference in &fields.requires {
+        let other = board.find(reference)?;
+        required_lines.extend(crate::links::apply(
+            &created.task,
+            crate::links::LinkType::Requires,
+            &other,
+            false,
+            false,
+        )?);
     }
     // Read what the report and the commit message need before filing it under
     // an epic: inside `backlog/` that moves the file, after which `created.task`
@@ -388,11 +440,20 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
             "could not list {id_display} as a clone on {reason}"
         )));
     }
-    outcome.events.push(Event::Info(format!(
-        "created {}/{file_name}",
-        Column::Backlog
-    )));
+    // Where it landed (ticket 225): the board's landing column, or the
+    // backlog for one filed straight into an epic or sprint.
+    let landed = match fields.epic {
+        Some(_) => Column::Backlog,
+        None => board.workflow().landing(),
+    };
+    outcome
+        .events
+        .push(Event::Info(format!("created {landed}/{file_name}")));
+    outcome
+        .events
+        .extend(required_lines.into_iter().map(Event::Info));
     let message = format!("new: {id_display} \"{title}\"");
+    settle_priorities(board);
     if let Some(warning) = commit_since(board, before, &message)? {
         outcome.events.push(Event::Warn(warning));
     }
@@ -477,6 +538,63 @@ pub fn link_tickets(
     Ok(outcome)
 }
 
+/// Make `task`'s requires links exactly `wanted` (ticket 214): those not
+/// there yet are made, those not listed are removed, each on both tickets,
+/// in one commit (`amd set <ref> requires 3,7`; an empty list clears them).
+pub fn set_requires(board: &Board, task: &Task, wanted: &[Task]) -> Result<Outcome> {
+    use crate::links::{LinkType, apply};
+    let have = crate::requires::required(board, task)?;
+    let (id, title) = (task.id_display(), task.title());
+    let (lines, warning) = with_auto_commit(board, "set", &id, &title, || {
+        let mut lines = Vec::new();
+        for gone in have
+            .iter()
+            .filter(|h| !wanted.iter().any(|w| w.path == h.path))
+        {
+            lines.extend(apply(task, LinkType::Requires, gone, true, false)?);
+        }
+        for new in wanted
+            .iter()
+            .filter(|w| !have.iter().any(|h| h.path == w.path))
+        {
+            lines.extend(apply(task, LinkType::Requires, new, false, false)?);
+        }
+        if lines.is_empty() {
+            lines.push(format!("{id} already requires exactly that"));
+        }
+        Ok(lines)
+    })?;
+    let mut outcome = Outcome::default();
+    outcome.events.extend(lines.into_iter().map(Event::Info));
+    if let Some(warning) = warning {
+        outcome.events.push(Event::Warn(warning));
+    }
+    Ok(outcome)
+}
+
+/// Change the type of the link between `from` and `to` from `old` to `new`
+/// (ticket 213): both ends, one commit (`relink: 012 -> 016 "…"`). The way
+/// past "done waits": a requires or child-of link changed to relates-to
+/// holds nothing back.
+pub fn retype_link(
+    board: &Board,
+    from: &Task,
+    old: crate::links::LinkType,
+    new: crate::links::LinkType,
+    to: &Task,
+) -> Result<Outcome> {
+    let subject = format!("{} -> {}", from.id_display(), to.id_display());
+    let (lines, warning) = with_auto_commit(board, "relink", &subject, &from.title(), || {
+        crate::links::retype(from, old, new, to)
+    })?;
+    let mut outcome = Outcome::default();
+    outcome.events.extend(lines.into_iter().map(Event::Info));
+    if let Some(warning) = warning {
+        outcome.events.push(Event::Warn(warning));
+    }
+    Ok(outcome)
+}
+
 /// Save every editable field of an existing ticket in one write, checked
 /// against `expected` — the fingerprint taken when the form opened — so a
 /// ticket that changed underneath it is refused with the conflict rather than
@@ -509,7 +627,7 @@ pub fn edit_ticket(
             task.set_repository(task.hash()?, repository)?;
         }
         if !fields.priority.trim().is_empty() && fields.priority.trim() != task.priority() {
-            task.set_priority(task.hash()?, fields.priority.trim())?;
+            crate::auto_priority::set_by_hand(board, task, fields.priority.trim())?;
         }
         board.set_epic(task, fields.epic.as_deref())?;
         Ok(())
@@ -542,8 +660,22 @@ pub fn save_text(
         }
         _ => text.to_string(),
     };
+    // A priority changed in the editor is set by hand (ticket 215): `auto`
+    // goes to auto priority, anything else pins when override is on.
+    let before = task.priority();
+    let wanted = crate::task::meta_in(&text, "priority")
+        .map(|p| p.trim().trim_matches('"').to_lowercase())
+        .filter(|p| !p.is_empty());
+    let text = match wanted.as_deref() {
+        Some("auto") => crate::task::set_meta(&text, "priority", &format!("{before:?}"))?,
+        _ => text,
+    };
     let ((), warning) = with_auto_commit(board, "edit", &id_display, &title, || {
-        task.set_text(expected, &text)
+        task.set_text(expected, &text)?;
+        if let Some(wanted) = wanted.filter(|w| *w == "auto" || *w != before) {
+            crate::auto_priority::set_by_hand(board, task, &wanted)?;
+        }
+        Ok(())
     })?;
     let mut outcome = Outcome::default();
     outcome
@@ -592,6 +724,146 @@ mod tests {
             "{copy}"
         );
         assert!(copy.contains("## Notes\n\nkeep"), "{copy}");
+    }
+
+    const TEAM: &str = "Triage=triage:backlog, Backlog=backlog:backlog, To do=todo:todo, \
+                        Doing=doing:doing, Review=review:doing, Done=done:done, Released=released:done";
+
+    /// A board with a team's workflow (ticket 223): Triage before the
+    /// backlog, Review after doing, Released after done. A git repository
+    /// with an identity, auto-commit off, and tickets 001 to `n`.
+    fn team_board(dir: &std::path::Path, n: u32) -> Board {
+        for args in [
+            vec!["init", "-q"],
+            vec!["config", "user.email", "t@t.co"],
+            vec!["config", "user.name", "t"],
+        ] {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .status()
+                .unwrap();
+        }
+        std::fs::write(
+            dir.join(".settings"),
+            format!("commit = off\nsync = off\ncolumns = {TEAM}\n"),
+        )
+        .unwrap();
+        let board = Board::at(dir.join("tasks"));
+        board.create().unwrap();
+        for id in 1..=n {
+            let body = format!("---\nid: \"{id:03}\"\ntitle: \"T{id}\"\n---\n\nbody\n");
+            std::fs::write(board.dir(Column::Doing).join(format!("{id:03}-t.md")), body).unwrap();
+        }
+        board
+    }
+
+    fn column_of(board: &Board, id: &str) -> Column {
+        board.find(id).unwrap().column
+    }
+
+    #[test]
+    fn a_team_workflow_leases_in_every_doing_kind_column_and_releases_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = team_board(dir.path(), 1);
+        let review = board.workflow().find("review").unwrap();
+        // The board made the extra folders too.
+        assert!(board.dir(review).is_dir());
+        move_to(&board, &board.find("001").unwrap(), review, false).unwrap();
+        let task = board.find("001").unwrap();
+        assert_eq!(task.column, review);
+        assert!(task.lease_active(), "Review is a doing-kind column: locked");
+        move_to(&board, &task, Column::Done, false).unwrap();
+        let task = board.find("001").unwrap();
+        assert!(!task.lease_active(), "released on reaching done");
+        // Doing to Done skips Review: one column at a time.
+        assert!(!board.workflow().next_to(Column::Doing, Column::Done));
+    }
+
+    #[test]
+    fn a_doing_kind_column_has_its_own_wip_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = team_board(dir.path(), 2);
+        std::fs::write(
+            dir.path().join(".settings"),
+            format!("commit = off\nsync = off\ncolumns = {TEAM}\nwip-limit-review = 1\n"),
+        )
+        .unwrap();
+        let review = board.workflow().find("review").unwrap();
+        move_to(&board, &board.find("001").unwrap(), review, false).unwrap();
+        let err = move_to(&board, &board.find("002").unwrap(), review, false).unwrap_err();
+        assert!(
+            err.downcast_ref::<crate::board::WipLimitExceeded>()
+                .is_some(),
+            "{err:#}"
+        );
+        assert_eq!(column_of(&board, "002"), Column::Doing);
+    }
+
+    #[test]
+    fn done_waits_in_every_done_kind_column_and_any_of_them_counts_as_done() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = team_board(dir.path(), 2);
+        let review = board.workflow().find("review").unwrap();
+        let released = board.workflow().find("released").unwrap();
+        crate::links::apply(
+            &board.find("001").unwrap(),
+            crate::links::LinkType::Requires,
+            &board.find("002").unwrap(),
+            false,
+            false,
+        )
+        .unwrap();
+        move_to(&board, &board.find("001").unwrap(), review, false).unwrap();
+        let err = move_to(&board, &board.find("001").unwrap(), Column::Done, false).unwrap_err();
+        assert!(err.to_string().contains("002"), "{err:#}");
+        // 002 goes all the way to Released: done for every rule.
+        for to in [review, Column::Done, released] {
+            move_to(&board, &board.find("002").unwrap(), to, false).unwrap();
+        }
+        move_to(&board, &board.find("001").unwrap(), Column::Done, false).unwrap();
+        assert_eq!(column_of(&board, "001"), Column::Done);
+    }
+
+    #[test]
+    fn a_started_sprints_tickets_only_move_on_and_a_draft_stays_in_backlog_kinds() {
+        use crate::group::{Group, Kind as GroupKind, State};
+        let dir = tempfile::tempdir().unwrap();
+        let board = team_board(dir.path(), 2);
+        let triage = board.workflow().find("triage").unwrap();
+        for id in ["001", "002"] {
+            let task = board.find(id).unwrap();
+            let to = board.dir(Column::Backlog).join(task.file_name());
+            std::fs::rename(&task.path, to).unwrap();
+        }
+        board
+            .create_group(&Group {
+                dir: board.dir(Column::Backlog).join("s1"),
+                name: "s1".into(),
+                kind: GroupKind::Sprint,
+                description: String::new(),
+                days: 10,
+                state: State::Pending,
+            })
+            .unwrap();
+        let task = board.find("001").unwrap();
+        task.set_points(task.hash().unwrap(), "3").unwrap();
+        board
+            .set_epic(&board.find("001").unwrap(), Some("s1"))
+            .unwrap();
+        board.group("s1").unwrap().start().unwrap();
+        let err = board
+            .move_task(&board.find("001").unwrap(), triage, false)
+            .unwrap_err();
+        assert!(err.to_string().contains("started sprint s1"), "{err:#}");
+        // A draft may go back to Triage (still the backlog) but not on.
+        let task = board.find("002").unwrap();
+        task.set_draft(task.hash().unwrap(), true).unwrap();
+        board
+            .move_task(&board.find("002").unwrap(), triage, false)
+            .unwrap();
+        assert_eq!(column_of(&board, "002"), triage);
     }
 
     #[test]
@@ -665,6 +937,50 @@ mod tests {
             body: "## Notes\nhello\n".to_string(),
             ..TicketFields::default()
         }
+    }
+
+    /// Ticket 227: Save and New makes the missing ticket already required
+    /// by the one being edited, both ends written in the one commit.
+    #[test]
+    fn a_new_ticket_can_be_required_by_an_existing_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = empty_board(dir.path());
+        create_ticket(&board, &fields("Checkout")).unwrap();
+        let outcome = create_ticket(
+            &board,
+            &TicketFields {
+                required_by: vec!["001".into()],
+                ..fields("Payment provider")
+            },
+        )
+        .unwrap();
+        assert!(
+            outcome
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Info(t) if t.contains("001") && t.contains("002"))),
+            "{:?}",
+            outcome.events
+        );
+        let checkout = board.find("001").unwrap();
+        let ids: Vec<String> = crate::requires::required(&board, &checkout)
+            .unwrap()
+            .iter()
+            .map(|t| t.id_display())
+            .collect();
+        assert_eq!(ids, ["002"]);
+        assert!(
+            create_ticket(
+                &board,
+                &TicketFields {
+                    required_by: vec!["999".into()],
+                    ..fields("Nowhere")
+                }
+            )
+            .is_err(),
+            "an unknown ticket refuses before anything is written"
+        );
+        assert!(board.find("003").is_err());
     }
 
     #[test]

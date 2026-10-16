@@ -836,6 +836,52 @@ assert "amd clone --all clones every one still missing" \
     && in_cl clone 2>/dev/null | grep -q 'every declared repository is cloned here'"
 rm -rf "${cl}"
 
+echo "amd repo new makes a repository for the project (ticket 228):"
+# A tickets repository cloned from a local bare remote: new repositories go
+# beside that remote, as they would beside a GitHub one.
+rn="$(mktemp -d)"
+(
+  set -e
+  export XDG_CONFIG_HOME="${rn}/config"
+  git init -q --bare -b main "${rn}/remote/p-tickets.git"
+  git clone -q "${rn}/remote/p-tickets.git" "${rn}/work/p-tickets" 2>/dev/null
+  cd "${rn}/work/p-tickets"
+  git config user.email t@t.co && git config user.name t && git config commit.gpgsign false
+  "${AMD}" init p --local-only >/dev/null 2>&1
+  git add -A && git commit -q -m "seed for ticket 228" && git push -q origin HEAD:main 2>/dev/null
+  git branch -q --set-upstream-to=origin/main
+  "${AMD}" new "Take card payments" --no-edit >/dev/null 2>&1
+  # One that already exists on the remote, not cloned here.
+  git init -q --bare -b main "${rn}/remote/p-existing.git"
+  git clone -q "${rn}/remote/p-existing.git" "${rn}/seed" 2>/dev/null
+  git -C "${rn}/seed" -c user.email=t@t.co -c user.name=t commit -q --allow-empty -m "already here"
+  git -C "${rn}/seed" push -q origin HEAD:main 2>/dev/null
+)
+in_rn() { (cd "${rn}/work/p-tickets" && env XDG_CONFIG_HOME="${rn}/config" AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "amd repo new --for makes it beside the remote, clones it beside the tickets repository, with a README" \
+  bash -c "$(declare -f in_rn); rn='${rn}'; AMD='${AMD}'; in_rn repo new p-payments --for 1 2>/dev/null \
+    | grep -q \"created p-payments at ${rn}/work/p-payments\" \
+    && [ -d '${rn}/remote/p-payments.git' ] && [ -f '${rn}/work/p-payments/README.md' ] \
+    && grep -q 'ticket 001, Take card payments' '${rn}/work/p-payments/README.md' \
+    && [ \"\$(git -C '${rn}/remote/p-payments.git' log -1 --format=%s main)\" = 'Start the repository' ]"
+assert "...declares and registers it, and the ticket says so, in one commit" \
+  bash -c "rn='${rn}'; grep -q '^repos = .*p-payments' '${rn}/work/p-tickets/.settings' \
+    && grep -q '/work/p-payments\$' '${rn}/config/agile-md/repos' \
+    && grep -q '^repository: \"p-payments\"' '${rn}'/work/p-tickets/tasks/backlog/001-*.md \
+    && grep -q 'Created repository p-payments (private).' '${rn}'/work/p-tickets/tasks/backlog/001-*.md \
+    && [ \"\$(git -C '${rn}/work/p-tickets' log -1 --format=%s)\" = 'repo: new \"p-payments\"' ] \
+    && git -C '${rn}/work/p-tickets' show --stat --format= HEAD | grep -q '.settings' \
+    && git -C '${rn}/work/p-tickets' show --stat --format= HEAD | grep -q '001-'"
+assert "making it again is refused" \
+  bash -c "$(declare -f in_rn); rn='${rn}'; AMD='${AMD}'; in_rn repo new p-payments 2>&1 | grep -q 'p-payments is already cloned'"
+assert "a repository already on the remote is connected, not made again" \
+  bash -c "$(declare -f in_rn); rn='${rn}'; AMD='${AMD}'; in_rn repo new p-existing 2>/dev/null | grep -q '^connected p-existing' \
+    && [ \"\$(git -C '${rn}/work/p-existing' log -1 --format=%s)\" = 'already here' ] \
+    && [ ! -f '${rn}/work/p-existing/README.md' ]"
+assert "a name with a slash or a space is refused" \
+  bash -c "$(declare -f in_rn); rn='${rn}'; AMD='${AMD}'; ! in_rn repo new 'bad name' >/dev/null 2>&1 && ! in_rn repo new a/b >/dev/null 2>&1"
+rm -rf "${rn}"
+
 echo "board settings live in the tickets repository (ticket 111):"
 # A project whose documents repository still holds settings from before
 # 111: repos and wip-limit there, an older repos value in tickets.
@@ -1205,25 +1251,227 @@ assert "a ticket with no branch carries the list too" \
 echo "typed links (ticket 207):"
 "${AMD}" new "Link blocker" >/dev/null
 "${AMD}" new "Link blocked" >/dev/null
-assert "amd link --type blocks records the opposite on the other ticket" \
-  bash -c "'${AMD}' link link-blocker link-blocked --type blocks >/dev/null \
-    && grep -q '^links: \[blocks:0' tasks/backlog/*-link-blocker.md \
-    && grep -q '^links: \[blocked-by:0' tasks/backlog/*-link-blocked.md"
+assert "amd link --type requires records the opposite on the other ticket" \
+  bash -c "'${AMD}' link link-blocker link-blocked --type requires >/dev/null \
+    && grep -q '^links: \[requires:0' tasks/backlog/*-link-blocker.md \
+    && grep -q '^links: \[required-by:0' tasks/backlog/*-link-blocked.md"
 assert "a typed link is idempotent" \
-  bash -c "'${AMD}' link link-blocker link-blocked --type blocks | grep -q 'already blocks'"
+  bash -c "'${AMD}' link link-blocker link-blocked --type requires | grep -q 'already requires'"
 assert "a ticket may take several links of different types" \
   bash -c "'${AMD}' link link-blocker link-blocked --type supersedes >/dev/null \
-    && grep -q '^links: \[blocks:0[0-9]*,supersedes:0' tasks/backlog/*-link-blocker.md"
+    && grep -q '^links: \[requires:0[0-9]*,supersedes:0' tasks/backlog/*-link-blocker.md"
 assert "an unknown link type is refused" \
   bash -c "! '${AMD}' link link-blocker link-blocked --type befriends 2>/dev/null"
 assert "amd link --remove takes it away from both tickets" \
-  bash -c "'${AMD}' link link-blocker link-blocked --type blocks --remove >/dev/null \
-    && ! grep -q 'blocks:' tasks/backlog/*-link-blocker.md \
-    && ! grep -q 'blocked-by:' tasks/backlog/*-link-blocked.md"
+  bash -c "'${AMD}' link link-blocker link-blocked --type requires --remove >/dev/null \
+    && ! grep -q 'requires:' tasks/backlog/*-link-blocker.md \
+    && ! grep -q 'required-by:' tasks/backlog/*-link-blocked.md"
 assert "child-of sets the parent and lists the child" \
   bash -c "'${AMD}' link link-blocked link-blocker --type child-of >/dev/null \
     && grep -q '^parent: \"0' tasks/backlog/*-link-blocked.md \
     && grep -q 'link-blocked' tasks/backlog/*-link-blocker.md"
+
+echo "done waits for required tickets and children (ticket 213):"
+dw="$(mktemp -d)"
+( cd "${dw}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init waits --local-only >/dev/null \
+  && for t in Feature Dependency Child; do "${AMD}" new "$t" >/dev/null; done \
+  && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 3 1 --type child-of >/dev/null \
+  && AMD_NO_BRANCH=1 "${AMD}" todo 1 >/dev/null && "${AMD}" doing 1 >/dev/null )
+in_dw() { (cd "${dw}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "done is refused while a required ticket and a child aren't done, naming them" \
+  bash -c "$(declare -f in_dw); dw='${dw}'; AMD='${AMD}'; out=\$(in_dw done 1 2>&1); [ \$? -ne 0 ] \
+    && printf '%s' \"\$out\" | grep -q '002 (required, in backlog), 003 (a child, in backlog) aren.t done' \
+    && test -f '${dw}'/tasks/doing/001-feature.md"
+assert "amd link --replace changes a link's type on both tickets" \
+  bash -c "$(declare -f in_dw); dw='${dw}'; AMD='${AMD}'; in_dw link 1 2 --replace requires --type relates-to >/dev/null \
+    && grep -q '^related: \[002\]' '${dw}'/tasks/doing/001-feature.md \
+    && grep -q '^related: \[001\]' '${dw}'/tasks/backlog/002-dependency.md \
+    && ! grep -q 'requires:' '${dw}'/tasks/doing/001-feature.md \
+    && git -C '${dw}' log --format=%s -1 | grep -q '^relink: 001 -> 002'"
+assert "--replace refuses a link that isn't there" \
+  bash -c "$(declare -f in_dw); dw='${dw}'; AMD='${AMD}'; ! in_dw link 1 2 --replace supersedes --type relates-to 2>/dev/null"
+assert "with the child done, the parent can be done" \
+  bash -c "$(declare -f in_dw); dw='${dw}'; AMD='${AMD}'; in_dw done 1 2>&1 | grep -q '003 (a child' \
+    && in_dw todo 3 >/dev/null && in_dw doing 3 >/dev/null && in_dw done 3 >/dev/null \
+    && in_dw done 1 >/dev/null && test -f '${dw}'/tasks/done/001-feature.md"
+rm -rf "${dw}"
+
+echo "requires and the sprint start check (ticket 214):"
+rq="$(mktemp -d)"
+( cd "${rq}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init reqs --local-only >/dev/null \
+  && "${AMD}" new "Base" >/dev/null && "${AMD}" new "Other" >/dev/null \
+  && "${AMD}" new "Top" --requires 1 --requires other >/dev/null )
+in_rq() { (cd "${rq}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "amd new --requires links both ends in the new ticket's own commit" \
+  bash -c "grep -q '^links: \[requires:001,requires:002\]' '${rq}'/tasks/backlog/003-top.md \
+    && grep -q '^links: \[required-by:003\]' '${rq}'/tasks/backlog/001-base.md \
+    && [ \"\$(git -C '${rq}' log --format=%s -1)\" = 'new: 003 \"Top\"' ] \
+    && git -C '${rq}' show --stat HEAD | grep -q '001-base.md'"
+assert "amd new --requires with an unknown ticket creates nothing" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; ! in_rq new 'Nope' --requires 99 2>/dev/null \
+    && ! ls '${rq}'/tasks/backlog/*-nope.md 2>/dev/null"
+assert "amd set requires makes the list exactly that, both ends, and empty clears" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq set 3 requires 2 >/dev/null \
+    && grep -q '^links: \[requires:002\]' '${rq}'/tasks/backlog/003-top.md \
+    && ! grep -q 'required-by' '${rq}'/tasks/backlog/001-base.md \
+    && in_rq set 3 requires '' >/dev/null && ! grep -q 'requires:' '${rq}'/tasks/backlog/003-top.md"
+( cd "${rq}" && AMD_NO_BRANCH=1 "${AMD}" set 3 requires 1 >/dev/null && "${AMD}" group sprint s1 >/dev/null \
+  && "${AMD}" set 3 points 3 >/dev/null && "${AMD}" s1 3 >/dev/null )
+assert "amd group start is refused while a sprint ticket requires one outside it, naming it" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; out=\$(in_rq group start s1 2>&1); [ \$? -ne 0 ] \
+    && printf '%s' \"\$out\" | grep -q 's1 can.t start: 003 requires 001 (backlog)' \
+    && grep -q '^started: \"pending\"' '${rq}'/tasks/backlog/s1/_group.md"
+assert "with the required ticket in the sprint, it starts" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq set 1 points 2 >/dev/null && in_rq s1 1 >/dev/null \
+    && in_rq group start s1 | grep -q 's1 started'"
+( cd "${rq}" && AMD_NO_BRANCH=1 "${AMD}" new "Loner" >/dev/null && "${AMD}" new "Friend" >/dev/null \
+  && "${AMD}" link 3 5 >/dev/null )
+assert "amd tree of a ticket in a started sprint says the tree leaves it out" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq tree 3 2>&1 | grep -q 'started sprint s1, which the tree leaves out'"
+assert "amd tree shows the started sprint's ticket as a stub where something links to it" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq tree 5 | grep -q '^└ ─ ─ 003 Top · in started sprint s1\$'"
+assert "amd tree of a ticket with no links says so" \
+  bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq tree 4 | grep -qx '004 requires nothing and has no related tickets'"
+rm -rf "${rq}"
+tr="$(mktemp -d)"
+( cd "${tr}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init trees --local-only >/dev/null \
+  && for t in Alpha Beta Gamma Delta; do "${AMD}" new "$t" >/dev/null; done \
+  && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 2 3 --type requires >/dev/null \
+  && "${AMD}" link 1 4 >/dev/null \
+  && for c in todo doing "done"; do AMD_NO_BRANCH=1 "${AMD}" "$c" 3 >/dev/null; done )
+assert "amd tree --done draws requires solid and related dashed, with where each is and what waits" \
+  bash -c "cd '${tr}' && [ \"\$('${AMD}' tree 4 --done)\" = \"\$(printf '%s\\n' \\
+    '001 Alpha · backlog  waits on 002' \\
+    '├──── 002 Beta · backlog' \\
+    '│     └──── 003 Gamma · done ✓' \\
+    '└ ─ ─ 004 Delta · backlog  ◀')\" ]"
+assert "amd tree leaves done tickets out without --done" \
+  bash -c "cd '${tr}' && [ \"\$('${AMD}' tree 4)\" = \"\$(printf '%s\\n' \\
+    '001 Alpha · backlog  waits on 002' \\
+    '├──── 002 Beta · backlog' \\
+    '└ ─ ─ 004 Delta · backlog  ◀')\" ]"
+assert "amd tree of a ticket linked only to done ones says they're done" \
+  bash -c "cd '${tr}' && '${AMD}' new Epsilon >/dev/null && '${AMD}' link 5 3 >/dev/null \
+    && '${AMD}' tree 5 | grep -qx 'Everything 005 is linked to is done (amd tree 005 --done shows it)'"
+rm -rf "${tr}"
+
+echo "auto priority (ticket 215):"
+ap="$(mktemp -d)"
+( cd "${ap}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init autop --local-only >/dev/null \
+  && for t in Goal Middle Base Extra; do "${AMD}" new "$t" >/dev/null; done \
+  && "${AMD}" set 1 priority high >/dev/null \
+  && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 2 3 --type requires >/dev/null )
+in_ap() { (cd "${ap}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "auto priority is off until switched on" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap auto-priority | grep -qx 'auto priority is off' \
+    && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/003-base.md"
+assert "amd auto-priority on raises a chain in the setting's own commit, saying why" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; out=\$(in_ap auto-priority on) \
+    && printf '%s' \"\$out\" | grep -q '003 raised to high: 002 requires it' \
+    && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/003-base.md \
+    && grep -q '^priority-from: \"002\"' '${ap}'/tasks/backlog/003-base.md \
+    && git -C '${ap}' show --stat HEAD | grep -q '003-base.md'"
+assert "a new requires link raises in the link's own commit" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap link 3 4 --type requires >/dev/null \
+    && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/004-extra.md \
+    && git -C '${ap}' log --format=%s -1 | grep -q '^link: 003 -> 004'"
+assert "amd show says why a priority was raised" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap show 4 2>&1 >/dev/null | grep -q 'raised by auto priority, 003 requires it (own: low)'"
+assert "with override on, a priority set by hand pins the ticket" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap set 3 priority low | grep -q pinned \
+    && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/003-base.md \
+    && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/004-extra.md"
+assert "amd set <ref> priority auto hands it back to auto priority" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap set 3 priority auto >/dev/null \
+    && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/003-base.md"
+assert "with override off, a priority set by hand is only a floor" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap priority-override off >/dev/null \
+    && in_ap set 3 priority low >/dev/null && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/003-base.md"
+assert "amd auto-priority off puts raised tickets back" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap auto-priority off | grep -q '002 back to low' \
+    && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/002-middle.md \
+    && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/001-goal.md \
+    && ! grep -q 'priority-from' '${ap}'/tasks/backlog/00[234]-*.md"
+rm -rf "${ap}"
+
+echo "your own columns (ticket 224):"
+cl="$(mktemp -d)"
+( cd "${cl}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init cols --local-only >/dev/null \
+  && for t in One Two Three; do "${AMD}" new "$t" >/dev/null; done )
+in_cl() { (cd "${cl}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "amd column add puts a column where asked, in one commit, and amd board shows it" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; n=\$(git -C '${cl}' rev-list --count HEAD) \
+    && in_cl column add Review --kind doing --after doing 2>/dev/null | grep -qx 'added Review (review/, doing)' \
+    && [ \$(git -C '${cl}' rev-list --count HEAD) -eq \$((n + 1)) ] \
+    && [ -d '${cl}'/tasks/review ] \
+    && [ \"\$(in_cl board --plain | grep -E '^[A-Z]' | tr '\\n' ' ')\" = 'BACKLOG TODO DOING REVIEW DONE ' ]"
+assert "amd column lists name, folder, kind, WIP limit and count" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column | grep -qx 'Review  review/  doing, no WIP limit  (0)'"
+assert "a ticket moves into the column by its name, one step at a time, and stays locked" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl todo 1 >/dev/null && in_cl doing 1 >/dev/null \
+    && ! in_cl done 1 2>/dev/null >/dev/null \
+    && in_cl review 1 | grep -q 'moved 001-one.md -> review/' \
+    && grep -q '^locked-by: \"t@t.co\"' '${cl}'/tasks/review/001-one.md"
+assert "a doing column's own WIP limit refuses one more, and amd move --force gets past it" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column wip review 1 >/dev/null \
+    && in_cl todo 2 >/dev/null && in_cl doing 2 >/dev/null \
+    && in_cl review 2 2>&1 | grep -q 'review/ already has 1 of 1' \
+    && in_cl move 2 review --force | grep -q 'moved 002-two.md -> review/'"
+assert "a rename keeps the folder and the board shows the new name" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column rename todo Ready | grep -qx 'todo/ is now called Ready' \
+    && [ -d '${cl}'/tasks/todo ] && in_cl board --plain | grep -qx 'READY' \
+    && in_cl draft 3 | grep -q 'draft'"
+assert "only an added column can go, and its tickets need somewhere to go first" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column remove done 2>&1 | grep -q 'standard columns' \
+    && in_cl column remove review 2>&1 | grep -q 'move-to' \
+    && in_cl column remove review --move-to doing | grep -q 'moved 2 ticket(s) to doing/' \
+    && [ ! -d '${cl}'/tasks/review ] && ls '${cl}'/tasks/doing | grep -q 001-one.md \
+    && ! grep -q 'wip-limit-review' '${cl}'/.settings"
+assert "amd column move reorders, and a column can't be named like an epic" \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column add Triage --kind backlog --after done >/dev/null 2>&1 \
+    && in_cl column move triage --before backlog | grep -qx 'Triage | Backlog | Ready | Doing | Done' \
+    && in_cl group epic checkout >/dev/null && ! in_cl column add Checkout --kind doing 2>/dev/null"
+rm -rf "${cl}"
+
+echo "flow rules, landing column and reset (ticket 225):"
+fl="$(mktemp -d)"
+( cd "${fl}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init flows --local-only >/dev/null \
+  && "${AMD}" column add Triage --kind backlog --before backlog >/dev/null 2>&1 \
+  && "${AMD}" column add Review --kind doing --after doing >/dev/null 2>&1 \
+  && "${AMD}" new One >/dev/null && "${AMD}" new Two >/dev/null )
+in_fl() { (cd "${fl}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "amd column landing triage puts new tickets in Triage" \
+  bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; in_fl column landing triage | grep -qx 'new tickets land in Triage' \
+    && in_fl new Three | grep -q '^created triage/003-three.md' && [ -f '${fl}'/tasks/triage/003-three.md ]"
+assert "from Triage a ticket can't skip to todo until the move is allowed, and then can" \
+  bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; ! in_fl todo 3 >/dev/null 2>&1 \
+    && in_fl column allow triage todo | grep -qx 'allowed Triage → To do' \
+    && in_fl todo 3 | grep -q 'moved 003-three.md -> todo/' \
+    && in_fl column | grep -qx 'flow: next, plus Triage → To do'"
+assert "an extra move is one way, and disallow takes it back" \
+  bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; ! in_fl triage 3 >/dev/null 2>&1 \
+    && in_fl column disallow triage todo >/dev/null && ! grep -q '^moves' '${fl}'/.settings"
+assert "flow any lets a ticket go from the backlog straight to doing, locked" \
+  bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; in_fl column flow any | grep -qx 'flow: any' \
+    && in_fl doing 1 | grep -q 'moved 001-one.md -> doing/' \
+    && grep -q '^locked-by: \"t@t.co\"' '${fl}'/tasks/doing/001-one.md"
+assert "amd column reset moves tickets by kind and puts every setting back, in one commit" \
+  bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; in_fl review 1 >/dev/null && in_fl new Four >/dev/null \
+    && n=\$(git -C '${fl}' rev-list --count HEAD) \
+    && out=\$(in_fl column reset) \
+    && printf '%s' \"\$out\" | grep -q 'moved 001-one.md -> doing/' \
+    && printf '%s' \"\$out\" | grep -q 'moved 004-four.md -> backlog/' \
+    && [ \$(git -C '${fl}' rev-list --count HEAD) -eq \$((n + 1)) ] \
+    && [ ! -d '${fl}'/tasks/review ] && [ ! -d '${fl}'/tasks/triage ] \
+    && ! grep -qE '^(columns|flow|moves|new-tickets)' '${fl}'/.settings \
+    && [ \"\$(in_fl board --plain | grep -E '^[A-Z]' | tr '\\n' ' ')\" = 'BACKLOG TODO DOING DONE ' ]"
+rm -rf "${fl}"
 
 echo "duplicate:"
 assert "amd duplicate copies a ticket" \

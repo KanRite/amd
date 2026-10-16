@@ -471,6 +471,37 @@ impl Task {
         })
     }
 
+    /// Write the priority and auto priority's notes on it (ticket 215) in
+    /// one checked write: `priority`, and `priority-from`, `priority-own`
+    /// and `priority-pinned`, each set when `Some` and removed when `None`.
+    pub fn write_priority(
+        &self,
+        expected: ContentHash,
+        priority: &str,
+        from: Option<&str>,
+        own: Option<&str>,
+        pinned: bool,
+    ) -> Result<()> {
+        validate_priority(priority)?;
+        if let Some(own) = own {
+            validate_priority(own)?;
+        }
+        self.write_checked(expected, |text| {
+            let mut text = set_meta(text, "priority", &format!("{priority:?}"))?;
+            for (key, value) in [
+                ("priority-from", from.map(str::to_string)),
+                ("priority-own", own.map(str::to_string)),
+                ("priority-pinned", pinned.then(|| "yes".to_string())),
+            ] {
+                text = match value {
+                    Some(value) => set_meta(&text, key, &format!("{value:?}"))?,
+                    None => remove_meta(&text, key),
+                };
+            }
+            Ok(text)
+        })
+    }
+
     /// The epic recorded in the frontmatter. `Task::epic` — set from the
     /// folder — is the authority; this is what a reader outside the board
     /// sees, and the two are kept in step when a ticket is filed.
@@ -1012,6 +1043,32 @@ fn set_links(text: &str, links: &[crate::links::Link]) -> Result<String> {
     set_meta(text, "links", &format!("[{}]", entries.join(",")))
 }
 
+/// `text` without the frontmatter line for `key`, if it has one.
+pub(crate) fn remove_meta(text: &str, key: &str) -> String {
+    if !text.starts_with("---") {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut closed = false;
+    for (i, line) in text.lines().enumerate() {
+        if i > 0 && !closed && line.trim_end() == "---" {
+            closed = true;
+        } else if i > 0
+            && !closed
+            && let Some(rest) = line.strip_prefix(key)
+            && rest.starts_with(':')
+        {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !text.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
 pub(crate) fn set_meta(text: &str, key: &str, value: &str) -> Result<String> {
     if !text.starts_with("---") {
         bail!("no frontmatter to update");
@@ -1139,6 +1196,40 @@ pub fn slugify(title: &str) -> String {
         slug.pop();
     }
     slug
+}
+
+/// `body` with `note` added at the end of its `## Notes` section, which is
+/// made at the end if there isn't one.
+pub fn with_note(body: &str, note: &str) -> String {
+    let lines: Vec<&str> = body.lines().collect();
+    let Some(start) = lines.iter().position(|l| l.trim() == "## Notes") else {
+        let mut out = body.trim_end().to_string();
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        return format!("{out}## Notes\n\n{note}\n");
+    };
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find(|(_, l)| l.starts_with("## "))
+        .map_or(lines.len(), |(i, _)| i);
+    // Back over the blank lines before the next section.
+    let mut at = end;
+    while at > start + 1 && lines[at - 1].trim().is_empty() {
+        at -= 1;
+    }
+    let mut out: Vec<String> = lines[..at].iter().map(|l| l.to_string()).collect();
+    out.push(String::new());
+    out.push(note.to_string());
+    if end < lines.len() {
+        out.push(String::new());
+        out.extend(lines[end..].iter().map(|l| l.to_string()));
+    }
+    let mut text = out.join("\n");
+    text.push('\n');
+    text
 }
 
 #[cfg(test)]

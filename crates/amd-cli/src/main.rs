@@ -7,7 +7,6 @@
 mod completions;
 mod docs;
 mod form;
-mod github;
 mod idea;
 mod init;
 mod join;
@@ -30,13 +29,40 @@ use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 use time::format_description::well_known::Rfc3339;
 
-use agile_md::board::{ABANDON, Board, Column};
+use agile_md::board::{ABANDON, Board, Column, Kind};
 use agile_md::create::{Draft, NewTicket};
 use agile_md::registry::Registry;
 use agile_md::templates::{DEFAULT_TEMPLATE, TEMPLATE_SUFFIX, Templates};
 use agile_md::{board_settings, branch, git, task, templates, transition};
 
 /// `amd import --help`'s examples and what each kind does (ticket 162).
+const COLUMN_HELP: &str = "\
+A board starts with Backlog, To do, Doing and Done. A team can add its own
+columns, rename any of them, move them along and take its own ones away
+again; every rule follows a column's kind, so a Review of kind doing is
+locked while a ticket is in it and has its own WIP limit, and a Released of
+kind done counts as done everywhere. A rename only changes the name: the
+folder, and every ticket's history, stays put. The four standard columns
+can be renamed and moved but not removed.
+
+Examples:
+  amd column add Review --kind doing --after doing
+  amd column add Triage --kind backlog --before backlog
+  amd column rename todo Ready
+  amd column wip review 3
+  amd column remove review --move-to doing
+  amd review 12            move ticket 12 into Review (or: amd move 12 review)
+  amd column allow triage todo    an extra one-way move, beside the next column
+  amd column flow any             any column to any other
+  amd column landing triage       new tickets arrive in Triage
+  amd column reset                back to the standard four
+
+Whatever the flow, a draft stays in the backlog, a started sprint's tickets
+only move on to todo, done waits for what a ticket requires, and WIP limits
+and locks apply.
+
+Teammates need amd 4.1 or later to see tickets in an added column.";
+
 const IMPORT_HELP: &str = "\
 Stand where the things should go; name where they come from. Nothing is
 overwritten: what's left out is printed and appended to import.log in the
@@ -278,6 +304,35 @@ enum Cmd {
         #[arg(value_name = "TAG")]
         tag: String,
     },
+    /// Show or change the board's columns
+    ///
+    /// With no action, each column: its name, folder, kind (backlog, todo,
+    /// doing or done: what it does), WIP limit and how many tickets it
+    /// holds. Every change is committed like any other setting
+    #[command(after_help = COLUMN_HELP)]
+    Column {
+        #[command(subcommand)]
+        action: Option<ColumnAction>,
+    },
+    /// Make a new repository for the project (or connect one that already
+    /// exists), clone it beside the tickets repository and register it
+    Repo {
+        #[command(subcommand)]
+        action: RepoAction,
+    },
+    /// Move a ticket to any column by its name or folder
+    ///
+    /// The same as the column's own verb (`amd review 12`), and the way to
+    /// reach a column named like one of amd's own commands
+    Move {
+        #[arg(value_name = "REF")]
+        task: String,
+        #[arg(value_name = "COLUMN")]
+        column: String,
+        /// Move into a doing column at its WIP limit anyway
+        #[arg(long)]
+        force: bool,
+    },
     /// Show or change the project's tag list
     ///
     /// With no action, every listed tag and how many tickets carry it. Tags
@@ -470,6 +525,21 @@ enum Cmd {
         #[arg(long, value_name = "DATE")]
         since: Option<String>,
     },
+    /// Draw how tickets hang together: what each requires (solid) and
+    /// what it relates to (dashed)
+    ///
+    /// With a ticket, its family: every ticket joined to it by requires or
+    /// related. Without, every family on the board. Tickets in a started
+    /// sprint aren't expanded. Each line says where the ticket is, and
+    /// "waits on" names what it requires that isn't done. Done tickets are
+    /// left out unless --done
+    Tree {
+        #[arg(value_name = "REF")]
+        task: Option<String>,
+        /// Include done tickets
+        #[arg(long)]
+        done: bool,
+    },
     /// Print a task
     Show {
         #[arg(value_name = "REF")]
@@ -520,13 +590,15 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
-    /// Set a field on a ticket: points, epic, order, title or priority
+    /// Set a field on a ticket: points, epic, order, title, priority,
+    /// repository, or requires (the tickets it requires, as a list:
+    /// `amd set 12 requires 3,7`; both ends are linked, empty clears)
     Set {
         #[arg(value_name = "REF")]
         task: String,
         #[arg(
             value_name = "FIELD",
-            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title", "priority", "repository"]),
+            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title", "priority", "repository", "requires"]),
         )]
         field: String,
         /// The new value; empty clears the field
@@ -543,6 +615,25 @@ enum Cmd {
     WipLimit {
         #[arg(value_name = "N")]
         limit: u32,
+    },
+    /// Show or switch auto priority: priorities set from requires links
+    ///
+    /// When on, a ticket is at least as urgent as the most urgent ticket
+    /// that requires it, down a chain; raised tickets record why
+    /// (`priority-from`, `priority-own`). Switching it off puts them back.
+    /// With no value, says whether it's on and lists the raised tickets
+    AutoPriority {
+        #[arg(value_name = "on|off", value_parser = PossibleValuesParser::new(["on", "off"]))]
+        action: Option<String>,
+    },
+    /// Show or switch whether a priority set by hand wins over auto priority
+    ///
+    /// On (the default): `amd set <ref> priority low` pins the ticket and
+    /// auto priority leaves it; `amd set <ref> priority auto` unpins it.
+    /// Off: a hand-set priority is only a floor auto priority can raise
+    PriorityOverride {
+        #[arg(value_name = "on|off", value_parser = PossibleValuesParser::new(["on", "off"]))]
+        action: Option<String>,
     },
     /// Show or set the priority imported GitHub issues start at
     ///
@@ -610,12 +701,17 @@ enum Cmd {
     ///
     /// By default the tickets are just related: both get the other in
     /// `related`. `--type` says how the first stands to the others, and each
-    /// of them records the opposite (`amd link 12 13 --type blocks` makes 13
-    /// blocked-by 12). `--remove` unlinks. Both ends are one commit.
+    /// of them records the opposite (`amd link 12 13 --type requires` makes 13
+    /// required-by 12). `--remove` unlinks. Both ends are one commit.
     ///
-    /// Types: depends-on, depended-on-by, parent-of, child-of, relates-to,
-    /// clone-of, cloned-by, blocked-by, blocks, supersedes, superseded-by.
+    /// Types: requires, required-by, parent-of, child-of, relates-to,
+    /// clone-of, cloned-by, supersedes, superseded-by.
     /// A ticket has one parent and is a clone of one original.
+    ///
+    /// A ticket can't move to done until the tickets it requires and its
+    /// children are done. `--replace <type> --type relates-to` changes such
+    /// a link (`amd link 12 16 --replace requires --type relates-to`), and
+    /// `--remove` takes it away.
     Link {
         #[arg(value_name = "REF")]
         task: String,
@@ -632,11 +728,20 @@ enum Cmd {
         )]
         kind: String,
         /// Take the link away instead of adding it
-        #[arg(long)]
+        #[arg(long, conflicts_with = "replace")]
         remove: bool,
         /// Only record the link on the first ticket
-        #[arg(long)]
+        #[arg(long, conflicts_with = "replace")]
         one_way: bool,
+        /// Change an existing link of this type to --type, on both tickets
+        #[arg(
+            long,
+            value_name = "TYPE",
+            value_parser = clap::builder::PossibleValuesParser::new(
+                agile_md::links::LinkType::ALL.map(agile_md::links::LinkType::slug)
+            ),
+        )]
+        replace: Option<String>,
     },
     /// Duplicate a ticket into the backlog, linked to it as a clone
     ///
@@ -731,9 +836,13 @@ struct NewArgs {
     /// branch is made there on entering todo
     #[arg(short = 'R', long, value_name = "REPO")]
     repository: Option<String>,
-    /// Another ticket this one depends on or relates to (repeatable)
+    /// Another ticket this one relates to (repeatable)
     #[arg(short = 'r', long = "related", value_name = "REF")]
     related: Vec<String>,
+    /// A ticket this one requires (repeatable): linked both ways, and it
+    /// must be done first
+    #[arg(long = "requires", value_name = "REF")]
+    requires: Vec<String>,
     /// Tag to add (repeatable)
     #[arg(short = 't', long = "tag", value_name = "TAG")]
     tags: Vec<String>,
@@ -843,7 +952,12 @@ fn main() -> ExitCode {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
 
-    match run() {
+    let result = run();
+    // What auto priority moved along with the change (ticket 215).
+    for note in agile_md::auto_priority::take_notes() {
+        println!("{note}");
+    }
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("amd: {err:#}");
@@ -1127,12 +1241,31 @@ fn run() -> Result<()> {
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
         Cmd::SharedDocuments { name, clear } => cmd_shared_documents(&board, name, clear),
         Cmd::TriagePriority { priority } => cmd_triage_priority(&board, priority),
+        Cmd::AutoPriority { action } => cmd_auto_priority(&board, action.as_deref()),
+        Cmd::PriorityOverride { action } => cmd_priority_override(&board, action.as_deref()),
         Cmd::Register { .. } | Cmd::Deregister { .. } => unreachable!("handled above"),
         Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
         Cmd::New(args) => cmd_new(&board, args),
-        Cmd::Board { tag } => render::columns(&board, &Column::ALL, &tag),
+        Cmd::Board { tag } => render::columns(
+            &board,
+            &board.workflow().columns().collect::<Vec<_>>(),
+            &tag,
+        ),
         Cmd::Tag { tag } => render::named(&format!("tag: {tag}"), board.tasks_tagged(&tag)?, &[]),
         Cmd::Tags { action } => cmd_tags(&board, action),
+        Cmd::Column { action } => cmd_column(&board, action),
+        Cmd::Repo { action } => cmd_repo(&board, action),
+        Cmd::Move {
+            task,
+            column,
+            force,
+        } => {
+            let to = board
+                .workflow()
+                .find(&column)
+                .with_context(|| column_list(&board, &column))?;
+            cmd_destination(&board, Destination::Column(to), Some(task), &[], force)
+        }
         Cmd::Import {
             first,
             path,
@@ -1202,8 +1335,10 @@ fn run() -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("usage: amd <destination> [ref] [--tag TAG]"))?;
             let mut task = None;
             let mut tag: Vec<String> = Vec::new();
+            let mut force = false;
             while let Some(arg) = args.next() {
                 match arg.as_str() {
+                    "--force" | "-f" => force = true,
                     "--tag" | "-t" => {
                         let value = args
                             .next()
@@ -1215,14 +1350,23 @@ fn run() -> Result<()> {
                 }
             }
             let destination = resolve_destination(&board, &name)?;
-            cmd_destination(&board, destination, task, &tag, false)
+            cmd_destination(&board, destination, task, &tag, force)
         }
         Cmd::Show { task } => {
-            let task = resolve(&board, task, "show", &Column::ALL)?;
+            let task = resolve(
+                &board,
+                task,
+                "show",
+                &board.workflow().columns().collect::<Vec<_>>(),
+            )?;
             let body =
                 fs::read(&task.path).with_context(|| format!("reading {}", task.path.display()))?;
             io::stdout().write_all(&body)?;
             if let Some(line) = lock_note(&board, &task) {
+                eprintln!("{line}");
+            }
+            // Why its priority is what it is (ticket 215).
+            if let Some(line) = agile_md::auto_priority::note(&board, &task) {
                 eprintln!("{line}");
             }
             // Who to ask about it (ticket 155), on stderr like the lock note.
@@ -1232,7 +1376,12 @@ fn run() -> Result<()> {
             Ok(())
         }
         Cmd::Edit { task } => {
-            let task = resolve(&board, task, "edit", &Column::ALL)?;
+            let task = resolve(
+                &board,
+                task,
+                "edit",
+                &board.workflow().columns().collect::<Vec<_>>(),
+            )?;
             let (id_display, title) = (task.id_display(), task.title());
             // No separate "did it actually change" check needed: the
             // snapshot diff in with_auto_commit is already empty when the
@@ -1241,8 +1390,31 @@ fn run() -> Result<()> {
                 open_editor(&task.path)
             })
         }
+        Cmd::Set { task, field, value } if field == "requires" => {
+            let task = resolve(
+                &board,
+                Some(task),
+                "set",
+                &board.workflow().columns().collect::<Vec<_>>(),
+            )?;
+            let mut wanted = Vec::new();
+            for reference in agile_md::task::parse_list(&value) {
+                let other = board.find(&reference)?;
+                if other.path == task.path {
+                    bail!("a ticket can't require itself");
+                }
+                wanted.push(other);
+            }
+            report(&transition::set_requires(&board, &task, &wanted)?);
+            Ok(())
+        }
         Cmd::Set { task, field, value } => {
-            let task = resolve(&board, Some(task), "set", &Column::ALL)?;
+            let task = resolve(
+                &board,
+                Some(task),
+                "set",
+                &board.workflow().columns().collect::<Vec<_>>(),
+            )?;
             let (id_display, title) = (task.id_display(), task.title());
             with_auto_commit(&board, "set", &id_display, &title, || {
                 match field.as_str() {
@@ -1268,9 +1440,13 @@ fn run() -> Result<()> {
                         task.set_title(task.hash()?, &value)?;
                         println!("{} retitled", task.id_display());
                     }
+                    // By hand (ticket 215): pins it against auto priority
+                    // when override is on; `auto` unpins.
                     "priority" => {
-                        task.set_priority(task.hash()?, &value)?;
-                        println!("{} priority {value}", task.id_display());
+                        println!(
+                            "{}",
+                            agile_md::auto_priority::set_by_hand(&board, &task, &value)?
+                        );
                     }
                     "repository" => {
                         task.set_repository(task.hash()?, &value)?;
@@ -1290,7 +1466,12 @@ fn run() -> Result<()> {
         }
         Cmd::Group { command } => cmd_group(&board, command.unwrap_or(GroupCmd::List)),
         Cmd::Assign { task, who, clear } => {
-            let task = resolve(&board, Some(task), "assign", &Column::ALL)?;
+            let task = resolve(
+                &board,
+                Some(task),
+                "assign",
+                &board.workflow().columns().collect::<Vec<_>>(),
+            )?;
             let (id_display, title) = (task.id_display(), task.title());
             // No name: the picker in a terminal (ticket 089); anywhere else
             // it unassigns, as it always has, so scripts are unchanged.
@@ -1325,7 +1506,11 @@ fn run() -> Result<()> {
             kind,
             remove,
             one_way,
-        } => cmd_link(&board, &task, &to, &kind, remove, one_way),
+            replace,
+        } => match replace {
+            Some(old) => cmd_relink(&board, &task, &to, &old, &kind),
+            None => cmd_link(&board, &task, &to, &kind, remove, one_way),
+        },
         Cmd::Duplicate { task } => {
             let original = board.find(&task)?;
             report(&transition::clone_ticket(&board, &original)?);
@@ -1333,6 +1518,31 @@ fn run() -> Result<()> {
         }
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
         Cmd::Log => cmd_log(&board),
+        Cmd::Tree { task, done } => {
+            let around = task.map(|t| board.find(&t)).transpose()?;
+            let trees = agile_md::requires::family(&board, around.as_ref(), done)?;
+            // Empty only because done tickets were left out: say so.
+            let all_done = trees.is_empty()
+                && !done
+                && !agile_md::requires::family(&board, around.as_ref(), true)?.is_empty();
+            match (&around, trees.is_empty()) {
+                (Some(t), true) if all_done => println!(
+                    "Everything {} is linked to is done (amd tree {} --done shows it)",
+                    t.id_display(),
+                    t.id_display()
+                ),
+                (Some(t), true) => println!(
+                    "{} requires nothing and has no related tickets",
+                    t.id_display()
+                ),
+                (None, true) if all_done => {
+                    println!("Every ticket linked to another is done (amd tree --done shows them)")
+                }
+                (None, true) => println!("No ticket on this board requires or relates to another"),
+                _ => render::tree(&board, &trees),
+            }
+            Ok(())
+        }
         Cmd::Recover {
             ids,
             all,
@@ -1642,6 +1852,7 @@ fn cmd_enter_todo(
             force,
             branch: override_branch,
             no_branch,
+            to: None,
         },
     )?;
     report(&outcome);
@@ -1684,6 +1895,20 @@ fn cmd_link(
     report(&transition::link_tickets(
         board, &task, kind, &others, remove, one_way,
     )?);
+    Ok(())
+}
+
+/// `amd link <ref> <ref>... --replace OLD --type NEW` (ticket 213): change
+/// each link's type on both ends, in one commit.
+fn cmd_relink(board: &Board, reference: &str, to: &[String], old: &str, new: &str) -> Result<()> {
+    use agile_md::links::LinkType;
+    let old = LinkType::parse(old).with_context(|| format!("unknown link type '{old}'"))?;
+    let new = LinkType::parse(new).with_context(|| format!("unknown link type '{new}'"))?;
+    let task = board.find(reference)?;
+    for other in to {
+        let other = board.find(other)?;
+        report(&transition::retype_link(board, &task, old, new, &other)?);
+    }
     Ok(())
 }
 
@@ -1745,7 +1970,7 @@ enum Destination {
 /// name of an epic that already exists — and say exactly what's valid when
 /// it's none of those, since that list is the whole point of the error.
 fn resolve_destination(board: &Board, name: &str) -> Result<Destination> {
-    if let Some(column) = Column::parse(name) {
+    if let Some(column) = board.workflow().find(name) {
         return Ok(Destination::Column(column));
     }
     if name.eq_ignore_ascii_case(ABANDON) {
@@ -1755,7 +1980,7 @@ fn resolve_destination(board: &Board, name: &str) -> Result<Destination> {
     if epics.iter().any(|epic| epic == name) {
         return Ok(Destination::Epic(name.to_string()));
     }
-    let columns: Vec<String> = Column::ALL.iter().map(|c| c.to_string()).collect();
+    let columns: Vec<String> = board.workflow().columns().map(|c| c.to_string()).collect();
     let epics_display = if epics.is_empty() {
         "none".to_string()
     } else {
@@ -1781,6 +2006,20 @@ fn cmd_destination(
     match (destination, task) {
         (Destination::Column(column), Some(reference)) => {
             let task = board.find(&reference)?;
+            // Any todo-kind column makes the branch, as `amd todo` does.
+            if column.is(Kind::Todo) {
+                let outcome = transition::enter_todo(
+                    board,
+                    &task,
+                    &transition::TodoOptions {
+                        force,
+                        to: Some(column),
+                        ..Default::default()
+                    },
+                )?;
+                report(&outcome);
+                return Ok(());
+            }
             move_and_report(board, &task, column, force)
         }
         (Destination::Column(column), None) => render::columns(board, &[column], tag),
@@ -1883,8 +2122,8 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
             Ok(())
         }),
         GroupCmd::Start { name } => with_auto_commit(board, "group-start", &name, "", || {
-            let mut group = board.group(&name)?;
-            group.start()?;
+            // Refused while its tickets require others outside it (ticket 214).
+            agile_md::requires::start_sprint(board, &name)?;
             println!("{name} started — its tickets are now fixed");
             Ok(())
         }),
@@ -1956,6 +2195,67 @@ fn cmd_shared_documents(board: &Board, name: Option<String>, clear: bool) -> Res
         Some(name) => println!("shared documents: {name}"),
         None => println!("no shared documents repository"),
     }
+    Ok(())
+}
+
+/// `amd auto-priority [on|off]` (ticket 215): switching commits the
+/// setting and every priority it moves, together.
+fn cmd_auto_priority(board: &Board, action: Option<&str>) -> Result<()> {
+    let Some(action) = action else {
+        let on = board_settings::load(board).auto_priority();
+        println!("auto priority is {}", if on { "on" } else { "off" });
+        for task in board.tasks()? {
+            if let Some(note) = agile_md::auto_priority::note(board, &task) {
+                println!("{}: {note}", task.id_display());
+            }
+        }
+        return Ok(());
+    };
+    let on = action == "on";
+    with_auto_commit(board, "settings", "auto-priority", action, || {
+        let mut settings = board_settings::load(board);
+        settings.set_auto_priority(on);
+        settings.save(board)
+    })?;
+    println!(
+        "{}",
+        if on {
+            "auto priority is on: a ticket is at least as urgent as what requires it"
+        } else {
+            "auto priority is off: raised priorities are put back"
+        }
+    );
+    Ok(())
+}
+
+/// `amd priority-override [on|off]` (ticket 215).
+fn cmd_priority_override(board: &Board, action: Option<&str>) -> Result<()> {
+    let Some(action) = action else {
+        let on = board_settings::load(board).priority_override();
+        println!(
+            "priority override is {}",
+            if on {
+                "on: a priority set by hand pins the ticket"
+            } else {
+                "off: a priority set by hand is a floor auto priority can raise"
+            }
+        );
+        return Ok(());
+    };
+    let on = action == "on";
+    with_auto_commit(board, "settings", "priority-override", action, || {
+        let mut settings = board_settings::load(board);
+        settings.set_priority_override(on);
+        settings.save(board)
+    })?;
+    println!(
+        "{}",
+        if on {
+            "priority override is on: a priority set by hand pins the ticket"
+        } else {
+            "priority override is off: a priority set by hand is a floor"
+        }
+    );
     Ok(())
 }
 
@@ -2036,6 +2336,389 @@ fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
         false => println!("{name} was already registered on this machine"),
     }
     Ok(())
+}
+
+/// `amd repo` (ticket 228).
+#[derive(Subcommand, Debug)]
+enum RepoAction {
+    /// Make a repository on GitHub under the tickets repository's owner (or
+    /// beside a local origin), or connect it if it's already there; clone
+    /// it beside the tickets repository, declare it for the project and
+    /// register it here. With --for, the ticket's repository is set and a
+    /// note says so
+    New {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(long, value_name = "TEXT")]
+        description: Option<String>,
+        /// Public, whatever the tickets repository is
+        #[arg(long, conflicts_with = "private")]
+        public: bool,
+        /// Private, whatever the tickets repository is
+        #[arg(long)]
+        private: bool,
+        /// No starter README
+        #[arg(long)]
+        no_readme: bool,
+        /// The ticket it's for: its repository is set, and a note added
+        #[arg(long = "for", value_name = "REF")]
+        for_ticket: Option<String>,
+    },
+}
+
+/// Makes or connects a repository for the project (ticket 228), in one
+/// commit on the tickets repository with the ticket it's for.
+fn cmd_repo(board: &Board, action: RepoAction) -> Result<()> {
+    use agile_md::new_repo::{self, NewRepo};
+    let RepoAction::New {
+        name,
+        description,
+        public,
+        private,
+        no_readme,
+        for_ticket,
+    } = action;
+    let task = for_ticket.map(|r| board.find(&r)).transpose()?;
+    let new = NewRepo {
+        name: name.clone(),
+        description: description
+            .clone()
+            .unwrap_or_else(|| task.as_ref().map(|t| t.title()).unwrap_or_default()),
+        private: match (public, private) {
+            (true, _) => Some(false),
+            (_, true) => Some(true),
+            _ => None,
+        },
+        readme: !no_readme,
+        for_ticket: task.as_ref().map(|t| (t.id_display(), t.title())),
+    };
+    let made = new_repo::create(board, &new, &mut new_repo::gh)?;
+    new_repo::register(&made)?;
+    with_auto_commit(board, "repo", "new", &made.name, || {
+        new_repo::declare(board, &made.name)?;
+        if let Some(task) = &task {
+            new_repo::record_on_ticket(board, task, &made)?;
+        }
+        Ok(())
+    })?;
+    let what = if made.created { "created" } else { "connected" };
+    println!("{what} {} at {}", made.name, made.path.display());
+    if let Some(task) = &task {
+        println!("{} is now about {}", task.id_display(), made.name);
+    }
+    for note in &made.notes {
+        eprintln!("amd: {note}");
+    }
+    Ok(())
+}
+
+/// `amd column` (ticket 224): the CLI side of Admin's Columns section.
+#[derive(Subcommand, Debug)]
+enum ColumnAction {
+    /// Add a column. Its kind decides what it does: backlog (where work
+    /// waits), todo (entering it makes the branch), doing (locked while in
+    /// it, with a WIP limit) or done (waits for what the ticket requires)
+    Add {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(long, value_name = "backlog|todo|doing|done")]
+        kind: String,
+        /// Put it after this column (the end when neither is given)
+        #[arg(long, value_name = "COLUMN", conflicts_with = "before")]
+        after: Option<String>,
+        /// Put it before this column
+        #[arg(long, value_name = "COLUMN")]
+        before: Option<String>,
+        /// Its folder under tasks/ (made from the name when left out)
+        #[arg(long, value_name = "FOLDER")]
+        folder: Option<String>,
+    },
+    /// Give a column a new name. Its folder stays as it is
+    Rename {
+        #[arg(value_name = "COLUMN")]
+        column: String,
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+    /// Remove an added column (the standard four can't go). One with
+    /// tickets needs --move-to
+    Remove {
+        #[arg(value_name = "COLUMN")]
+        column: String,
+        /// Where its tickets go first
+        #[arg(long, value_name = "COLUMN")]
+        move_to: Option<String>,
+    },
+    /// Move a column along the board
+    Move {
+        #[arg(value_name = "COLUMN")]
+        column: String,
+        #[arg(
+            long,
+            value_name = "COLUMN",
+            conflicts_with = "before",
+            required_unless_present = "before"
+        )]
+        after: Option<String>,
+        #[arg(long, value_name = "COLUMN")]
+        before: Option<String>,
+    },
+    /// Set a doing column's WIP limit, or `off`
+    Wip {
+        #[arg(value_name = "COLUMN")]
+        column: String,
+        #[arg(value_name = "N|off")]
+        limit: String,
+    },
+    /// Which moves are allowed: `next` (the next column either way, plus
+    /// any moves allowed with `amd column allow`; the default) or `any`
+    /// (any column to any other). Shows it with no value
+    Flow {
+        #[arg(value_name = "next|any")]
+        flow: Option<String>,
+    },
+    /// Allow an extra one-way move under the `next` flow, e.g. `amd column
+    /// allow triage todo`
+    Allow {
+        #[arg(value_name = "FROM")]
+        from: String,
+        #[arg(value_name = "TO")]
+        to: String,
+    },
+    /// Stop allowing an extra move
+    Disallow {
+        #[arg(value_name = "FROM")]
+        from: String,
+        #[arg(value_name = "TO")]
+        to: String,
+    },
+    /// Where new tickets land: a backlog column (Backlog unless changed)
+    Landing {
+        #[arg(value_name = "COLUMN")]
+        column: String,
+    },
+    /// Back to the standard four: tickets in added columns move to the
+    /// standard column of the same kind, and the names, flow, extra moves,
+    /// landing column and column WIP limits go back to standard
+    Reset,
+}
+
+/// `name`'s column on `board`, or an error listing the columns there are.
+fn find_column(board: &Board, name: &str) -> Result<Column> {
+    board
+        .workflow()
+        .find(name)
+        .with_context(|| column_list(board, name))
+}
+
+fn column_list(board: &Board, name: &str) -> String {
+    let names: Vec<String> = board
+        .workflow()
+        .defs()
+        .iter()
+        .map(|d| d.column.as_str().to_string())
+        .collect();
+    format!(
+        "'{name}' isn't a column on this board (columns: {})",
+        names.join(", ")
+    )
+}
+
+/// Lists the board's columns, or changes them (ticket 224), each change
+/// committed like a setting.
+fn cmd_column(board: &Board, action: Option<ColumnAction>) -> Result<()> {
+    use agile_md::columns::{self, Position};
+    let position = |after: Option<String>, before: Option<String>| -> Result<Position> {
+        Ok(match (after, before) {
+            (Some(a), _) => Position::After(find_column(board, &a)?),
+            (None, Some(b)) => Position::Before(find_column(board, &b)?),
+            (None, None) => Position::End,
+        })
+    };
+    match action {
+        None => {
+            let workflow = board.workflow();
+            let settings = board_settings::load(board);
+            for def in workflow.defs() {
+                let count = board.tasks_in(def.column)?.len();
+                let wip = match settings.wip_limit(def.column) {
+                    Some(n) => format!(", WIP limit {n}"),
+                    None if def.column.is(Kind::Doing) => ", no WIP limit".to_string(),
+                    None => String::new(),
+                };
+                println!(
+                    "{}  {}/  {}{wip}  ({count})",
+                    def.label,
+                    def.column.as_str(),
+                    def.column.kind().as_str()
+                );
+            }
+            let workflow = board.workflow();
+            let label = |c: Column| workflow.label(c);
+            match workflow.flow() {
+                agile_md::workflow::Flow::Any => println!("flow: any (any column to any other)"),
+                agile_md::workflow::Flow::Next => {
+                    let extra: Vec<String> = workflow
+                        .moves()
+                        .iter()
+                        .map(|(f, t)| format!("{} → {}", label(*f), label(*t)))
+                        .collect();
+                    if extra.is_empty() {
+                        println!("flow: next (one column at a time)");
+                    } else {
+                        println!("flow: next, plus {}", extra.join(", "));
+                    }
+                }
+            }
+            println!("new tickets land in: {}", label(workflow.landing()));
+            if let Some(problem) = board.workflow_problem() {
+                eprintln!("amd: {problem}");
+            }
+            Ok(())
+        }
+        Some(ColumnAction::Flow { flow: None }) => {
+            println!("{}", board.workflow().flow().as_str());
+            Ok(())
+        }
+        Some(ColumnAction::Flow { flow: Some(flow) }) => {
+            let flow = agile_md::workflow::Flow::parse(&flow)
+                .with_context(|| format!("'{flow}' isn't a flow: next or any"))?;
+            with_auto_commit(board, "column", "flow", flow.as_str(), || {
+                columns::set_flow(board, flow)
+            })?;
+            println!("flow: {}", flow.as_str());
+            Ok(())
+        }
+        Some(ColumnAction::Allow { from, to }) => {
+            let (f, t) = (find_column(board, &from)?, find_column(board, &to)?);
+            let what = format!("{}>{}", f.as_str(), t.as_str());
+            with_auto_commit(board, "column", "allow", &what, || {
+                columns::allow_move(board, f, t, true)
+            })?;
+            let w = board.workflow();
+            println!("allowed {} → {}", w.label(f), w.label(t));
+            if w.flow() == agile_md::workflow::Flow::Any {
+                eprintln!("amd: the flow is any, so every move is allowed anyway");
+            }
+            Ok(())
+        }
+        Some(ColumnAction::Disallow { from, to }) => {
+            let (f, t) = (find_column(board, &from)?, find_column(board, &to)?);
+            let what = format!("{}>{}", f.as_str(), t.as_str());
+            with_auto_commit(board, "column", "disallow", &what, || {
+                columns::allow_move(board, f, t, false)
+            })?;
+            let w = board.workflow();
+            println!("no longer allowed: {} → {}", w.label(f), w.label(t));
+            Ok(())
+        }
+        Some(ColumnAction::Landing { column }) => {
+            let col = find_column(board, &column)?;
+            let label = board.workflow().label(col);
+            with_auto_commit(board, "column", "landing", &label, || {
+                columns::set_landing(board, col)
+            })?;
+            println!("new tickets land in {label}");
+            Ok(())
+        }
+        Some(ColumnAction::Reset) => {
+            let moved = with_auto_commit(board, "column", "reset", "standard", || {
+                columns::reset(board)
+            })?;
+            for (file, to) in &moved {
+                println!("moved {file} -> {to}/");
+            }
+            println!("columns back to Backlog | To do | Doing | Done");
+            Ok(())
+        }
+        Some(ColumnAction::Add {
+            name,
+            kind,
+            after,
+            before,
+            folder,
+        }) => {
+            let kind = Kind::parse(&kind)
+                .with_context(|| format!("'{kind}' isn't a kind: backlog, todo, doing or done"))?;
+            let at = position(after, before)?;
+            let column = with_auto_commit(board, "column", "add", name.trim(), || {
+                columns::add(board, &name, kind, at, folder.as_deref())
+            })?;
+            println!(
+                "added {} ({}/, {})",
+                name.trim(),
+                column.as_str(),
+                kind.as_str()
+            );
+            eprintln!(
+                "amd: teammates need amd 4.1 or later to see tickets in {}/",
+                column.as_str()
+            );
+            Ok(())
+        }
+        Some(ColumnAction::Rename { column, name }) => {
+            let col = find_column(board, &column)?;
+            with_auto_commit(board, "column", "rename", name.trim(), || {
+                columns::rename(board, col, &name)
+            })?;
+            println!("{}/ is now called {}", col.as_str(), name.trim());
+            Ok(())
+        }
+        Some(ColumnAction::Remove { column, move_to }) => {
+            let col = find_column(board, &column)?;
+            let to = move_to.map(|m| find_column(board, &m)).transpose()?;
+            let label = board.workflow().label(col);
+            let moved = with_auto_commit(board, "column", "remove", &label, || {
+                columns::remove(board, col, to)
+            })?;
+            if let Some(to) = to
+                && !moved.is_empty()
+            {
+                println!("moved {} ticket(s) to {}/", moved.len(), to.as_str());
+            }
+            println!("removed {label}");
+            Ok(())
+        }
+        Some(ColumnAction::Move {
+            column,
+            after,
+            before,
+        }) => {
+            let col = find_column(board, &column)?;
+            let at = position(after, before)?;
+            let label = board.workflow().label(col);
+            with_auto_commit(board, "column", "move", &label, || {
+                columns::reorder(board, col, at)
+            })?;
+            let order: Vec<String> = board
+                .workflow()
+                .defs()
+                .iter()
+                .map(|d| d.label.clone())
+                .collect();
+            println!("{}", order.join(" | "));
+            Ok(())
+        }
+        Some(ColumnAction::Wip { column, limit }) => {
+            let col = find_column(board, &column)?;
+            let limit = match limit.trim().to_ascii_lowercase().as_str() {
+                "off" | "0" => None,
+                n => Some(
+                    n.parse::<u32>()
+                        .with_context(|| format!("'{n}' isn't a number or off"))?,
+                ),
+            };
+            let label = board.workflow().label(col);
+            with_auto_commit(board, "column", "wip", &label, || {
+                columns::set_wip(board, col, limit)
+            })?;
+            match limit {
+                Some(n) => println!("{label}: WIP limit {n}"),
+                None => println!("{label}: no WIP limit"),
+            }
+            Ok(())
+        }
+    }
 }
 
 /// `amd tags` (ticket 122): the CLI side of Admin's Tags section.
@@ -2368,6 +3051,8 @@ fn changes_board(command: &Cmd) -> bool {
             command,
             Cmd::WipLimit { .. }
                 | Cmd::TriagePriority { priority: Some(_) }
+                | Cmd::AutoPriority { action: Some(_) }
+                | Cmd::PriorityOverride { action: Some(_) }
                 | Cmd::SharedDocuments { name: Some(_), .. }
                 | Cmd::SharedDocuments { clear: true, .. }
                 | Cmd::Templates {
@@ -2398,7 +3083,12 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         Cmd::Board { .. }
         | Cmd::Tag { .. }
         | Cmd::Tags { action: None }
+        | Cmd::Column { action: None }
+        | Cmd::Column {
+            action: Some(ColumnAction::Flow { flow: None }),
+        }
         | Cmd::Show { .. }
+        | Cmd::Tree { .. }
         | Cmd::Log
         | Cmd::Templates { .. }
         | Cmd::Register { .. }
@@ -2406,6 +3096,8 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::WipLimit { .. }
         | Cmd::SharedDocuments { .. }
         | Cmd::TriagePriority { .. }
+        | Cmd::AutoPriority { action: None }
+        | Cmd::PriorityOverride { action: None }
         | Cmd::Group {
             command: None | Some(GroupCmd::List),
         } => Read,
@@ -2478,8 +3170,33 @@ fn resolve(
     form::select_task(&format!("Which task should amd {command}?"), choices)
 }
 
+/// Link a new ticket to each ticket it requires, both ends.
+fn requires_links(
+    board: &Board,
+    task: &agile_md::task::Task,
+    refs: &[String],
+) -> Result<Vec<String>> {
+    let mut lines = Vec::new();
+    for reference in refs {
+        let other = board.find(reference)?;
+        lines.extend(agile_md::links::apply(
+            task,
+            agile_md::links::LinkType::Requires,
+            &other,
+            false,
+            false,
+        )?);
+    }
+    Ok(lines)
+}
+
 fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     let templates = Templates::load(board)?;
+    // Resolved before anything is written, so a typo creates nothing.
+    let requires = args.requires.clone();
+    for reference in &requires {
+        board.find(reference)?;
+    }
     // A bare `amd new` (or -i) fills the whole form in; otherwise only the
     // fields the chosen template needs and the arguments didn't supply.
     let full_form = args.interactive || args.title.is_none();
@@ -2610,6 +3327,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
             clone_of: None,
             tags,
             extra,
+            land_in: None,
         },
     )?;
 
@@ -2641,6 +3359,11 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     let auto_commit = board_settings::load(board).auto_commit();
     let before = auto_commit.then(|| git::dirty_paths(board.repo_root()).unwrap_or_default());
     let created = draft.write(board, body)?;
+    // What it requires (ticket 214), linked both ways in the same commit.
+    for line in requires_links(board, &created.task, &requires)? {
+        println!("{line}");
+    }
+    transition::settle_priorities(board);
     // The same commit, push and replay-or-undo every other change gets
     // (ticket 102): a clash with a ticket someone else numbered at the same
     // moment is undone here, and fails, rather than reaching the remote.
@@ -2655,7 +3378,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     for id in &created.linked {
         println!("{id} now links to {}", created.task.id_display());
     }
-    println!("created {}/{name}{note}", Column::Backlog);
+    println!("created {}/{name}{note}", created.task.column);
     if let Some(warning) = created
         .task
         .assignee()
@@ -2682,7 +3405,11 @@ fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {
             board.root.display()
         );
     }
-    let is_tasks = |dir: &Path| Column::ALL.iter().all(|c| dir.join(c.to_string()).is_dir());
+    let is_tasks = |dir: &Path| {
+        Column::STANDARD
+            .iter()
+            .all(|c| dir.join(c.to_string()).is_dir())
+    };
     if !is_tasks(path) {
         bail!(
             "{} isn't a tasks directory (it needs backlog/, todo/, doing/ and done/)",
@@ -2982,6 +3709,14 @@ fn cmd_log(board: &Board) -> Result<()> {
             _ => continue,
         };
         let Some(path) = path else { continue };
+        // A column's placeholder (`.gitkeep`) or the archive's `.gitignore`
+        // isn't a ticket: adding a column shouldn't read as a new ticket.
+        if Path::new(path)
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+        {
+            continue;
+        }
         let title = Path::new(path)
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())

@@ -2,8 +2,9 @@
 //! drop between neighbouring columns and between the backlog and its epics.
 
 use amd_ui_model::epic::{self, GroupKind, GroupState, Place, can_move};
+use amd_ui_model::waiting;
 use amd_ui_model::wip::WipLimits;
-use amd_ui_model::{Column, TicketSummary};
+use amd_ui_model::{Column, Kind, TicketSummary};
 use leptos::ev::DragEvent;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -13,6 +14,14 @@ use crate::app::{Ctx, Overlay};
 
 #[component]
 pub fn BoardView() -> impl IntoView {
+    // The board's own columns, in its order (ticket 224).
+    let columns = Memo::new(move |_| {
+        Ctx::get().board.with(|b| {
+            b.as_ref()
+                .map(|b| b.workflow.columns().collect::<Vec<_>>())
+                .unwrap_or_default()
+        })
+    });
     view! {
         <div class="flex h-full gap-3 overflow-x-auto p-3">
             <EpicsColumn />
@@ -22,7 +31,7 @@ pub fn BoardView() -> impl IntoView {
                     .get()
                     .map(|(repo, name)| view! { <OpenEpicColumn repo name /> })
             }}
-            {Column::ALL.map(|column| view! { <ColumnView column /> }).collect_view()}
+            <For each=move || columns.get() key=|column| *column children=|column| view! { <ColumnView column /> } />
         </div>
     }
 }
@@ -51,8 +60,8 @@ fn ticket_at(ctx: Ctx, file: &str, from: &Place) -> Option<TicketSummary> {
                 .epics
                 .iter()
                 .find(|e| e.repo == from.repo && e.name == *name)
-                .map(|e| &e.tickets),
-            None => Some(&b.columns[from.column.index()].tickets),
+                .map(|e| e.tickets.as_slice()),
+            None => Some(b.tickets(from.column)),
         };
         list.and_then(|l| l.iter().find(|t| t.file == file && t.repo == from.repo))
             .cloned()
@@ -63,7 +72,11 @@ fn ticket_at(ctx: Ctx, file: &str, from: &Place) -> Option<TicketSummary> {
 /// then the draft and sprint rules. An empty error means `to` is not a
 /// target at all.
 fn verdict(ctx: Ctx, file: &str, from: &Place, to: &Place) -> Result<(), String> {
-    if !can_move(from, to) {
+    let next = ctx.board.with(|b| {
+        b.as_ref()
+            .is_some_and(|b| can_move(b.workflow_of(&from.repo), from, to))
+    });
+    if !next {
         return Err(String::new());
     }
     let ticket = ticket_at(ctx, file, from);
@@ -71,6 +84,16 @@ fn verdict(ctx: Ctx, file: &str, from: &Place, to: &Place) -> Result<(), String>
     let draft = ticket.as_ref().is_some_and(|t| epic::is_draft(&t.tags));
     let stem = file.trim_end_matches(".md");
     epic::draft_rule(from, to, group_state(ctx, to), draft, stem)?;
+    // Done waits for required tickets and children (ticket 213).
+    if let Some(t) = &ticket {
+        ctx.board.with(|b| match b {
+            Some(b) => {
+                let waits = waiting::waiting_on(t, waiting::all_tickets(b));
+                waiting::done_rule(to.column, &waits, &t.id)
+            }
+            None => Ok(()),
+        })?;
+    }
     epic::sprint_rule(
         from,
         to,
@@ -118,16 +141,23 @@ fn limits_of(ctx: Ctx, repo: &str) -> WipLimits {
     })
 }
 
+/// The WIP limit on `column` of `repo`'s board: the repository's own for
+/// the standard doing, the column's own for another doing-kind column
+/// (ticket 224), none for the rest.
+fn limit_of(ctx: Ctx, repo: &str, column: Column) -> Option<u32> {
+    if column == Column::Doing {
+        return limits_of(ctx, repo).of(column);
+    }
+    ctx.board
+        .with(|b| b.as_ref().and_then(|b| b.workflow.wip(column)))
+}
+
 /// How many tickets `column` of `repo`'s board holds, whatever the filters
 /// are showing.
 fn held(ctx: Ctx, repo: &str, column: Column) -> usize {
     ctx.board.with(|b| {
         b.as_ref().map_or(0, |b| {
-            b.columns[column.index()]
-                .tickets
-                .iter()
-                .filter(|t| t.repo == repo)
-                .count()
+            b.tickets(column).iter().filter(|t| t.repo == repo).count()
         })
     })
 }
@@ -140,9 +170,16 @@ fn over_limit(ctx: Ctx, file: &str, from: &Place, to: &Place) -> Option<String> 
         return None;
     }
     let count = held(ctx, &to.repo, to.column);
-    limits_of(ctx, &to.repo)
-        .admit(to.column, count, file.trim_end_matches(".md"))
-        .err()
+    let label = ctx
+        .board
+        .with(|b| b.as_ref().map(|b| b.label(to.column)).unwrap_or_default());
+    amd_ui_model::wip::admit(
+        limit_of(ctx, &to.repo, to.column),
+        &label,
+        count,
+        file.trim_end_matches(".md"),
+    )
+    .err()
 }
 
 /// Whether `to` is a valid target for the ticket being dragged but is full.
@@ -203,7 +240,7 @@ fn ColumnView(column: Column) -> impl IntoView {
     let tickets = move || {
         let list = ctx.board.with(|b| {
             b.as_ref()
-                .map(|b| b.columns[column.index()].tickets.clone())
+                .map(|b| b.tickets(column).to_vec())
                 .unwrap_or_default()
         });
         ctx.shown(list)
@@ -213,12 +250,20 @@ fn ColumnView(column: Column) -> impl IntoView {
     let count = move || {
         ctx.board.with(|b| {
             b.as_ref().map_or(0, |b| {
-                b.columns[column.index()]
-                    .tickets
-                    .iter()
-                    .filter(|t| ctx.in_view(t))
-                    .count()
+                b.tickets(column).iter().filter(|t| ctx.in_view(t)).count()
             })
+        })
+    };
+    // What the board calls it (ticket 224).
+    let title = Memo::new(move |_| {
+        ctx.board
+            .with(|b| b.as_ref().map(|b| b.label(column)))
+            .unwrap_or_else(|| column.dir_name().to_string())
+    });
+    let collapsible = move || {
+        ctx.board.with(|b| {
+            b.as_ref()
+                .is_some_and(|b| b.workflow.is_collapsible(column))
         })
     };
     let collapsed = move || ctx.collapsed.with(|c| c.contains(&column));
@@ -234,7 +279,7 @@ fn ColumnView(column: Column) -> impl IntoView {
 
     // Hide points towards the board edge the column folds into; show points
     // back out.
-    let (hide_arrow, show_arrow) = if column == Column::Done {
+    let (hide_arrow, show_arrow) = if column.is(Kind::Done) {
         ("»", "«")
     } else {
         ("«", "»")
@@ -268,7 +313,7 @@ fn ColumnView(column: Column) -> impl IntoView {
                     .map(|r| r.name.clone())
             })
         })?;
-        let limit = limits_of(ctx, &repo).of(column)?;
+        let limit = limit_of(ctx, &repo, column)?;
         Some((held(ctx, &repo, column), limit as usize))
     };
     let full = move || full_for_drag(ctx, &here());
@@ -279,6 +324,10 @@ fn ColumnView(column: Column) -> impl IntoView {
             "ring-2 ring-amber-500 bg-amber-50 dark:bg-amber-950/60"
         } else if accepts(ctx, &to) {
             "ring-2 ring-accent-500 bg-accent-50 dark:bg-accent-950"
+        } else if rejects(ctx, &to) && refusal(ctx, &to).is_some() {
+            // A column it may not enter for a reason (a draft, done
+            // waiting on other tickets) says so, rather than just fading.
+            "ring-2 ring-red-400 bg-red-50/60 dark:bg-red-950/40"
         } else if rejects(ctx, &to) {
             "opacity-40"
         } else {
@@ -293,14 +342,14 @@ fn ColumnView(column: Column) -> impl IntoView {
             fallback=move || {
                 view! {
                     <section
-                        aria-label=column.title()
+                        aria-label=move || title.get()
                         class=move || format!("{} min-w-48 flex-1 basis-0", frame())
                         on:dragover=on_dragover
                         on:drop=on_drop
                     >
                         <header class="flex items-center gap-2 px-3 py-2">
                             <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                                {column.title()}
+                                {move || title.get()}
                             </h2>
                             <span class="rounded-full bg-slate-300 px-2 text-xs dark:bg-slate-700">{count}</span>
                             {move || {
@@ -326,11 +375,11 @@ fn ColumnView(column: Column) -> impl IntoView {
                                     })
                             }}
                             <span class="flex-1"></span>
-                            <Show when=move || column.is_collapsible()>
+                            <Show when=collapsible>
                                 <button
                                     class="rounded px-1.5 text-slate-500 hover:bg-slate-300 dark:hover:bg-slate-700"
-                                    title=format!("Hide {}", column.title())
-                                    aria-label=format!("Hide {}", column.title())
+                                    title=move || format!("Hide {}", title.get())
+                                    aria-label=move || format!("Hide {}", title.get())
                                     on:click=move |_| set_collapsed(true)
                                 >
                                     {hide_arrow}
@@ -339,12 +388,22 @@ fn ColumnView(column: Column) -> impl IntoView {
                         </header>
                         <Show when=full>
                             <p class="mx-2 mb-2 rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900 dark:text-amber-100">
-                                {format!(
+                                {move || format!(
                                     "{} is at its WIP limit. Drop here only to move it anyway: you will be asked to confirm.",
-                                    column.title(),
+                                    title.get(),
                                 )}
                             </p>
                         </Show>
+                        {move || {
+                            refusal(ctx, &here())
+                                .map(|why| {
+                                    view! {
+                                        <p role="status" class="mx-2 mb-2 rounded bg-red-100 px-2 py-1 text-xs font-medium text-red-900 dark:bg-red-950 dark:text-red-100">
+                                            {why}
+                                        </p>
+                                    }
+                                })
+                        }}
                         <ul class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
                             <For each=tickets key=|t| t.clone() children=|ticket| view! { <Card ticket /> } />
                         </ul>
@@ -353,21 +412,21 @@ fn ColumnView(column: Column) -> impl IntoView {
             }
         >
             <section
-                aria-label=format!("{} (hidden)", column.title())
+                aria-label=move || format!("{} (hidden)", title.get())
                 class=move || format!("{} w-10 shrink-0 items-center", frame())
                 on:dragover=on_dragover
                 on:drop=on_drop
             >
                 <button
                     class="flex h-full w-full flex-col items-center gap-2 rounded-lg py-3 hover:bg-slate-300 dark:hover:bg-slate-700"
-                    title=format!("Show {}", column.title())
-                    aria-label=format!("Show {}", column.title())
+                    title=move || format!("Show {}", title.get())
+                    aria-label=move || format!("Show {}", title.get())
                     on:click=move |_| set_collapsed(false)
                 >
                     <span class="text-slate-500">{show_arrow}</span>
                     <span class="rounded-full bg-slate-300 px-1.5 text-xs dark:bg-slate-700">{count}</span>
                     <span class="text-sm font-semibold uppercase tracking-wide text-slate-600 [writing-mode:vertical-rl] dark:text-slate-300">
-                        {column.title()}
+                        {move || title.get()}
                     </span>
                 </button>
             </section>
@@ -641,9 +700,22 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
         )
     };
 
+    // What stops it starting (ticket 214): tickets in it that require
+    // others outside it, not done.
+    let gaps = Memo::new(move |_| {
+        let (repo, name) = ids.get_value();
+        ctx.board.with(|b| {
+            b.as_ref()
+                .map(|b| waiting::sprint_gaps(&waiting::all_tickets(b), &repo, &name, &b.workflow))
+                .unwrap_or_default()
+        })
+    });
     // Starting asks once more: there is no way back.
     let confirm_start = RwSignal::new(false);
     let start = move |_| {
+        if !gaps.with_untracked(Vec::is_empty) {
+            return;
+        }
         if !confirm_start.get_untracked() {
             confirm_start.set(true);
             return;
@@ -694,15 +766,65 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
                             if confirm_start.get() {
                                 "w-full rounded bg-accent-600 px-2 py-1 text-xs font-medium text-white hover:bg-accent-500"
                             } else {
-                                "w-full rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                                "w-full rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:cursor-default disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700"
                             }
                         }
-                        title="Once started, a sprint takes no more tickets and gives none back"
+                        title=move || {
+                            if gaps.with(Vec::is_empty) {
+                                "Once started, a sprint takes no more tickets and gives none back"
+                            } else {
+                                "Its tickets require others outside it: see below"
+                            }
+                        }
+                        disabled=move || !gaps.with(Vec::is_empty)
                         on:click=start
                         on:blur=move |_| confirm_start.set(false)
                     >
                         {move || if confirm_start.get() { "Confirm: start sprint" } else { "Start sprint" }}
                     </button>
+                    {move || {
+                        let list = gaps.get();
+                        (!list.is_empty())
+                            .then(|| {
+                                view! {
+                                    <div role="status" class="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900 dark:bg-amber-900/60 dark:text-amber-100">
+                                        <p class="font-medium">"Can't start yet: these are required but not in this sprint or done."</p>
+                                        <ul class="mt-0.5">
+                                            {list
+                                                .into_iter()
+                                                .map(|g| {
+                                                    let place = Place {
+                                                        repo: ids.get_value().0,
+                                                        column: g.column,
+                                                        epic: g.epic.clone(),
+                                                    };
+                                                    let file = g.file.clone();
+                                                    view! {
+                                                        <li class="flex flex-wrap items-baseline gap-x-2">
+                                                            {format!("{} requires {} ({})", g.id, g.required_id, g.required_place)}
+                                                            // The tree around it (ticket 214).
+                                                            <button
+                                                                type="button"
+                                                                class="underline hover:no-underline"
+                                                                on:click=move |_| {
+                                                                    ctx.overlay.set(Some(Overlay::Tree {
+                                                                        place: place.clone(),
+                                                                        file: file.clone(),
+                                                                    }))
+                                                                }
+                                                            >
+                                                                "Show the tree"
+                                                            </button>
+                                                        </li>
+                                                    }
+                                                })
+                                                .collect_view()}
+                                        </ul>
+                                        <p class="mt-0.5 text-amber-800 dark:text-amber-200">"Add them to the sprint, finish them, or change the link."</p>
+                                    </div>
+                                }
+                            })
+                    }}
                 </Show>
                 {move || {
                     refusal()
@@ -732,6 +854,59 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
 #[component]
 fn Card(ticket: TicketSummary) -> impl IntoView {
     let ctx = Ctx::get();
+    // What it waits on before it can be done (ticket 213), from the board's
+    // other cards.
+    let waits = {
+        let me = ticket.clone();
+        Memo::new(move |_| {
+            if me.column.is(Kind::Done) {
+                return Vec::new();
+            }
+            ctx.board.with(|b| {
+                b.as_ref()
+                    .map(|b| {
+                        waiting::waiting_on(&me, waiting::all_tickets(b))
+                            .iter()
+                            .map(|t| format!("{} {} ({})", t.id, t.title, b.label(t.column)))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+        })
+    };
+    // A tree button when it has a family (ticket 214), unless it's in a
+    // started sprint, which the tree leaves out.
+    let family = {
+        let me = ticket.clone();
+        Memo::new(move |_| {
+            ctx.board.with(|b| {
+                b.as_ref().is_some_and(|b| {
+                    let sprint = me
+                        .epic
+                        .clone()
+                        .or_else(|| (!me.epic_label.is_empty()).then(|| me.epic_label.clone()));
+                    let started = sprint.is_some_and(|name| {
+                        b.epics
+                            .iter()
+                            .any(|e| e.repo == me.repo && e.name == name && e.started)
+                    });
+                    !started && waiting::has_family(&me, waiting::all_tickets(b))
+                })
+            })
+        })
+    };
+    // How many tickets it's linked to (ticket 216): beside the tree icon,
+    // or a dot when there are none.
+    let linked = {
+        let me = ticket.clone();
+        Memo::new(move |_| {
+            ctx.board.with(|b| {
+                b.as_ref()
+                    .map(|b| waiting::relationship_count(&me, waiting::all_tickets(b)))
+                    .unwrap_or(0)
+            })
+        })
+    };
     let TicketSummary {
         file,
         column,
@@ -740,6 +915,7 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
         assignee,
         tags,
         priority,
+        priority_from,
         epic,
         repo,
         repository,
@@ -829,6 +1005,64 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
             <div class="flex items-baseline gap-2">
                 <span class="font-mono text-xs text-slate-500">{id}</span>
                 <span class="flex-1 font-medium">{title}</span>
+                {
+                    let tree_file = file.clone();
+                    move || {
+                        let tree_file = tree_file.clone();
+                        let count = linked.get();
+                        let noun = if count == 1 { "ticket" } else { "tickets" };
+                        if family.get() {
+                            view! {
+                                <button
+                                    type="button"
+                                    class="flex shrink-0 items-center gap-0.5 self-start rounded px-1 text-xs text-slate-500 hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+                                    title=format!("Linked to {count} {noun}: show what it requires and relates to")
+                                    aria-label=format!("Linked to {count} {noun}: show the requires tree")
+                                    on:click=move |ev| {
+                                        ev.stop_propagation();
+                                        ctx.overlay.set(Some(Overlay::Tree {
+                                            place: place.get_value(),
+                                            file: tree_file.clone(),
+                                        }));
+                                    }
+                                >
+                                    <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                                        <circle cx="4" cy="3" r="1.6" />
+                                        <circle cx="4" cy="13" r="1.6" />
+                                        <circle cx="12" cy="8" r="1.6" />
+                                        <path d="M4 4.6v6.8M4 8h6.4" />
+                                    </svg>
+                                    {count}
+                                </button>
+                            }
+                                .into_any()
+                        } else if count > 0 {
+                            // Linked, but not by requires or related (a parent, a
+                            // clone, supersedes): just the count.
+                            view! {
+                                <span
+                                    class="flex shrink-0 items-center gap-0.5 self-start rounded px-1 text-xs text-slate-500"
+                                    title=format!("Linked to {count} {noun}")
+                                >
+                                    <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                                        <path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11.5l-1 1a2.5 2.5 0 01-3.5-3.5l1-1" />
+                                    </svg>
+                                    {count}
+                                </span>
+                            }
+                                .into_any()
+                        } else {
+                            view! {
+                                <span
+                                    class="mt-1 inline-block h-2 w-2 shrink-0 self-start rounded-full border-2 border-sky-500"
+                                    title="No relationships: it isn't linked to any other ticket"
+                                    aria-label="No relationships"
+                                ></span>
+                            }
+                                .into_any()
+                        }
+                    }
+                }
             </div>
             // The repository it's about (ticket 101), unless the filter
             // already says so.
@@ -855,6 +1089,20 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                             </span>
                         }
                     })}
+                {move || {
+                    let list = waits.get();
+                    (!list.is_empty())
+                        .then(|| {
+                            view! {
+                                <span
+                                    class="rounded border border-orange-400 px-1.5 font-medium text-orange-700 dark:border-orange-500 dark:text-orange-300"
+                                    title=format!("Can't be done until these are: {}", list.join(", "))
+                                >
+                                    {format!("waits on {}", list.len())}
+                                </span>
+                            }
+                        })
+                }}
                 {match (lock, lapsed) {
                     (Some(l), _) => Some(view! { <LockBadge lock=l lapsed=false /> }),
                     (None, Some(l)) => Some(view! { <LockBadge lock=l lapsed=true /> }),
@@ -884,12 +1132,22 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                     })}
                 {(!priority.is_empty())
                     .then(|| {
+                        // Raised by auto priority (ticket 215): an arrow, and
+                        // which ticket it's from.
+                        let (text, title) = if priority_from.is_empty() {
+                            (priority.clone(), "Priority".to_string())
+                        } else {
+                            (
+                                format!("↑ {priority}"),
+                                format!("{priority}, raised by auto priority: {priority_from} requires it"),
+                            )
+                        };
                         view! {
                             <span
                                 class=format!("rounded px-1.5 font-medium {}", priority_tone(&priority))
-                                title="Priority"
+                                title=title
                             >
-                                {priority.clone()}
+                                {text}
                             </span>
                         }
                     })}

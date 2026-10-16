@@ -249,6 +249,7 @@ async fn open_ticket(place: Place, file: String) -> Result<TicketDocument> {
             lapsed: project.lapsed_of(&task),
             version: task.hash().map_err(err)?.to_string(),
             authorship: agile_md::authorship::summary(board, &task).unwrap_or_default(),
+            priority_note: agile_md::auto_priority::note(board, &task).unwrap_or_default(),
             content,
         })
     })
@@ -357,10 +358,15 @@ async fn create_ticket(
     repo: Option<String>,
     repository: Option<String>,
     draft: Option<bool>,
+    required_by: Option<String>,
+    related_to: Option<String>,
 ) -> Result<Created> {
     change(&state, move |project| {
         let repo = repo.unwrap_or_default();
         let board = project.board(&repo)?;
+        // Save and New (ticket 227): linked back to the ticket it came from.
+        let required_by: Vec<String> = required_by.into_iter().collect();
+        let related: Vec<String> = related_to.into_iter().collect();
         let fields = TicketFields {
             title: title.clone(),
             assignee: String::new(),
@@ -376,10 +382,12 @@ async fn create_ticket(
             },
             branch_type: String::new(),
             parent: String::new(),
-            related: Vec::new(),
+            related,
             clone_of: String::new(),
             body: String::new(),
             priority: String::new(),
+            requires: Vec::new(),
+            required_by,
         };
         let outcome = transition::create_ticket(board, &fields).map_err(err)?;
         let name = if repo.is_empty() {
@@ -388,6 +396,109 @@ async fn create_ticket(
             repo
         };
         created_from(board, name, &outcome)
+    })
+    .await
+}
+
+/// Where a new repository would go, and its defaults (ticket 228).
+#[tauri::command]
+async fn repo_defaults() -> Result<amd_ui_model::RepoDefaults> {
+    blocking(|| {
+        let project = Project::open()?;
+        let board = &project.repos[0].1;
+        let prefix = board_settings::load(board)
+            .project()
+            .map(|p| format!("{p}-"))
+            .unwrap_or_default();
+        let admin = boards::admin_access(board);
+        if !admin.allowed {
+            return Ok(amd_ui_model::RepoDefaults {
+                prefix,
+                refused: Some("Only the project's admins can make repositories.".into()),
+                ..Default::default()
+            });
+        }
+        use agile_md::new_repo::{self, Forge};
+        Ok(match new_repo::defaults(board, &mut new_repo::gh) {
+            Ok(d) => amd_ui_model::RepoDefaults {
+                place: match d.forge {
+                    Forge::GitHub { owner } => format!("on GitHub, under {owner}"),
+                    Forge::Local => "beside the tickets repository's remote".into(),
+                    Forge::None => {
+                        "on this machine only (the tickets repository has no remote)".into()
+                    }
+                },
+                private: d.private,
+                prefix,
+                refused: None,
+            },
+            Err(e) => amd_ui_model::RepoDefaults {
+                prefix,
+                refused: Some(format!("{e:#}")),
+                ..Default::default()
+            },
+        })
+    })
+    .await
+}
+
+/// Makes (or connects) a repository for the project and registers it
+/// (ticket 228): the ticket at `place`/`file`, if given, gets it as its
+/// repository and a note. Admins only.
+#[tauri::command]
+async fn create_repository(
+    state: Tauri<'_, AppState>,
+    name: String,
+    description: String,
+    private: bool,
+    readme: bool,
+    place: Option<Place>,
+    file: Option<String>,
+) -> Result<SyncReport> {
+    change(&state, move |project| {
+        use agile_md::new_repo::{self, NewRepo};
+        let board = &project.repos[0].1;
+        if !boards::admin_access(board).allowed {
+            return Err("Only the project's admins can make repositories.".into());
+        }
+        let task = match (&place, &file) {
+            (Some(place), Some(file)) => {
+                let on = project.board(&place.repo)?;
+                Some((on, task_at(on, place, file)?))
+            }
+            _ => None,
+        };
+        let new = NewRepo {
+            name: name.trim().to_string(),
+            description: description.trim().to_string(),
+            private: Some(private),
+            readme,
+            for_ticket: task.as_ref().map(|(_, t)| (t.id_display(), t.title())),
+        };
+        let made = new_repo::create(board, &new, &mut new_repo::gh).map_err(err)?;
+        new_repo::register(&made).map_err(err)?;
+        let same_board = task.as_ref().is_none_or(|(on, _)| on.root == board.root);
+        let mut report = committed(board, "repo", "new", &made.name, || {
+            new_repo::declare(board, &made.name)?;
+            if same_board && let Some((_, task)) = &task {
+                new_repo::record_on_ticket(board, task, &made)?;
+            }
+            Ok(())
+        })?;
+        // A ticket on one of the project's other boards: its own commit.
+        if !same_board && let Some((on, task)) = &task {
+            committed(on, "repo", "new", &made.name, || {
+                new_repo::record_on_ticket(on, task, &made)
+            })?;
+        }
+        if !made.notes.is_empty() {
+            let notes = made.notes.join("; ");
+            report.warning = Some(match report.warning {
+                Some(w) => format!("{w}; {notes}"),
+                None => notes,
+            });
+        }
+        Ok(report)
     })
     .await
 }
@@ -411,6 +522,7 @@ fn created_from(board: &Board, repo: String, outcome: &transition::Outcome) -> R
             lapsed: None,
             version: task.hash().map_err(err)?.to_string(),
             authorship: agile_md::authorship::summary(board, &task).unwrap_or_default(),
+            priority_note: agile_md::auto_priority::note(board, &task).unwrap_or_default(),
             content: std::fs::read_to_string(&task.path).map_err(|e| e.to_string())?,
         },
         sync,
@@ -692,8 +804,9 @@ async fn start_sprint(
 ) -> Result<SyncReport> {
     change(&state, move |p| {
         let board = p.board(&repo.unwrap_or_default())?;
+        // Refused while its tickets require others outside it (ticket 214).
         committed(board, "group-start", &name, "", || {
-            board.group(&name)?.start()
+            agile_md::requires::start_sprint(board, &name)
         })
     })
     .await
@@ -747,6 +860,47 @@ async fn link_ticket(
         Ok(report_outcome(board, message(verb, &task), &outcome))
     })
     .await
+}
+
+/// Changes the type of the link between a ticket and `other` (ticket 213),
+/// on both tickets, in one commit.
+#[tauri::command]
+async fn retype_link(
+    state: Tauri<'_, AppState>,
+    place: Place,
+    file: String,
+    other: String,
+    old: String,
+    new: String,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = p.board(&place.repo)?;
+        let task = task_at(board, &place, &file)?;
+        let parse = |kind: &str| {
+            agile_md::links::LinkType::parse(kind)
+                .ok_or_else(|| format!("unknown link type {kind:?}"))
+        };
+        let (old, new) = (parse(&old)?, parse(&new)?);
+        let other = board.find(&other).map_err(err)?;
+        let outcome = transition::retype_link(board, &task, old, new, &other).map_err(err)?;
+        Ok(report_outcome(board, message("relink", &task), &outcome))
+    })
+    .await
+}
+
+/// The requires tree around a ticket (ticket 214): its family on its own
+/// board, as `amd tree <ref>` draws it; done tickets only with
+/// `include_done` (ticket 217).
+#[tauri::command]
+fn ticket_family(
+    place: Place,
+    file: String,
+    include_done: bool,
+) -> Result<Vec<agile_md::requires::TreeNode>> {
+    let project = Project::open()?;
+    let board = project.board(&place.repo)?;
+    let task = task_at(board, &place, &file)?;
+    agile_md::requires::family(board, Some(&task), include_done).map_err(err)
 }
 
 /// Takes a ticket off the board into the archive (`amd abandon`).
@@ -816,6 +970,181 @@ fn save_setting(
     let mut settings = board_settings::load(board);
     change(&mut settings).map_err(err)?;
     committed(board, "settings", what, "", || settings.save(board))
+}
+
+/// Where a column goes, from the page: after or before another, else last.
+fn column_position(
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+) -> agile_md::columns::Position {
+    use agile_md::columns::Position;
+    match (after, before) {
+        (Some(c), _) => Position::After(boards::to_column(c)),
+        (None, Some(c)) => Position::Before(boards::to_column(c)),
+        (None, None) => Position::End,
+    }
+}
+
+/// Adds a column to the project's board (ticket 224), of `kind`.
+#[tauri::command]
+async fn add_column(
+    state: Tauri<'_, AppState>,
+    label: String,
+    kind: String,
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let kind = agile_md::board::Kind::parse(&kind)
+            .ok_or_else(|| format!("{kind:?} isn't a kind: backlog, todo, doing or done"))?;
+        let at = column_position(after, before);
+        committed(board, "column", "add", label.trim(), || {
+            agile_md::columns::add(board, &label, kind, at, None).map(|_| ())
+        })
+    })
+    .await
+}
+
+/// Gives one of the project's columns a new name; its folder stays.
+#[tauri::command]
+async fn rename_column(
+    state: Tauri<'_, AppState>,
+    column: amd_ui_model::Column,
+    label: String,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        committed(board, "column", "rename", label.trim(), || {
+            agile_md::columns::rename(board, boards::to_column(column), &label)
+        })
+    })
+    .await
+}
+
+/// Moves one of the project's columns along the board.
+#[tauri::command]
+async fn move_column(
+    state: Tauri<'_, AppState>,
+    column: amd_ui_model::Column,
+    after: Option<amd_ui_model::Column>,
+    before: Option<amd_ui_model::Column>,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let col = boards::to_column(column);
+        let label = board.workflow().label(col);
+        committed(board, "column", "move", &label, || {
+            agile_md::columns::reorder(board, col, column_position(after, before))
+        })
+    })
+    .await
+}
+
+/// Removes an added column, its tickets moved to `move_to` first.
+#[tauri::command]
+async fn remove_column(
+    state: Tauri<'_, AppState>,
+    column: amd_ui_model::Column,
+    move_to: Option<amd_ui_model::Column>,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let col = boards::to_column(column);
+        let label = board.workflow().label(col);
+        committed(board, "column", "remove", &label, || {
+            agile_md::columns::remove(board, col, move_to.map(boards::to_column)).map(|_| ())
+        })
+    })
+    .await
+}
+
+/// Sets a doing-kind column's own WIP limit, or clears it.
+#[tauri::command]
+async fn set_column_wip(
+    state: Tauri<'_, AppState>,
+    column: amd_ui_model::Column,
+    limit: Option<u32>,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let col = boards::to_column(column);
+        let label = board.workflow().label(col);
+        committed(board, "column", "wip", &label, || {
+            agile_md::columns::set_wip(board, col, limit)
+        })
+    })
+    .await
+}
+
+/// Any column to any other, or the next column plus the extra moves
+/// (ticket 225).
+#[tauri::command]
+async fn set_flow(state: Tauri<'_, AppState>, any: bool) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let flow = if any {
+            agile_md::workflow::Flow::Any
+        } else {
+            agile_md::workflow::Flow::Next
+        };
+        committed(board, "column", "flow", flow.as_str(), || {
+            agile_md::columns::set_flow(board, flow)
+        })
+    })
+    .await
+}
+
+/// Allows an extra one-way move, or stops allowing it.
+#[tauri::command]
+async fn allow_move(
+    state: Tauri<'_, AppState>,
+    from: amd_ui_model::Column,
+    to: amd_ui_model::Column,
+    on: bool,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let (f, t) = (boards::to_column(from), boards::to_column(to));
+        let what = format!("{}>{}", f.as_str(), t.as_str());
+        committed(
+            board,
+            "column",
+            if on { "allow" } else { "disallow" },
+            &what,
+            || agile_md::columns::allow_move(board, f, t, on),
+        )
+    })
+    .await
+}
+
+/// Where new tickets land: a backlog-kind column.
+#[tauri::command]
+async fn set_landing(
+    state: Tauri<'_, AppState>,
+    column: amd_ui_model::Column,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let col = boards::to_column(column);
+        let label = board.workflow().label(col);
+        committed(board, "column", "landing", &label, || {
+            agile_md::columns::set_landing(board, col)
+        })
+    })
+    .await
+}
+
+/// Back to the standard four columns, tickets moved by kind.
+#[tauri::command]
+async fn reset_columns(state: Tauri<'_, AppState>) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        committed(board, "column", "reset", "standard", || {
+            agile_md::columns::reset(board).map(|_| ())
+        })
+    })
+    .await
 }
 
 /// Adds a tag to the project's list, in UPPERCASE (ticket 122).
@@ -990,6 +1319,41 @@ async fn set_import_issues(state: Tauri<'_, AppState>, on: bool) -> Result<SyncR
             &format!("import-issues {}", if on { "on" } else { "off" }),
             |s| {
                 s.set_import_issues(on);
+                Ok(())
+            },
+        )
+    })
+    .await
+}
+
+/// Whether priorities follow requires links (ticket 215). Switching it
+/// commits the setting and every priority it moves, together.
+#[tauri::command]
+async fn set_auto_priority(state: Tauri<'_, AppState>, on: bool) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        save_setting(
+            board,
+            &format!("auto-priority {}", if on { "on" } else { "off" }),
+            |s| {
+                s.set_auto_priority(on);
+                Ok(())
+            },
+        )
+    })
+    .await
+}
+
+/// Whether a priority set by hand pins its ticket (ticket 215).
+#[tauri::command]
+async fn set_priority_override(state: Tauri<'_, AppState>, on: bool) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        save_setting(
+            board,
+            &format!("priority-override {}", if on { "on" } else { "off" }),
+            |s| {
+                s.set_priority_override(on);
                 Ok(())
             },
         )
@@ -1895,7 +2259,8 @@ async fn home() -> Result<amd_ui_model::Home> {
             project: w.project,
             project_root: w.project_root.display().to_string(),
             repo: w.repo,
-            column: agile_md::board::Column::parse(&w.column)
+            column: agile_md::workflow::Workflow::standard()
+                .find(&w.column)
                 .map(boards::from_column)
                 .unwrap_or(amd_ui_model::Column::Todo),
             id: w.id,
@@ -2115,6 +2480,19 @@ pub fn run() {
             create_ticket,
             clone_ticket,
             link_ticket,
+            retype_link,
+            ticket_family,
+            repo_defaults,
+            create_repository,
+            add_column,
+            rename_column,
+            move_column,
+            remove_column,
+            set_column_wip,
+            set_flow,
+            allow_move,
+            set_landing,
+            reset_columns,
             create_epic,
             list_roadmaps,
             create_roadmap,
@@ -2138,6 +2516,8 @@ pub fn run() {
             set_triage_priority,
             pull_issues,
             set_import_issues,
+            set_auto_priority,
+            set_priority_override,
             list_documents,
             document_history,
             read_document_version,
@@ -2700,6 +3080,37 @@ mod tests {
         assert_eq!(lib, amd_ui_model::LINK_KINDS);
     }
 
+    /// The tree amd-lib builds reads back as the page's own copy (ticket
+    /// 214), field for field.
+    #[test]
+    fn the_pages_tree_is_amd_libs() {
+        use agile_md::requires::{Edge, TreeNode};
+        let node = |id: &str, edge: Edge, children: Vec<TreeNode>| TreeNode {
+            id: id.into(),
+            title: format!("Ticket {id}"),
+            file: format!("{id}-t.md"),
+            column: "backlog".into(),
+            epic: Some("s13".into()),
+            place: "sprint s13".into(),
+            done: false,
+            edge,
+            unmet: vec!["002".into()],
+            stub: Some("s12".into()),
+            seen: true,
+            current: true,
+            children,
+        };
+        let lib = node(
+            "001",
+            Edge::Root,
+            vec![node("002", Edge::Related, Vec::new())],
+        );
+        let json = serde_json::to_value(&lib).unwrap();
+        let page: amd_ui_model::tree::TreeNode = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(page.children[0].edge, amd_ui_model::tree::Edge::Related);
+        assert_eq!(serde_json::to_value(&page).unwrap(), json);
+    }
+
     use super::*;
     use amd_ui_model::Column as UiColumn;
 
@@ -2877,6 +3288,8 @@ mod tests {
             clone_of: String::new(),
             body: String::new(),
             priority: String::new(),
+            requires: Vec::new(),
+            required_by: Vec::new(),
         };
         let dest = transition::create_ticket(project.board("").unwrap(), &fields)
             .unwrap()

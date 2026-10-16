@@ -576,6 +576,78 @@ redundant. Their history is in git if it is ever wanted again.
   order). **`amd new` lands in `backlog/`** — new work is raised, then pulled
   into `todo` when someone means to do it. `tests/test.sh` drifted from the
   tool for exactly this reason, so it is worth stating plainly.
+- **Columns have kinds** (ticket 223, `crates/amd-lib/src/workflow.rs`):
+  `board::Column` is a small `Copy` struct, a folder (interned, so a
+  handful of names are leaked once) and a `board::Kind` (`Backlog`,
+  `Todo`, `Doing`, `Done`). The four standard columns keep the old enum's
+  names as constants (`Column::Backlog` …, `Column::STANDARD`), so they
+  read as before. A board's columns, in order and labelled, are its
+  `Workflow` (`Board::workflow()`): `columns()`, `position`, `next_to`
+  (one column at a time), `first(kind)`, `of_kind`, `find` (folder or
+  label, ignoring case), `landing()` (the standard backlog). **Rules ask
+  the kind, never the name**: the lease is taken entering any doing-kind
+  column and released leaving them (`transition::move_to`); the WIP limit
+  belongs to doing-kind columns (`wip-limit` for the standard doing,
+  `wip-limit-<folder>` for another); done waits on entering a done-kind
+  column and any done-kind ticket holds nothing back (links, requires,
+  auto priority, the tree, roadmaps); a draft can't leave the backlog
+  kinds; a started sprint's tickets only move on to a todo-kind column;
+  `home_group` runs coming back from a todo-kind column; My work covers
+  todo and doing kinds and `to_pick` the backlog kinds. Epics and sprints
+  still live only in the standard backlog folder, and new tickets land
+  there. `Workflow::parse` reads and checks the written form
+  (`Label=folder:kind`, comma separated: every kind present, folders
+  plain and unique, not `archive`/`templates`, the four standard folders
+  kept with their kinds). **A team's own columns** (ticket 224):
+  `Board::workflow()` reads its board's `.settings` `columns` (cached by
+  the file's mtime and length; an unreadable value is the standard four,
+  with `workflow_problem()` saying why); `board_settings::set_columns`
+  leaves no key for the standard four. `crates/amd-lib/src/columns.rs`
+  changes it: `add` (folder from `slugify(label)`, a `.gitkeep`; refuses
+  a name a column, an epic or `abandon` answers to), `rename` (label
+  only), `reorder`, `remove` (never a standard folder; a non-empty one
+  needs `move_to`, tickets `git mv`'d there first, someone else's lease
+  stops it; its `wip-limit-<folder>` and folder go) and `set_wip`; each
+  re-checked by `Workflow::parse` before saving. CLI: `amd column [add|
+  rename|remove|move|wip]` (`cmd_column`, each one commit), `amd move
+  <ref> <column>`, and any column's name as a destination verb (`amd
+  review 12`, with `--force`; any todo-kind column goes through
+  `enter_todo`, `TodoOptions.to`). `amd board` heads a renamed column
+  with its name; `amd log` skips dotfiles (`.gitkeep`). The MCP schemas
+  take any column name. amdui: `amd_ui_model::Column` mirrors amd-lib's
+  (folder + `Kind`, the standard four as constants; on the wire a
+  standard column is its folder and another `"folder:kind"`), and
+  `Board.workflow` (`ColumnInfo {column, label, wip}`) is what the page
+  draws (`BoardView`'s `For`, labels, `is_collapsible` for backlog and
+  done kinds) and what the drag rules take (`epic::can_move(&workflow,
+  …)`, `sprint_rule`/`draft_rule` by kind, `wip::admit` with a column's
+  own limit). `boards::ui_workflow` builds it from the tickets board; a
+  declared repository's ticket in a folder that workflow lacks shows in
+  the first column of its kind. Admin → Columns (`ColumnsAdmin`; commands
+  `add_column`, `rename_column`, `move_column`, `remove_column`,
+  `set_column_wip`, all through `change()`). **Flow, landing and reset**
+  (ticket 225): `flow = next|any` (`workflow::Flow`; `next`, the
+  default, is the next column plus `moves = triage>todo, …`, extra
+  one-way moves) and `new-tickets = <backlog-kind folder>` in the tickets
+  `.settings`, applied by `Workflow::configure` in `Board::read_workflow`
+  (a bad value falls back, reported by `workflow_problem`).
+  `Workflow::allows` replaces `next_to` in `Board::move_task`; every other
+  rule (drafts, started sprints, done waits, WIP, leases, the branch on a
+  todo kind) still applies. New tickets land in `workflow.landing()`
+  (`NewTicket.land_in`, `Draft.column`); one given an epic lands in the
+  standard backlog (`create_ticket`). `columns::{set_flow, allow_move,
+  set_landing, reset}`: `reset` moves each ticket in an added column to
+  the standard column of its kind (`git mv`, lease checked first), then
+  clears `columns`, `flow`, `moves`, `new-tickets` and every
+  `wip-limit-<folder>`; `remove` drops moves naming the column and a
+  landing there. CLI `amd column flow|allow|disallow|landing|reset`.
+  amdui: `ui::Workflow {any, moves, landing}` and `allows`, which
+  `epic::can_move` uses; each `RepoInfo` carries its own board's
+  workflow and drags follow the ticket's own (`Board::workflow_of`), as
+  amd-lib does, since a declared repository's board reads its own
+  `.settings`. Admin → Columns: Moves select, extra moves (× and Allow),
+  New tickets land in, Reset to standard (with a confirm). The MCP
+  `board` says the flow and landing column.
 - `Board::find(<ref>)` resolves a numeric id or a unique slug substring to one
   task (errors on 0 or >1 matches).
 - `Board::move_task()` uses `git mv` for tracked files (history follows the
@@ -866,17 +938,28 @@ off**, ticket 141) to
   made and `Created.unlinked` becomes a warning. Same board only, since a
   bare id can't name a ticket on another.
 
+- **Save and New** (ticket 227): the editor's button saves the ticket
+  (when it has edits) and opens `Overlay::NewTicket(Some(LinkBack))`,
+  whose "Link to" choice (`LinkKind`: requires, the default, related, or
+  none) goes to the `create_ticket` command as `required_by`/`related_to`.
+  `TicketFields.required_by` links each named ticket as requiring the new
+  one in the `new:` commit; the new ticket goes on the linked ticket's
+  board.
+
 - **Typed links** (ticket 207, `crates/amd-lib/src/links.rs`, `amd link
   <ref> <ref>... [--type T] [--remove] [--one-way]`, the MCP `link_tickets`,
-  the editor's **Add link**). `LinkType` has eleven kinds, each with an
-  inverse written on the other ticket: relates-to, blocks/blocked-by,
-  depends-on/depended-on-by, parent-of/child-of, clone-of/cloned-by,
+  the editor's **Add link**). `LinkType` has nine kinds, each with an
+  inverse written on the other ticket: relates-to, requires/required-by,
+  parent-of/child-of, clone-of/cloned-by,
   supersedes/superseded-by (the last of each pair exists only so the other
-  end has something to say). **Four kinds keep their older fields** so
+  end has something to say). The first version's names are still read
+  (`LinkType::parse`): depends-on and blocked-by are requires,
+  depended-on-by and blocks are required-by, and an old entry is written
+  back under its new name. **Four kinds keep their older fields** so
   there is one record of each fact: relates-to is `related`, child-of the
   child's `parent` with parent-of the parent's `## Children` wikilink,
   clone-of `clone-of` with cloned-by `clones`. The rest live in a `links`
-  flow list of `kind:id` entries (`links: [blocks:012,depends-on:003]`,
+  flow list of `kind:id` entries (`links: [requires:012,supersedes:003]`,
   `Task::links`/`add_link`/`remove_link`; an entry it can't read is skipped).
   `links::apply` writes both ends, each hash-checked, after a `preflight`
   that refuses a second parent or a second original before touching a file;
@@ -890,6 +973,106 @@ off**, ticket 141) to
   panel shows a group per kind with a × on each, and both Add link and ×
   wait while the editor has unsaved edits, since they rewrite the file.
   The command is `link_ticket`.
+  **Done waits** (ticket 213): `Board::move_task` refuses a move to done
+  while `links::waiting_on` finds tickets on the board, not done, that the
+  ticket requires (its own `requires`, or another's `required-by` naming
+  it) or that are its children (their `parent`, or its `## Children`
+  list), returning `links::NotReady` naming each with why and where.
+  **No override**, `force` included (that's only the WIP limit): the way
+  past it is to change the link (`links::retype`, `transition::retype_link`
+  → `relink: 001 -> 002`; `amd link A B --replace OLD --type NEW`, the MCP
+  `link_tickets` `replace`, amdui's per-link type picker and its
+  `retype_link` command) or remove it. Abandoned or missing tickets hold
+  nothing back. The page mirrors the rule (`amd_ui_model::waiting`): a
+  "waits on N" badge on the card, and `verdict` refuses a drag onto done
+  with the reason, which columns now show as epics did.
+  **Requires and sprints** (ticket 214, `crates/amd-lib/src/requires.rs`):
+  there is no separate depends-on field; requires *is* the dependency,
+  called requires everywhere. `requires::required(board, task)` is the
+  one reading (own `requires` + others' `required-by`), used by
+  `waiting_on`, the sprint check and the tree. `sprint_gaps(board, name)`
+  lists each ticket in the sprint (`tasks_in_group`) that requires one
+  neither in it nor done; `requires::start_sprint` refuses with
+  `SprintNotReady` (`s1 can't start: 003 requires 001 (backlog)…`), and
+  `amd group start` and amdui's `start_sprint` both call it instead of
+  `Group::start`. Nothing is enforced outside sprints. Setting them:
+  `amd new --requires <ref>` (repeatable; resolved before writing, linked
+  in the `new:` commit), `amd set <ref> requires 3,7` (exactly that list,
+  both ends, empty clears: `transition::set_requires`),
+  `TicketFields.requires` (create only; the MCP `create_ticket`
+  `requires`). The page mirrors the check (`amd_ui_model::waiting::
+  sprint_gaps`): the sprint column disables Start sprint and lists the
+  gaps.
+  **The tree** (`requires::family(board, around)`, `amd tree [<ref>]`):
+  one board's families, tickets joined by requires or related either
+  way, as serialisable `TreeNode`s (id, title, file, column, epic, place,
+  done, edge Root/Requires/Related, unmet, stub, seen, current). `Facts`
+  reads every ticket's links once. Roots: tickets nothing in the family
+  requires, those that require something first (so a ticket only related
+  to one hangs under it); a pure cycle starts at its lowest id. Each
+  ticket drawn once (`seen` back-references carry no marks); related
+  drawn once, under whichever end comes first. Tickets in a started
+  sprint (`!accepts_changes()`) are stubs, not expanded and not walked
+  through; asking for one is refused. Parent/child aren't drawn. A lone
+  ticket has no family (empty). Done tickets are left out unless
+  `include_done` (ticket 217, `Facts::hide_done`: their links dropped, so
+  a family held together only by a done ticket comes apart), except the
+  ticket asked about; `amd tree --done`, and the panel's "Include done"
+  checkbox (off each time it opens). An empty answer only because of
+  done tickets says so. render.rs `tree`: `├──── ` solid,
+  `├ ─ ─ ` dashed (spaced so related stands out), both six wide; colour
+  and links only on a terminal.
+  **amdui's tree:** the `ticket_family` command returns `family`'s nodes;
+  `amd_ui_model::tree::TreeNode` mirrors them (amd-ui's tests check the
+  JSON agrees). A card with a family (`waiting::has_family`: requires,
+  required-by or related, either end), not in a started sprint, gets a
+  tree button opening `Overlay::Tree { place, file }` (`tree.rs`'s
+  `TreePanel`): nested rows, a solid rule for requires and a dashed one
+  drawn as a repeating gradient (4 px dash, 6 px gap) for related, the
+  ticket it was opened from highlighted, waits-on marked, stubs greyed.
+  A click on a node goes to its card with `Ctx::show_card` (the board
+  shown, `focus`/`focus_scroll`, its epic or sprint column opened, a
+  folded column unfolded), which `open_ticket` now uses before opening
+  the editor. Each sprint gap has "Show the tree".
+  **Auto priority** (ticket 215, `crates/amd-lib/src/auto_priority.rs`):
+  `auto-priority` (off unless on) and `priority-override` (on unless off)
+  in the tickets `.settings`, read per board. When on, a ticket not done
+  is at least as urgent as the most urgent not-done ticket that requires
+  it, down a chain (repeated to a fixpoint; three steps, so cycles end).
+  Written into `priority`, a raise recorded as `priority-from` (the
+  requirer) and `priority-own` (its own before), `Task::write_priority`
+  writing all of them in one checked write. `reconcile(board)` runs in
+  `transition::settle_priorities`, called by `with_auto_commit` after the
+  change and before the commit (and by `create_ticket` and `cmd_new`), so
+  every change carries its priority moves; a failure is only a note.
+  What it changed queues for `take_notes` (the CLI prints them after each
+  command). Off puts raised tickets back; pins stay. By hand
+  (`set_by_hand`: `amd set <ref> priority`, the MCP `edit_ticket`,
+  `transition::edit_ticket`, `save_text` when the saved priority differs):
+  the value becomes the ticket's own, raises cleared, and with override on
+  `priority-pinned: "yes"`, which reconcile leaves alone; `auto` unpins.
+  With override off a hand value is only a floor. A ticket someone else
+  has leased is left alone with a note. CLI: `amd auto-priority [on|off]`
+  (bare lists the raised), `amd priority-override [on|off]`, `amd show`
+  prints `auto_priority::note` on stderr. amdui: Admin's Auto priority
+  section (`set_auto_priority`, `set_priority_override`), the editor's
+  `auto` option (the page's `ensure_priority` accepts it) and note
+  (`TicketDocument.priority_note`), and `↑ high` on a raised card
+  (`TicketSummary.priority_from`). **Automatic sort** (ticket 230):
+  `SortOrder::Automatic` ("Automatic: what's needed first") is a
+  dependency order, `SortOrder::sort` (a pairwise `compare` can't express
+  it): the column pre-sorted by priority then age, then each ticket placed
+  only after the tickets in the list it requires on its own board
+  (`waiting::requires`), a cycle broken at the first left. `Ctx::shown`
+  calls `sort`; `Ctx::default_sort` is Automatic when the board's
+  `auto_priority` is on, and the sort follows it until one is picked
+  (`ctx.sort_chosen`); Reset filters goes back to it.
+  **How linked a card is** (ticket 216, `waiting::relationship_count`):
+  the number of other tickets it's linked to in any way (any `links`
+  kind, related, parent and children, clones), from either end, each
+  once. A card with a tree shows it beside the tree icon; one linked
+  otherwise (a parent, a clone, a started sprint's ticket) shows a link
+  icon and the count; one with none shows a small hollow blue dot.
 
 - **One ticket, one template.** There are no ticket types any more: `admin` and
   `development` collapsed into fields you either fill in or don't.
@@ -1074,6 +1257,25 @@ project, into one `amdui` window:
   that's only *registered* here (a project's own tickets or documents
   repository, a scratch board) just loses its registration. Neither is an
   error. The clone is never touched. It takes `--project` like `register`.
+- **`amd repo new <name> [--for <ref>]`** (ticket 228,
+  `crates/amd-lib/src/new_repo.rs`): makes a repository for the project,
+  or connects one that's already there, from where the tickets
+  repository's `origin` is (`new_repo::forge`): on GitHub under the same
+  owner through `gh` (a closure, `new_repo::gh`, so tests pass a fake),
+  beside a local origin as a bare repository (what test.sh and the demo
+  use), or only here (`git init`) with no origin; another forge is
+  refused. `create` checks the name as typed (`validate_project_name`),
+  refuses one already cloned or in the way, defaults visibility to the
+  tickets repository's, clones with `clone::sibling_url`, adds a starter
+  README on an empty one (pushed), and protects `main` on GitHub
+  (`github::protect_main`, now in amd-lib). The caller then `register`s
+  the clone (the machine's registry, kept out of `create` so tests never
+  touch it), and in one commit `declare`s it and `record_on_ticket`
+  (repository set, a signed, dated note via `task::with_note`, moved from
+  assistant.rs). amdui: the editor's Repository select has "＋ New
+  repository…" (admins only; it saves the ticket first if edited), the
+  `NewRepoDialog` (`repo_defaults`, `create_repository`, which checks
+  `boards::admin_access`), then reopens the ticket. Not in the MCP tools.
 - **`amd clone [name | --all]`** (ticket 108, `crates/amd-lib/src/clone.rs`):
   clones a declared repository this machine hasn't got into the project
   directory, from the tickets repo's own `origin` with the last path part
@@ -1502,6 +1704,12 @@ changes):
   step on) and calls `set_zoom`, which applies Tauri's `WebviewWindow::set_zoom`
   and saves `ui.zoom` in `~/.config/agile-md/config`. `zoom` reapplies it at
   start. A real webview zoom, not CSS `zoom`, so `100vh` layouts still fit.
+- **No `cursor-not-allowed`** (ticket 229): GTK on Wayland looks a CSS
+  cursor up by its modern name only, and an older pointer theme (e.g.
+  whiteglass) has no `not-allowed`, so every hover over a disabled button
+  printed `Gdk-Message: Unable to load not-allowed from the cursor theme`
+  in the terminal amdui was started from. Disabled buttons use
+  `disabled:cursor-default`; their faded look already says they're off.
 - WebKitGTK quirks met building it: the CSP needs `'wasm-unsafe-eval'` and
   `connect-src 'self' ipc: http://ipc.localhost`; native `<select>`s draw a
   white box (styled with `appearance-none`); `dragDropEnabled: false` so

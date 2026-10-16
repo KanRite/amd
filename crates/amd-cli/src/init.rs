@@ -22,7 +22,7 @@ use agile_md::sync::{self, Purpose};
 use agile_md::transition::Event;
 use agile_md::{board_settings, git, registry::Registry};
 
-use crate::github;
+use agile_md::github;
 
 pub fn run(project: String, local_only: bool, org: Option<String>) -> Result<()> {
     board_settings::validate_project_name(&project)?;

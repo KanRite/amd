@@ -4,8 +4,8 @@
 //! template). Personal settings live
 //! in Preferences (`preferences.rs`, ticket 148).
 
-use amd_ui_model::TicketTemplate;
 use amd_ui_model::wip::WipLimits;
+use amd_ui_model::{Column, Kind, TicketTemplate};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -119,6 +119,7 @@ pub fn AdminPanel() -> impl IntoView {
 
                 <TagsAdmin />
 
+                <ColumnsAdmin />
                 <WipAdmin />
 
                 <LeaseAdmin />
@@ -126,6 +127,8 @@ pub fn AdminPanel() -> impl IntoView {
                 <DocumentsAdmin />
 
                 <IssuesAdmin />
+
+                <PriorityAdmin />
 
                 <EpicsAdmin />
 
@@ -301,6 +304,429 @@ fn EpicRow(repo: String, name: String, count: usize) -> impl IntoView {
                     })
             }}
         </li>
+    }
+}
+
+/// The board's columns (ticket 224): rename, move, set a doing column's
+/// WIP limit, remove an added one (its tickets moved first), and add new
+/// ones. Saved in the tickets `.settings` and committed, so the whole team
+/// gets the same board.
+#[component]
+fn ColumnsAdmin() -> impl IntoView {
+    let ctx = Ctx::get();
+    let note = RwSignal::new(None::<String>);
+    let busy = RwSignal::new(false);
+    let rows = Memo::new(move |_| {
+        ctx.board.with(|b| {
+            b.as_ref()
+                .map(|b| {
+                    b.workflow
+                        .columns
+                        .iter()
+                        .map(|info| {
+                            let in_epics: usize = if info.column == Column::Backlog {
+                                b.epics.iter().map(|e| e.tickets.len()).sum()
+                            } else {
+                                0
+                            };
+                            (info.clone(), b.tickets(info.column).len() + in_epics)
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        })
+    });
+    // Runs a change, then says what happened and redraws the board.
+    let run = move |work: std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<amd_ui_model::SyncReport, String>>>,
+    >,
+                    done: &'static str| {
+        busy.set(true);
+        spawn_local(async move {
+            match work.await {
+                Ok(report) => {
+                    ctx.report(report);
+                    note.set(Some(done.into()));
+                    ctx.reload();
+                }
+                Err(e) => note.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
+    let new_label = RwSignal::new(String::new());
+    let new_kind = RwSignal::new("doing".to_string());
+    let new_after = RwSignal::new(Column::Doing.dir_name().to_string());
+    let column_named = move |folder: &str| {
+        rows.with_untracked(|r| {
+            r.iter()
+                .map(|(i, _)| i.column)
+                .find(|c| c.dir_name() == folder)
+        })
+    };
+    let add = move |_| {
+        let label = new_label.get_untracked();
+        if label.trim().is_empty() {
+            note.set(Some("Give the column a name.".into()));
+            return;
+        }
+        let kind = new_kind.get_untracked();
+        let after = column_named(&new_after.get_untracked());
+        new_label.set(String::new());
+        run(
+            Box::pin(async move { api::add_column(&label, &kind, after, None).await }),
+            "Column added.",
+        );
+    };
+    let field = "rounded border border-slate-300 bg-slate-50 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900";
+    let small = "rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:hover:bg-slate-700";
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Columns"</h3>
+            <p class="text-xs text-slate-500">
+                "Each column's kind decides what it does: backlog (work waiting), todo (entering it makes the ticket's branch), doing (locked while in it, with a WIP limit) or done (waits for what the ticket requires). Renaming keeps the folder. The four standard columns can be renamed and moved but not removed. Everyone needs amd 4.1 or later to see tickets in an added column."
+            </p>
+            <ul class="flex flex-col gap-1">
+                {move || {
+                    let all = rows.get();
+                    all.into_iter()
+                        .enumerate()
+                        .map(|(i, (info, held))| {
+                            let column = info.column;
+                            let standard = Column::STANDARD.contains(&column);
+                            let label = RwSignal::new(info.label.clone());
+                            let original = info.label.clone();
+                            let wip = RwSignal::new(info.wip.map(|n| n.to_string()).unwrap_or_default());
+                            let move_to = RwSignal::new(String::new());
+                            let neighbours: Vec<Column> = rows.with_untracked(|r| r.iter().map(|(i, _)| i.column).collect());
+                            let (prev, next) = (
+                                i.checked_sub(1).map(|p| neighbours[p]),
+                                neighbours.get(i + 1).copied(),
+                            );
+                            let others: Vec<(String, String)> = rows.with_untracked(|r| {
+                                r.iter()
+                                    .filter(|(o, _)| o.column != column)
+                                    .map(|(o, _)| (o.column.dir_name().to_string(), o.label.clone()))
+                                    .collect()
+                            });
+                            view! {
+                                <li class="flex flex-wrap items-center gap-2 rounded border border-slate-200 px-2 py-1 dark:border-slate-700">
+                                    <input
+                                        type="text"
+                                        class=format!("{field} w-36")
+                                        aria-label=format!("Name of {}/", column.dir_name())
+                                        prop:value=move || label.get()
+                                        on:input=move |ev| label.set(event_target_value(&ev))
+                                    />
+                                    <button
+                                        class=small
+                                        disabled=move || busy.get() || label.with(|l| l.trim() == original || l.trim().is_empty())
+                                        on:click=move |_| {
+                                            let new = label.get_untracked();
+                                            run(Box::pin(async move { api::rename_column(column, &new).await }), "Column renamed.");
+                                        }
+                                    >
+                                        "Rename"
+                                    </button>
+                                    <span class="font-mono text-xs text-slate-500">{format!("{}/", column.dir_name())}</span>
+                                    <span class="text-xs text-slate-500">{column.kind().as_str()}</span>
+                                    <span class="text-xs text-slate-500">{format!("{held} ticket(s)")}</span>
+                                    {(column.is(Kind::Doing) && column != Column::Doing)
+                                        .then(|| {
+                                            view! {
+                                                <label class="flex items-center gap-1 text-xs">
+                                                    "WIP"
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max="99"
+                                                        class=format!("{field} w-16")
+                                                        placeholder="none"
+                                                        prop:value=move || wip.get()
+                                                        on:input=move |ev| wip.set(event_target_value(&ev))
+                                                    />
+                                                    <button
+                                                        class=small
+                                                        disabled=move || busy.get()
+                                                        on:click=move |_| {
+                                                            let limit = wip.get_untracked().trim().parse::<u32>().ok().filter(|n| *n > 0);
+                                                            run(Box::pin(async move { api::set_column_wip(column, limit).await }), "WIP limit saved.");
+                                                        }
+                                                    >
+                                                        "Set"
+                                                    </button>
+                                                </label>
+                                            }
+                                        })}
+                                    <span class="flex-1"></span>
+                                    <button
+                                        class=small
+                                        title="Move left"
+                                        aria-label=format!("Move {} left", info.label)
+                                        disabled=move || busy.get() || prev.is_none()
+                                        on:click=move |_| {
+                                            run(Box::pin(async move { api::move_column(column, None, prev).await }), "Column moved.");
+                                        }
+                                    >
+                                        "←"
+                                    </button>
+                                    <button
+                                        class=small
+                                        title="Move right"
+                                        aria-label=format!("Move {} right", info.label)
+                                        disabled=move || busy.get() || next.is_none()
+                                        on:click=move |_| {
+                                            run(Box::pin(async move { api::move_column(column, next, None).await }), "Column moved.");
+                                        }
+                                    >
+                                        "→"
+                                    </button>
+                                    {(!standard)
+                                        .then(|| {
+                                            let others = others.clone();
+                                            view! {
+                                                {(held > 0)
+                                                    .then(|| {
+                                                        view! {
+                                                            <select
+                                                                class=format!("{field} appearance-none text-xs")
+                                                                aria-label="Move its tickets to"
+                                                                on:change=move |ev| move_to.set(event_target_value(&ev))
+                                                            >
+                                                                <option value="">"Move its tickets to…"</option>
+                                                                {others
+                                                                    .into_iter()
+                                                                    .map(|(folder, name)| view! { <option value=folder>{name}</option> })
+                                                                    .collect_view()}
+                                                            </select>
+                                                        }
+                                                    })}
+                                                <button
+                                                    class=format!("{small} text-red-700 dark:text-red-300")
+                                                    disabled=move || busy.get() || (held > 0 && move_to.with(String::is_empty))
+                                                    on:click=move |_| {
+                                                        let to = column_named(&move_to.get_untracked());
+                                                        run(Box::pin(async move { api::remove_column(column, to).await }), "Column removed.");
+                                                    }
+                                                >
+                                                    "Remove"
+                                                </button>
+                                            }
+                                        })}
+                                </li>
+                            }
+                        })
+                        .collect_view()
+                }}
+            </ul>
+            <div class="flex flex-wrap items-center gap-2">
+                <input
+                    type="text"
+                    class=format!("{field} w-40")
+                    placeholder="New column, e.g. Review"
+                    aria-label="New column's name"
+                    prop:value=move || new_label.get()
+                    on:input=move |ev| new_label.set(event_target_value(&ev))
+                />
+                <select
+                    class=format!("{field} appearance-none")
+                    aria-label="New column's kind"
+                    on:change=move |ev| new_kind.set(event_target_value(&ev))
+                    prop:value=move || new_kind.get()
+                >
+                    <option value="backlog">"backlog"</option>
+                    <option value="todo">"todo"</option>
+                    <option value="doing">"doing"</option>
+                    <option value="done">"done"</option>
+                </select>
+                <label class="flex items-center gap-1 text-sm">
+                    "after"
+                    <select
+                        class=format!("{field} appearance-none")
+                        aria-label="Put it after"
+                        on:change=move |ev| new_after.set(event_target_value(&ev))
+                        prop:value=move || new_after.get()
+                    >
+                        {move || {
+                            rows.get()
+                                .into_iter()
+                                .map(|(info, _)| {
+                                    view! { <option value=info.column.dir_name()>{info.label}</option> }
+                                })
+                                .collect_view()
+                        }}
+                    </select>
+                </label>
+                <button
+                    class="rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
+                    disabled=move || busy.get()
+                    on:click=add
+                >
+                    "Add column"
+                </button>
+            </div>
+            // Flow rules, landing column and reset (ticket 225).
+            {move || {
+                let workflow = ctx.board.with(|b| b.as_ref().map(|b| b.workflow.clone()))?;
+                let any = workflow.any;
+                let label = {
+                    let workflow = workflow.clone();
+                    move |c: Column| workflow.label(c)
+                };
+                let backlogs: Vec<(String, String)> = workflow
+                    .columns
+                    .iter()
+                    .filter(|i| i.column.is(Kind::Backlog))
+                    .map(|i| (i.column.dir_name().to_string(), i.label.clone()))
+                    .collect();
+                let all: Vec<(String, String)> = workflow
+                    .columns
+                    .iter()
+                    .map(|i| (i.column.dir_name().to_string(), i.label.clone()))
+                    .collect();
+                let landing = workflow.landing.dir_name().to_string();
+                let move_from = RwSignal::new(String::new());
+                let move_to = RwSignal::new(String::new());
+                let standard = workflow.columns.len() == 4
+                    && workflow.columns.iter().all(|i| Column::STANDARD.contains(&i.column))
+                    && !any
+                    && workflow.moves.is_empty()
+                    && workflow.landing == Column::Backlog;
+                let moving: usize = rows.with(|r| {
+                    r.iter()
+                        .filter(|(i, _)| !Column::STANDARD.contains(&i.column))
+                        .map(|(_, held)| held)
+                        .sum()
+                });
+                let confirming = RwSignal::new(false);
+                Some(view! {
+                    <div class="flex flex-col gap-2 border-t border-slate-200 pt-2 dark:border-slate-700">
+                        <label class="flex items-center gap-2 text-sm">
+                            "Moves"
+                            <select
+                                class=format!("{field} appearance-none")
+                                aria-label="Which moves are allowed"
+                                prop:value=if any { "any" } else { "next" }
+                                on:change=move |ev| {
+                                    let any = event_target_value(&ev) == "any";
+                                    run(Box::pin(async move { api::set_flow(any).await }), "Flow saved.");
+                                }
+                            >
+                                <option value="next">"Next column only, plus the moves below"</option>
+                                <option value="any">"Any column to any column"</option>
+                            </select>
+                        </label>
+                        {(!any)
+                            .then(|| {
+                                let label = label.clone();
+                                let all = all.clone();
+                                view! {
+                                    <ul class="flex flex-wrap gap-2">
+                                        {workflow
+                                            .moves
+                                            .iter()
+                                            .map(|(from, to)| {
+                                                let (from, to) = (*from, *to);
+                                                view! {
+                                                    <li class="flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+                                                        {format!("{} → {}", label(from), label(to))}
+                                                        <button
+                                                            class="text-slate-500 hover:text-red-600"
+                                                            aria-label=format!("Stop allowing {} to {}", label(from), label(to))
+                                                            disabled=move || busy.get()
+                                                            on:click=move |_| {
+                                                                run(Box::pin(async move { api::allow_move(from, to, false).await }), "Move no longer allowed.");
+                                                            }
+                                                        >
+                                                            "×"
+                                                        </button>
+                                                    </li>
+                                                }
+                                            })
+                                            .collect_view()}
+                                    </ul>
+                                    <div class="flex flex-wrap items-center gap-2 text-sm">
+                                        "Also allow"
+                                        <select class=format!("{field} appearance-none") aria-label="Move from" on:change=move |ev| move_from.set(event_target_value(&ev))>
+                                            <option value="">"from…"</option>
+                                            {all.iter().map(|(f, n)| view! { <option value=f.clone()>{n.clone()}</option> }).collect_view()}
+                                        </select>
+                                        "→"
+                                        <select class=format!("{field} appearance-none") aria-label="Move to" on:change=move |ev| move_to.set(event_target_value(&ev))>
+                                            <option value="">"to…"</option>
+                                            {all.iter().map(|(f, n)| view! { <option value=f.clone()>{n.clone()}</option> }).collect_view()}
+                                        </select>
+                                        <button
+                                            class=small
+                                            disabled=move || busy.get() || move_from.with(String::is_empty) || move_to.with(String::is_empty)
+                                            on:click=move |_| {
+                                                let (Some(f), Some(t)) = (column_named(&move_from.get_untracked()), column_named(&move_to.get_untracked())) else {
+                                                    return;
+                                                };
+                                                run(Box::pin(async move { api::allow_move(f, t, true).await }), "Move allowed.");
+                                            }
+                                        >
+                                            "Allow"
+                                        </button>
+                                    </div>
+                                }
+                            })}
+                        <label class="flex items-center gap-2 text-sm">
+                            "New tickets land in"
+                            <select
+                                class=format!("{field} appearance-none")
+                                aria-label="Where new tickets land"
+                                prop:value=landing
+                                on:change=move |ev| {
+                                    if let Some(c) = column_named(&event_target_value(&ev)) {
+                                        run(Box::pin(async move { api::set_landing(c).await }), "Landing column saved.");
+                                    }
+                                }
+                            >
+                                {backlogs.into_iter().map(|(f, n)| view! { <option value=f>{n}</option> }).collect_view()}
+                            </select>
+                        </label>
+                        {(!standard)
+                            .then(|| {
+                                view! {
+                                    <div class="flex flex-wrap items-center gap-2 text-sm">
+                                        <Show
+                                            when=move || confirming.get()
+                                            fallback=move || {
+                                                view! {
+                                                    <button class=small disabled=move || busy.get() on:click=move |_| confirming.set(true)>
+                                                        "Reset to standard"
+                                                    </button>
+                                                }
+                                            }
+                                        >
+                                            <span>
+                                                {format!(
+                                                    "Back to Backlog, To do, Doing and Done? {moving} ticket(s) in added columns move to the standard column of the same kind.",
+                                                )}
+                                            </span>
+                                            <button
+                                                class=format!("{small} text-red-700 dark:text-red-300")
+                                                disabled=move || busy.get()
+                                                on:click=move |_| {
+                                                    confirming.set(false);
+                                                    run(Box::pin(async move { api::reset_columns().await }), "Columns reset to standard.");
+                                                }
+                                            >
+                                                "Reset"
+                                            </button>
+                                            <button class=small on:click=move |_| confirming.set(false)>
+                                                "Cancel"
+                                            </button>
+                                        </Show>
+                                    </div>
+                                }
+                            })}
+                    </div>
+                })
+            }}
+            {move || note.get().map(|n| view! { <p class="text-xs">{n}</p> })}
+        </section>
     }
 }
 
@@ -764,6 +1190,66 @@ fn ArchiveAdmin() -> impl IntoView {
             </div>
             <Show when=move || note.with(Option::is_some)>
                 <p class="text-xs text-amber-700 dark:text-amber-300">{move || note.get().unwrap_or_default()}</p>
+            </Show>
+        </section>
+    }
+}
+
+/// Auto priority (ticket 215): priorities set from requires links, and
+/// whether a priority set by hand wins.
+#[component]
+fn PriorityAdmin() -> impl IntoView {
+    let ctx = Ctx::get();
+    let auto = move || {
+        ctx.board
+            .with(|b| b.as_ref().is_some_and(|b| b.auto_priority))
+    };
+    let manual = move || {
+        ctx.board
+            .with(|b| b.as_ref().is_none_or(|b| b.priority_override))
+    };
+    let note = RwSignal::new(None::<String>);
+    let apply = move |result: Result<amd_ui_model::SyncReport, String>| match result {
+        Ok(report) => {
+            ctx.report(report);
+            note.set(None);
+            ctx.reload();
+        }
+        Err(e) => note.set(Some(e)),
+    };
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Auto priority"</h3>
+            <p class="text-xs text-slate-500">
+                "A ticket becomes at least as urgent as the most urgent ticket that requires it, down a chain, so the priorities on your goals flow to the work they wait on. Raised tickets say why, and switching it off puts them back."
+            </p>
+            <label class="flex items-center gap-2 text-sm font-semibold">
+                <input
+                    type="checkbox"
+                    prop:checked=auto
+                    on:change=move |ev| {
+                        let on = event_target_checked(&ev);
+                        spawn_local(async move { apply(api::set_auto_priority(on).await) });
+                    }
+                />
+                "Set priorities from requires links"
+            </label>
+            <label class="flex items-center gap-2 text-sm font-semibold">
+                <input
+                    type="checkbox"
+                    prop:checked=manual
+                    on:change=move |ev| {
+                        let on = event_target_checked(&ev);
+                        spawn_local(async move { apply(api::set_priority_override(on).await) });
+                    }
+                />
+                "Allow override: a priority set by hand stays"
+            </label>
+            <p class="text-xs text-slate-500">
+                "On: choosing a priority yourself pins that ticket, and Auto in its priority hands it back. Off: a priority you choose is only a floor; auto priority can still raise it."
+            </p>
+            <Show when=move || note.with(Option::is_some)>
+                <p class="text-xs text-red-700 dark:text-red-300">{move || note.get().unwrap_or_default()}</p>
             </Show>
         </section>
     }

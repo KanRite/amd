@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 use anyhow::Result;
 use richrs::prelude::{Console, Style, Tree, TreeNode};
 
-use agile_md::board::{Board, Column};
+use agile_md::board::{Board, Column, Kind};
 use agile_md::task::Task;
 
 static PLAIN: OnceLock<bool> = OnceLock::new();
@@ -74,9 +74,14 @@ pub fn column_forest(board: &Board, column: Column, tags: &[String]) -> Result<V
 /// Print one or more columns of the board. `tags` narrow every column to the
 /// tasks passing them.
 pub fn columns(board: &Board, columns: &[Column], tags: &[String]) -> Result<()> {
+    let workflow = board.workflow();
     let mut loaded = Vec::new();
     for column in columns {
-        loaded.push((*column, column_forest(board, *column, tags)?));
+        loaded.push((
+            *column,
+            heading(&workflow, *column),
+            column_forest(board, *column, tags)?,
+        ));
     }
     if rich() {
         // Falling back rather than failing: a rendering problem should never
@@ -196,11 +201,23 @@ fn sort(nodes: &mut [Node]) {
     }
 }
 
+/// A column's heading: its folder in capitals, as it always was, unless the
+/// team has named it something else (ticket 224), then that name.
+fn heading(workflow: &agile_md::workflow::Workflow, column: Column) -> String {
+    let label = workflow.label(column);
+    let standard = agile_md::workflow::Workflow::standard().label(column);
+    if label == standard {
+        column.as_str().to_uppercase()
+    } else {
+        label.to_uppercase()
+    }
+}
+
 /// The stable text form: `  [id] title  (labels)`, indented by depth.
-fn plain_columns(columns: &[(Column, Vec<Node>)]) {
-    for (column, nodes) in columns {
+fn plain_columns(columns: &[(Column, String, Vec<Node>)]) {
+    for (_, heading, nodes) in columns {
         println!();
-        println!("{}", column.as_str().to_uppercase());
+        println!("{heading}");
         if nodes.is_empty() {
             println!("  (empty)");
             continue;
@@ -227,13 +244,12 @@ fn plain_nodes(nodes: &[Node], depth: usize) {
     }
 }
 
-fn rich_columns(columns: &[(Column, Vec<Node>)]) -> Result<()> {
+fn rich_columns(columns: &[(Column, String, Vec<Node>)]) -> Result<()> {
     let mut console = Console::new();
     console.print("")?;
-    for (column, nodes) in columns {
+    for (column, heading, nodes) in columns {
         let count = count(nodes);
-        let mut tree = Tree::new(format!("{}  ({count})", column.as_str().to_uppercase()))
-            .guide_style(guide_style(*column));
+        let mut tree = Tree::new(format!("{heading}  ({count})")).guide_style(guide_style(*column));
         if nodes.is_empty() {
             tree.add(TreeNode::new("(empty)"));
         } else {
@@ -285,13 +301,14 @@ fn count(nodes: &[Node]) -> usize {
 
 /// Columns read left-to-right as work progresses, so they're coloured that way.
 fn guide_style(column: Column) -> Style {
-    let spec = match column {
+    // By kind (ticket 223), so a team's Review reads as work in progress.
+    let spec = match column.kind() {
         // The backlog is everything not yet committed to, so it reads as the
         // quietest column rather than another stage of progress.
-        Column::Backlog => "bright_black",
-        Column::Todo => "blue",
-        Column::Doing => "yellow",
-        Column::Done => "green",
+        Kind::Backlog => "bright_black",
+        Kind::Todo => "blue",
+        Kind::Doing => "yellow",
+        Kind::Done => "green",
     };
     Style::parse(spec).unwrap_or_default()
 }
@@ -319,6 +336,82 @@ fn labels(node: &Node, root: bool) -> String {
     .flatten()
     .collect::<Vec<String>>()
     .join(" ")
+}
+
+/// `amd tree` (ticket 214): the requires tree, solid edges for what a
+/// ticket requires and dashed ones (spaced, to stand out) for related. On a
+/// terminal: ids link to their tickets, a started sprint's stub is dimmed
+/// and "waits on" is in colour. In a pipe: the same characters, no colour,
+/// and a stub says it's in a started sprint.
+pub fn tree(board: &Board, trees: &[agile_md::requires::TreeNode]) {
+    let colour = rich();
+    for (n, root) in trees.iter().enumerate() {
+        if n > 0 {
+            println!();
+        }
+        println!("{}", tree_line(board, root, colour));
+        tree_children(board, &root.children, "", colour);
+    }
+}
+
+fn tree_children(
+    board: &Board,
+    children: &[agile_md::requires::TreeNode],
+    prefix: &str,
+    colour: bool,
+) {
+    use agile_md::requires::Edge;
+    for (n, child) in children.iter().enumerate() {
+        let last = n + 1 == children.len();
+        let branch = match (last, child.edge) {
+            (false, Edge::Related) => "├ ─ ─ ",
+            (true, Edge::Related) => "└ ─ ─ ",
+            (false, _) => "├──── ",
+            (true, _) => "└──── ",
+        };
+        println!("{prefix}{branch}{}", tree_line(board, child, colour));
+        let deeper = format!("{prefix}{}", if last { "      " } else { "│     " });
+        tree_children(board, &child.children, &deeper, colour);
+    }
+}
+
+fn tree_line(board: &Board, node: &agile_md::requires::TreeNode, colour: bool) -> String {
+    let (dim, yellow, bold, reset) = if colour {
+        ("\x1b[2m", "\x1b[33m", "\x1b[1m", "\x1b[0m")
+    } else {
+        ("", "", "", "")
+    };
+    let id = if colour {
+        board
+            .find(&node.id)
+            .map(|t| link(&t))
+            .unwrap_or_else(|_| node.id.clone())
+    } else {
+        node.id.clone()
+    };
+    if node.seen {
+        return format!("{dim}↑ {} {} (above){reset}", node.id, node.title);
+    }
+    if let Some(sprint) = &node.stub {
+        return format!(
+            "{dim}{} {} · in started sprint {sprint}{reset}",
+            node.id, node.title
+        );
+    }
+    let mut line = format!("{id} {} · {}", node.title, node.place);
+    if node.current {
+        line = format!("{bold}{line}{reset}  ◀");
+    }
+    if node.done {
+        line.push_str(" ✓");
+    }
+    if !node.unmet.is_empty() {
+        line.push_str(&format!(
+            "  {yellow}waits on {}{reset}",
+            node.unmet.join(", ")
+        ));
+    }
+    line
 }
 
 #[cfg(test)]

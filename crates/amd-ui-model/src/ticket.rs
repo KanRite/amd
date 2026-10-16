@@ -49,10 +49,15 @@ pub enum SortOrder {
     YoungestFirst,
     /// Lowest priority first, then oldest first within a priority.
     LowestFirst,
+    /// What's needed first (ticket 230): a ticket comes before the tickets
+    /// in its column that require it; otherwise highest priority, then
+    /// oldest. The default on a board with auto priority on.
+    Automatic,
 }
 
 impl SortOrder {
-    pub const ALL: [SortOrder; 3] = [
+    pub const ALL: [SortOrder; 4] = [
+        SortOrder::Automatic,
         SortOrder::Default,
         SortOrder::YoungestFirst,
         SortOrder::LowestFirst,
@@ -64,6 +69,7 @@ impl SortOrder {
             SortOrder::Default => "Priority, then oldest",
             SortOrder::YoungestFirst => "Youngest first",
             SortOrder::LowestFirst => "Lowest first",
+            SortOrder::Automatic => "Automatic: what's needed first",
         }
     }
 
@@ -73,6 +79,7 @@ impl SortOrder {
             SortOrder::Default => "default",
             SortOrder::YoungestFirst => "youngest",
             SortOrder::LowestFirst => "lowest",
+            SortOrder::Automatic => "automatic",
         }
     }
 
@@ -83,10 +90,47 @@ impl SortOrder {
             .unwrap_or_default()
     }
 
-    /// Compares two tickets in this order.
+    /// Puts `list` in this order. [`SortOrder::Automatic`] is more than a
+    /// comparison: a ticket goes after every ticket in the list it
+    /// requires (on its own board), the rest by priority then age; a cycle
+    /// is broken at its highest-priority, oldest ticket.
+    pub fn sort(self, list: &mut Vec<crate::TicketSummary>) {
+        list.sort_by(|a, b| self.compare(a, b));
+        if self != SortOrder::Automatic {
+            return;
+        }
+        let needs: Vec<Vec<usize>> = list
+            .iter()
+            .map(|t| {
+                crate::waiting::requires(t, list.iter())
+                    .into_iter()
+                    .filter(|r| r.repo == t.repo)
+                    .filter_map(|r| {
+                        list.iter()
+                            .position(|o| o.file == r.file && o.repo == r.repo)
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut placed = vec![false; list.len()];
+        let mut order = Vec::with_capacity(list.len());
+        while order.len() < list.len() {
+            let next = (0..list.len())
+                .find(|&i| !placed[i] && needs[i].iter().all(|&j| placed[j] || j == i))
+                .or_else(|| (0..list.len()).find(|&i| !placed[i]))
+                .unwrap_or(0);
+            placed[next] = true;
+            order.push(next);
+        }
+        let mut taken: Vec<Option<crate::TicketSummary>> = list.drain(..).map(Some).collect();
+        list.extend(order.into_iter().filter_map(|i| taken[i].take()));
+    }
+
+    /// Compares two tickets in this order ([`SortOrder::Automatic`]
+    /// compares as the default; its dependency order is [`sort`](Self::sort)).
     pub fn compare(self, a: &crate::TicketSummary, b: &crate::TicketSummary) -> std::cmp::Ordering {
         match self {
-            SortOrder::Default => default_order(a, b),
+            SortOrder::Default | SortOrder::Automatic => default_order(a, b),
             SortOrder::YoungestFirst => age(b, a)
                 // A ticket without a date has no age to compare; keep it last.
                 .then_with(|| undated(a).cmp(&undated(b))),
@@ -222,7 +266,9 @@ pub fn apply_fields(content: &str, new: &Fields) -> String {
 pub fn ensure_priority(content: &str) -> Result<String, String> {
     let priority = parse_frontmatter(content).priority;
     let priority = priority.trim();
-    if PRIORITIES.contains(&priority) {
+    // `auto` hands the ticket back to auto priority (ticket 215); amd-lib
+    // turns it into a priority as it saves.
+    if PRIORITIES.contains(&priority) || priority == "auto" {
         return Ok(content.to_string());
     }
     if !priority.is_empty() {
@@ -467,6 +513,7 @@ mod tests {
             clone_of: String::new(),
             clones: Vec::new(),
             links: Vec::new(),
+            priority_from: String::new(),
         }
     }
 
@@ -615,5 +662,40 @@ mod tests {
     fn tags_parse_from_a_comma_list() {
         assert_eq!(parse_tags(" editor, ui ,,board"), ["editor", "ui", "board"]);
         assert!(parse_tags("  ").is_empty());
+    }
+
+    /// Ticket 230: what's needed first, then priority and age.
+    #[test]
+    fn automatic_puts_what_is_needed_first() {
+        let card = |id: &str, priority: &str, links: &[&str]| crate::TicketSummary {
+            id: id.into(),
+            file: format!("{id}-t.md"),
+            priority: priority.into(),
+            created: "2026-10-01".into(),
+            links: links.iter().map(|l| l.to_string()).collect(),
+            ..Default::default()
+        };
+        let mut list = vec![
+            card("003", "low", &["requires:004"]),
+            card(
+                "004",
+                "low",
+                &["requires:005", "requires:006", "required-by:003"],
+            ),
+            card("005", "low", &["required-by:004"]),
+            card("006", "low", &["required-by:004"]),
+            card("007", "high", &[]),
+        ];
+        SortOrder::Automatic.sort(&mut list);
+        let ids: Vec<&str> = list.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["007", "005", "006", "004", "003"]);
+        // A cycle still sorts everything once.
+        let mut cycle = vec![
+            card("001", "low", &["requires:002"]),
+            card("002", "low", &["requires:001"]),
+        ];
+        SortOrder::Automatic.sort(&mut cycle);
+        assert_eq!(cycle.len(), 2);
+        assert_eq!(SortOrder::from_key("automatic"), SortOrder::Automatic);
     }
 }
