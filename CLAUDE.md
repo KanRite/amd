@@ -1243,6 +1243,25 @@ project, into one `amdui` window:
   that's only *registered* here (a project's own tickets or documents
   repository, a scratch board) just loses its registration. Neither is an
   error. The clone is never touched. It takes `--project` like `register`.
+- **`amd repo new <name> [--for <ref>]`** (ticket 228,
+  `crates/amd-lib/src/new_repo.rs`): makes a repository for the project,
+  or connects one that's already there, from where the tickets
+  repository's `origin` is (`new_repo::forge`): on GitHub under the same
+  owner through `gh` (a closure, `new_repo::gh`, so tests pass a fake),
+  beside a local origin as a bare repository (what test.sh and the demo
+  use), or only here (`git init`) with no origin; another forge is
+  refused. `create` checks the name as typed (`validate_project_name`),
+  refuses one already cloned or in the way, defaults visibility to the
+  tickets repository's, clones with `clone::sibling_url`, adds a starter
+  README on an empty one (pushed), and protects `main` on GitHub
+  (`github::protect_main`, now in amd-lib). The caller then `register`s
+  the clone (the machine's registry, kept out of `create` so tests never
+  touch it), and in one commit `declare`s it and `record_on_ticket`
+  (repository set, a signed, dated note via `task::with_note`, moved from
+  assistant.rs). amdui: the editor's Repository select has "＋ New
+  repository…" (admins only; it saves the ticket first if edited), the
+  `NewRepoDialog` (`repo_defaults`, `create_repository`, which checks
+  `boards::admin_access`), then reopens the ticket. Not in the MCP tools.
 - **`amd clone [name | --all]`** (ticket 108, `crates/amd-lib/src/clone.rs`):
   clones a declared repository this machine hasn't got into the project
   directory, from the tickets repo's own `origin` with the last path part

@@ -283,6 +283,23 @@ in `~/.config/agile-md/repos`, written only when a repository is first seen:
 /Users/you/code/other-repo
 ```
 
+**A repository the project hasn't got yet** can be made from the ticket that
+needs it: the editor's Repository list has **＋ New repository…** (for the
+project's admins), and the command line has `amd repo new`:
+
+```bash
+amd repo new acme-payments --for 12          # make it, clone it, add it to the project, set ticket 12
+amd repo new acme-payments --public --description "Card payments"
+```
+
+It's made under the tickets repository's owner on GitHub (through `gh`),
+private or public as the tickets repository is unless you say otherwise,
+with a starter README (`--no-readme` leaves it out) and `main` protected
+where GitHub allows. A repository of that name that's already there is
+connected instead. It's cloned beside the tickets repository, added to the
+project for everyone, and the ticket gets it as its repository with a dated
+note saying so, all in one commit.
+
 The tickets themselves are never copied into a store. They're markdown in each
 repo, they change when you check out a branch or pull someone's work, and an
 index of them would be wrong the moment it was written. Reading a board is a
