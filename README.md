@@ -482,7 +482,10 @@ disagree.
   type, tags, points, priority), its relationships (parent, children,
   related, and tickets that link to it), each a click away, and its body as
   rich text, with a switch to the raw markdown. Lock, renew, unlock — or break someone else's lock, after
-  a confirmation — from the same window.
+  a confirmation — from the same window. **Save and New** saves the ticket
+  and opens New ticket linked back to it ("012 requires this" unless you
+  pick related or no link), for when you find it depends on a ticket that
+  doesn't exist yet.
 - **Filters** across the top: repository, person, a search, the sort order,
   and Reset.
 - **New ticket**, **+ Sprint**, **+ Epic**; start a sprint from its box.

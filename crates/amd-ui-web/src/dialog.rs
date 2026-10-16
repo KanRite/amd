@@ -6,12 +6,16 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
-use crate::app::{Ctx, Modal, Overlay};
+use crate::app::{Ctx, LinkBack, LinkKind, Modal, Overlay};
 
 #[component]
-pub fn NewTicketDialog() -> impl IntoView {
+pub fn NewTicketDialog(link: Option<LinkBack>) -> impl IntoView {
     let ctx = Ctx::get();
     let title = RwSignal::new(String::new());
+    // From Save and New (ticket 227): how it ties back, "requires" unless
+    // changed.
+    let kind = RwSignal::new(LinkKind::Requires);
+    let link = StoredValue::new(link);
     let draft = RwSignal::new(false);
     let busy = RwSignal::new(false);
     // Why the create failed, shown in the dialog (ticket 021): the status
@@ -28,9 +32,26 @@ pub fn NewTicketDialog() -> impl IntoView {
         spawn_local(async move {
             // Onto the board being shown (the project's own under All), and
             // about the repository being filtered to, if any (ticket 101).
-            let repo = ctx.repo.get_untracked();
+            let back = link.get_value();
+            // Linked tickets share a board, so it goes on the other's.
+            let repo = match &back {
+                Some(b) if !b.repo.is_empty() => Some(b.repo.clone()),
+                _ => ctx.repo.get_untracked(),
+            };
             let about = ctx.about.get_untracked();
-            match api::create_ticket(&t, repo.as_deref(), about.as_deref(), as_draft).await {
+            let tie = back
+                .as_ref()
+                .map(|b| (b.id.clone(), kind.get_untracked()))
+                .filter(|(_, k)| *k != LinkKind::None);
+            match api::create_ticket(
+                &t,
+                repo.as_deref(),
+                about.as_deref(),
+                as_draft,
+                tie.as_ref().map(|(id, k)| (id.as_str(), *k)),
+            )
+            .await
+            {
                 Ok(created) => {
                     ctx.report(created.sync);
                     ctx.reload();
@@ -67,6 +88,31 @@ pub fn NewTicketDialog() -> impl IntoView {
                         }
                     />
                 </label>
+                {link
+                    .get_value()
+                    .map(|b| {
+                        let name = format!("{} {}", b.id, b.title);
+                        view! {
+                            <label class="flex flex-col gap-1 text-sm">
+                                "Link to"
+                                <select
+                                    class="appearance-none rounded border border-slate-300 bg-slate-50 px-2 py-1.5 dark:border-slate-600 dark:bg-slate-900"
+                                    aria-label="How the new ticket links back"
+                                    on:change=move |ev| {
+                                        kind.set(match event_target_value(&ev).as_str() {
+                                            "related" => LinkKind::Related,
+                                            "none" => LinkKind::None,
+                                            _ => LinkKind::Requires,
+                                        })
+                                    }
+                                >
+                                    <option value="requires" selected>{format!("{name} requires this")}</option>
+                                    <option value="related">{format!("Related to {name}")}</option>
+                                    <option value="none">"No link"</option>
+                                </select>
+                            </label>
+                        }
+                    })}
                 <label class="flex items-center gap-2 text-sm">
                     <input
                         type="checkbox"

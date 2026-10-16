@@ -349,6 +349,10 @@ pub struct TicketFields {
     /// On creation, refs of the tickets it requires (ticket 214), linked
     /// both ways in the same commit. Ignored on an edit.
     pub requires: Vec<String>,
+    /// On creation, refs of tickets that require it (ticket 227: amdui's
+    /// Save and New, for a ticket found to depend on one that's missing),
+    /// linked in the same commit.
+    pub required_by: Vec<String>,
 }
 
 /// Make a ticket the way `amd new` does: render it from the templates, write
@@ -356,7 +360,7 @@ pub struct TicketFields {
 /// `outcome.dest` is where it landed.
 pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
     // Every ticket it requires must exist before anything is written.
-    for reference in &fields.requires {
+    for reference in fields.requires.iter().chain(&fields.required_by) {
         board.find(reference)?;
     }
     let templates = crate::templates::Templates::load(board)?;
@@ -395,6 +399,17 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
             .set_priority(created.task.hash()?, fields.priority.trim())?;
     }
     let mut required_lines = Vec::new();
+    for reference in &fields.required_by {
+        let other = board.find(reference)?;
+        required_lines.extend(crate::links::apply(
+            &other,
+            crate::links::LinkType::Requires,
+            &crate::task::Task::from_path(&created.task.path, created.task.column)
+                .unwrap_or_else(|| created.task.clone()),
+            false,
+            false,
+        )?);
+    }
     for reference in &fields.requires {
         let other = board.find(reference)?;
         required_lines.extend(crate::links::apply(
@@ -922,6 +937,50 @@ mod tests {
             body: "## Notes\nhello\n".to_string(),
             ..TicketFields::default()
         }
+    }
+
+    /// Ticket 227: Save and New makes the missing ticket already required
+    /// by the one being edited, both ends written in the one commit.
+    #[test]
+    fn a_new_ticket_can_be_required_by_an_existing_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = empty_board(dir.path());
+        create_ticket(&board, &fields("Checkout")).unwrap();
+        let outcome = create_ticket(
+            &board,
+            &TicketFields {
+                required_by: vec!["001".into()],
+                ..fields("Payment provider")
+            },
+        )
+        .unwrap();
+        assert!(
+            outcome
+                .events
+                .iter()
+                .any(|e| matches!(e, Event::Info(t) if t.contains("001") && t.contains("002"))),
+            "{:?}",
+            outcome.events
+        );
+        let checkout = board.find("001").unwrap();
+        let ids: Vec<String> = crate::requires::required(&board, &checkout)
+            .unwrap()
+            .iter()
+            .map(|t| t.id_display())
+            .collect();
+        assert_eq!(ids, ["002"]);
+        assert!(
+            create_ticket(
+                &board,
+                &TicketFields {
+                    required_by: vec!["999".into()],
+                    ..fields("Nowhere")
+                }
+            )
+            .is_err(),
+            "an unknown ticket refuses before anything is written"
+        );
+        assert!(board.find("003").is_err());
     }
 
     #[test]
