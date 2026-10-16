@@ -53,7 +53,9 @@
           <h3>Tickets</h3>
           <ul>
             <li>One flexible ticket, from templates you can change</li>
-            <li>Priority, points, assignee, tags, parent and related links</li>
+            <li>Priority, points, assignee, tags and repository</li>
+            <li>Typed links (requires, related, parent, supersedes) and a tree of them</li>
+            <li>Save and New for a ticket that depends on one not made yet</li>
             <li>Drafts that can't leave the backlog until ready</li>
             <li>A git branch per ticket when work starts</li>
             <li>Search and filters</li>
@@ -62,7 +64,9 @@
         <article>
           <h3>Workflow rules</h3>
           <ul>
-            <li>One column at a time: backlog, todo, doing, done</li>
+            <li>One column at a time, unless the team allows other moves</li>
+            <li>Your own columns: Triage, Review, Released and more</li>
+            <li>Done waits for what a ticket requires and its children</li>
             <li>A WIP limit on doing</li>
             <li>Locks while a ticket is being worked on</li>
             <li>Every change committed and pushed, boards kept in step</li>
@@ -72,6 +76,7 @@
           <h3>Planning</h3>
           <ul>
             <li>Epics and sprints, both optional</li>
+            <li>Auto priority from requires links, and a what's-needed-first sort</li>
             <li>Roadmaps with milestones, working days and time left</li>
             <li>My work across every project on your machine</li>
           </ul>
@@ -90,6 +95,7 @@
           <ul>
             <li><code>amd init</code> and <code>amd join</code> set a project up</li>
             <li>Several repositories per project, several projects</li>
+            <li>New repositories made from the ticket that needs them</li>
             <li>Team settings for admins; your own preferences</li>
             <li>GitHub issues arrive as tickets to triage</li>
             <li>Deleted tickets recovered from history</li>

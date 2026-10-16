@@ -59,7 +59,12 @@ no daemon, no database.
 
 - **One flexible ticket**, rendered from templates each project can change.
 - **Fields:** priority, story points (1, 2, 3, 5, 8, 13), assignee from the
-  project's users, tags, the repository it's about, parent and related links.
+  project's users, tags and the repository it's about.
+- **Typed links:** requires, related, parent and child, clone, supersedes,
+  each written on both tickets and changeable later. A tree draws what each
+  ticket requires and relates to, and cards show how many links they have.
+- **Save and New:** found a ticket depends on one that doesn't exist yet?
+  Save it and make the missing one, already linked.
 - **Who created it** is recorded; **who last edited it** comes from git.
 - **Tags** are uppercase and can be limited to the project's own list; DRAFT
   and TRIAGE are built in.
@@ -70,7 +75,12 @@ no daemon, no database.
 
 ### Workflow rules
 
-- **One column at a time:** backlog → todo → doing → done, never a jump.
+- **One column at a time:** backlog → todo → doing → done, unless the team
+  allows other moves.
+- **Your own columns:** add Triage, Review, Released and the like, rename,
+  reorder and remove them; each has a kind that decides what it does, and
+  reset puts the standard four back.
+- **Done waits** for the tickets a ticket requires and for its children.
 - **A WIP limit on doing** (2 unless changed), with a deliberate override.
 - **Locks:** a ticket is yours while it's in doing and is released when it
   leaves; someone else's lock is only broken on purpose.
@@ -81,7 +91,9 @@ no daemon, no database.
 ### Planning
 
 - **Epics and sprints**, both optional; a started sprint takes nothing more
-  and gives nothing back.
+  and gives nothing back, and can't start while it needs a ticket outside it.
+- **Auto priority** (optional): a ticket is at least as urgent as what
+  requires it, and the **Automatic** sort shows what's needed first.
 - **Roadmaps:** one per board, made of milestones that create its epics or
   sprints, with working days, time left and whether each is on track.
 - **My work:** your todo and doing tickets across every project on your
@@ -101,7 +113,8 @@ no daemon, no database.
 
 - **`amd init`** creates a project's repositories on GitHub; **`amd join`**
   gives a teammate the project and adds them as a user.
-- **Several repositories per project**, and several projects side by side.
+- **Several repositories per project**, and several projects side by side;
+  a new repository can be made from the ticket that needs it.
 - **Admin** settings are committed for the team; **Preferences** are your
   own, on your machine.
 - **Archive a project** to make it read-only, on GitHub too if you like.
