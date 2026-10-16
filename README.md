@@ -290,6 +290,23 @@ tickets show on the project's board too, each card saying which repository
 it came from, since ids restart at 001 on every board. The desktop board's
 Repository filter narrows it to one.
 
+**A repository the project hasn't got yet** can be made from the ticket that
+needs it: the editor's Repository list has **＋ New repository…** (for the
+project's admins), and the command line has `amd repo new`:
+
+```bash
+amd repo new acme-payments --for 12          # make it, clone it, add it to the project, set ticket 12
+amd repo new acme-payments --public --description "Card payments"
+```
+
+It's made under the tickets repository's owner on GitHub (through `gh`),
+private or public as the tickets repository is unless you say otherwise,
+with a starter README (`--no-readme` leaves it out) and `main` protected
+where GitHub allows. A repository of that name that's already there is
+connected instead. It's cloned beside the tickets repository, added to the
+project for everyone, and the ticket gets it as its repository with a dated
+note saying so, all in one commit.
+
 The tickets themselves are never copied into a store. They're markdown in each
 repo, they change when you check out a branch or pull someone's work, and an
 index of them would be wrong the moment it was written. Reading a board is a
@@ -478,7 +495,10 @@ disagree.
   type, tags, points, priority), its relationships (parent, children,
   related, and tickets that link to it), each a click away, and its body as
   rich text, with a switch to the raw markdown. Lock, renew, unlock — or break someone else's lock, after
-  a confirmation — from the same window.
+  a confirmation — from the same window. **Save and New** saves the ticket
+  and opens New ticket linked back to it ("012 requires this" unless you
+  pick related or no link), for when you find it depends on a ticket that
+  doesn't exist yet.
 - **Filters** across the top: repository, person, a search, the sort order,
   and Reset.
 - **New ticket**, **+ Sprint**, **+ Epic**; start a sprint from its box.

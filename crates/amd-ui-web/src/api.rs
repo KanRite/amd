@@ -152,11 +152,14 @@ struct SaveArgs<'a> {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TitleArgs<'a> {
     title: &'a str,
     repo: Option<&'a str>,
     repository: Option<&'a str>,
     draft: bool,
+    required_by: Option<&'a str>,
+    related_to: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -313,12 +316,16 @@ pub async fn ticket_family(
 
 /// Creates a ticket in `repo`'s backlog (the board's own when `None`),
 /// as a draft when `draft` (ticket 114).
+/// `link` ties it back to the ticket it was made from (ticket 227): that
+/// ticket's id, and whether it requires the new one or relates to it.
 pub async fn create_ticket(
     title: &str,
     repo: Option<&str>,
     repository: Option<&str>,
     draft: bool,
+    link: Option<(&str, crate::app::LinkKind)>,
 ) -> Result<Created, String> {
+    use crate::app::LinkKind;
     call(
         "create_ticket",
         &TitleArgs {
@@ -326,6 +333,8 @@ pub async fn create_ticket(
             repo,
             repository,
             draft,
+            required_by: link.and_then(|(id, k)| (k == LinkKind::Requires).then_some(id)),
+            related_to: link.and_then(|(id, k)| (k == LinkKind::Related).then_some(id)),
         },
     )
     .await
@@ -494,6 +503,44 @@ pub async fn set_column_wip(
     limit: Option<u32>,
 ) -> Result<SyncReport, String> {
     call("set_column_wip", &ColumnWipArgs { column, limit }).await
+}
+
+/// Where a new repository would be made, and its defaults (ticket 228).
+pub async fn repo_defaults() -> Result<amd_ui_model::RepoDefaults, String> {
+    call("repo_defaults", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct NewRepoArgs<'a> {
+    name: &'a str,
+    description: &'a str,
+    private: bool,
+    readme: bool,
+    place: Option<&'a Place>,
+    file: Option<&'a str>,
+}
+
+/// Makes (or connects) a repository for the project, for the ticket at
+/// `place`/`file` when given.
+pub async fn create_repository(
+    name: &str,
+    description: &str,
+    private: bool,
+    readme: bool,
+    ticket: Option<(&Place, &str)>,
+) -> Result<SyncReport, String> {
+    call(
+        "create_repository",
+        &NewRepoArgs {
+            name,
+            description,
+            private,
+            readme,
+            place: ticket.map(|(p, _)| p),
+            file: ticket.map(|(_, f)| f),
+        },
+    )
+    .await
 }
 
 #[derive(Serialize)]

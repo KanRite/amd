@@ -396,7 +396,7 @@ pub fn task_at(board: &Board, place: &Place, file: &str) -> Result<Task> {
 /// takes a moment, and the board reloads every time a file changes. The
 /// project's `admins` list is read fresh each time, so editing it shows at
 /// once.
-fn admin_access(board: &Board) -> ui::AdminAccess {
+pub fn admin_access(board: &Board) -> ui::AdminAccess {
     use agile_md::access::{self, GitHub};
     static ASKED: Mutex<Vec<(std::path::PathBuf, GitHub)>> = Mutex::new(Vec::new());
     let decided = access::admin_access_with(board, |repo| {

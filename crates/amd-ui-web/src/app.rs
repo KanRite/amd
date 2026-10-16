@@ -43,13 +43,17 @@ pub enum Overlay {
         place: Place,
         file: String,
     },
-    NewTicket,
+    /// New ticket; from the editor's Save and New, linked back to the
+    /// ticket it came from (ticket 227).
+    NewTicket(Option<LinkBack>),
     NewEpic,
     NewSprint,
     Admin,
     Preferences,
     /// A "(not cloned)" repository chosen in the filter: clone it? (108)
     CloneRepo(String),
+    /// A new repository for the project, from a ticket (ticket 228).
+    NewRepo(NewRepoFor),
     /// A ticket dropped on a column at its WIP limit: move it anyway?
     OverLimit {
         file: String,
@@ -57,6 +61,33 @@ pub enum Overlay {
         to: Place,
         reason: String,
     },
+}
+
+/// The ticket a new one is made from with Save and New (ticket 227): on
+/// its board, by id and title.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinkBack {
+    pub repo: String,
+    pub id: String,
+    pub title: String,
+}
+
+/// The ticket a new repository is made for (ticket 228).
+#[derive(Clone, Debug, PartialEq)]
+pub struct NewRepoFor {
+    pub place: Place,
+    pub file: String,
+    pub id: String,
+    pub title: String,
+}
+
+/// How a ticket made with Save and New is tied to the one it came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkKind {
+    /// That ticket requires the new one: it was found to depend on it.
+    Requires,
+    Related,
+    None,
 }
 
 /// State shared by every component, provided as context. All fields are
@@ -366,7 +397,7 @@ pub fn App() -> impl IntoView {
                     <button
                         class="whitespace-nowrap rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
                         disabled=move || ctx.board.with(|b| b.as_ref().is_none_or(|b| b.archived))
-                        on:click=move |_| ctx.overlay.set(Some(Overlay::NewTicket))
+                        on:click=move |_| ctx.overlay.set(Some(Overlay::NewTicket(None)))
                     >
                         "New ticket"
                     </button>
@@ -467,12 +498,15 @@ pub fn App() -> impl IntoView {
 
             {move || match ctx.overlay.get() {
                 Some(Overlay::Editor(doc)) => view! { <Editor doc /> }.into_any(),
-                Some(Overlay::NewTicket) => view! { <NewTicketDialog /> }.into_any(),
+                Some(Overlay::NewTicket(link)) => view! { <NewTicketDialog link /> }.into_any(),
                 Some(Overlay::NewEpic) => view! { <NewEpicDialog /> }.into_any(),
                 Some(Overlay::NewSprint) => view! { <NewSprintDialog /> }.into_any(),
                 Some(Overlay::Admin) => view! { <AdminPanel /> }.into_any(),
                 Some(Overlay::Preferences) => view! { <PreferencesPanel /> }.into_any(),
                 Some(Overlay::CloneRepo(name)) => view! { <CloneRepoDialog name /> }.into_any(),
+                Some(Overlay::NewRepo(ticket)) => {
+                    view! { <crate::dialog::NewRepoDialog ticket /> }.into_any()
+                }
                 Some(Overlay::Tree { place, file }) => {
                     view! { <crate::tree::TreePanel place file /> }.into_any()
                 }
