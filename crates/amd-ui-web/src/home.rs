@@ -111,7 +111,7 @@ pub fn HomeBar() -> impl IntoView {
             }
         });
     };
-    let small = "rounded border border-slate-300 px-2.5 py-1.5 text-sm hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:border-slate-600 dark:hover:bg-slate-700";
+    let small = "rounded border border-slate-300 px-2.5 py-1.5 text-sm hover:bg-slate-100 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent dark:border-slate-600 dark:hover:bg-slate-700";
     let doc_button = move |label: &'static str, folder: &'static str, help: &'static str| {
         let available = move || current().is_some_and(|p| p.documents);
         let title = move || match current() {
