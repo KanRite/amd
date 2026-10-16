@@ -119,6 +119,9 @@ pub struct Ctx {
     pub dragging: RwSignal<Option<(String, Place)>>,
     /// How every column and epic is ordered (the Sort dropdown).
     pub sort: RwSignal<SortOrder>,
+    /// Whether the sort was picked in the dropdown (ticket 230); until it
+    /// is, it follows the board's default.
+    pub sort_chosen: RwSignal<bool>,
     /// The search box: only matching cards are shown while it has text.
     pub search: RwSignal<String>,
     /// Which repository's *board* new tickets, epics and WIP limits go to;
@@ -202,9 +205,21 @@ impl Ctx {
     /// order chosen in the Sort dropdown.
     pub fn shown(self, mut list: Vec<TicketSummary>) -> Vec<TicketSummary> {
         list.retain(|t| self.in_view(t));
-        let order = self.sort.get();
-        list.sort_by(|a, b| order.compare(a, b));
+        self.sort.get().sort(&mut list);
         list
+    }
+
+    /// The board's own sort (ticket 230): Automatic where auto priority is
+    /// on, else priority then oldest.
+    pub fn default_sort(self) -> SortOrder {
+        if self
+            .board
+            .with(|b| b.as_ref().is_some_and(|b| b.auto_priority))
+        {
+            SortOrder::Automatic
+        } else {
+            SortOrder::Default
+        }
     }
 
     /// Whether a card passes the repository and user filters and the search.
@@ -220,7 +235,7 @@ impl Ctx {
     pub fn filters_changed(self) -> bool {
         self.about.with(Option::is_some)
             || self.user.with(|u| *u != Assigned::Anyone)
-            || self.sort.get() != SortOrder::default()
+            || self.sort.get() != self.default_sort()
             || self.searching()
     }
 
@@ -229,7 +244,8 @@ impl Ctx {
     pub fn reset_filters(self) {
         self.about.set(None);
         self.user.set(Assigned::Anyone);
-        self.sort.set(SortOrder::default());
+        self.sort_chosen.set(false);
+        self.sort.set(self.default_sort());
         self.search.set(String::new());
     }
 
@@ -284,6 +300,7 @@ pub fn App() -> impl IntoView {
         focus_scroll: RwSignal::new(false),
         dragging: RwSignal::new(None),
         sort: RwSignal::new(SortOrder::default()),
+        sort_chosen: RwSignal::new(false),
         search: RwSignal::new(String::new()),
         repo: RwSignal::new(None),
         about: RwSignal::new(None),
@@ -298,6 +315,14 @@ pub fn App() -> impl IntoView {
         idea: RwSignal::new(None),
     };
     provide_context(ctx);
+    // The sort follows the board's default (ticket 230: Automatic with auto
+    // priority on) until one is picked in the dropdown.
+    Effect::new(move |_| {
+        let wanted = ctx.default_sort();
+        if !ctx.sort_chosen.get_untracked() && ctx.sort.get_untracked() != wanted {
+            ctx.sort.set(wanted);
+        }
+    });
     // A document belongs to the project it was opened in (ticket 175):
     // whatever switches project (the landing page's picker or buttons, the
     // header's switcher, a Projects row), the open document goes with it,
@@ -1120,7 +1145,7 @@ fn FilterBar() -> impl IntoView {
             <Marked active=Signal::derive(move || ctx.searching())>
                 <SearchBox />
             </Marked>
-            <Marked active=Signal::derive(move || ctx.sort.get() != SortOrder::default())>
+            <Marked active=Signal::derive(move || ctx.sort.get() != ctx.default_sort())>
             // WebKit draws a native (white) box for a <select> unless its
             // appearance is turned off, so the select is unstyled and
             // painted indigo itself, with its own arrow.
@@ -1132,7 +1157,10 @@ fn FilterBar() -> impl IntoView {
                 <select
                     class="cursor-pointer appearance-none border-0 bg-accent-600 pr-5 font-medium text-white group-hover:bg-accent-500 focus:outline-none"
                     prop:value=move || ctx.sort.get().key()
-                    on:change=move |ev| ctx.sort.set(SortOrder::from_key(&event_target_value(&ev)))
+                    on:change=move |ev| {
+                        ctx.sort_chosen.set(true);
+                        ctx.sort.set(SortOrder::from_key(&event_target_value(&ev)));
+                    }
                 >
                     // The open list is indigo too, with white text.
                     {SortOrder::ALL
