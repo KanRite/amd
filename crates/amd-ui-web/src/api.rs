@@ -152,11 +152,14 @@ struct SaveArgs<'a> {
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TitleArgs<'a> {
     title: &'a str,
     repo: Option<&'a str>,
     repository: Option<&'a str>,
     draft: bool,
+    required_by: Option<&'a str>,
+    related_to: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -313,12 +316,16 @@ pub async fn ticket_family(
 
 /// Creates a ticket in `repo`'s backlog (the board's own when `None`),
 /// as a draft when `draft` (ticket 114).
+/// `link` ties it back to the ticket it was made from (ticket 227): that
+/// ticket's id, and whether it requires the new one or relates to it.
 pub async fn create_ticket(
     title: &str,
     repo: Option<&str>,
     repository: Option<&str>,
     draft: bool,
+    link: Option<(&str, crate::app::LinkKind)>,
 ) -> Result<Created, String> {
+    use crate::app::LinkKind;
     call(
         "create_ticket",
         &TitleArgs {
@@ -326,6 +333,8 @@ pub async fn create_ticket(
             repo,
             repository,
             draft,
+            required_by: link.and_then(|(id, k)| (k == LinkKind::Requires).then_some(id)),
+            related_to: link.and_then(|(id, k)| (k == LinkKind::Related).then_some(id)),
         },
     )
     .await

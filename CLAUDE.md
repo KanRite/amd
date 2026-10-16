@@ -932,6 +932,14 @@ off**, ticket 141) to
   made and `Created.unlinked` becomes a warning. Same board only, since a
   bare id can't name a ticket on another.
 
+- **Save and New** (ticket 227): the editor's button saves the ticket
+  (when it has edits) and opens `Overlay::NewTicket(Some(LinkBack))`,
+  whose "Link to" choice (`LinkKind`: requires, the default, related, or
+  none) goes to the `create_ticket` command as `required_by`/`related_to`.
+  `TicketFields.required_by` links each named ticket as requiring the new
+  one in the `new:` commit; the new ticket goes on the linked ticket's
+  board.
+
 - **Typed links** (ticket 207, `crates/amd-lib/src/links.rs`, `amd link
   <ref> <ref>... [--type T] [--remove] [--one-way]`, the MCP `link_tickets`,
   the editor's **Add link**). `LinkType` has nine kinds, each with an

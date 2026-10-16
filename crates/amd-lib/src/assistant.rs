@@ -940,6 +940,7 @@ fn create_ticket(args: &Value) -> Result<Reply> {
         body: arg(args, "body").unwrap_or_default(),
         priority: arg(args, "priority").unwrap_or_default(),
         requires: list(args, "requires").unwrap_or_default(),
+        required_by: Vec::new(),
     };
     let unknown = board_settings::unknown_assignee(board, &fields.assignee);
     let outcome = transition::create_ticket(board, &fields)?;

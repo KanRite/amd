@@ -216,6 +216,7 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
         }
     };
 
+    let file_for_new = file.clone();
     let save = move |_| {
         let file = file.clone();
         // Same rule the backend applies; checking here keeps the editor open
@@ -237,6 +238,46 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
             }
             saving.set(false);
         });
+    };
+
+    // Save and New (ticket 227): saves this ticket if it has edits, then
+    // opens New ticket linked back to it, for a ticket found to depend on
+    // one that's missing.
+    let save_and_new = {
+        let file = file_for_new;
+        move |_| {
+            let back = crate::app::LinkBack {
+                repo: place.get_value().repo,
+                id: id.get_untracked(),
+                title: fields.with_untracked(|f| f.title.clone()),
+            };
+            let open_new = move || {
+                ctx.overlay
+                    .set(Some(Overlay::NewTicket(Some(back.clone()))))
+            };
+            if !dirty.get_untracked() {
+                open_new();
+                return;
+            }
+            let content = match ticket::ensure_priority(&current()) {
+                Ok(content) => content,
+                Err(e) => return save_error.set(Some(e)),
+            };
+            let file = file.clone();
+            saving.set(true);
+            spawn_local(async move {
+                let opened = version.get_untracked();
+                match api::save_ticket(&place.get_value(), &file, &content, &opened).await {
+                    Ok(report) => {
+                        ctx.report(report);
+                        ctx.reload();
+                        open_new();
+                    }
+                    Err(e) => save_error.set(Some(e)),
+                }
+                saving.set(false);
+            });
+        }
     };
 
     let set_field = move |f: fn(&mut Fields, String)| {
@@ -651,6 +692,14 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                     on:click=move |_| ctx.close_overlay()
                 >
                     "Close"
+                </button>
+                <button
+                    class="rounded border border-accent-600 px-3 py-1.5 text-sm font-medium text-accent-700 hover:bg-accent-50 disabled:opacity-50 dark:text-accent-300 dark:hover:bg-accent-950"
+                    disabled=move || saving.get() || (dirty.get() && held())
+                    title="Save this ticket, then make a new one linked to it"
+                    on:click=save_and_new
+                >
+                    "Save and New"
                 </button>
                 <button
                     class="rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"

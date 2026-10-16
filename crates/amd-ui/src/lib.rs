@@ -358,10 +358,15 @@ async fn create_ticket(
     repo: Option<String>,
     repository: Option<String>,
     draft: Option<bool>,
+    required_by: Option<String>,
+    related_to: Option<String>,
 ) -> Result<Created> {
     change(&state, move |project| {
         let repo = repo.unwrap_or_default();
         let board = project.board(&repo)?;
+        // Save and New (ticket 227): linked back to the ticket it came from.
+        let required_by: Vec<String> = required_by.into_iter().collect();
+        let related: Vec<String> = related_to.into_iter().collect();
         let fields = TicketFields {
             title: title.clone(),
             assignee: String::new(),
@@ -377,11 +382,12 @@ async fn create_ticket(
             },
             branch_type: String::new(),
             parent: String::new(),
-            related: Vec::new(),
+            related,
             clone_of: String::new(),
             body: String::new(),
             priority: String::new(),
             requires: Vec::new(),
+            required_by,
         };
         let outcome = transition::create_ticket(board, &fields).map_err(err)?;
         let name = if repo.is_empty() {
@@ -3178,6 +3184,7 @@ mod tests {
             body: String::new(),
             priority: String::new(),
             requires: Vec::new(),
+            required_by: Vec::new(),
         };
         let dest = transition::create_ticket(project.board("").unwrap(), &fields)
             .unwrap()
