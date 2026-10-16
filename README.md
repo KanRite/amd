@@ -261,6 +261,13 @@ goals flow to the work they wait on. A raised ticket records why
 ticket; `amd set 12 priority auto` (or "auto" in the editor) hands it back.
 With it off, a hand-set priority is only a floor.
 
+Auto priority only passes urgency down: if the ticket at the top of a chain
+is low, everything it needs stays low. To see the work in the order it has
+to be done, pick **Automatic: what's needed first** in the desktop board's
+Sort (the default on a board with auto priority on): within each column, a
+ticket comes after the tickets it requires, and otherwise highest priority
+first, then oldest.
+
 ```markdown
 related: [001,002]
 ```

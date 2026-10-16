@@ -1052,7 +1052,15 @@ off**, ticket 141) to
   section (`set_auto_priority`, `set_priority_override`), the editor's
   `auto` option (the page's `ensure_priority` accepts it) and note
   (`TicketDocument.priority_note`), and `↑ high` on a raised card
-  (`TicketSummary.priority_from`).
+  (`TicketSummary.priority_from`). **Automatic sort** (ticket 230):
+  `SortOrder::Automatic` ("Automatic: what's needed first") is a
+  dependency order, `SortOrder::sort` (a pairwise `compare` can't express
+  it): the column pre-sorted by priority then age, then each ticket placed
+  only after the tickets in the list it requires on its own board
+  (`waiting::requires`), a cycle broken at the first left. `Ctx::shown`
+  calls `sort`; `Ctx::default_sort` is Automatic when the board's
+  `auto_priority` is on, and the sort follows it until one is picked
+  (`ctx.sort_chosen`); Reset filters goes back to it.
   **How linked a card is** (ticket 216, `waiting::relationship_count`):
   the number of other tickets it's linked to in any way (any `links`
   kind, related, parent and children, clones), from either end, each
@@ -1690,6 +1698,12 @@ changes):
   step on) and calls `set_zoom`, which applies Tauri's `WebviewWindow::set_zoom`
   and saves `ui.zoom` in `~/.config/agile-md/config`. `zoom` reapplies it at
   start. A real webview zoom, not CSS `zoom`, so `100vh` layouts still fit.
+- **No `cursor-not-allowed`** (ticket 229): GTK on Wayland looks a CSS
+  cursor up by its modern name only, and an older pointer theme (e.g.
+  whiteglass) has no `not-allowed`, so every hover over a disabled button
+  printed `Gdk-Message: Unable to load not-allowed from the cursor theme`
+  in the terminal amdui was started from. Disabled buttons use
+  `disabled:cursor-default`; their faded look already says they're off.
 - WebKitGTK quirks met building it: the CSP needs `'wasm-unsafe-eval'` and
   `connect-src 'self' ipc: http://ipc.localhost`; native `<select>`s draw a
   white box (styled with `appearance-none`); `dragDropEnabled: false` so
