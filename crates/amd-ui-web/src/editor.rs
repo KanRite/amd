@@ -1480,7 +1480,7 @@ fn Relationships(
             <li class="flex items-center gap-1">
                 <button
                     type="button"
-                    class="text-left text-sm text-accent-700 hover:underline disabled:cursor-not-allowed disabled:opacity-60 dark:text-accent-300"
+                    class="text-left text-sm text-accent-700 hover:underline disabled:cursor-default disabled:opacity-60 dark:text-accent-300"
                     disabled=move || dirty.get()
                     title=move || if dirty.get() { "Save or discard your edits first" } else { "Open this ticket" }
                     on:click=move |_| ctx.open_ticket(target.clone(), file.clone())
@@ -1518,7 +1518,7 @@ fn Relationships(
                                 title=move || {
                                     if dirty.get() { "Save or discard your edits first".to_string() } else { label.clone() }
                                 }
-                                class="ml-1 rounded px-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-slate-800"
+                                class="ml-1 rounded px-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-red-700 disabled:cursor-default disabled:opacity-50 dark:hover:bg-slate-800"
                                 disabled=wait
                                 on:click=move |_| change_link(other.clone(), slug.to_string(), true)
                             >
@@ -1589,7 +1589,7 @@ fn Relationships(
                                         <li class="flex items-center gap-2">
                                             <button
                                                 type="button"
-                                                class="text-left text-sm hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                                                class="text-left text-sm hover:underline disabled:cursor-default disabled:opacity-50"
                                                 disabled=wait
                                                 title=move || format!("{} this ticket", link_label(&kind.get()))
                                                 on:click=move |_| change_link(other.clone(), kind.get_untracked(), false)

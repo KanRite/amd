@@ -766,7 +766,7 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
                             if confirm_start.get() {
                                 "w-full rounded bg-accent-600 px-2 py-1 text-xs font-medium text-white hover:bg-accent-500"
                             } else {
-                                "w-full rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700"
+                                "w-full rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:cursor-default disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700"
                             }
                         }
                         title=move || {
