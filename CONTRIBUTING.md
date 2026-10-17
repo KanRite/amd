@@ -107,7 +107,8 @@ Everyone else works from issues and pull requests here.
 
 Please report a vulnerability privately rather than in an issue: use
 [Report a vulnerability](https://github.com/agile-md/amd/security/advisories/new)
-on the repository's Security tab.
+on the repository's Security tab. [SECURITY.md](SECURITY.md) says what's
+covered and what happens next.
 
 ## Conduct
 

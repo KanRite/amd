@@ -548,6 +548,10 @@ redundant. Their history is in git if it is ever wanted again.
   notes, a roadmap on track, locks only in doing, creation dates spread back. Own
   `XDG_CONFIG_HOME` in `DIR/config`; refuses a DIR it didn't make
   (`.agile-md-demo` marker). Shellchecked in CI.
+- `SECURITY.md` (ticket 245): fixes in the latest 4.x only, reports
+  privately through the Security tab's advisories, acknowledged within 7
+  days; covers amd, `amd mcp`, amdui, `install.sh`/`amd-uninstall` and the
+  release builds, not people's repositories or third-party tools.
 - `README.md`, `LICENSE` (MIT). The README is the pitch, features,
   install (the curl line) and a quick start; **how to use everything is in
   `docs/user-guide.md`** (ticket 239), and building from source in
