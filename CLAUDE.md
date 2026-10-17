@@ -527,6 +527,12 @@ redundant. Their history is in git if it is ever wanted again.
   up temp git repos. Unit tests live next to the code in `#[cfg(test)] mod tests`.
 - `.github/workflows/ci.yml` — fmt + clippy + cargo test + tests/test.sh, and
   shellcheck for the shell files.
+- `.github/dependabot.yml` / `dependabot-auto-merge.yml` (ticket 246):
+  weekly GitHub Actions and Cargo updates, Cargo's minor and patch grouped
+  into one PR. The workflow turns on auto-merge (squash) for a Dependabot
+  minor or patch PR; it still needs a code owner's approval, since main
+  requires one and the Actions bot isn't a code owner. Needs the repo's
+  "Allow auto-merge" setting.
 - `.github/workflows/release.yml` — on a `vX.Y.Z` tag, builds `amd` and
   `amdui` for Linux and macOS, x86_64 and aarch64 (ticket 085): WebKitGTK on
   Linux, the wasm target and Trunk, `trunk build`, then `cargo build -p
