@@ -608,6 +608,43 @@ pub fn add_milestone(
     Ok(roadmap)
 }
 
+/// Change the start and due dates of the milestone `name` on the roadmap
+/// `slug` (ticket 235). Either may be empty. A sprint milestone with no
+/// duration of its own is as long as start to due, so its sprint on `target`
+/// takes the new length while it hasn't started; a started sprint is a
+/// commitment and keeps its length. Checked before anything is written.
+pub fn set_milestone_dates(
+    store: &Board,
+    target: &Board,
+    slug: &str,
+    name: &str,
+    start: &str,
+    due: &str,
+) -> Result<Roadmap> {
+    let mut roadmap = find(store, slug)?;
+    let (start, due) = (start.trim(), due.trim());
+    check_date(start)?;
+    check_date(due)?;
+    let days = sprint_days(start, due)?;
+    let Some(m) = roadmap.milestones.iter_mut().find(|m| m.name == name) else {
+        bail!("{} has no milestone {name}", roadmap.name);
+    };
+    m.start = start.to_string();
+    m.due = due.to_string();
+    let resize = m.kind == Kind::Sprint && m.duration == 0;
+    if resize
+        && let Ok(mut group) = target.group(name)
+        && group.is_sprint()
+        && group.accepts_changes()
+        && group.days != days
+    {
+        group.days = days;
+        group.save()?;
+    }
+    write(store, &roadmap)?;
+    Ok(roadmap)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -910,5 +947,80 @@ mod tests {
         assert!(!summary.late);
         let late = roadmap.summary(date!(2026 - 10 - 26), &|_| (0, 3));
         assert!(late.late);
+    }
+    #[test]
+    fn a_milestones_dates_can_be_changed() {
+        let (_dir, board) = board();
+        create(&board, "acme-api", "").unwrap();
+        add_milestone(
+            &board,
+            &board,
+            "acme-api",
+            milestone("Beta", "2026-10-01", "2026-11-01"),
+        )
+        .unwrap();
+        let r = set_milestone_dates(
+            &board,
+            &board,
+            "acme-api",
+            "Beta",
+            "2026-10-05",
+            " 2026-11-20 ",
+        )
+        .unwrap();
+        let m = &r.milestones[0];
+        assert_eq!(
+            (m.start.as_str(), m.due.as_str()),
+            ("2026-10-05", "2026-11-20")
+        );
+        assert_eq!(list(&board).unwrap()[0], r, "written");
+        let r = set_milestone_dates(&board, &board, "acme-api", "Beta", "", "").unwrap();
+        assert_eq!(
+            (r.milestones[0].start.as_str(), r.milestones[0].due.as_str()),
+            ("", "")
+        );
+        assert!(
+            set_milestone_dates(
+                &board,
+                &board,
+                "acme-api",
+                "Beta",
+                "2026-11-02",
+                "2026-11-01"
+            )
+            .is_err()
+        );
+        assert!(set_milestone_dates(&board, &board, "acme-api", "Beta", "soon", "").is_err());
+        assert!(set_milestone_dates(&board, &board, "acme-api", "Gamma", "", "").is_err());
+    }
+
+    #[test]
+    fn a_pending_sprint_follows_its_milestones_dates_and_a_started_one_does_not() {
+        let (_dir, board) = board();
+        create(&board, "acme-api", "").unwrap();
+        set_details(&board, "acme-api", "", true).unwrap();
+        add_milestone(
+            &board,
+            &board,
+            "acme-api",
+            milestone("S1", "2026-10-01", "2026-10-11"),
+        )
+        .unwrap();
+        assert_eq!(board.group("S1").unwrap().days, 10);
+        set_milestone_dates(&board, &board, "acme-api", "S1", "2026-10-01", "2026-10-15").unwrap();
+        assert_eq!(board.group("S1").unwrap().days, 14);
+        board.group("S1").unwrap().start().unwrap();
+        set_milestone_dates(&board, &board, "acme-api", "S1", "2026-10-01", "2026-10-30").unwrap();
+        assert_eq!(
+            board.group("S1").unwrap().days,
+            14,
+            "a started sprint keeps its length"
+        );
+        // One with a duration of its own keeps that.
+        let mut s2 = milestone("S2", "2026-11-01", "2026-11-11");
+        s2.duration = 5;
+        add_milestone(&board, &board, "acme-api", s2).unwrap();
+        set_milestone_dates(&board, &board, "acme-api", "S2", "2026-11-01", "2026-11-30").unwrap();
+        assert_eq!(board.group("S2").unwrap().days, 5);
     }
 }

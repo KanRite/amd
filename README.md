@@ -88,7 +88,8 @@ a solo developer without it.
 - **Auto priority** (optional): a ticket is at least as urgent as what
   requires it, and the **Automatic** sort shows what's needed first.
 - **Roadmaps:** one per board, made of milestones that create its epics or
-  sprints, with working days, time left and whether each is on track.
+  sprints, with working days, time left and whether each is on track. A
+  milestone's start and due dates can be changed later.
 - **My work:** your todo and doing tickets across every project on your
   machine, and work to pick up when you have none.
 
