@@ -1026,10 +1026,21 @@ enum IdeaAction {
         #[arg(value_name = "TEXT")]
         text: String,
     },
-    /// Make a backlog ticket from an idea, linked both ways
+    /// Make a backlog ticket from an idea, linked both ways, or with `--as`
+    /// an epic or a sprint (empty, its description the idea's write-up)
     Ticket {
         #[arg(value_name = "IDEA")]
         reference: String,
+        /// What to make: a backlog ticket (the default), an epic or a sprint
+        #[arg(long = "as", value_name = "KIND", default_value = "ticket",
+              value_parser = ["ticket", "epic", "sprint"])]
+        kind: String,
+        /// The epic's or sprint's name (default: the idea's title)
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+        /// A sprint's length in days
+        #[arg(long, value_name = "DAYS", default_value_t = agile_md::group::DEFAULT_DAYS)]
+        days: u32,
     },
 }
 
@@ -1194,7 +1205,17 @@ fn run() -> Result<()> {
                 idea::Action::Vote { reference, clicks }
             }
             Some(IdeaAction::Note { reference, text }) => idea::Action::Note { reference, text },
-            Some(IdeaAction::Ticket { reference }) => idea::Action::Ticket { reference },
+            Some(IdeaAction::Ticket {
+                reference,
+                kind,
+                name,
+                days,
+            }) => idea::Action::Ticket {
+                reference,
+                kind,
+                name: name.unwrap_or_default(),
+                days,
+            },
         };
         return idea::run(action, &editor_command());
     }

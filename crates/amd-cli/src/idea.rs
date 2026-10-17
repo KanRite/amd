@@ -36,6 +36,10 @@ pub enum Action {
     },
     Ticket {
         reference: String,
+        /// `ticket`, `epic` or `sprint`.
+        kind: String,
+        name: String,
+        days: u32,
     },
 }
 
@@ -97,7 +101,37 @@ pub fn run(action: Action, editor: &str) -> Result<()> {
             println!("added a note to {}", idea.title);
             Ok(())
         }
-        Action::Ticket { reference } => {
+        Action::Ticket {
+            reference,
+            kind,
+            name,
+            days,
+        } if kind != "ticket" => {
+            let all = ideas::list(&source);
+            let idea = ideas::find(&all, &reference)?;
+            let root = root_of(sources, idea)?;
+            let group_kind = if kind == "sprint" {
+                agile_md::group::Kind::Sprint
+            } else {
+                agile_md::group::Kind::Epic
+            };
+            let (made, warning, done) = ideas::to_group(
+                &board,
+                &root,
+                &idea.source,
+                &idea.path,
+                group_kind,
+                &name,
+                days,
+            )?;
+            if let Some(warning) = warning {
+                eprintln!("amd: {warning}");
+            }
+            report(&done);
+            println!("{} -> {kind} {made}", idea.title);
+            Ok(())
+        }
+        Action::Ticket { reference, .. } => {
             let all = ideas::list(&source);
             let idea = ideas::find(&all, &reference)?;
             let root = root_of(sources, idea)?;

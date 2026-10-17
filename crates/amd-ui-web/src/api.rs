@@ -1122,6 +1122,33 @@ pub async fn idea_to_ticket(path: &str) -> Result<amd_ui_model::IdeaTicket, Stri
 }
 
 #[derive(Serialize)]
+struct IdeaGroupArgs<'a> {
+    path: &'a str,
+    sprint: bool,
+    name: &'a str,
+    days: u32,
+}
+
+/// Makes an epic, or a sprint `days` long, from an idea (admins only).
+pub async fn idea_to_group(
+    path: &str,
+    sprint: bool,
+    name: &str,
+    days: u32,
+) -> Result<SyncReport, String> {
+    call(
+        "idea_to_group",
+        &IdeaGroupArgs {
+            path,
+            sprint,
+            name,
+            days,
+        },
+    )
+    .await
+}
+
+#[derive(Serialize)]
 struct PinArgs<'a> {
     source: &'a str,
     path: Option<&'a str>,
