@@ -191,6 +191,16 @@ changes nothing: on Windows, install it inside
 board needs WebKitGTK 4.1; if it's missing, the installer names the package
 to add, and `amd` works without it.
 
+To uninstall, run `amd-uninstall` (the installer puts it beside `amd`). It
+removes the programs and the menu entry, then asks whether to remove your
+agile-md settings too; `--all` removes them without asking. Your projects,
+in your git repositories, are never touched. Installed before it existed?
+The installer does the same:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash -s -- --uninstall
+```
+
 Building from source is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Quick start
