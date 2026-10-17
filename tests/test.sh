@@ -1608,6 +1608,19 @@ assert "deleting an unknown group is an error" \
   bash -c "cd '${work}' && ! '${AMD}' group delete nope"
 rm -rf "${work}"
 
+echo "statistics (ticket 233):"
+stats_repo="$(mktemp -d)"
+( cd "${stats_repo}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
+  && git config commit.gpgsign false && AMD_YES=1 "${AMD}" init statstest --local-only >/dev/null \
+  && git add -A && git commit -q -m "board for ticket 233" )
+assert "amd stats counts tickets raised, done and closed from git history" \
+  bash -c "cd '${stats_repo}' && '${AMD}' new 'Counted' --no-edit >/dev/null && '${AMD}' new 'Dropped' --no-edit >/dev/null \
+    && '${AMD}' todo 1 --no-branch >/dev/null && '${AMD}' doing 1 >/dev/null && '${AMD}' done 1 >/dev/null \
+    && '${AMD}' abandon 2 >/dev/null \
+    && '${AMD}' stats --days 7 | grep -qx 'last 7 days: 2 raised · 1 done · 1 closed' \
+    && '${AMD}' stats --days 7 | grep -q 'done   1\$'"
+rm -rf "${stats_repo}"
+
 echo "commit-and-push:"
 commit_repo="$(mktemp -d)"
 commit_origin="$(mktemp -d)/origin.git"

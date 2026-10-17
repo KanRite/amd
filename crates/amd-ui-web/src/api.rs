@@ -1358,3 +1358,24 @@ pub async fn speech_stop() -> Result<String, String> {
 pub async fn speech_cancel() -> Result<(), String> {
     call("speech_cancel", &NoArgs {}).await
 }
+
+#[derive(Serialize)]
+struct StatsArgs<'a> {
+    root: &'a str,
+    days: u32,
+}
+
+/// A project's statistics over `days` (ticket 233).
+pub async fn project_stats(root: &str, days: u32) -> Result<amd_ui_model::ProjectStats, String> {
+    call("project_stats", &StatsArgs { root, days }).await
+}
+
+#[derive(Serialize)]
+struct DaysArgs {
+    days: u32,
+}
+
+/// Remembers the statistics period on this machine.
+pub async fn set_stats_days(days: u32) -> Result<(), String> {
+    call("set_stats_days", &DaysArgs { days }).await
+}

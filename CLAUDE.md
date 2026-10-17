@@ -272,6 +272,26 @@ redundant. Their history is in git if it is ever wanted again.
   rewritten; a bare number in `parent`/`related` only when the moved
   ticket's own `## Children`/`related` proves which ticket it meant, else
   reported as ambiguous and left. Without `--apply` it only shows the plan.
+- `crates/amd-lib/src/stats.rs` — statistics (ticket 233), read from git
+  history when asked, never stored (RFC 0005). `events(board, since)`:
+  `git log -z --name-status -M` over the board, a ticket path being
+  `<column>/…/NNN-*.md`: an `A` is raised, a `D` closed (abandoned or
+  deleted), an `R` between column folders a move (done-kind judged by the
+  board's workflow, a removed column by the name `done`). `counts(boards,
+  days, now)` sums raised, done (a move into a done kind from another) and
+  closed, and per week (the last ending now). `burns(board, repo, now)`:
+  each started sprint, its start the first commit whose `_group.md` says
+  `started: "started"` (`sprint_started`, `git log -S`), its scope the
+  points of its tickets now (a started sprint takes nothing more), and
+  `done_by_day` from when each ticket now done last reached done, up to
+  today or its last day. `period()`/`set_period` is `ui.stats-days` (7, 30
+  or 90; 30 default). CLI `amd stats [--days N]` (counts, weeks, and a
+  text burn-up/burn-down a sprint). amdui: the landing page's Projects
+  heading has the 7/30/90 switch (`Home.stats_days`, `set_stats_days`);
+  each project row loads `project_stats(root, days)` (its boards via
+  `my_work::boards_of`) and shows the counts, a bar pair a week, and per
+  running sprint an SVG burn-up (dashed scope) and burn-down (dashed
+  ideal) (`ProjectStatsView`, `WeekBars`, `BurnCharts` in `home.rs`).
 - `crates/amd-lib/src/my_work.rs` — My work (ticket 020): every project
   registered on this machine (`Registry` entries with a board, scratch
   boards under `std::env::temp_dir()` skipped, named by

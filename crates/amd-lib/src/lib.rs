@@ -46,6 +46,7 @@ pub mod richtext;
 pub mod roadmap;
 pub mod screen;
 pub mod settings;
+pub mod stats;
 pub mod sync;
 pub mod task;
 pub mod templates;

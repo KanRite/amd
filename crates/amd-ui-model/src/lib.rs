@@ -1134,11 +1134,53 @@ pub struct Home {
     pub projects: Vec<HomeProject>,
     /// Who "you" is (git's `user.email`); empty when git doesn't say.
     pub me: String,
+    /// The period, in days, the projects' statistics count over (7, 30 or
+    /// 90; ticket 233), remembered on this machine.
+    #[serde(default = "default_stats_days")]
+    pub stats_days: u32,
     /// The project amdui has open, and remembers for next time, by its
     /// board repository's path (`HomeProject.root`); empty when none
     /// (ticket 168: the top bar's picker and documents buttons act on it).
     #[serde(default)]
     pub current: String,
+}
+
+fn default_stats_days() -> u32 {
+    30
+}
+
+/// A project's statistics (ticket 233), read from git history.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectStats {
+    pub days: u32,
+    pub raised: usize,
+    pub done: usize,
+    /// Abandoned or deleted.
+    pub closed: usize,
+    /// Oldest first; the last ends today.
+    pub weeks: Vec<StatWeek>,
+    /// Each running sprint on its boards.
+    pub sprints: Vec<SprintBurn>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StatWeek {
+    pub raised: usize,
+    pub done: usize,
+    pub closed: usize,
+}
+
+/// A started sprint's burn, in points.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SprintBurn {
+    pub repo: String,
+    pub sprint: String,
+    /// `YYYY-MM-DD`.
+    pub start: String,
+    pub days: u32,
+    pub total: u32,
+    /// Points done by the end of each day so far.
+    pub done_by_day: Vec<u32>,
 }
 
 /// A project on the landing page.
