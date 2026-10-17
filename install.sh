@@ -4,6 +4,7 @@
 #
 #   ./install.sh [--dir DIR] [--version vX.Y.Z] [--from-source]
 #   curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash
+#   ... | bash -s -- --uninstall [--all] [--yes]      (or run amd-uninstall)
 #
 # Default target directory: /usr/local/bin if writable, else ~/bin.
 # Downloads the prebuilt binaries for your platform from the GitHub release.
@@ -20,6 +21,10 @@
 # ~/.local/share ($XDG_DATA_HOME), which is where the dock and top bar take
 # the board's icon from (from the clone, or else fetched for the release).
 #
+# It also writes `amd-uninstall` beside them (ticket 242): it removes what
+# was installed, and asks before removing your settings and data
+# (`--all` removes them, `--yes` doesn't ask). Projects are never touched.
+#
 # Then, in the folder you keep projects in:  amd init <project>
 #
 set -euo pipefail
@@ -28,15 +33,24 @@ REPO="agile-md/amd"
 DIR=""
 VERSION="latest"
 FROM_SOURCE=0
+UNINSTALL=0
+UNINSTALL_ARGS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --dir) DIR="$2"; shift 2 ;;
     --version) VERSION="$2"; shift 2 ;;
     --from-source) FROM_SOURCE=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
+    --all|--yes) UNINSTALL_ARGS+=("$1"); shift ;;
     *) shift ;;
   esac
 done
+
+# Uninstalling without --dir: wherever amd is on the PATH.
+if [ "${UNINSTALL}" = "1" ] && [ -z "${DIR}" ] && command -v amd >/dev/null 2>&1; then
+  DIR="$(dirname "$(command -v amd)")"
+fi
 
 if [ -z "${DIR}" ]; then
   if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then
@@ -183,6 +197,100 @@ check_system() {
   fi
 }
 
+# The uninstaller for an install into BIN, with the launcher under DATA:
+# one script, written beside amd as amd-uninstall, and also what
+# `install.sh --uninstall` runs.
+uninstaller() {
+  local bin="$1" data="$2"
+  cat <<HEAD
+#!/usr/bin/env bash
+# agile-md's uninstaller, written by its installer (ticket 242).
+#
+#   amd-uninstall [--all] [--yes]
+#
+# Removes amd, amdui, this script and amdui's launcher and icons. Then asks
+# whether to remove your agile-md settings and data too (--all: yes without
+# asking; --yes: never asks, so with no --all they stay). Your projects (the
+# tickets, documents and ideas in your git repositories) are never touched.
+set -euo pipefail
+BIN=$(printf '%q' "${bin}")
+DATA=$(printf '%q' "${data}")
+HEAD
+  cat <<'BODY'
+ALL=0
+ASK=1
+for arg in "$@"; do
+  case "${arg}" in
+    --all) ALL=1 ;;
+    --yes) ASK=0 ;;
+    -h|--help) sed -n '4,10p' "$0"; exit 0 ;;
+  esac
+done
+
+removed=""
+gone() { rm -f "$1" && removed="${removed}  $1"$'\n'; }
+
+for name in amd amdui; do
+  [ -e "${BIN}/${name}" ] || continue
+  # Running from this very file (Linux's /proc tells), not just any amd.
+  if [ -d /proc/self ]; then
+    target="$(readlink -f "${BIN}/${name}")"
+    for exe in /proc/[0-9]*/exe; do
+      if [ "$(readlink "${exe}" 2>/dev/null)" = "${target}" ]; then
+        printf 'Note: %s is running; it keeps working until it exits.\n' "${name}" >&2
+        break
+      fi
+    done
+  fi
+  gone "${BIN}/${name}"
+done
+for file in applications/amdui.desktop icons/hicolor/scalable/apps/amdui.svg \
+  icons/hicolor/32x32/apps/amdui.png icons/hicolor/128x128/apps/amdui.png \
+  icons/hicolor/256x256/apps/amdui.png; do
+  if [ -e "${DATA}/${file}" ]; then gone "${DATA}/${file}"; fi
+done
+if [ -d "${DATA}/applications" ] && command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database -q "${DATA}/applications" 2>/dev/null || true
+fi
+
+if [ -n "${removed}" ]; then
+  printf 'Removed:\n%s' "${removed}"
+else
+  printf "agile-md's programs were not in %s.\n" "${BIN}"
+fi
+
+# Your own settings and data: kept unless you say.
+config="${XDG_CONFIG_HOME:-${HOME}/.config}/agile-md"
+state="${XDG_STATE_HOME:-${HOME}/.local/state}/agile-md"
+share="${XDG_DATA_HOME:-${HOME}/.local/share}/agile-md"
+present=()
+for d in "${config}" "${state}" "${share}"; do
+  if [ -d "${d}" ]; then present+=("${d}"); fi
+done
+if [ "${#present[@]}" -gt 0 ]; then
+  if [ "${ALL}" = "0" ] && [ "${ASK}" = "1" ] && { : </dev/tty; } 2>/dev/null; then
+    printf '\nYour agile-md settings and data are still here:\n'
+    printf '  %s\n' "${present[@]}"
+    if [ -n "$(ls -A "${state}/recovered" 2>/dev/null)" ]; then
+      printf '  (%s/recovered holds tickets saved after a push conflict: look before removing.)\n' "${state}"
+    fi
+    printf 'Remove them too? [y/N] '
+    read -r answer </dev/tty || answer=""
+    case "${answer}" in y|Y|yes|YES) ALL=1 ;; esac
+  fi
+  if [ "${ALL}" = "1" ]; then
+    for d in "${present[@]}"; do rm -rf "${d}"; printf 'Removed %s\n' "${d}"; done
+  else
+    printf 'Kept your settings and data (amd-uninstall --all removes them):\n'
+    printf '  %s\n' "${present[@]}"
+  fi
+fi
+
+rm -f "${BIN}/amd-uninstall"
+printf 'agile-md is uninstalled. Your projects, in your git repositories, were not touched.\n'
+BODY
+}
+
 # Rust target triple for this machine — matches the assets this repository's
 # release workflow publishes (amd-<target>.zip).
 target_triple() {
@@ -275,6 +383,13 @@ check_board_libraries() {
   printf 'amd itself works without them.\n' >&2
 }
 
+if [ "${UNINSTALL}" = "1" ]; then
+  TMP="$(mktemp -d)"
+  uninstaller "${DIR}" "${XDG_DATA_HOME:-${HOME}/.local/share}" > "${TMP}/amd-uninstall"
+  bash "${TMP}/amd-uninstall" "${UNINSTALL_ARGS[@]+"${UNINSTALL_ARGS[@]}"}"
+  exit
+fi
+
 check_system
 if [ "${FROM_SOURCE}" = "1" ]; then
   build_from_source
@@ -308,6 +423,9 @@ if [ -f "${DIR}/amdui" ]; then
   echo "Installed amdui -> ${DIR}/amdui   (the desktop board)"
   install_launcher
 fi
+uninstaller "${DIR}" "${XDG_DATA_HOME:-${HOME}/.local/share}" > "${DIR}/amd-uninstall"
+chmod +x "${DIR}/amd-uninstall"
+echo "To uninstall later:  ${DIR}/amd-uninstall"
 case ":${PATH}:" in
   *":${DIR}:"*) ;;
   *) echo "Note: ${DIR} is not on your PATH. Add this to your shell profile:"
