@@ -1593,6 +1593,17 @@ assert "an emptied group can be deleted" \
   bash -c "cd '${work}' && '${AMD}' group empty checkout >/dev/null \
     && '${AMD}' group delete checkout | grep -q 'deleted checkout' \
     && ! test -d tasks/backlog/checkout"
+assert "a group whose tickets are all done can be deleted, and they keep its name" \
+  bash -c "cd '${work}' && '${AMD}' group epic finished >/dev/null \
+    && '${AMD}' new 'Finished work' --no-edit >/dev/null \
+    && id=\$(ls tasks/backlog | grep finished-work | cut -d- -f1) \
+    && '${AMD}' finished \${id} >/dev/null \
+    && '${AMD}' todo \${id} >/dev/null && '${AMD}' doing \${id} --force >/dev/null \
+    && '${AMD}' group delete finished 2>&1 | grep -q '1 ticket(s) not done' \
+    && '${AMD}' done \${id} >/dev/null \
+    && '${AMD}' group delete finished | grep -q 'deleted finished' \
+    && ! test -d tasks/backlog/finished \
+    && grep -q 'epic: \"finished\"' tasks/done/\${id}-*.md"
 assert "deleting an unknown group is an error" \
   bash -c "cd '${work}' && ! '${AMD}' group delete nope"
 rm -rf "${work}"

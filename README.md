@@ -638,7 +638,8 @@ disagree.
   doesn't exist yet.
 - **Filters** across the top: repository, person, a search, the sort order,
   and Reset.
-- **New ticket**, **+ Sprint**, **+ Epic**; start a sprint from its box.
+- **New ticket**, **+ Sprint**, **+ Epic**; open one from its box to start
+  a sprint, rename it, or delete it once everything in it is done.
 - **Preferences**, your own settings on this machine, in
   `~/.config/agile-md/config`: the colour scheme (light, dark or the
   system's, with an accent colour), the zoom, the board to open when amdui
@@ -685,6 +686,7 @@ amd group start sprint-1               # one way: no route back to pending
 amd group                              # tickets and points per epic and sprint
 amd group empty checkout               # every ticket in it, back to backlog/ at once
 amd group rename checkout payments     # the folder and every ticket's epic
+amd group delete payments              # once every ticket in it is done (or moved out)
 amd todo 001 --no-branch && amd doing 001 && amd done 001
 ```
 

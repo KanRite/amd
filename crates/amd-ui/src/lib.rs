@@ -869,6 +869,23 @@ async fn rename_epic(
     .await
 }
 
+/// Deletes an epic or sprint (`amd group delete`, ticket 204): refused while
+/// any ticket in it isn't done.
+#[tauri::command]
+async fn delete_epic(
+    state: Tauri<'_, AppState>,
+    repo: Option<String>,
+    name: String,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = p.board(&repo.unwrap_or_default())?;
+        committed(board, "group-delete", &name, "", || {
+            board.delete_group(&name)
+        })
+    })
+    .await
+}
+
 /// Links a ticket to another on the same board as `kind`, or unlinks them
 /// (`amd link`, ticket 207). The other ticket records the opposite, and both
 /// files go in one commit.
@@ -2544,6 +2561,7 @@ pub fn run() {
             create_sprint,
             start_sprint,
             rename_epic,
+            delete_epic,
             archive_ticket,
             lock_ticket,
             unlock_ticket,

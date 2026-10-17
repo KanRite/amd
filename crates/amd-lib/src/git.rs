@@ -689,7 +689,10 @@ pub fn dirty_paths(repo: &Path) -> Result<BTreeMap<PathBuf, Option<SystemTime>>>
     let out = Command::new("git")
         .arg("-C")
         .arg(repo)
-        .args(["status", "--porcelain=v1", "--untracked-files=all"])
+        // `-z`: paths as they are, never quoted. Without it a path with a
+        // space (an epic called "Launch plan") came back in quotes and the
+        // commit's pathspec matched nothing (ticket 204).
+        .args(["status", "--porcelain=v1", "-z", "--untracked-files=all"])
         .output()
         .context("running git status")?;
     if !out.status.success() {
@@ -697,18 +700,16 @@ pub fn dirty_paths(repo: &Path) -> Result<BTreeMap<PathBuf, Option<SystemTime>>>
     }
     let text = String::from_utf8(out.stdout).context("git status produced non-utf8 output")?;
     let mut paths = BTreeSet::new();
-    for line in text.lines() {
-        // Two status characters, a space, then the path (or "old -> new"
-        // for a rename).
-        let Some(rest) = line.get(3..) else { continue };
-        match rest.split_once(" -> ") {
-            Some((old, new)) => {
-                paths.insert(PathBuf::from(old));
-                paths.insert(PathBuf::from(new));
-            }
-            None => {
-                paths.insert(PathBuf::from(rest));
-            }
+    let mut fields = text.split('\0').filter(|f| !f.is_empty());
+    while let Some(entry) = fields.next() {
+        // Two status characters, a space, then the path. A rename or copy
+        // is followed by its original path as a field of its own.
+        let Some(path) = entry.get(3..) else { continue };
+        paths.insert(PathBuf::from(path));
+        if entry[..2].contains(['R', 'C'])
+            && let Some(from) = fields.next()
+        {
+            paths.insert(PathBuf::from(from));
         }
     }
     Ok(paths
@@ -970,6 +971,37 @@ mod tests {
         assert!(
             dirty.contains_key(&PathBuf::from("moved.md")),
             "new side of the rename"
+        );
+    }
+
+    #[test]
+    fn dirty_paths_are_not_quoted_when_they_have_spaces() {
+        // An epic's folder takes its name, spaces and all (ticket 204).
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        init_repo(&repo);
+        std::fs::create_dir_all(repo.join("Launch plan")).unwrap();
+        std::fs::write(repo.join("Launch plan/_group.md"), "one\n").unwrap();
+        commit_all(&repo, "seed").unwrap();
+        git(&repo, &["mv", "Launch plan", "Launch plan two"]);
+        std::fs::write(repo.join("new épic.md"), "x\n").unwrap();
+
+        let dirty = dirty_paths(&repo).unwrap();
+        for path in [
+            "Launch plan/_group.md",
+            "Launch plan two/_group.md",
+            "new épic.md",
+        ] {
+            assert!(
+                dirty.contains_key(&PathBuf::from(path)),
+                "{path}: {dirty:?}"
+            );
+        }
+        commit_paths_locally(&repo, "rename", &dirty.into_keys().collect()).unwrap();
+        assert_eq!(
+            ask(&repo, &["status", "--porcelain"]).as_deref(),
+            Some(""),
+            "all committed"
         );
     }
 

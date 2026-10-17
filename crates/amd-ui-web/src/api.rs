@@ -349,6 +349,17 @@ pub async fn rename_epic(repo: Option<&str>, from: &str, to: &str) -> Result<Syn
 }
 
 #[derive(Serialize)]
+struct DeleteEpicArgs<'a> {
+    repo: Option<&'a str>,
+    name: &'a str,
+}
+
+/// Deletes an epic or sprint; refused while any ticket in it isn't done.
+pub async fn delete_epic(repo: Option<&str>, name: &str) -> Result<SyncReport, String> {
+    call("delete_epic", &DeleteEpicArgs { repo, name }).await
+}
+
+#[derive(Serialize)]
 struct SprintArgs<'a> {
     name: &'a str,
     days: u32,

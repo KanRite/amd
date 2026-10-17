@@ -141,7 +141,14 @@ impl Project {
                     .filter(|t| t.epic.as_deref() == Some(group.name.as_str()))
                     .map(|t| self.summary_of(&t, name))
                     .collect();
+                let unfinished = board
+                    .tasks_in_group(&group.name)
+                    .map_err(err)?
+                    .iter()
+                    .filter(|t| !t.column.is(agile_md::board::Kind::Done))
+                    .count();
                 epics.push(Epic {
+                    unfinished,
                     repo: name.clone(),
                     kind: if group.is_sprint() {
                         GroupKind::Sprint

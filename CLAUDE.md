@@ -838,6 +838,11 @@ off**, ticket 141) to
     `--untracked-files=all`, a brand new ticket inside a never-committed
     `tasks/` never appears as its own path, because git reports the whole
     directory as a single untracked entry.
+  - **`dirty_paths` reads `git status -z`** (ticket 204): without it git
+    quotes a path with a space, so an epic called "Launch plan" gave
+    `"tasks/backlog/Launch plan/_group.md"`, quotes included, and the
+    commit's pathspec matched nothing: every change to such a group failed
+    to commit. A rename's original path is the next NUL field.
   - **`commit_paths` skips `add` for a path that no longer exists.**
     `git mv` (used for a tracked rename) already stages both sides of the
     move in the index by itself; re-`add`ing the now-gone old path
@@ -1452,11 +1457,16 @@ changes):
   (below) needed to, so the bug was latent, not yet shipped-and-observed.
 - **`Board::delete_group`/`amd group delete <name>`** removes a group's
   `_group.md` and directory outright. Refused (naming the count) if
-  `tasks_in_group` finds any ticket still claiming membership, checked
-  across every column the same way `empty_group` already does — not just
-  the physical folder — since a committed sprint's tickets can sit in
-  `doing`/`done` while the backlog folder itself is empty. `empty` it
-  first; `delete` does not imply `empty`.
+  `tasks_in_group` finds any ticket still claiming membership **that isn't
+  done** (ticket 204), checked across every column the same way
+  `empty_group` already does — not just the physical folder — since a
+  committed sprint's tickets can sit in `doing` while the backlog folder
+  itself is empty. So a finished sprint or epic can go; its done tickets
+  keep their `epic` label as the record. `empty` it first; `delete` does
+  not imply `empty`. amdui: the open epic or sprint column has **Rename**
+  (inline; the column reopens under the new name) and **Delete** (asks
+  once more; disabled while `Epic.unfinished` > 0), commands `rename_epic`
+  and `delete_epic`. Admin keeps its rename list too.
 - **Next round of epic/sprint design, not built yet**: sprint backfill, a
   `Closed` state, and burn-up reporting into the documents repo are
   designed in `agile-md-documents`'
