@@ -908,8 +908,8 @@ enum GroupCmd {
         #[arg(value_name = "NAME")]
         name: String,
     },
-    /// Delete an epic or sprint outright. Refuses if it still has any
-    /// tickets, in any column — `group empty` it first
+    /// Delete an epic or sprint outright. Refuses while any ticket in it,
+    /// in any column, isn't done — finish them or `group empty` it first
     Delete {
         #[arg(value_name = "NAME")]
         name: String,

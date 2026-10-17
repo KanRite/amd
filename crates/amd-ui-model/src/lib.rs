@@ -811,6 +811,10 @@ pub struct Epic {
     #[serde(default)]
     pub started: bool,
     pub tickets: Vec<TicketSummary>,
+    /// Tickets in it, in any column, that aren't done (ticket 204): it can
+    /// be deleted when there are none.
+    #[serde(default)]
+    pub unfinished: usize,
 }
 
 /// A ticket's full markdown, as opened in the editor.
@@ -1532,6 +1536,7 @@ mod assigned_tests {
             days: 0,
             started: false,
             tickets: vec![ticket("Alice")],
+            unfinished: 1,
         });
         assert_eq!(board.assignees(), ["Alice", "claude", "mrdoodles"]);
     }

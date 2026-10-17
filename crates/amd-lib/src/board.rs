@@ -762,14 +762,19 @@ impl Board {
     /// while still claiming membership. `empty` it first, same two-step
     /// `create_group`'s own "already exists" refusal expects the caller to
     /// resolve deliberately rather than the tool guessing.
+    ///
+    /// Tickets that are done hold nothing back (ticket 204): a finished
+    /// sprint or epic can go, and its done tickets keep their `epic` label
+    /// as the record of what they were part of.
     pub fn delete_group(&self, name: &str) -> Result<()> {
         let group = self.group(name)?;
-        let tickets = self.tasks_in_group(name)?;
-        if !tickets.is_empty() {
-            bail!(
-                "{name} still has {} ticket(s) — empty it first",
-                tickets.len()
-            );
+        let open = self
+            .tasks_in_group(name)?
+            .into_iter()
+            .filter(|t| !t.column.is(Kind::Done))
+            .count();
+        if open > 0 {
+            bail!("{name} still has {open} ticket(s) not done — finish them or empty it first");
         }
         fs::remove_dir_all(&group.dir).with_context(|| format!("removing {}", group.dir.display()))
     }
@@ -2024,6 +2029,27 @@ mod tests {
 
         let err = board.delete_group("sprint-1").unwrap_err();
         assert!(err.to_string().contains("1 ticket"), "{err}");
+    }
+
+    #[test]
+    fn a_group_whose_tickets_are_all_done_can_be_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board_at(dir.path());
+        sprint(&board, "sprint-1");
+        backlog_ticket(&board, "001-a.md");
+        let task = board.find("001").unwrap();
+        task.set_points(task.hash().unwrap(), "3").unwrap();
+        board.set_epic(&task, Some("sprint-1")).unwrap();
+        walk(&board, "001", Column::Done);
+
+        board.delete_group("sprint-1").unwrap();
+        assert!(board.group("sprint-1").is_err(), "the directory is gone");
+        let done = board.find("001").unwrap();
+        assert_eq!(
+            done.epic_meta().as_deref(),
+            Some("sprint-1"),
+            "a done ticket keeps the record of its sprint"
+        );
     }
 
     #[test]

@@ -662,7 +662,11 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
     let ids = StoredValue::new((repo.clone(), name.clone()));
     let group = group_memo(ctx, repo, name.clone());
     Effect::new(move |_| {
-        if ctx.board.with(Option::is_some) && group.with(Option::is_none) {
+        // Only while it's still this column that's open: after a rename the
+        // new name is already open, and this one mustn't close it.
+        let still_open =
+            ids.with_value(|ids| ctx.open_epic.with_untracked(|o| o.as_ref() == Some(ids)));
+        if ctx.board.with(Option::is_some) && group.with(Option::is_none) && still_open {
             ctx.open_epic.set(None);
         }
     });
@@ -731,6 +735,62 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
         });
     };
 
+    // Rename and delete (ticket 204), here where the group is, not only in
+    // Admin. Delete asks once more, and only once nothing in it is unfinished.
+    let renaming = RwSignal::new(false);
+    let new_name = RwSignal::new(name.clone());
+    let unfinished = move || group.with(|g| g.as_ref().map_or(0, |g| g.unfinished));
+    let confirm_delete = RwSignal::new(false);
+    let rename = move || {
+        let (repo, from) = ids.get_value();
+        let to = new_name.get_untracked();
+        if to.trim().is_empty() || to.trim() == from {
+            renaming.set(false);
+            return;
+        }
+        spawn_local(async move {
+            match api::rename_epic(Some(&repo), &from, &to).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    renaming.set(false);
+                    // The board first, so the column reopens under the new
+                    // name rather than closing for a group it can't find.
+                    match api::load_board().await {
+                        Ok(board) => ctx.board.set(Some(board)),
+                        Err(e) => ctx.error.set(Some(e)),
+                    }
+                    ctx.open_epic.set(Some((repo, to.trim().to_string())));
+                }
+                Err(e) => {
+                    ctx.error.set(Some(e));
+                    ctx.reload();
+                }
+            }
+        });
+    };
+    let delete = move |_: leptos::ev::MouseEvent| {
+        if unfinished() > 0 {
+            return;
+        }
+        if !confirm_delete.get_untracked() {
+            confirm_delete.set(true);
+            return;
+        }
+        confirm_delete.set(false);
+        let (repo, name) = ids.get_value();
+        spawn_local(async move {
+            match api::delete_epic(Some(&repo), &name).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    ctx.open_epic.set(None);
+                }
+                Err(e) => ctx.error.set(Some(e)),
+            }
+            ctx.reload();
+        });
+    };
+    let kind_word = move || if is_sprint() { "sprint" } else { "epic" };
+
     view! {
         <section
             aria-label=move || {
@@ -760,6 +820,66 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
             </header>
             <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
                 {move || summary().map(|text| view! { <p class="px-1 text-[11px] text-slate-500">{text}</p> })}
+                <form
+                    class="flex items-center gap-1 px-1"
+                    class:hidden=move || !renaming.get()
+                    on:submit=move |ev| {
+                        ev.prevent_default();
+                        rename();
+                    }
+                >
+                    <input
+                        type="text"
+                        aria-label=move || format!("New name for the {}", kind_word())
+                        class="min-w-0 flex-1 rounded border border-slate-300 bg-slate-50 px-2 py-0.5 text-xs dark:border-slate-600 dark:bg-slate-900"
+                        prop:value=move || new_name.get()
+                        on:input=move |ev| new_name.set(event_target_value(&ev))
+                    />
+                    <button type="submit" class="rounded bg-accent-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-accent-500">
+                        "Save"
+                    </button>
+                    <button
+                        type="button"
+                        class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                        on:click=move |_| {
+                            new_name.set(ids.get_value().1);
+                            renaming.set(false);
+                        }
+                    >
+                        "Cancel"
+                    </button>
+                </form>
+                <div class="flex gap-1 px-1" class:hidden=move || renaming.get()>
+                    <button
+                        type="button"
+                        class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                        on:click=move |_| renaming.set(true)
+                    >
+                        "Rename"
+                    </button>
+                    <button
+                        type="button"
+                        class=move || {
+                            if confirm_delete.get() {
+                                "rounded bg-red-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-red-500"
+                            } else {
+                                "rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 disabled:cursor-default disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700"
+                            }
+                        }
+                        title=move || match unfinished() {
+                            0 => format!("Delete this {}; done tickets keep its name", kind_word()),
+                            n => format!(
+                                "{n} ticket{} in it not done yet: finish or move them first",
+                                if n == 1 { "" } else { "s" },
+                            ),
+                        }
+                        disabled=move || { unfinished() > 0 }
+                        on:click=delete
+                        on:blur=move |_| confirm_delete.set(false)
+                    >
+                        {move || if confirm_delete.get() { "Confirm: delete" } else { "Delete" }}
+                    </button>
+                </div>
                 <Show when=move || is_sprint() && !started()>
                     <button
                         class=move || {
