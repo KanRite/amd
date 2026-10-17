@@ -811,6 +811,10 @@ pub struct Epic {
     #[serde(default)]
     pub started: bool,
     pub tickets: Vec<TicketSummary>,
+    /// A closed sprint (ticket 052): read-only, like a started one, and
+    /// no longer running.
+    #[serde(default)]
+    pub closed: bool,
     /// Tickets in it, in any column, that aren't done (ticket 204): it can
     /// be deleted when there are none.
     #[serde(default)]
@@ -1597,6 +1601,7 @@ mod assigned_tests {
             days: 0,
             started: false,
             tickets: vec![ticket("Alice")],
+            closed: false,
             unfinished: 1,
         });
         assert_eq!(board.assignees(), ["Alice", "claude", "mrdoodles"]);

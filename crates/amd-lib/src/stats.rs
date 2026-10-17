@@ -287,52 +287,58 @@ pub fn sprint_started(board: &Board, name: &str) -> Option<i64> {
 pub fn burns(board: &Board, repo: &str, now: i64) -> Result<Vec<Burn>> {
     let mut out = Vec::new();
     for group in board.groups()? {
-        if !group.is_sprint() || group.state != State::Started {
-            continue;
+        if group.is_sprint() && group.state == State::Started {
+            out.push(burn_of(board, repo, &group, now)?);
         }
-        let start = sprint_started(board, &group.name).unwrap_or(now);
-        let members = board.tasks_in_group(&group.name)?;
-        let points = |t: &crate::task::Task| {
-            t.points()
-                .and_then(|p| p.trim().parse::<u32>().ok())
-                .unwrap_or(0)
-        };
-        let total = members.iter().map(points).sum();
-        // When each ticket last reached done, for those done now.
-        let mut done_at: HashMap<String, i64> = HashMap::new();
-        for event in events(board, start - DAY)? {
-            if let What::Moved {
-                from_done: false,
-                to_done: true,
-            } = event.what
-            {
-                done_at.insert(event.stem, event.time);
-            }
-        }
-        let start_day = day_start(start);
-        let elapsed = ((now - start_day).max(0) / DAY) as u32;
-        let last = elapsed.min(group.days.saturating_sub(1));
-        let done_by_day = (0..=last)
-            .map(|d| {
-                let end = start_day + i64::from(d + 1) * DAY;
-                members
-                    .iter()
-                    .filter(|t| t.column.is(Kind::Done))
-                    .filter(|t| done_at.get(&t.stem).copied().unwrap_or(start) < end)
-                    .map(points)
-                    .sum()
-            })
-            .collect();
-        out.push(Burn {
-            repo: repo.to_string(),
-            sprint: group.name.clone(),
-            start: date_of(start).to_string(),
-            days: group.days,
-            total,
-            done_by_day,
-        });
     }
     Ok(out)
+}
+
+/// One sprint's burn as of `now` (a closing sprint's too, ticket 052).
+pub fn burn_of(board: &Board, repo: &str, group: &crate::group::Group, now: i64) -> Result<Burn> {
+    let start = sprint_started(board, &group.name).unwrap_or(now);
+    let members = board.tasks_in_group(&group.name)?;
+    let total = members.iter().map(points_of).sum();
+    // When each ticket last reached done, for those done now.
+    let mut done_at: HashMap<String, i64> = HashMap::new();
+    for event in events(board, start - DAY)? {
+        if let What::Moved {
+            from_done: false,
+            to_done: true,
+        } = event.what
+        {
+            done_at.insert(event.stem, event.time);
+        }
+    }
+    let start_day = day_start(start);
+    let elapsed = ((now - start_day).max(0) / DAY) as u32;
+    let last = elapsed.min(group.days.saturating_sub(1));
+    let done_by_day = (0..=last)
+        .map(|d| {
+            let end = start_day + i64::from(d + 1) * DAY;
+            members
+                .iter()
+                .filter(|t| t.column.is(Kind::Done))
+                .filter(|t| done_at.get(&t.stem).copied().unwrap_or(start) < end)
+                .map(points_of)
+                .sum()
+        })
+        .collect();
+    Ok(Burn {
+        repo: repo.to_string(),
+        sprint: group.name.clone(),
+        start: date_of(start).to_string(),
+        days: group.days,
+        total,
+        done_by_day,
+    })
+}
+
+/// A ticket's points, 0 when unsized.
+pub fn points_of(task: &crate::task::Task) -> u32 {
+    task.points()
+        .and_then(|p| p.trim().parse::<u32>().ok())
+        .unwrap_or(0)
 }
 
 /// Midnight UTC of the day `time` falls on.
@@ -340,7 +346,7 @@ fn day_start(time: i64) -> i64 {
     time - time.rem_euclid(DAY)
 }
 
-fn date_of(time: i64) -> Date {
+pub(crate) fn date_of(time: i64) -> Date {
     OffsetDateTime::from_unix_timestamp(time)
         .map(|t| t.date())
         .unwrap_or(Date::MIN)

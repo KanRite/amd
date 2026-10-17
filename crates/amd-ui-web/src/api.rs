@@ -384,6 +384,27 @@ pub async fn start_sprint(repo: Option<&str>, name: &str) -> Result<SyncReport, 
     call("start_sprint", &StartArgs { repo, name }).await
 }
 
+/// Closes a started sprint and files its report (ticket 052).
+pub async fn close_sprint(repo: Option<&str>, name: &str) -> Result<SyncReport, String> {
+    call("close_sprint", &StartArgs { repo, name }).await
+}
+
+#[derive(Serialize)]
+struct BackfillArgs<'a> {
+    repo: Option<&'a str>,
+    name: &'a str,
+    points: u32,
+}
+
+/// Backfills a running sprint with up to `points` from the loose backlog.
+pub async fn backfill_sprint(
+    repo: Option<&str>,
+    name: &str,
+    points: u32,
+) -> Result<SyncReport, String> {
+    call("backfill_sprint", &BackfillArgs { repo, name, points }).await
+}
+
 #[derive(Serialize)]
 struct AppearanceArgs {
     appearance: Appearance,

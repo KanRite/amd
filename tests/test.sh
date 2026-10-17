@@ -2090,6 +2090,29 @@ assert "amd docs pin keeps your own pins in the documents repository, pushed (ti
 assert "...and amd docs unpin takes it off" \
   bash -c "${ix_fns}; in_ix docs unpin idp-documents/docs/guide.md | grep -q '^unpin:' \
     && ! test -e '${ix}/idp-documents/.agile-md-pins' && in_ix docs pins | grep -q 'nothing pinned'"
+assert "amd group close ends a sprint: the unstarted go back, a report is pushed to documents (ticket 052)" \
+  bash -c "${ix_fns}; in_ix group sprint s9 --days 5 >/dev/null \
+    && in_ix new 'Close me' --no-edit >/dev/null && in_ix new 'Left behind' --no-edit >/dev/null \
+    && a=\$(ls '${ix}'/idp-tickets/tasks/backlog | grep close-me | cut -d- -f1) \
+    && b=\$(ls '${ix}'/idp-tickets/tasks/backlog | grep left-behind | cut -d- -f1) \
+    && in_ix set \$a points 3 >/dev/null && in_ix set \$b points 2 >/dev/null \
+    && in_ix s9 \$a >/dev/null && in_ix s9 \$b >/dev/null && in_ix group start s9 >/dev/null \
+    && in_ix todo \$a --no-branch >/dev/null && in_ix doing \$a --force >/dev/null && in_ix done \$a >/dev/null \
+    && out=\$(in_ix group close s9 2>&1) \
+    && printf '%s\\n' \"\$out\" | grep -q 's9 closed: 3 of 5 points done, 1 ticket(s) not done' \
+    && printf '%s\\n' \"\$out\" | grep -q \"back to the backlog: \$b\" \
+    && test -f '${ix}'/idp-tickets/tasks/backlog/\$b-left-behind.md \
+    && grep -q '^started: \"closed\"' '${ix}/idp-tickets/tasks/backlog/s9/_group.md' \
+    && ls '${ix}'/idp-documents/sprint/history/ | grep -q '^20[0-9]*T[0-9]*Z-s9.svg\$' \
+    && grep -q '^## Not done' '${ix}'/idp-documents/sprint/history/*-s9.md \
+    && git -C '${ix}/origin-documents.git' log -1 --format=%s main | grep -q '^sprint: s9 closed' \
+    && ! in_ix s9 \$b 2>/dev/null"
+assert "amd group backfill pulls sized, unassigned backlog tickets into a running sprint" \
+  bash -c "${ix_fns}; in_ix group sprint s10 --days 5 >/dev/null && in_ix group start s10 >/dev/null \
+    && b=\$(ls '${ix}'/idp-tickets/tasks/backlog | grep left-behind | cut -d- -f1) \
+    && in_ix group backfill s10 --points 2 | grep -q \"backfilled s10: \$b\" \
+    && test -f '${ix}'/idp-tickets/tasks/backlog/s10/\$b-left-behind.md \
+    && ! in_ix group backfill s9 --points 2 2>/dev/null"
 rm -rf "${ix}"
 
 echo "importing documents (ticket 079):"
