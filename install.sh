@@ -6,19 +6,21 @@
 #   curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash
 #
 # Default target directory: /usr/local/bin if writable, else ~/bin.
-# Run from a clone with cargo installed and it builds from source; otherwise it
-# downloads the prebuilt binary for your platform from the GitHub release.
+# Downloads the prebuilt binaries for your platform from the GitHub release.
+# Run from a clone with cargo installed, it builds from source instead
+# (CONTRIBUTING.md). On a system the release doesn't cover (Windows, another
+# OS or processor, git too old, libraries too old) it says so plainly.
 #
 # Installs two commands: `amd`, the command line interface, and `amdui`, the
 # desktop board. Both come from the release zip and from a source build; the
 # board's source build needs Trunk and the wasm32-unknown-unknown target (and
 # WebKitGTK on Linux), and is skipped with a note when they're missing.
 #
-# On Linux, installing amdui from a clone also installs its launcher entry and
-# icon into ~/.local/share ($XDG_DATA_HOME), which is where the dock and top
-# bar take the board's icon from.
+# On Linux, installing amdui also installs its launcher entry and icon into
+# ~/.local/share ($XDG_DATA_HOME), which is where the dock and top bar take
+# the board's icon from (from the clone, or else fetched for the release).
 #
-# Then, in any project directory:  amd init project-name will initialise your tasks board"
+# Then, in the folder you keep projects in:  amd init <project>
 #
 set -euo pipefail
 
@@ -44,7 +46,14 @@ if [ -z "${DIR}" ]; then
   fi
 fi
 
-SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Where this script is, when it's run from a file. Piped from curl there's
+# no file, and the current directory must never be mistaken for a clone.
+SELF=""
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+  SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+# A clone of agile-md, not just any directory with a Cargo.toml.
+in_clone() { [ -n "${SELF}" ] && [ -f "${SELF}/crates/amd-cli/Cargo.toml" ]; }
 
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
 
@@ -93,10 +102,14 @@ RESTART=""
 install_launcher() {
   local src data apps icons size
   [ "$(uname -s)" = "Linux" ] && [ -x "${DIR}/amdui" ] || return 0
-  src="${SELF}/crates/amd-ui"
-  if [ ! -f "${src}/app-icon.svg" ]; then
-    printf 'No launcher for amdui: its icon is installed from a clone of the repository.\n' >&2
-    return 0
+  if in_clone; then
+    src="${SELF}/crates/amd-ui"
+  else
+    # A release install: the icons from the same version of the repository.
+    src="$(fetch_icons)" || {
+      printf 'No launcher for amdui: its icons could not be downloaded.\n' >&2
+      return 0
+    }
   fi
   data="${XDG_DATA_HOME:-${HOME}/.local/share}"
   apps="${data}/applications"
@@ -130,6 +143,46 @@ EOF
   echo "Installed the amdui launcher -> ${apps}/amdui.desktop"
 }
 
+# The launcher's icons for the installed release, from the repository at its
+# tag, into a temporary folder whose path is printed.
+fetch_icons() {
+  local tag dir file
+  tag="v$("${DIR}/amd" --version 2>/dev/null | awk '{print $NF}')"
+  [ "${tag}" != "v" ] || return 1
+  dir="${TMP:-$(mktemp -d)}/icons-src"
+  mkdir -p "${dir}/icons"
+  for file in app-icon.svg icons/32x32.png icons/128x128.png icons/128x128@2x.png; do
+    curl -fsSL "https://raw.githubusercontent.com/${REPO}/${tag}/crates/amd-ui/${file}" \
+      -o "${dir}/${file}" 2>/dev/null || return 1
+  done
+  printf '%s' "${dir}"
+}
+
+# Says plainly, before anything is downloaded or changed, when this system
+# isn't one agile-md runs on, and why.
+check_system() {
+  local os arch version major minor
+  os="$(uname -s)"
+  arch="$(uname -m)"
+  case "${os}" in
+    Linux|Darwin) ;;
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+      die "agile-md runs on Linux and macOS, not Windows itself. On Windows, install it inside WSL: https://learn.microsoft.com/windows/wsl/install" ;;
+    *) die "agile-md runs on Linux and macOS; this system (${os}) isn't supported." ;;
+  esac
+  case "${arch}" in
+    arm64|aarch64|x86_64|amd64) ;;
+    *) die "agile-md's downloads are for x86_64 and arm64 (aarch64) processors; this one is ${arch}. Building from source may work: see https://github.com/${REPO}/blob/main/CONTRIBUTING.md" ;;
+  esac
+  command -v git >/dev/null 2>&1 || die "agile-md needs git 2.29 or later, and git isn't installed."
+  version="$(git --version | awk '{print $3}')"
+  major="${version%%.*}"
+  minor="${version#*.}"; minor="${minor%%.*}"
+  if [ "${major}" -lt 2 ] 2>/dev/null || { [ "${major}" -eq 2 ] && [ "${minor}" -lt 29 ]; } 2>/dev/null; then
+    die "agile-md needs git 2.29 or later; this system has git ${version}. Update git, then run the install again."
+  fi
+}
+
 # Rust target triple for this machine — matches the assets this repository's
 # release workflow publishes (amd-<target>.zip).
 target_triple() {
@@ -139,12 +192,12 @@ target_triple() {
   case "${arch}" in
     arm64|aarch64) arch="aarch64" ;;
     x86_64|amd64) arch="x86_64" ;;
-    *) die "unsupported architecture '${arch}' — install with --from-source" ;;
+    *) die "unsupported processor '${arch}'" ;;
   esac
   case "${os}" in
     Linux) printf '%s-unknown-linux-gnu' "${arch}" ;;
     Darwin) printf '%s-apple-darwin' "${arch}" ;;
-    *) die "unsupported OS '${os}' — install with --from-source" ;;
+    *) die "unsupported system '${os}'" ;;
   esac
 }
 
@@ -156,6 +209,7 @@ can_build_board() {
 }
 
 build_from_source() {
+  in_clone || die "building from source is done in a clone of https://github.com/${REPO} (see CONTRIBUTING.md)"
   command -v cargo >/dev/null 2>&1 || die "cargo not found — install Rust from https://rustup.rs"
   printf 'Building amd from source...\n'
   ( cd "${SELF}" && cargo build --release --locked -p amd-cli )
@@ -221,19 +275,34 @@ check_board_libraries() {
   printf 'amd itself works without them.\n' >&2
 }
 
+check_system
 if [ "${FROM_SOURCE}" = "1" ]; then
   build_from_source
-elif [ -f "${SELF}/Cargo.toml" ] && command -v cargo >/dev/null 2>&1; then
+elif in_clone && command -v cargo >/dev/null 2>&1; then
   build_from_source
 elif ! download_release; then
-  printf 'No prebuilt binary available; falling back to a source build.\n' >&2
-  build_from_source
+  if in_clone; then
+    printf 'No prebuilt binary available; falling back to a source build.\n' >&2
+    build_from_source
+  else
+    die "couldn't download agile-md ${VERSION} for $(target_triple) from https://github.com/${REPO}/releases — check your connection, or that the version exists."
+  fi
 fi
 
 chmod +x "${DIR}/amd"
 
+# A binary this system can't run (most often a Linux whose C library is
+# older than the one the release was built against) is said as such.
+if ! version_out="$("${DIR}/amd" --version 2>&1)"; then
+  printf 'install: amd was copied to %s but does not run on this system:\n  %s\n' "${DIR}/amd" "${version_out}" >&2
+  if printf '%s' "${version_out}" | grep -q GLIBC; then
+    printf 'This Linux is older than agile-md'"'"'s release builds support (its C library, glibc, is too old).\n' >&2
+    printf 'Building from source may work: see https://github.com/%s/blob/main/CONTRIBUTING.md\n' "${REPO}" >&2
+  fi
+  exit 1
+fi
 echo "Installed amd -> ${DIR}/amd"
-"${DIR}/amd" --version || true
+echo "${version_out}"
 if [ -f "${DIR}/amdui" ]; then
   chmod +x "${DIR}/amdui"
   echo "Installed amdui -> ${DIR}/amdui   (the desktop board)"
@@ -244,7 +313,8 @@ case ":${PATH}:" in
   *) echo "Note: ${DIR} is not on your PATH. Add this to your shell profile:"
      echo "      export PATH=\"${DIR}:\$PATH\"" ;;
 esac
-echo "Then, in any repo:  amd init  &&  amd new \"My first task\""
+echo "Then start a project, from the folder you keep projects in:"
+echo "  amd init my-project      (or amd join my-project for a team's)"
 if [ -x "${DIR}/amdui" ]; then
   echo "For the desktop board:  amdui   (or amd gui)"
 fi
