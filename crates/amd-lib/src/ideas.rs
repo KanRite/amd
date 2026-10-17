@@ -129,6 +129,10 @@ pub struct Idea {
     pub notes: Vec<Note>,
     /// The tickets made from it, as `<tickets repository>#<id>`.
     pub tickets: Vec<String>,
+    /// The epics and sprints made from it (ticket 231), as
+    /// `<tickets repository>#<name>`.
+    pub epics: Vec<String>,
+    pub sprints: Vec<String>,
     pub archived: bool,
     /// Its whole text.
     pub text: String,
@@ -189,6 +193,8 @@ pub fn parse(source: &str, path: &str, text: &str) -> Idea {
         votes,
         notes: notes_in(body),
         tickets: get("tickets").map(|v| flow_list(&v)).unwrap_or_default(),
+        epics: get("epics").map(|v| flow_list(&v)).unwrap_or_default(),
+        sprints: get("sprints").map(|v| flow_list(&v)).unwrap_or_default(),
         archived: is_archived(text),
         text: text.to_string(),
     }
@@ -422,24 +428,99 @@ pub fn to_ticket(
     }
 
     let reference = format!("{tickets_repo}#{id}");
+    let done = record(root, path, "tickets", &reference, &title)?;
+    Ok((id, events, done))
+}
+
+/// Adds `reference` to the idea's `key` list (`tickets`, `epics` or
+/// `sprints`) and commits it to the documents repository.
+fn record(root: &Path, path: &str, key: &str, reference: &str, title: &str) -> Result<Restored> {
     let full = documents::resolve(root, path)?;
-    let done = commit_reapplied(root, || {
+    commit_reapplied(root, || {
         let current = fs::read_to_string(&full).with_context(|| format!("reading {path}"))?;
-        let mut tickets = parse("", path, &current).tickets;
-        if !tickets.contains(&reference) {
-            tickets.push(reference.clone());
+        let idea = parse("", path, &current);
+        let mut list = match key {
+            "epics" => idea.epics,
+            "sprints" => idea.sprints,
+            _ => idea.tickets,
+        };
+        if !list.iter().any(|r| r == reference) {
+            list.push(reference.to_string());
         }
-        fs::write(
-            &full,
-            with_key(&current, "tickets", Some(&json_list(&tickets))),
-        )
-        .with_context(|| format!("writing {path}"))?;
+        fs::write(&full, with_key(&current, key, Some(&json_list(&list))))
+            .with_context(|| format!("writing {path}"))?;
         Ok((
             format!("idea: {title} -> {reference}"),
             vec![PathBuf::from(path)],
         ))
-    })?;
-    Ok((id, events, done))
+    })
+}
+
+/// Makes an epic or a pending sprint on `board` from the idea at `path`
+/// (ticket 231): named `name` (the idea's title when empty), empty, its
+/// description saying which idea it came from and the write-up, on one
+/// line as `_group.md` keeps it. A sprint is `days` long. Records it on the
+/// idea under `epics` or `sprints`. Returns the group's name, the board
+/// commit's warning, and the idea's commit.
+pub fn to_group(
+    board: &Board,
+    root: &Path,
+    source: &str,
+    path: &str,
+    kind: crate::group::Kind,
+    name: &str,
+    days: u32,
+) -> Result<(String, Option<String>, Restored)> {
+    use crate::group::{Group, Kind, State};
+    crate::archive::ensure_writable(board)?;
+    documents::ensure_clean(root, &[path])?;
+    let idea = read(root, source, path)?;
+    let name = match name.trim() {
+        "" => idea.title.trim().to_string(),
+        given => given.to_string(),
+    };
+    let sprint = kind == Kind::Sprint;
+    if sprint && days == 0 {
+        bail!("a sprint needs a length in days");
+    }
+    let write_up = write_up(&idea.text);
+    // Curly quotes: `_group.md` keeps the description in straight ones.
+    let mut description = format!("From the idea “{}”", idea.title);
+    if !write_up.is_empty() {
+        description.push_str(": ");
+        description.push_str(&write_up.split_whitespace().collect::<Vec<_>>().join(" "));
+    }
+    let group = Group {
+        dir: board.dir(crate::board::Column::Backlog).join(&name),
+        name: name.clone(),
+        kind,
+        description,
+        days: if sprint {
+            days
+        } else {
+            crate::group::DEFAULT_DAYS
+        },
+        state: State::Pending,
+    };
+    let action = if sprint { "group-sprint" } else { "group-epic" };
+    let ((), warning) =
+        crate::transition::with_auto_commit(board, action, &name, &idea.title, || {
+            board.create_group(&group)
+        })?;
+    let tickets_repo = board
+        .repo_root()
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let key = if sprint { "sprints" } else { "epics" };
+    let done = record(
+        root,
+        path,
+        key,
+        &format!("{tickets_repo}#{name}"),
+        &idea.title,
+    )?;
+    Ok((name, warning, done))
 }
 
 /// The write-up alone: no frontmatter, no title heading, no notes.
@@ -645,7 +726,8 @@ mod tests {
     #[test]
     fn frontmatter_votes_notes_and_tickets_read_back() {
         let text = "---\ntitle: \"Dark mode\"\nauthor: \"Sam Lee <sam@acme.io>\"\ncreated: \"2026-10-11\"\n\
-votes: [\"Sam Lee <sam@acme.io> +3\", \"Priya Shah <priya@acme.io> -1\"]\ntickets: [\"acme-tickets#042\"]\n---\n\
+votes: [\"Sam Lee <sam@acme.io> +3\", \"Priya Shah <priya@acme.io> -1\"]\ntickets: [\"acme-tickets#042\"]\n\
+epics: [\"acme-tickets#Dark mode\"]\nsprints: [\"acme-tickets#s1\"]\n---\n\
 # Dark mode\n\nWrite-up.\n\n## Notes\n\n- **Priya Shah**, 2026-10-11: Follow the OS.\n  Or a switch.\n- **Sam Lee**, 2026-10-12: Agreed.\n";
         let idea = parse("acme-documents", "ideas/dark-mode.md", text);
         assert_eq!(idea.title, "Dark mode");
@@ -653,6 +735,8 @@ votes: [\"Sam Lee <sam@acme.io> +3\", \"Priya Shah <priya@acme.io> -1\"]\nticket
         assert_eq!(idea.score(), 2);
         assert_eq!(idea.vote_of("priya@acme.io"), -1);
         assert_eq!(idea.tickets, vec!["acme-tickets#042"]);
+        assert_eq!(idea.epics, vec!["acme-tickets#Dark mode"]);
+        assert_eq!(idea.sprints, vec!["acme-tickets#s1"]);
         assert_eq!(idea.notes.len(), 2);
         assert_eq!(idea.notes[0].text, "Follow the OS.\nOr a switch.");
         assert_eq!(idea.notes[1].date, "2026-10-12");

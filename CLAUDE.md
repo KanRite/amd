@@ -122,16 +122,25 @@ redundant. Their history is in git if it is ever wanted again.
   change again on the new file (up to three times), since two people
   voting edit the same line and a rebase replay would conflict.
   `to_ticket` makes a backlog ticket (`source: "idea:<repo>/<path>"`,
-  notes naming the idea) and records it on the idea. Refused in an
+  notes naming the idea) and records it on the idea. `to_group` (ticket
+  231) makes an empty epic or pending sprint instead, named from the idea
+  (or as given), its `_group.md` description `From the idea “T”: ` plus
+  the write-up on one line (curly quotes, since the field is in straight
+  ones), recorded on the idea as `epics`/`sprints` (`<tickets
+  repo>#<name>`, `Idea.epics`/`sprints`). Refused in an
   archived project. CLI: `amd idea [--all]`, `idea new <title>
-  [--anonymous] [-e]`, `show`, `vote <ref> <+|++|-|-2…>`, `note`, `ticket`
+  [--anonymous] [-e]`, `show`, `vote <ref> <+|++|-|-2…>`, `note`, `ticket [--as
+  ticket|epic|sprint] [--name N] [--days D]`
   (`crates/amd-cli/src/idea.rs`, handled before `ensure_board()`). amdui:
   `View::Ideas` (`amd-ui-web/src/ideas.rs`), from the landing page's Ideas
   button: cards best first with your − / + (disabled at ±3), an idea
   opened beside them (write-up via `ideas::write_up`, votes, notes, Add
-  note, Make a ticket then Open ticket, Open in Documents to edit), New
-  idea (rich text, "Put my name on it"). Commands `list_ideas`,
-  `read_idea`, `create_idea`, `vote_idea`, `note_idea`, `idea_to_ticket`.
+  note, Make (a backlog ticket, or an epic or sprint for admins only,
+  with Name and Days) then Open ticket / Open epic, Open in Documents to
+  edit), New idea (rich text, "Put my name on it"). Commands
+  `list_ideas`, `read_idea`, `create_idea`, `vote_idea`, `note_idea`,
+  `idea_to_ticket`, `idea_to_group` (refused unless
+  `boards::admin_access`; the CLI isn't gated, like other admin things).
 - `crates/amd-lib/src/roadmap.rs` — Roadmaps (ticket 206): a plan for **one
   board** (repository) of the project, made of milestones. One markdown file
   per roadmap at `<tickets repo>/roadmaps/<board slug>.md`, beside `tasks/`

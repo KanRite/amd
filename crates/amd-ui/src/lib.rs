@@ -1597,6 +1597,8 @@ fn idea_card(idea: &agile_md::ideas::Idea, me: &str) -> amd_ui_model::IdeaCard {
         mine: idea.vote_of(me),
         notes: idea.notes.len(),
         tickets: idea.tickets.clone(),
+        epics: idea.epics.clone(),
+        sprints: idea.sprints.clone(),
         archived: idea.archived,
     }
 }
@@ -1757,6 +1759,46 @@ async fn idea_to_ticket(
                 .unwrap_or_default(),
             file: task.file_name(),
             id,
+        })
+    })
+    .await
+}
+
+/// Makes an epic or a pending sprint from an idea (ticket 231): empty, its
+/// description the idea's write-up. The project's admins only; anyone can
+/// make a backlog ticket.
+#[tauri::command]
+async fn idea_to_group(
+    state: Tauri<'_, AppState>,
+    path: String,
+    sprint: bool,
+    name: String,
+    days: u32,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        if !boards::admin_access(board).allowed {
+            return Err(
+                "Only the project's admins can make an epic or a sprint from an idea.".into(),
+            );
+        }
+        let source = agile_md::ideas::source(board);
+        let root = source
+            .root
+            .ok_or_else(|| format!("{} isn't cloned on this machine", source.name))?;
+        let kind = if sprint { Kind::Sprint } else { Kind::Epic };
+        let (made, warning, done) =
+            agile_md::ideas::to_group(board, &root, &source.name, &path, kind, &name, days)
+                .map_err(err)?;
+        let warnings: Vec<String> = warning.into_iter().chain(done.warning.clone()).collect();
+        Ok(SyncReport {
+            committed: true,
+            pushed: warnings.is_empty(),
+            warning: (!warnings.is_empty()).then(|| warnings.join("; ")),
+            message: format!(
+                "{} {made} made from the idea",
+                if sprint { "sprint" } else { "epic" }
+            ),
         })
     })
     .await
@@ -2527,6 +2569,7 @@ pub fn run() {
             vote_idea,
             note_idea,
             idea_to_ticket,
+            idea_to_group,
             set_include_unassigned,
             board_fingerprint,
             sync_board,

@@ -245,7 +245,36 @@ fn Detail(
             busy.set(false);
         });
     };
-    let make_ticket = move |_| {
+    // What to make (ticket 231): anyone can make a backlog ticket; an epic
+    // or a sprint, empty with the write-up as its description, is for the
+    // project's admins.
+    let what = RwSignal::new("ticket".to_string());
+    let group_name = RwSignal::new(detail.card.title.clone());
+    let days = RwSignal::new("14".to_string());
+    let admin = move || {
+        ctx.board
+            .with(|b| b.as_ref().is_none_or(|b| b.admin.allowed))
+    };
+    let group_path = path.clone();
+    let make_group = move || {
+        let path = group_path.clone();
+        let sprint = what.get_untracked() == "sprint";
+        let name = group_name.get_untracked();
+        let days = days.get_untracked().trim().parse::<u32>().unwrap_or(0);
+        busy.set(true);
+        spawn_local(async move {
+            match api::idea_to_group(&path, sprint, &name, days).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    ctx.reload();
+                    reload();
+                }
+                Err(e) => ctx.error.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
+    let make_ticket = move || {
         let path = ticket_path.clone();
         busy.set(true);
         spawn_local(async move {
@@ -260,6 +289,13 @@ fn Detail(
             }
             busy.set(false);
         });
+    };
+    let make = move |_| {
+        if what.with_untracked(|w| w == "ticket") {
+            make_ticket();
+        } else {
+            make_group();
+        }
     };
     let open_ticket = move |_| {
         if let Some(t) = made.get_untracked() {
@@ -307,6 +343,16 @@ fn Detail(
     };
 
     let card = detail.card.clone();
+    let made_groups: Vec<(&'static str, String, String)> = card
+        .epics
+        .iter()
+        .map(|r| ("epic", r))
+        .chain(card.sprints.iter().map(|r| ("sprint", r)))
+        .filter_map(|(kind, r)| {
+            let (repo, name) = r.split_once('#')?;
+            Some((kind, repo.to_string(), name.to_string()))
+        })
+        .collect();
     let votes = detail
         .votes
         .iter()
@@ -373,20 +419,73 @@ fn Detail(
                     </button>
                 </div>
             </section>
-            <section class="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-2 dark:border-slate-700">
-                <span class="flex-1 text-xs text-slate-500">
-                    {if card.tickets.is_empty() {
-                        "Ready to do it? Make a backlog ticket from it, linked both ways.".to_string()
+            <section class="flex flex-col gap-2 border-t border-slate-200 pt-2 dark:border-slate-700">
+                <span class="text-xs text-slate-500">
+                    {if card.tickets.is_empty() && card.epics.is_empty() && card.sprints.is_empty() {
+                        "Ready to do it? Make a backlog ticket, an epic or a sprint from it.".to_string()
+                    } else if card.tickets.is_empty() {
+                        String::new()
                     } else {
                         format!("Tickets: {}", card.tickets.join(", "))
                     }}
                 </span>
-                <Show when=move || made.with(Option::is_some)>
-                    <button type="button" class=SMALL on:click=open_ticket>
-                        {move || made.with(|t| t.as_ref().map(|t| format!("Open ticket {}", t.id)).unwrap_or_default())}
-                    </button>
-                </Show>
-                <button class=PRIMARY disabled=move || busy.get() on:click=make_ticket>"Make a ticket"</button>
+                {made_groups
+                    .into_iter()
+                    .map(|(kind, repo, name)| {
+                        let label = format!("Open {kind} {name}");
+                        let open = move |_| {
+                            ctx.view.set(View::Board);
+                            ctx.open_epic.set(Some((repo.clone(), name.clone())));
+                        };
+                        view! {
+                            <div>
+                                <button type="button" class=SMALL on:click=open>{label}</button>
+                            </div>
+                        }
+                    })
+                    .collect_view()}
+                <div class="flex flex-wrap items-end gap-2">
+                    <label class="flex flex-col gap-1 text-xs">
+                        "Make"
+                        <select
+                            class="rounded border border-slate-300 bg-slate-50 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-900"
+                            prop:value=move || what.get()
+                            on:change=move |ev| what.set(event_target_value(&ev))
+                        >
+                            <option value="ticket">"A backlog ticket"</option>
+                            <option value="epic" disabled=move || !admin()>"An epic"</option>
+                            <option value="sprint" disabled=move || !admin()>"A sprint"</option>
+                        </select>
+                    </label>
+                    <label class="flex flex-1 flex-col gap-1 text-xs" class:hidden=move || what.with(|w| w == "ticket")>
+                        "Name"
+                        <input
+                            type="text"
+                            class="rounded border border-slate-300 bg-slate-50 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-900"
+                            prop:value=move || group_name.get()
+                            on:input=move |ev| group_name.set(event_target_value(&ev))
+                        />
+                    </label>
+                    <label class="flex flex-col gap-1 text-xs" class:hidden=move || what.with(|w| w != "sprint")>
+                        "Days"
+                        <input
+                            type="number"
+                            min="1"
+                            class="w-20 rounded border border-slate-300 bg-slate-50 px-2 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-900"
+                            prop:value=move || days.get()
+                            on:input=move |ev| days.set(event_target_value(&ev))
+                        />
+                    </label>
+                    <Show when=move || made.with(Option::is_some)>
+                        <button type="button" class=SMALL on:click=open_ticket>
+                            {move || made.with(|t| t.as_ref().map(|t| format!("Open ticket {}", t.id)).unwrap_or_default())}
+                        </button>
+                    </Show>
+                    <button class=PRIMARY disabled=move || busy.get() on:click=make>"Make it"</button>
+                </div>
+                {move || (!admin()).then(|| view! {
+                    <p class="text-xs text-slate-500">"Only the project's admins can make an epic or a sprint from an idea."</p>
+                })}
             </section>
         </article>
     }

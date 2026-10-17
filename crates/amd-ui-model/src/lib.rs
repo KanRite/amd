@@ -976,6 +976,12 @@ pub struct IdeaCard {
     pub notes: usize,
     /// The tickets made from it, as `<tickets repository>#<id>`.
     pub tickets: Vec<String>,
+    /// The epics and sprints made from it (ticket 231), as
+    /// `<tickets repository>#<name>`.
+    #[serde(default)]
+    pub epics: Vec<String>,
+    #[serde(default)]
+    pub sprints: Vec<String>,
     pub archived: bool,
 }
 

@@ -101,7 +101,9 @@ a solo developer without it.
 - **Write in amdui:** rich text or markdown, folders, moves that keep links
   working, archiving, a pinned start page and search.
 - **Ideas** before they're tickets: everyone votes up to ±3 and adds notes,
-  and an idea becomes a ticket in one click.
+  and an idea becomes a backlog ticket in one click, or (for the project's
+  admins) an epic or a sprint with the idea's write-up as its description
+  (`amd idea ticket <idea> --as epic|sprint`).
 
 ### Teams and projects
 
