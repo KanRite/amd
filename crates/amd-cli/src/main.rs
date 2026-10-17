@@ -1977,7 +1977,7 @@ fn cmd_gui() -> Result<()> {
         Ok(status) => bail!("amdui exited with {status}"),
         Err(err) if err.kind() == io::ErrorKind::NotFound => bail!(
             "the desktop board isn't installed: amdui ships with amd — \
-             run install.sh again, or build it from a clone (see the README)"
+             run the install again (see the README), or build it from a clone (CONTRIBUTING.md)"
         ),
         Err(err) => Err(err).context("starting amdui"),
     }
