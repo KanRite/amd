@@ -835,6 +835,75 @@ async fn create_sprint(
     .await
 }
 
+/// Closes a started sprint (`amd group close`, ticket 052): read-only from
+/// now, its unstarted tickets back to the backlog, and its report filed in
+/// the project's documents repository (a note when that isn't cloned).
+#[tauri::command]
+async fn close_sprint(
+    state: Tauri<'_, AppState>,
+    repo: Option<String>,
+    name: String,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        use agile_md::{documents, sprints, stats};
+        let (repo_name, board) = p
+            .repos
+            .iter()
+            .find(|(n, _)| repo.as_deref().is_none_or(|r| r.is_empty() || r == n))
+            .map(|(n, b)| (n.clone(), b))
+            .ok_or_else(|| "no such repository".to_string())?;
+        let now = stats::now();
+        let mut closed = None;
+        let mut report = committed(board, "group-close", &name, "", || {
+            closed = Some(sprints::close(board, &repo_name, &name, now)?);
+            Ok(())
+        })?;
+        let Some(closed) = closed else {
+            return Ok(report);
+        };
+        let own = documents::sources(&p.repos[0].1)
+            .into_iter()
+            .find(|s| s.kind == documents::Kind::Own)
+            .and_then(|s| s.root.map(|root| (s.name, root)));
+        let note = match own {
+            Some((source, root)) => match sprints::file_report(&root, &closed, now) {
+                Ok((path, filed)) => {
+                    report.message = format!("{name} closed; report in {source}/{path}");
+                    filed.warning
+                }
+                Err(e) => Some(format!("the close report wasn't written: {e:#}")),
+            },
+            None => Some("no documents repository is cloned here, so no close report".into()),
+        };
+        if let Some(note) = note {
+            report.warning = Some(match report.warning.take() {
+                Some(w) => format!("{w}; {note}"),
+                None => note,
+            });
+        }
+        Ok(report)
+    })
+    .await
+}
+
+/// Backfills a running sprint (`amd group backfill`, ticket 052): sized,
+/// unassigned tickets from the loose backlog, up to `points`.
+#[tauri::command]
+async fn backfill_sprint(
+    state: Tauri<'_, AppState>,
+    repo: Option<String>,
+    name: String,
+    points: u32,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = p.board(&repo.unwrap_or_default())?;
+        committed(board, "group-backfill", &name, "", || {
+            agile_md::sprints::backfill(board, &name, points).map(|_| ())
+        })
+    })
+    .await
+}
+
 /// Starts a sprint (`amd group start`): no more tickets in or back out.
 #[tauri::command]
 async fn start_sprint(
@@ -2735,6 +2804,8 @@ pub fn run() {
             set_milestone_dates,
             create_sprint,
             start_sprint,
+            close_sprint,
+            backfill_sprint,
             rename_epic,
             delete_epic,
             archive_ticket,

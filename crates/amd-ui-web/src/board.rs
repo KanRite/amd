@@ -46,7 +46,8 @@ fn group_state(ctx: Ctx, place: &Place) -> Option<GroupState> {
             .find(|e| e.repo == place.repo && e.name == *name)
             .map(|e| GroupState {
                 kind: e.kind,
-                started: e.started,
+                // A closed sprint is as fixed as a started one (ticket 052).
+                started: e.started || e.closed,
             })
     })
 }
@@ -672,6 +673,7 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
     });
     let is_sprint = move || group.with(|g| g.as_ref().is_some_and(|g| g.kind == GroupKind::Sprint));
     let started = move || group.with(|g| g.as_ref().is_some_and(|g| g.started));
+    let closed = move || group.with(|g| g.as_ref().is_some_and(|g| g.closed));
     let tickets = Memo::new(move |_| {
         let list = group.with(|g| g.as_ref().map(|g| g.tickets.clone()).unwrap_or_default());
         ctx.shown(list)
@@ -681,7 +683,13 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
         group.with(|g| {
             let g = g.as_ref()?;
             (g.kind == GroupKind::Sprint).then(|| {
-                let state = if g.started { "started" } else { "pending" };
+                let state = if g.closed {
+                    "closed"
+                } else if g.started {
+                    "started"
+                } else {
+                    "pending"
+                };
                 format!("{} days · {state} · {} pts", g.days, total_points(g))
             })
         })
@@ -790,6 +798,41 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
         });
     };
     let kind_word = move || if is_sprint() { "sprint" } else { "epic" };
+    // A running sprint (ticket 052): backfill it, or close it (asks once
+    // more: closing is final).
+    let backfill_points = RwSignal::new(String::new());
+    let backfill = move || {
+        let Ok(points) = backfill_points.get_untracked().trim().parse::<u32>() else {
+            return;
+        };
+        let (repo, name) = ids.get_value();
+        spawn_local(async move {
+            match api::backfill_sprint(Some(&repo), &name, points).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    backfill_points.set(String::new());
+                }
+                Err(e) => ctx.error.set(Some(e)),
+            }
+            ctx.reload();
+        });
+    };
+    let confirm_close = RwSignal::new(false);
+    let close_sprint = move |_: leptos::ev::MouseEvent| {
+        if !confirm_close.get_untracked() {
+            confirm_close.set(true);
+            return;
+        }
+        confirm_close.set(false);
+        let (repo, name) = ids.get_value();
+        spawn_local(async move {
+            match api::close_sprint(Some(&repo), &name).await {
+                Ok(report) => ctx.report(report),
+                Err(e) => ctx.error.set(Some(e)),
+            }
+            ctx.reload();
+        });
+    };
 
     view! {
         <section
@@ -880,7 +923,7 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
                         {move || if confirm_delete.get() { "Confirm: delete" } else { "Delete" }}
                     </button>
                 </div>
-                <Show when=move || is_sprint() && !started()>
+                <Show when=move || is_sprint() && !started() && !closed()>
                     <button
                         class=move || {
                             if confirm_start.get() {
@@ -946,6 +989,50 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
                             })
                     }}
                 </Show>
+                <Show when=move || is_sprint() && started()>
+                    <div class="flex flex-col gap-1 px-1">
+                        <form
+                            class="flex items-center gap-1"
+                            on:submit=move |ev| {
+                                ev.prevent_default();
+                                backfill();
+                            }
+                        >
+                            <input
+                                type="number"
+                                min="1"
+                                aria-label="Points to backfill"
+                                placeholder="pts"
+                                class="w-16 rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 text-xs dark:border-slate-600 dark:bg-slate-900"
+                                prop:value=move || backfill_points.get()
+                                on:input=move |ev| backfill_points.set(event_target_value(&ev))
+                            />
+                            <button
+                                type="submit"
+                                class="flex-1 rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 disabled:cursor-default disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700"
+                                title="Pull sized, unassigned tickets from the loose backlog into this sprint, highest priority first, up to these points"
+                                disabled=move || backfill_points.with(|p| p.trim().parse::<u32>().map_or(true, |n| n == 0))
+                            >
+                                "Backfill"
+                            </button>
+                        </form>
+                        <button
+                            type="button"
+                            class=move || {
+                                if confirm_close.get() {
+                                    "w-full rounded bg-accent-600 px-2 py-1 text-xs font-medium text-white hover:bg-accent-500"
+                                } else {
+                                    "w-full rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                                }
+                            }
+                            title="End the sprint: it becomes read-only, unstarted tickets go back to the backlog, and a report with its burn-up goes into the documents"
+                            on:click=close_sprint
+                            on:blur=move |_| confirm_close.set(false)
+                        >
+                            {move || if confirm_close.get() { "Confirm: close sprint" } else { "Close sprint" }}
+                        </button>
+                    </div>
+                </Show>
                 {move || {
                     refusal()
                         .map(|why| {
@@ -1008,7 +1095,7 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                     let started = sprint.is_some_and(|name| {
                         b.epics
                             .iter()
-                            .any(|e| e.repo == me.repo && e.name == name && e.started)
+                            .any(|e| e.repo == me.repo && e.name == name && (e.started || e.closed))
                     });
                     !started && waiting::has_family(&me, waiting::all_tickets(b))
                 })

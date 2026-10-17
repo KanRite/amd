@@ -375,6 +375,21 @@ backlog is just the default epic — a ticket in any epic or sprint can move on
 to todo, keeping its epic, and sent back from todo it returns to it (unless
 that is a sprint that has started).
 
+**Backfill** is the one way more goes into a running sprint: when it runs
+short, **Backfill** in its column (or `amd group backfill s12 --points 5`)
+pulls sized, unassigned tickets that aren't drafts from the loose backlog,
+never from an epic, highest priority first and then oldest, up to that many
+points.
+
+**Close sprint** (or `amd group close s12`) ends it, done or not: a sprint
+ends on schedule. It becomes read-only, so nothing goes in or out. Tickets
+still in its backlog folder go back to the loose backlog; tickets already
+in todo or doing keep its name and carry on. A report goes into the
+project's documents repository, `sprint/history/<date and time>-<sprint>.md`,
+with the sprint's dates, its points in scope and done, the tickets done and
+not done, and its burn-up and burn-down as a picture beside it, pushed to
+main like any document.
+
 ## Driving it from the command line
 
 Everything the board does is a command, so a script — or an agent — can work a
@@ -391,6 +406,8 @@ amd group start sprint-1               # one way: no route back to pending
 amd group                              # tickets and points per epic and sprint
 amd group empty checkout               # every ticket in it, back to backlog/ at once
 amd group rename checkout payments     # the folder and every ticket's epic
+amd group backfill sprint-1 --points 5 # top up a running sprint from the backlog
+amd group close sprint-1               # end it: read-only, and a report in the documents
 amd group delete payments              # once every ticket in it is done (or moved out)
 amd todo 001 --no-branch && amd doing 001 && amd done 001
 ```

@@ -149,6 +149,7 @@ impl Project {
                     .count();
                 epics.push(Epic {
                     unfinished,
+                    closed: group.is_sprint() && group.state == State::Closed,
                     repo: name.clone(),
                     kind: if group.is_sprint() {
                         GroupKind::Sprint

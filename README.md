@@ -91,6 +91,8 @@ a solo developer without it.
 
 - **Epics and sprints**, both optional; a started sprint takes nothing more
   and gives nothing back, and can't start while it needs a ticket outside it.
+  Backfill a running sprint from the backlog when it runs short, and close it
+  when it ends: a report with its burn-up goes into your documents.
 - **Auto priority** (optional): a ticket is at least as urgent as what
   requires it, and the **Automatic** sort shows what's needed first.
 - **Roadmaps:** one per board, made of milestones that create its epics or

@@ -660,6 +660,19 @@ impl Board {
     /// column included. Calling this on a `doing`/`done` ticket does not
     /// send it back to the backlog.
     pub fn set_epic(&self, task: &Task, epic: Option<&str>) -> Result<PathBuf> {
+        self.file(task, epic, false)
+    }
+
+    /// [`set_epic`](Self::set_epic), or with `deliberate` set, past the
+    /// started-sprint rule: what closing a sprint (its unfinished tickets
+    /// back to the backlog) and backfill (tickets into a running sprint) do
+    /// on purpose (ticket 052). Every other check stays.
+    pub(crate) fn file(
+        &self,
+        task: &Task,
+        epic: Option<&str>,
+        deliberate: bool,
+    ) -> Result<PathBuf> {
         // Checked up front, not left to set_epic_meta's own write_checked
         // afterwards — that would risk a half-moved, half-refused ticket if
         // someone else holds the lease.
@@ -671,17 +684,24 @@ impl Board {
             Column::Backlog => task.epic.clone(),
             _ => task.epic_meta(),
         };
-        if current.as_deref() != epic {
+        if current.as_deref() != epic && !deliberate {
             if let Some(name) = current.as_deref()
                 && let Ok(group) = self.group(name)
                 && !group.accepts_changes()
             {
-                bail!("{name} has started: its tickets can only move on to todo");
+                bail!(
+                    "{name} {}: its tickets can only move on to todo",
+                    group.locked_word()
+                );
             }
-            if let Some(name) = epic
-                && !self.group(name)?.accepts_changes()
-            {
-                bail!("{name} has started: no more tickets can be added to it");
+            if let Some(name) = epic {
+                let group = self.group(name)?;
+                if !group.accepts_changes() {
+                    bail!(
+                        "{name} {}: no more tickets can be added to it",
+                        group.locked_word()
+                    );
+                }
             }
         }
         if let Some(name) = epic {
@@ -976,8 +996,9 @@ impl Board {
             && !group.accepts_changes()
         {
             bail!(
-                "{} is in {name}, which has started — move it on to todo before archiving it",
-                task.stem
+                "{} is in {name}, which {} — move it on to todo before archiving it",
+                task.stem,
+                group.locked_word()
             );
         }
         let dir = self.archive_dir();
@@ -1082,8 +1103,13 @@ impl Board {
             && group.is_sprint()
             && !group.accepts_changes()
         {
+            let state = if group.state == crate::group::State::Closed {
+                "closed"
+            } else {
+                "started"
+            };
             bail!(
-                "{} is in started sprint {name}: its tickets only move on, to todo",
+                "{} is in {state} sprint {name}: its tickets only move on, to todo",
                 task.id_display()
             );
         }

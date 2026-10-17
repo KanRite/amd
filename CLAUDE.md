@@ -1455,6 +1455,25 @@ changes):
   a started sprint and taking one out of it, in any column; its tickets
   only move on, to todo (`move_task`), and archiving straight out of one is
   refused too. Any group refuses an unsized ticket if it is a sprint.
+  **Closed and backfill** (ticket 052, RFC 0005,
+  `crates/amd-lib/src/sprints.rs`): `group::State::Closed`
+  (`started: "closed"`); `accepts_changes()` is false for started and
+  closed, `locked_word()` says which. `sprints::close` (a started sprint
+  only, no all-done precondition): unfinished tickets in its backlog folder
+  go back to the loose backlog through `Board::file(task, None, true)`
+  (`deliberate` skips only the started-sprint rule), todo/doing ones keep
+  the label, then `Group::close`; `stats::burn_of` takes the burn first.
+  `file_report` writes `sprint/history/<YYYYMMDDTHHMMSSZ>-<slug>.md` and
+  `.svg` (`report_text`, `report_svg`) into the project's own documents
+  repository through `commit_change` (straight to main, ADR 0007, so no
+  Forge). `sprints::backfill(board, name, points)`: a started sprint only;
+  loose-backlog tickets (never an epic's), sized, unassigned, not drafts,
+  not leased by another, by priority then `created` then id, each that
+  fits under the points, filed with `deliberate`. CLI `amd group close`,
+  `amd group backfill <name> --points N`; amdui `close_sprint` (files the
+  report, a warning when documents aren't cloned), `backfill_sprint`, the
+  running sprint's column has Backfill (points) and Close sprint (confirm);
+  `Epic.closed`, and the page treats closed like started in its rules.
 - **The loose backlog is the default epic.** A ticket in any epic or sprint
   moves straight on to todo (`move_task` from its folder) and keeps its
   `epic` there. Sent back from todo, `Board::home_group` puts it back in the

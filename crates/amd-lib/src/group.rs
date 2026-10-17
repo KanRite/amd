@@ -48,6 +48,8 @@ impl Kind {
 pub enum State {
     Pending,
     Started,
+    /// Finished (ticket 052): read-only, nothing goes in or out.
+    Closed,
 }
 
 impl State {
@@ -55,12 +57,14 @@ impl State {
         match self {
             State::Pending => "pending",
             State::Started => "started",
+            State::Closed => "closed",
         }
     }
 
     fn parse(value: &str) -> State {
         match value.trim().to_ascii_lowercase().as_str() {
             "started" => State::Started,
+            "closed" => State::Closed,
             _ => State::Pending,
         }
     }
@@ -115,7 +119,32 @@ impl Group {
     /// commitment; changing what is in it after the fact is what makes a
     /// sprint report meaningless.
     pub fn accepts_changes(&self) -> bool {
-        !(self.is_sprint() && self.state == State::Started)
+        !(self.is_sprint() && self.state != State::Pending)
+    }
+
+    /// Why it takes no changes, for a refusal: "has started" or "is
+    /// closed".
+    pub fn locked_word(&self) -> &'static str {
+        if self.state == State::Closed {
+            "is closed"
+        } else {
+            "has started"
+        }
+    }
+
+    /// Close a started sprint (ticket 052): it becomes read-only. A pending
+    /// one has nothing to close, and an epic has no timebox.
+    pub fn close(&mut self) -> Result<()> {
+        if !self.is_sprint() {
+            bail!("{} is an epic, not a sprint", self.name);
+        }
+        match self.state {
+            State::Pending => bail!("{} hasn't started, so there's nothing to close", self.name),
+            State::Closed => bail!("{} is closed already", self.name),
+            State::Started => {}
+        }
+        self.state = State::Closed;
+        self.save()
     }
 
     /// Write the group's own file. Creates the directory if needed.

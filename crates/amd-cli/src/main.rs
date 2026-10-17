@@ -912,6 +912,23 @@ enum GroupCmd {
         #[arg(value_name = "NAME")]
         name: String,
     },
+    /// Close a started sprint: it becomes read-only. Unfinished tickets
+    /// still in its folder go back to the backlog; those in todo or doing
+    /// carry on. A report with its burn-up goes into the documents
+    /// repository's sprint/history/
+    Close {
+        #[arg(value_name = "NAME")]
+        name: String,
+    },
+    /// Pull tickets from the loose backlog into a running sprint, up to N
+    /// points: sized, unassigned, not drafts, highest priority first
+    Backfill {
+        #[arg(value_name = "NAME")]
+        name: String,
+        /// How many points to add at most
+        #[arg(long, value_name = "N")]
+        points: u32,
+    },
     /// Empty an epic or sprint's folder into the loose backlog at once —
     /// every ticket it holds, no precondition
     Empty {
@@ -2178,6 +2195,50 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
             println!("{name} started — its tickets are now fixed");
             Ok(())
         }),
+        GroupCmd::Close { name } => {
+            use agile_md::{documents, sprints, stats};
+            let now = stats::now();
+            let repo = board
+                .repo_root()
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let closed = with_auto_commit(board, "group-close", &name, "", || {
+                sprints::close(board, &repo, &name, now)
+            })?;
+            let done: u32 = closed.done.iter().map(|d| d.2).sum();
+            println!(
+                "{name} closed: {done} of {} points done, {} ticket(s) not done",
+                closed.burn.total,
+                closed.not_done.len()
+            );
+            if !closed.returned.is_empty() {
+                println!("back to the backlog: {}", closed.returned.join(", "));
+            }
+            let own = documents::sources(board)
+                .into_iter()
+                .find(|s| s.kind == documents::Kind::Own);
+            match own.and_then(|s| s.root.map(|root| (s.name, root))) {
+                Some((source, root)) => {
+                    let (path, filed) = sprints::file_report(&root, &closed, now)?;
+                    if let Some(warning) = &filed.warning {
+                        eprintln!("amd: {warning}");
+                    }
+                    println!("report: {source}/{path}");
+                }
+                None => eprintln!(
+                    "amd: no documents repository cloned here, so no close report was written"
+                ),
+            }
+            Ok(())
+        }
+        GroupCmd::Backfill { name, points } => {
+            with_auto_commit(board, "group-backfill", &name, "", || {
+                let filed = agile_md::sprints::backfill(board, &name, points)?;
+                println!("backfilled {name}: {}", filed.join(", "));
+                Ok(())
+            })
+        }
         GroupCmd::Empty { name } => with_auto_commit(board, "group-empty", &name, "", || {
             let result = board.empty_group(&name)?;
             println!(
