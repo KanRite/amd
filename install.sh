@@ -3,7 +3,7 @@
 # agile-md installer — install the `amd` command onto your PATH.
 #
 #   ./install.sh [--dir DIR] [--version vX.Y.Z] [--from-source]
-#   curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v4/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash
 #
 # Default target directory: /usr/local/bin if writable, else ~/bin.
 # Run from a clone with cargo installed and it builds from source; otherwise it
@@ -22,7 +22,7 @@
 #
 set -euo pipefail
 
-REPO="mrdoodles/agile-md"
+REPO="agile-md/amd"
 DIR=""
 VERSION="latest"
 FROM_SOURCE=0

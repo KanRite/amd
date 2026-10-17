@@ -17,10 +17,10 @@ members = [
 ]
 
 [workspace.package]
-version = "4.0.0"
+version = "4.1.0"
 edition = "2024"
 rust-version = "1.88"
-repository = "https://github.com/mrdoodles/agile-md"
+repository = "https://github.com/agile-md/amd"
 license = "MIT"
 
 [workspace.dependencies]
