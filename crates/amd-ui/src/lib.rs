@@ -776,6 +776,46 @@ async fn add_milestone(
     .await
 }
 
+/// Changes a milestone's start and due dates (ticket 235). A pending sprint
+/// it made takes the new length, in its own commit when it's on another
+/// repository's board.
+#[tauri::command]
+async fn set_milestone_dates(
+    state: Tauri<'_, AppState>,
+    roadmap: String,
+    milestone: String,
+    start: String,
+    due: String,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let store = &p.repos[0].1;
+        let found = agile_md::roadmap::list(store)
+            .map_err(err)?
+            .into_iter()
+            .find(|r| r.slug == roadmap)
+            .ok_or_else(|| format!("No roadmap called {roadmap}."))?;
+        if found.board.is_empty() {
+            return Err(format!("Give {} a board first.", found.name));
+        }
+        let target = p.board(&found.board)?;
+        let set = || {
+            agile_md::roadmap::set_milestone_dates(
+                store, target, &roadmap, &milestone, &start, &due,
+            )
+            .map(|_| ())
+        };
+        if target.repo_root() == store.repo_root() {
+            committed(store, "roadmap-dates", &milestone, &roadmap, set)
+        } else {
+            committed(target, "roadmap-dates", &milestone, &roadmap, || {
+                transition::with_auto_commit(store, "roadmap-dates", &milestone, &roadmap, set)
+                    .map(|_| ())
+            })
+        }
+    })
+    .await
+}
+
 /// Creates a pending sprint in `repo`'s backlog (`amd group sprint`).
 #[tauri::command]
 async fn create_sprint(
@@ -2500,6 +2540,7 @@ pub fn run() {
             save_roadmap,
             rename_roadmap,
             add_milestone,
+            set_milestone_dates,
             create_sprint,
             start_sprint,
             rename_epic,

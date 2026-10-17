@@ -1030,6 +1030,33 @@ pub async fn add_milestone(
     call("add_milestone", &MilestoneArgs { roadmap, milestone }).await
 }
 
+#[derive(Serialize)]
+struct MilestoneDatesArgs<'a> {
+    roadmap: &'a str,
+    milestone: &'a str,
+    start: &'a str,
+    due: &'a str,
+}
+
+/// Changes a milestone's start and due dates (either may be empty).
+pub async fn set_milestone_dates(
+    roadmap: &str,
+    milestone: &str,
+    start: &str,
+    due: &str,
+) -> Result<SyncReport, String> {
+    call(
+        "set_milestone_dates",
+        &MilestoneDatesArgs {
+            roadmap,
+            milestone,
+            start,
+            due,
+        },
+    )
+    .await
+}
+
 /// The project's ideas, best first (ticket 131).
 pub async fn list_ideas() -> Result<amd_ui_model::IdeaList, String> {
     call("list_ideas", &NoArgs {}).await

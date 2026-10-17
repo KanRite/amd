@@ -468,34 +468,7 @@ fn RoadmapView(
                 {roadmap
                     .milestones
                     .iter()
-                    .map(|m| {
-                        let class = format!(
-                            "rounded border-l-4 bg-slate-50 p-2 text-sm dark:bg-slate-800 {}",
-                            if m.late {
-                                "border-red-600"
-                            } else if m.total.is_some() || m.remaining.is_some() {
-                                "border-green-600"
-                            } else {
-                                "border-slate-300 dark:border-slate-600"
-                            },
-                        );
-                        view! {
-                            <li class=class>
-                                <span class="font-medium">{m.name.clone()}</span>
-                                <span class="text-slate-500">
-                                    {format!(" · {}", m.kind)}
-                                    {dated("starts", &m.start)}
-                                    {dated("due by", &m.due)}
-                                    {m
-                                        .total
-                                        .map(|d| format!(" · {}", days_label(i64::from(d))))
-                                        .unwrap_or_default()}
-                                    {m.remaining.map(|r| format!(" · {}", left(r))).unwrap_or_default()}
-                                </span>
-                                <p class="whitespace-pre-wrap">{m.description.clone()}</p>
-                            </li>
-                        }
-                    })
+                    .map(|m| view! { <MilestoneRow m=m.clone() slug reload /> })
                     .collect_view()}
             </ul>
         </section>
@@ -585,5 +558,137 @@ fn RoadmapView(
                 </button>
             </div>
         </form>
+    }
+}
+
+/// One milestone: its name, kind, dates, length and time left, and Change
+/// dates, which edits the start and due dates in place (ticket 235).
+#[component]
+fn MilestoneRow(
+    m: MilestoneCard,
+    slug: StoredValue<String>,
+    reload: impl Fn() + Copy + 'static,
+) -> impl IntoView {
+    let ctx = Ctx::get();
+    let editing = RwSignal::new(false);
+    let busy = RwSignal::new(false);
+    let problem = RwSignal::new(None::<String>);
+    let start = RwSignal::new(m.start.clone());
+    let due = RwSignal::new(m.due.clone());
+    let name = StoredValue::new(m.name.clone());
+    let old = StoredValue::new((m.start.clone(), m.due.clone()));
+    let sprint = m.kind == "sprint" && m.duration == 0;
+    let class = format!(
+        "rounded border-l-4 bg-slate-50 p-2 text-sm dark:bg-slate-800 {}",
+        if m.late {
+            "border-red-600"
+        } else if m.total.is_some() || m.remaining.is_some() {
+            "border-green-600"
+        } else {
+            "border-slate-300 dark:border-slate-600"
+        },
+    );
+    let cancel = move || {
+        let (old_start, old_due) = old.get_value();
+        start.set(old_start);
+        due.set(old_due);
+        problem.set(None);
+        editing.set(false);
+    };
+    let save = move || {
+        if busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        spawn_local(async move {
+            let result = api::set_milestone_dates(
+                &slug.get_value(),
+                &name.get_value(),
+                &start.get_untracked(),
+                &due.get_untracked(),
+            )
+            .await;
+            match result {
+                Ok(report) => {
+                    ctx.report(report);
+                    problem.set(None);
+                    editing.set(false);
+                    // A sprint's length may have changed on the board.
+                    ctx.reload();
+                    reload();
+                }
+                Err(e) => problem.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
+    let unchanged = move || old.with_value(|(s, d)| start.get() == *s && due.get() == *d);
+    view! {
+        <li class=class>
+            <div class="flex items-start gap-2">
+                <div class="flex-1">
+                    <span class="font-medium">{m.name.clone()}</span>
+                    <span class="text-slate-500">
+                        {format!(" · {}", m.kind)}
+                        {dated("starts", &m.start)}
+                        {dated("due by", &m.due)}
+                        {m
+                            .total
+                            .map(|d| format!(" · {}", days_label(i64::from(d))))
+                            .unwrap_or_default()}
+                        {m.remaining.map(|r| format!(" · {}", left(r))).unwrap_or_default()}
+                    </span>
+                </div>
+                <button
+                    type="button"
+                    class=SECONDARY
+                    class:hidden=move || editing.get()
+                    on:click=move |_| editing.set(true)
+                >
+                    "Change dates"
+                </button>
+            </div>
+            <div class:hidden=move || !editing.get()>
+                <form
+                    class="mt-2 flex flex-wrap items-end gap-3"
+                    on:submit=move |ev| {
+                        ev.prevent_default();
+                        save();
+                    }
+                >
+                    <label class="flex flex-col gap-1 text-sm">
+                        "Start date"
+                        <input
+                            type="date"
+                            class=FIELD
+                            prop:value=move || start.get()
+                            on:input=move |ev| start.set(event_target_value(&ev))
+                        />
+                    </label>
+                    <label class="flex flex-col gap-1 text-sm">
+                        "Due date"
+                        <input
+                            type="date"
+                            class=FIELD
+                            prop:value=move || due.get()
+                            on:input=move |ev| due.set(event_target_value(&ev))
+                        />
+                    </label>
+                    <button type="submit" class=PRIMARY disabled=move || busy.get() || unchanged()>
+                        "Save dates"
+                    </button>
+                    <button type="button" class=SECONDARY on:click=move |_| cancel()>
+                        "Cancel"
+                    </button>
+                    {sprint.then(|| view! {
+                        <span class="text-xs text-slate-500">
+                            "Its sprint takes the new length if it hasn't started."
+                        </span>
+                    })}
+                </form>
+                <Problem problem />
+            </div>
+            <p class="whitespace-pre-wrap">{m.description.clone()}</p>
+        </li>
     }
 }

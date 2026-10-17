@@ -165,7 +165,13 @@ redundant. Their history is in git if it is ever wanted again.
   `adopt_roadmap`, `save_roadmap`, `rename_roadmap`, `add_milestone`. `rename(store, slug,
   name)` (ticket 210) changes the name and moves the file to the new name's slug
   (`git mv`), refusing an empty name or another roadmap's; milestones, goal and
-  board stay. No CLI or MCP tool yet.
+  board stay. `set_milestone_dates(store, target, slug, name, start, due)`
+  (ticket 235) changes a milestone's dates (either may be empty; due before
+  start refused); a sprint milestone with no `duration` of its own resizes
+  its sprint on the target to start-to-due while it's pending, never once
+  started. amdui: each milestone's **Change dates** (`MilestoneRow`, command
+  `set_milestone_dates`, `roadmap-dates:` commits, a second one when the
+  sprint is on another repository's board). No CLI or MCP tool yet.
 - `crates/amd-lib/src/archive.rs` — archiving a project (ticket 157):
   `archived = on` in the tickets `.settings`, auto-committed like any
   setting. An archived project only reads: the CLI's `run()` refuses a
