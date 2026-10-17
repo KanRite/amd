@@ -252,7 +252,8 @@ Pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) has the build,
 the checks CI runs, the branch and commit names, and how to become a
 maintainer. Everyone taking part follows the
 [code of conduct](CODE_OF_CONDUCT.md). Report a security problem privately,
-through the repository's Security tab, not in an issue.
+through the repository's Security tab, not in an issue: see
+[SECURITY.md](SECURITY.md).
 
 ## Licence
 
