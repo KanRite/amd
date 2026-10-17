@@ -1,0 +1,190 @@
+/* The Agile-MD website (tickets 205, 211). Colours follow the logo. */
+
+:root {
+  --bg: #ffffff;
+  --surface: #f4f7fa;
+  --text: #152d44;
+  --muted: #5b6778;
+  --line: #dde4ec;
+  --accent: #0962b7;
+  --accent-text: #ffffff;
+  --code-bg: #eef2f6;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --surface: #151c26;
+    --text: #e8eef5;
+    --muted: #a3afbf;
+    --line: #26303d;
+    --accent: #4a9bf0;
+    --accent-text: #0d1117;
+    --code-bg: #1b2430;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "DejaVu Sans", sans-serif;
+}
+
+a { color: var(--accent); }
+
+code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  font-size: 0.9em;
+  background: var(--code-bg);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+main, .hero, footer {
+  width: min(1120px, 100% - 32px);
+  margin-inline: auto;
+}
+
+.hero {
+  text-align: center;
+  padding: 48px 0 24px;
+}
+
+.logo {
+  width: min(520px, 100%);
+  height: auto;
+}
+
+.lede {
+  font-size: clamp(1.3rem, 3vw, 1.75rem);
+  font-weight: 600;
+  margin: 16px auto 8px;
+  max-width: 34ch;
+}
+
+.sub {
+  color: var(--muted);
+  max-width: 60ch;
+  margin: 0 auto;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+.button {
+  display: inline-block;
+  padding: 10px 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.shot { margin: 0; }
+
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.18);
+}
+
+.shot figcaption {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-top: 8px;
+  text-align: center;
+}
+
+.shot.wide { margin: 24px 0 48px; }
+
+.points {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 24px;
+  margin-bottom: 56px;
+}
+
+.points h2 {
+  font-size: 1.15rem;
+  margin: 0 0 6px;
+}
+
+.points p { margin: 0; color: var(--muted); }
+
+section > h2 {
+  font-size: 1.6rem;
+  margin: 0 0 20px;
+}
+
+.features { margin-bottom: 56px; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+}
+
+.grid article {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px 20px;
+}
+
+.grid h3 { margin: 0 0 8px; font-size: 1.05rem; }
+
+.grid ul {
+  margin: 0;
+  padding-left: 1.1em;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.grid li + li { margin-top: 4px; }
+
+.gallery { margin-bottom: 56px; }
+
+.shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 32px 24px;
+}
+
+.install { margin-bottom: 56px; }
+
+.install pre {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+
+.install pre code { background: none; padding: 0; }
+
+footer {
+  border-top: 1px solid var(--line);
+  padding: 24px 0 40px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  text-align: center;
+}

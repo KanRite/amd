@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agile-MD</title>
+  <meta name="description" content="Your tickets and documents in Git, right where you work, not buried in a cloud. An open-source agile system: Kanban boards, sprints, roadmaps, documents and ideas, all markdown in Git.">
+  <meta property="og:title" content="Agile-MD">
+  <meta property="og:description" content="Your tickets and documents in Git, right where you work, not buried in a cloud.">
+  <meta property="og:image" content="screenshots/board.png">
+  <link rel="icon" href="logo/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="logo/agile-md-dark.svg">
+      <img class="logo" src="logo/agile-md-light.svg" alt="Agile-MD: plan, write, ideate, deliver" width="520" height="355">
+    </picture>
+    <p class="lede">Your tickets and documents in Git, right where you work, not buried in a cloud.</p>
+    <p class="sub">An open-source agile system: Kanban boards, sprints, roadmaps, documents and ideas, all plain markdown in your own repositories. Works with your AI tools, and just as well without them.</p>
+    <nav class="actions">
+      <a class="button primary" href="#install">Install</a>
+      <a class="button" href="https://github.com/agile-md/amd">View on GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <figure class="shot wide">
+      <img src="screenshots/board.png" alt="The board: a running sprint beside the backlog, todo, doing and done columns" width="1600" height="852" loading="lazy">
+      <figcaption>The board: a running sprint beside the backlog, todo, doing and done.</figcaption>
+    </figure>
+
+    <section class="points">
+      <div>
+        <h2>Status is the folder</h2>
+        <p>A ticket is a markdown file. Its column is the folder it's in, and moving it is a <code>git mv</code>, so git history is your audit trail.</p>
+      </div>
+      <div>
+        <h2>It lives where you work</h2>
+        <p>A tickets repository beside your code. No server, no database, no account, and nothing to pay for. Your team and your AI read the same files.</p>
+      </div>
+      <div>
+        <h2>One set of rules</h2>
+        <p><code>amd</code> on the command line and <code>amdui</code> on the desktop share one library, so a move follows the same rules wherever it's made.</p>
+      </div>
+    </section>
+
+    <section class="features" aria-labelledby="features">
+      <h2 id="features">Features</h2>
+      <div class="grid">
+        <article>
+          <h3>Tickets</h3>
+          <ul>
+            <li>One flexible ticket, from templates you can change</li>
+            <li>Priority, points, assignee, tags and repository</li>
+            <li>Typed links (requires, related, parent, supersedes) and a tree of them</li>
+            <li>Save and New for a ticket that depends on one not made yet</li>
+            <li>Drafts that can't leave the backlog until ready</li>
+            <li>A git branch per ticket when work starts</li>
+            <li>Search and filters</li>
+          </ul>
+        </article>
+        <article>
+          <h3>Workflow rules</h3>
+          <ul>
+            <li>One column at a time, unless the team allows other moves</li>
+            <li>Your own columns: Triage, Review, Released and more</li>
+            <li>Done waits for what a ticket requires and its children</li>
+            <li>A WIP limit on doing</li>
+            <li>Locks while a ticket is being worked on</li>
+            <li>Every change committed and pushed, boards kept in step</li>
+          </ul>
+        </article>
+        <article>
+          <h3>Planning</h3>
+          <ul>
+            <li>Epics and sprints, both optional</li>
+            <li>Auto priority from requires links, and a what's-needed-first sort</li>
+            <li>Roadmaps with milestones, working days and time left</li>
+            <li>My work across every project on your machine</li>
+          </ul>
+        </article>
+        <article>
+          <h3>Documents and ideas</h3>
+          <ul>
+            <li>ADRs, RFCs and docs in a documents repository</li>
+            <li>Rich-text editing, history, restore and search</li>
+            <li>A pinned start page per project</li>
+            <li>Ideas with votes and notes, one click to a ticket</li>
+          </ul>
+        </article>
+        <article>
+          <h3>Teams</h3>
+          <ul>
+            <li><code>amd init</code> and <code>amd join</code> set a project up</li>
+            <li>Several repositories per project, several projects</li>
+            <li>New repositories made from the ticket that needs them</li>
+            <li>Team settings for admins; your own preferences</li>
+            <li>GitHub issues arrive as tickets to triage</li>
+            <li>Deleted tickets recovered from history</li>
+          </ul>
+        </article>
+        <article>
+          <h3>The desktop board</h3>
+          <ul>
+            <li>Drag and drop, with the rules shown as you drag</li>
+            <li>Live: changes from anywhere appear in a second</li>
+            <li>A terminal and an AI tab in a bottom panel</li>
+            <li>Optional speech to text, entirely on your machine</li>
+            <li>Themes, accent colours and zoom</li>
+          </ul>
+        </article>
+        <article>
+          <h3>AI, if you want it</h3>
+          <ul>
+            <li><code>amd mcp</code> for Claude Code, Copilot, Cursor, Codex, Gemini CLI and more</li>
+            <li>Reads the board, documents, ideas and what's on screen</li>
+            <li>Changes tickets under the same rules, every change committed</li>
+            <li>No API keys, nothing runs unless your AI tool starts it</li>
+          </ul>
+        </article>
+        <article>
+          <h3>Command line</h3>
+          <ul>
+            <li>Everything the board does is a command</li>
+            <li>Safe in scripts and CI: never prompts without a terminal</li>
+            <li>Shell completion for bash, zsh and fish</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="gallery" aria-labelledby="tour">
+      <h2 id="tour">A look around</h2>
+      <div class="shots">
+        <figure class="shot">
+          <img src="screenshots/ticket.png" alt="A ticket open in the editor, with its lock, fields and notes" width="1600" height="852" loading="lazy">
+          <figcaption>A ticket in the editor: fields, lock, links and notes.</figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="screenshots/roadmap.png" alt="A roadmap with two milestones and their working days" width="1600" height="852" loading="lazy">
+          <figcaption>A roadmap: milestones with working days and time left.</figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="screenshots/documents.png" alt="Documents, with an architecture decision record open" width="1600" height="852" loading="lazy">
+          <figcaption>Documents: ADRs, RFCs, docs and a shared handbook.</figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="screenshots/ideas.png" alt="Ideas, best voted first, with one open showing its votes and notes" width="1600" height="852" loading="lazy">
+          <figcaption>Ideas, best voted first, with votes and notes.</figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="screenshots/home.png" alt="The landing page: My work and the projects" width="1600" height="852" loading="lazy">
+          <figcaption>The landing page: your work across every project.</figcaption>
+        </figure>
+        <figure class="shot">
+          <img src="screenshots/panel.png" alt="The board with the terminal open in the bottom panel, showing amd board" width="1600" height="852" loading="lazy">
+          <figcaption>The bottom panel: a terminal, and an AI tab for your own AI tool.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="install" id="install" aria-labelledby="install-title">
+      <h2 id="install-title">Install</h2>
+      <p>On Linux or macOS, with <strong>git 2.29 or later</strong> and <a href="https://rustup.rs">Rust</a>. The desktop board also needs <a href="https://trunkrs.dev">Trunk</a>, the <code>wasm32-unknown-unknown</code> target, and on Linux WebKitGTK and ALSA (<code>libwebkit2gtk-4.1-dev libasound2-dev</code>).</p>
+      <pre><code>git clone https://github.com/agile-md/amd.git
+cd amd
+bash install.sh --from-source</code></pre>
+      <p>That installs <code>amd</code> and <code>amdui</code>, and on Linux adds the board to your application menu. Then start a project:</p>
+      <pre><code>amd init my-project       # makes my-project-tickets and my-project-documents on GitHub
+amd new "My first task"
+amdui                     # the desktop board</code></pre>
+      <p>Prebuilt downloads come with the first release.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>Agile-MD is open source under the <a href="https://github.com/agile-md/amd/blob/main/LICENSE">MIT licence</a>. <a href="https://github.com/agile-md/amd">GitHub</a> · <a href="https://github.com/agile-md/amd/issues">Issues</a> · <a href="https://github.com/agile-md/amd/blob/main/CONTRIBUTING.md">Contributing</a></p>
+  </footer>
+</body>
+</html>
