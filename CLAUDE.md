@@ -1055,6 +1055,16 @@ off**, ticket 141) to
   panel shows a group per kind with a × on each, and both Add link and ×
   wait while the editor has unsaved edits, since they rewrite the file.
   The command is `link_ticket`.
+  **Every ticket linked to one, either way** (ticket 121):
+  `links::linked(board, task)` reads the ticket's own links (`links::all`
+  plus its `## Children`) and every other ticket's naming it, turned round
+  with `LinkType::inverse`, so a one-sided link is found from both ends;
+  `Linked {kind, task, recorded_here}`, each ticket and kind once, in the
+  picker's order. CLI `amd links <ref> [--json]` (alias `amd related`);
+  the MCP `ticket` tool adds a "Linked" list and `data.linked`; the
+  editor's Relationships panel also shows a typed link recorded only on
+  the other ticket, as its opposite (`amd_ui_model::link_inverse`, which
+  amd-ui's tests check against `LinkType::inverse`).
   **Done waits** (ticket 213): `Board::move_task` refuses a move to done
   while `links::waiting_on` finds tickets on the board, not done, that the
   ticket requires (its own `requires`, or another's `required-by` naming

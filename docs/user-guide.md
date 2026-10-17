@@ -214,6 +214,21 @@ that's neither in the sprint nor done**: `amd group start` names each one
 (`s12 can't start: 003 requires 010 (backlog)`), and so does the sprint's
 Start button on the desktop board. Outside sprints nothing more is enforced.
 
+`amd links 12` (or `amd related 12`) lists every ticket linked to 12 in
+any way, in either direction, with where each one is: what it requires and
+what requires it, related, parent and children, clones and supersedes. A
+link recorded on only one of the two tickets (made with `--one-way`, by
+hand or by an import) is found from both, and says so; `--json` gives the
+same for scripts:
+
+```
+012 Checkout revamp
+  requires          013 Payment form · todo
+  is superseded by  020 New checkout · backlog  (recorded on 020 only)
+```
+
+The editor's Relationships panel shows the same, one-sided links included.
+
 `amd tree 12` draws a ticket's family, what it requires (solid) and what
 it relates to (dashed), saying where each ticket is and what's still
 waited on; `amd tree` draws every family on the board. Done tickets are

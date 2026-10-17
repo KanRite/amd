@@ -525,6 +525,20 @@ enum Cmd {
         #[arg(long, value_name = "DATE")]
         since: Option<String>,
     },
+    /// Every ticket linked to a ticket, in either direction
+    ///
+    /// Requires, related, parent and children, clones, supersedes: whether
+    /// the link is recorded on this ticket or only on the other one (a
+    /// one-sided link from --one-way, a hand edit or an import), each with
+    /// where it is
+    #[command(alias = "related")]
+    Links {
+        #[arg(value_name = "REF")]
+        task: String,
+        /// Print JSON, for scripts
+        #[arg(long)]
+        json: bool,
+    },
     /// Draw how tickets hang together: what each requires (solid) and
     /// what it relates to (dashed)
     ///
@@ -1615,6 +1629,52 @@ fn run() -> Result<()> {
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
         Cmd::Log => cmd_log(&board),
         Cmd::Stats { days } => cmd_stats(days),
+        Cmd::Links { task, json } => {
+            let task = board.find(&task)?;
+            let linked = agile_md::links::linked(&board, &task)?;
+            if json {
+                let rows: Vec<serde_json::Value> = linked
+                    .iter()
+                    .map(|l| {
+                        serde_json::json!({
+                            "kind": l.kind.slug(),
+                            "id": l.task.id_display(),
+                            "title": l.task.title(),
+                            "file": l.task.file_name(),
+                            "column": l.task.column.as_str(),
+                            "place": agile_md::requires::place(&board, &l.task),
+                            "recorded_here": l.recorded_here,
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&rows)?);
+                return Ok(());
+            }
+            println!("{} {}", task.id_display(), task.title());
+            if linked.is_empty() {
+                println!("  linked to no other ticket");
+            }
+            let width = linked
+                .iter()
+                .map(|l| l.kind.phrase().len())
+                .max()
+                .unwrap_or(0);
+            for l in &linked {
+                let one_sided = if l.recorded_here {
+                    String::new()
+                } else {
+                    format!("  (recorded on {} only)", l.task.id_display())
+                };
+                println!(
+                    "  {:width$}  {} {} · {}{one_sided}",
+                    l.kind.phrase(),
+                    l.task.id_display(),
+                    l.task.title(),
+                    agile_md::requires::place(&board, &l.task),
+                );
+            }
+            Ok(())
+        }
         Cmd::Tree { task, done } => {
             let around = task.map(|t| board.find(&t)).transpose()?;
             let trees = agile_md::requires::family(&board, around.as_ref(), done)?;
@@ -3230,6 +3290,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         }
         | Cmd::Show { .. }
         | Cmd::Tree { .. }
+        | Cmd::Links { .. }
         | Cmd::Log
         | Cmd::Stats { .. }
         | Cmd::Templates { .. }

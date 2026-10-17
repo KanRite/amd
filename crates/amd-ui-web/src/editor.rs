@@ -1433,7 +1433,7 @@ fn Relationships(
             ("Clones".into(), Some("cloned-by"), clones),
         ];
         // The typed links, a group for each kind, in the picker's order.
-        let typed: Vec<(&str, u32)> = this
+        let mut typed: Vec<(&str, u32)> = this
             .as_ref()
             .map(|t| {
                 t.links
@@ -1443,6 +1443,22 @@ fn Relationships(
                     .collect()
             })
             .unwrap_or_default();
+        // A typed link recorded only on the other ticket (ticket 121) shows
+        // too, turned round: its `requires` naming this one is "Required by".
+        for t in &all {
+            let Some(theirs) = ticket_number(&t.id) else {
+                continue;
+            };
+            for (kind, target) in t.links.iter().filter_map(|entry| split_link(entry)) {
+                let ours = amd_ui_model::link_inverse(kind);
+                if me.is_some()
+                    && ticket_number(target) == me
+                    && !typed.iter().any(|(k, n)| *k == ours && *n == theirs)
+                {
+                    typed.push((ours, theirs));
+                }
+            }
+        }
         for (slug, _) in LINK_KINDS {
             let list: Vec<TicketSummary> = typed
                 .iter()
