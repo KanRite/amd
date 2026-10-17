@@ -194,6 +194,18 @@ pub fn move_to(board: &Board, task: &Task, to: Column, force: bool) -> Result<Ou
                 "could not release the lease automatically: {err:#}"
             )));
         }
+        // A recurring ticket comes round again (ticket 143): reaching done
+        // makes the next one, in this same commit.
+        if to.is(Kind::Done)
+            && !from.is(Kind::Done)
+            && let Some(moved) = Task::from_path(&dest, to)
+            && let Some(next) = crate::recur::make_next(board, &moved, crate::recur::today())?
+        {
+            outcome.events.push(Event::Info(format!(
+                "{id_display} repeats: made {}, due {}",
+                next.id, next.due
+            )));
+        }
         outcome.dest = Some(dest);
         Ok(outcome)
     })?;
@@ -484,7 +496,7 @@ pub fn clone_ticket(board: &Board, original: &Task) -> Result<Outcome> {
 
 /// The body of a copy: the original's, less its `## Children` section, with
 /// every ticked checklist item unticked.
-fn clone_body(body: &str) -> String {
+pub(crate) fn clone_body(body: &str) -> String {
     let mut out = String::new();
     let mut in_children = false;
     for line in body.lines() {

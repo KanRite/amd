@@ -29,8 +29,8 @@ a solo developer without it.
   optional sprints and automatic ticket prioritisation to help manage your
   workflow.
 - **Customisable tickets** with an optional draft status, parent and child
-  tickets nested to any depth, relationships, priorities and tags for
-  filtering and sorting.
+  tickets nested to any depth, relationships, priorities, due dates,
+  recurring tickets and tags for filtering and sorting.
 - **Your own board**: add, remove and rename columns, and set the workflow
   that suits your team.
 - **Roadmaps and milestones** that set up their epics or sprints for you, to
@@ -58,7 +58,9 @@ a solo developer without it.
 
 - **One flexible ticket**, rendered from templates each project can change.
 - **Fields:** priority, story points (1, 2, 3, 5, 8, 13), assignee from the
-  project's users, tags and the repository it's about.
+  project's users, tags, the repository it's about, and a due date.
+- **Recurring tickets:** a monthly report or a yearly renewal comes round
+  again: done makes the next one, due one interval on.
 - **Typed links:** requires, related, parent and child, clone, supersedes,
   each written on both tickets and changeable later. A tree draws what each
   ticket requires and relates to, and cards show how many links they have.

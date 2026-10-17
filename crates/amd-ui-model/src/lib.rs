@@ -337,6 +337,12 @@ pub struct TicketSummary {
     /// The ticket auto priority raised it from (ticket 215), or empty.
     #[serde(default)]
     pub priority_from: String,
+    /// When it's due, `YYYY-MM-DD`, or empty (ticket 143).
+    #[serde(default)]
+    pub due: String,
+    /// How it repeats (`monthly`…), or empty.
+    #[serde(default)]
+    pub recur: String,
 }
 
 /// The kinds of link a ticket can have (ticket 207), as `(slug, label)`:
@@ -1305,6 +1311,9 @@ pub struct Frontmatter {
     /// Who holds its lock (`locked-by`), and until when (`locked-until`).
     pub locked_by: String,
     pub locked_until: String,
+    /// When it's due and how it repeats (ticket 143).
+    pub due: String,
+    pub recur: String,
 }
 
 /// Reads the handful of fields the board displays from a ticket's
@@ -1340,6 +1349,8 @@ pub fn parse_frontmatter(content: &str) -> Frontmatter {
             "points" => fm.points = unquote(value),
             "locked-by" => fm.locked_by = unquote(value),
             "locked-until" => fm.locked_until = unquote(value),
+            "due" => fm.due = unquote(value),
+            "recur" => fm.recur = unquote(value),
             _ => {}
         }
     }
@@ -1525,6 +1536,8 @@ mod assigned_tests {
             clones: Vec::new(),
             links: Vec::new(),
             priority_from: String::new(),
+            due: String::new(),
+            recur: String::new(),
         }
     }
 
@@ -1649,6 +1662,8 @@ mod search_tests {
             clones: Vec::new(),
             links: Vec::new(),
             priority_from: String::new(),
+            due: String::new(),
+            recur: String::new(),
         }
     }
 
@@ -1775,6 +1790,8 @@ mod link_tests {
             clones: Vec::new(),
             links: Vec::new(),
             priority_from: String::new(),
+            due: String::new(),
+            recur: String::new(),
         }
     }
 

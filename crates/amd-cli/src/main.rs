@@ -591,14 +591,16 @@ enum Cmd {
         force: bool,
     },
     /// Set a field on a ticket: points, epic, order, title, priority,
-    /// repository, or requires (the tickets it requires, as a list:
+    /// repository, due (YYYY-MM-DD), recur (weekly, fortnightly, monthly,
+    /// quarterly, yearly or `every N days|weeks|months|years`: done makes the
+    /// next one), or requires (the tickets it requires, as a list:
     /// `amd set 12 requires 3,7`; both ends are linked, empty clears)
     Set {
         #[arg(value_name = "REF")]
         task: String,
         #[arg(
             value_name = "FIELD",
-            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title", "priority", "repository", "requires"]),
+            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title", "priority", "repository", "due", "recur", "requires"]),
         )]
         field: String,
         /// The new value; empty clears the field
@@ -853,6 +855,13 @@ struct NewArgs {
     /// must be done first
     #[arg(long = "requires", value_name = "REF")]
     requires: Vec<String>,
+    /// When it's due, YYYY-MM-DD
+    #[arg(long, value_name = "DATE")]
+    due: Option<String>,
+    /// How it repeats: weekly, fortnightly, monthly, quarterly, yearly or
+    /// "every N days|weeks|months|years". Done makes the next one
+    #[arg(long, value_name = "RULE")]
+    recur: Option<String>,
     /// Tag to add (repeatable)
     #[arg(short = 't', long = "tag", value_name = "TAG")]
     tags: Vec<String>,
@@ -1436,6 +1445,13 @@ fn run() -> Result<()> {
             if let Some(line) = agile_md::auto_priority::note(&board, &task) {
                 eprintln!("{line}");
             }
+            // Overdue, and how it repeats (ticket 143).
+            if agile_md::recur::overdue(&task, agile_md::recur::today()) {
+                eprintln!("overdue: it was due {}", task.due().unwrap_or_default());
+            }
+            if let Some(rule) = task.recur() {
+                eprintln!("repeats {rule}: done makes the next one");
+            }
             // Who to ask about it (ticket 155), on stderr like the lock note.
             if let Some(line) = agile_md::authorship::summary(&board, &task) {
                 eprintln!("{line}");
@@ -1525,6 +1541,19 @@ fn run() -> Result<()> {
                             );
                         }
                         println!("{} repository {}", task.id_display(), display(&name));
+                    }
+                    // Ticket 143: a due date, and a repeat that makes the
+                    // next one when this one is done.
+                    "due" => {
+                        task.set_due(task.hash()?, &value)?;
+                        println!("{} due {}", task.id_display(), display(&value));
+                    }
+                    "recur" => {
+                        task.set_recur(task.hash()?, &value)?;
+                        match task.recur() {
+                            Some(rule) => println!("{} repeats {rule}", task.id_display()),
+                            None => println!("{} doesn't repeat", task.id_display()),
+                        }
                     }
                     other => bail!("unknown field {other}"),
                 }
@@ -3307,6 +3336,13 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     let templates = Templates::load(board)?;
     // Resolved before anything is written, so a typo creates nothing.
     let requires = args.requires.clone();
+    // Checked before anything is written (ticket 143).
+    if let Some(due) = &args.due {
+        agile_md::recur::parse_date(due)?;
+    }
+    if let Some(rule) = &args.recur {
+        agile_md::recur::Every::parse(rule)?;
+    }
     for reference in &requires {
         board.find(reference)?;
     }
@@ -3472,6 +3508,12 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     let auto_commit = board_settings::load(board).auto_commit();
     let before = auto_commit.then(|| git::dirty_paths(board.repo_root()).unwrap_or_default());
     let created = draft.write(board, body)?;
+    if let Some(due) = &args.due {
+        created.task.set_due(created.task.hash()?, due)?;
+    }
+    if let Some(rule) = &args.recur {
+        created.task.set_recur(created.task.hash()?, rule)?;
+    }
     // What it requires (ticket 214), linked both ways in the same commit.
     for line in requires_links(board, &created.task, &requires)? {
         println!("{line}");

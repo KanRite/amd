@@ -331,6 +331,16 @@ fn labels(node: &Node, root: bool) -> String {
             .then(|| task.locked_by())
             .flatten()
             .map(|holder| format!("locked:{holder}")),
+        // Ticket 143: when it's due (overdue said so), and that it repeats.
+        task.due().map(|due| {
+            if agile_md::recur::overdue(task, agile_md::recur::today()) {
+                format!("overdue:{due}")
+            } else {
+                format!("due:{due}")
+            }
+        }),
+        task.recur()
+            .map(|rule| format!("repeats:{}", rule.replace(' ', "-"))),
     ]
     .into_iter()
     .flatten()

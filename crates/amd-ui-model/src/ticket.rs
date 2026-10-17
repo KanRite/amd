@@ -172,6 +172,9 @@ pub struct Fields {
     pub branch_type: String,
     pub priority: String,
     pub points: String,
+    /// `YYYY-MM-DD` or empty, and how it repeats (ticket 143).
+    pub due: String,
+    pub recur: String,
 }
 
 impl From<&Frontmatter> for Fields {
@@ -184,6 +187,8 @@ impl From<&Frontmatter> for Fields {
             branch_type: fm.branch_type.clone(),
             priority: fm.priority.clone(),
             points: fm.points.clone(),
+            due: fm.due.clone(),
+            recur: fm.recur.clone(),
         }
     }
 }
@@ -247,6 +252,12 @@ pub fn apply_fields(content: &str, new: &Fields) -> String {
     }
     if new.priority != old.priority {
         fm = set_line(&fm, "priority", &quote(&new.priority));
+    }
+    if new.due.trim() != old.due.trim() {
+        fm = set_line(&fm, "due", &quote(new.due.trim()));
+    }
+    if new.recur.trim() != old.recur.trim() {
+        fm = set_line(&fm, "recur", &quote(new.recur.trim()));
     }
     if new.branch_type != old.branch_type {
         fm = set_line(&fm, "branch-type", &quote(&new.branch_type));
@@ -514,6 +525,8 @@ mod tests {
             clones: Vec::new(),
             links: Vec::new(),
             priority_from: String::new(),
+            due: String::new(),
+            recur: String::new(),
         }
     }
 
@@ -697,5 +710,25 @@ mod tests {
         SortOrder::Automatic.sort(&mut cycle);
         assert_eq!(cycle.len(), 2);
         assert_eq!(SortOrder::from_key("automatic"), SortOrder::Automatic);
+    }
+
+    #[test]
+    fn the_form_writes_due_and_repeats_and_clears_them() {
+        let text = "---\nid: \"022\"\ntitle: \"Check\"\npriority: \"low\"\n---\n\nBody\n";
+        let mut fields = Fields::from(&parse_frontmatter(text));
+        fields.due = "2026-10-16".into();
+        fields.recur = "monthly".into();
+        let saved = apply_fields(text, &fields);
+        assert!(saved.contains("\ndue: \"2026-10-16\"\n"), "{saved}");
+        assert!(saved.contains("\nrecur: \"monthly\"\n"), "{saved}");
+        let back = Fields::from(&parse_frontmatter(&saved));
+        assert_eq!(
+            (back.due.as_str(), back.recur.as_str()),
+            ("2026-10-16", "monthly")
+        );
+        fields.recur.clear();
+        let cleared = apply_fields(&saved, &fields);
+        assert!(cleared.contains("\nrecur: \"\"\n"), "{cleared}");
+        assert!(cleared.ends_with("Body\n"));
     }
 }
