@@ -68,18 +68,15 @@ pub fn close(board: &Board, repo: &str, name: &str, now: i64) -> Result<Closed> 
     let mut not_done = Vec::new();
     let mut returned = Vec::new();
     for task in &members {
+        // Read before any move: the file isn't where `task` says afterwards.
         let id = task.id_display();
+        let title = task.title();
         let points = stats::points_of(task);
         if task.column.is(Kind::Done) {
-            done.push((id, task.title(), points));
+            done.push((id, title, points));
         } else if task.column == Column::Backlog {
             board.file(task, None, true)?;
-            not_done.push((
-                id.clone(),
-                task.title(),
-                points,
-                "back to the backlog".to_string(),
-            ));
+            not_done.push((id.clone(), title, points, "back to the backlog".to_string()));
             returned.push(id);
         } else {
             let label = board
@@ -88,7 +85,7 @@ pub fn close(board: &Board, repo: &str, name: &str, now: i64) -> Result<Closed> 
                 .find(|c| *c == task.column)
                 .map(|c| c.as_str().to_string())
                 .unwrap_or_default();
-            not_done.push((id, task.title(), points, label));
+            not_done.push((id, title, points, label));
         }
     }
     group.close()?;
@@ -157,7 +154,7 @@ pub fn report_svg(burn: &Burn) -> String {
     let total = f64::from(burn.total.max(1));
     let chart = |left: f64, down: bool| {
         let x = |d: f64| left + d / days * w;
-        let y = |v: f64| 30.0 + (h - v / total * h);
+        let y = |v: f64| 44.0 + (h - v / total * h);
         let mut points = vec![(0.0, if down { f64::from(burn.total) } else { 0.0 })];
         for (i, &v) in burn.done_by_day.iter().enumerate() {
             let v = f64::from(v);
@@ -184,7 +181,7 @@ pub fn report_svg(burn: &Burn) -> String {
         };
         format!(
             r##"<g><text x="{left}" y="16" font-weight="600">{title}</text><text x="{left}" y="{cap:.0}" fill="#5b6778">{what}</text><line x1="{left}" y1="{base:.1}" x2="{right:.1}" y2="{base:.1}" stroke="#a3afbf"/><polyline points="{guide}" fill="none" stroke="#a3afbf" stroke-dasharray="4 3"/><polyline points="{line}" fill="none" stroke="#0962b7" stroke-width="2"/><text x="{left}" y="{lab:.0}" fill="#5b6778">day 1</text><text x="{right:.1}" y="{lab:.0}" fill="#5b6778" text-anchor="end">day {d}</text><text x="{left}" y="{ptop:.0}" fill="#5b6778">{t} pts</text></g>"##,
-            cap = 30.0 + h + 34.0,
+            cap = 44.0 + h + 34.0,
             base = y(0.0),
             right = x(days),
             lab = y(0.0) + 14.0,
@@ -196,7 +193,7 @@ pub fn report_svg(burn: &Burn) -> String {
     format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="700" height="{hh:.0}" viewBox="0 0 700 {hh:.0}" font-family="sans-serif" font-size="12"><rect width="700" height="{hh:.0}" fill="#ffffff"/>{a}{b}</svg>
 "##,
-        hh = 30.0 + h + 44.0,
+        hh = 44.0 + h + 44.0,
         a = chart(20.0, false),
         b = chart(380.0, true),
     )
@@ -331,6 +328,12 @@ mod tests {
             "001-left",
             "points: \"3\"\nepic: \"s1\"\n",
         );
+        // A real title, so the report shows it and not the file name.
+        let left = board.root.join("backlog/s1/001-left.md");
+        let text = fs::read_to_string(&left)
+            .unwrap()
+            .replace("title: \"001-left\"", "title: \"Left behind\"");
+        fs::write(&left, text).unwrap();
         ticket(
             &board,
             "doing",
@@ -363,7 +366,7 @@ mod tests {
         let text = report_text(&closed, 1_800_000_000, "x.svg");
         assert!(text.contains("10 in scope, 5 done (50%)"), "{text}");
         assert!(
-            text.contains("- 001 001-left (3 pts), back to the backlog"),
+            text.contains("- 001 Left behind (3 pts), back to the backlog"),
             "{text}"
         );
         assert!(report_svg(&closed.burn).starts_with("<svg"));
