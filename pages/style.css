@@ -181,6 +181,30 @@ section > h2 {
 
 .install pre code { background: none; padding: 0; }
 
+.install .command {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.install .command pre { flex: 1; min-width: 0; margin: 0; }
+
+.install .copy { align-self: center; cursor: pointer; font: inherit; }
+
+.install .status { min-height: 1.4em; margin: 6px 0 0; color: var(--muted); font-size: 0.9rem; }
+
+.install .note {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px;
+  padding: 10px 14px;
+  background: var(--surface);
+}
+
+.install .note.bad { border-left-color: #c2410c; }
+
+.install .aside { color: var(--muted); font-size: 0.9rem; }
+
 footer {
   border-top: 1px solid var(--line);
   padding: 24px 0 40px;

@@ -489,7 +489,16 @@ redundant. Their history is in git if it is ever wanted again.
   binary.
 - `install.sh` — downloads the prebuilt `amd-<target>.zip` from the GitHub
   release, or builds from source in a clone (`--from-source`, `--dir`,
-  `--version`). Keep the two paths in sync. Both paths install `amdui` as well,
+  `--version`). Keep the two paths in sync. **The curl one-liner is the
+  install users get** (ticket 238: the README and the website show only
+  it; building from source is in CONTRIBUTING.md). `check_system` runs
+  first and refuses, saying why, on Windows (pointing at WSL), another OS,
+  another processor, or git older than 2.29; a downloaded `amd` that won't
+  run (an old glibc) is reported as such and exits 1. A clone is
+  `in_clone` (`crates/amd-cli/Cargo.toml` beside the script), never the
+  current directory: piped from curl there's no script file, and a user
+  standing in their own Rust project used to get a source build attempt.
+  A failed download only falls back to a source build in a clone. Both paths install `amdui` as well,
   guarded by `if [ -f ... ]` — `--version` can pin a release made before the
   zip carried both. Every binary goes in through `replace_bin` (ticket 098): copy beside
   it, then `mv` over it, never `cp` onto it — Linux refuses to write into a
@@ -503,8 +512,8 @@ redundant. Their history is in git if it is ever wanted again.
   so without it amdui shows a generic icon. The app id is `amdui`: Tauri
   leaves GTK's as the program name unless `app.enableGTKAppId` is set,
   which would also make GTK route a second `amdui` to the first process.
-  The icons come from the clone, so a release download run outside one
-  installs no launcher and says so.
+  The icons come from the clone, or for a release install from the
+  repository at the installed version's tag (`fetch_icons`).
 - `tests/test.sh` — assert-based end-to-end suite; builds with cargo and spins
   up temp git repos. Unit tests live next to the code in `#[cfg(test)] mod tests`.
 - `.github/workflows/ci.yml` — fmt + clippy + cargo test + tests/test.sh, and

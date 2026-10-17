@@ -166,39 +166,29 @@ a solo developer without it.
 
 ## Install
 
-Runs on **Linux and macOS**, and needs **git 2.29 or later** (`git --version`)
-on your `PATH`.
+Runs on **Linux and macOS** (x86_64 and arm64), and needs **git 2.29 or
+later**. In a terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash
 ```
 
-Downloads the newest release's binaries for your platform (Linux/macOS,
-x86_64/aarch64), `amd` and the desktop board `amdui`, into `/usr/local/bin`
-when it's writable, otherwise `~/bin`. Override with
-`install.sh --dir <dir>`, pin with `--version vX.Y.Z`, or build locally with
-`--from-source` (needs [Rust](https://rustup.rs)). From a clone:
+That installs two commands, **`amd`** (the command line) and **`amdui`**
+(the desktop board), into `/usr/local/bin` when it can, otherwise `~/bin`,
+and on Linux adds the board to your application menu. Run it again to
+update. To choose the folder or pin a version, pass them after `bash -s --`:
 
 ```bash
-(cd crates/amd-ui-web && trunk build --release)   # the board's pages, first
-cargo build --release        # target/release/{amd,amdui}
-# a workspace: crates/amd-lib (the library), crates/amd-cli, and the desktop
-# board — crates/amd-ui (Tauri), crates/amd-ui-web (Leptos), crates/amd-ui-model
-./install.sh                 # builds and installs
+curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash -s -- --dir ~/.local/bin --version v4.1.0
 ```
 
-On Linux, installing from a clone also adds the board to your application
-menu: a launcher entry and the agile-md icon in `~/.local/share`, which is
-where the dock and top bar take the icon from.
+If your system isn't one agile-md runs on, the installer says why and
+changes nothing: on Windows, install it inside
+[WSL](https://learn.microsoft.com/windows/wsl/install). On Linux the desktop
+board needs WebKitGTK 4.1; if it's missing, the installer names the package
+to add, and `amd` works without it.
 
-The desktop board needs [Trunk](https://trunkrs.dev) and the
-`wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`)
-to build its pages, and on Linux WebKitGTK and ALSA (`libwebkit2gtk-4.1-dev
-libasound2-dev`; ALSA is for speech to text's microphone). For the
-command line alone, `cargo build --release -p amd-cli` needs none of them.
-
-Two commands: **`amd`** is the command line and **`amdui`** is the desktop
-board. `amd gui` opens the same window as `amdui`.
+Building from source is in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Use
 
@@ -684,9 +674,6 @@ backlog is just the default epic — a ticket in any epic or sprint can move on
 to todo, keeping its epic, and sent back from todo it returns to it (unless
 that is a sprint that has started).
 
-`cargo build -p amd-cli` gives you the command line alone — no window or web
-stack, which is what CI and scripts want.
-
 ## Driving it from the command line
 
 Everything the board does is a command, so a script — or an agent — can work a
@@ -717,9 +704,6 @@ and gives nothing back.
 never limited, so work can't get stuck there. A move into a full doing is
 refused, naming the limit; `--force` overrides it. The limit only ever
 gates entry — moving a ticket *out* of doing always works.
-
-`cargo build -p amd-cli` builds this without the desktop board — the whole
-API, no window or web stack, which is what CI and scripts want.
 
 ## Using AI with agile-md
 
@@ -846,28 +830,9 @@ independently movable, while the folders give an unambiguous board.
 
 ## Development
 
-```bash
-(cd crates/amd-ui-web && trunk build --release)   # needed before anything builds amd-ui
-cargo test                    # unit tests (slugify, frontmatter, templates, the board)
-bash tests/test.sh            # end-to-end CLI spec against throwaway git repos
-cargo clippy --all-targets --all-features -- -D warnings
-cargo clippy -p amd-ui-web -p amd-ui-model --target wasm32-unknown-unknown -- -D warnings
-cargo fmt --all --check
-```
-
-To work on the board with live reload: `cargo tauri dev -- --no-default-features`
-in `crates/amd-ui` (it runs `trunk serve` for you; `--no-default-features`
-serves the pages live instead of the ones built into the binary).
-
-For screenshots, `scripts/demo-board.sh [DIR]` builds a demo project: a
-fictional shop with every column, epics, a running sprint, assignees,
-priorities, points, tags, a draft and locks, all made-up names at
-example.com. It keeps its own config in `DIR/config`, so your own boards and
-settings are untouched, and prints the command to open it.
-
-`amd` was pure bash through v3; v4 is the same tool in Rust, which is what
-buys the templating. The CLI, the board layout and the file format are
-unchanged — v3 boards work as-is.
+How to build agile-md, run its checks and work on the desktop board is in
+[CONTRIBUTING.md](CONTRIBUTING.md); [CLAUDE.md](CLAUDE.md) describes the
+architecture.
 
 ## Contributing
 
