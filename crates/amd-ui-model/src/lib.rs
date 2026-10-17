@@ -893,6 +893,19 @@ pub struct DocSource {
     pub pinned: bool,
 }
 
+/// One of your pinned documents (ticket 232).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocPin {
+    /// The documents repository it's in.
+    pub source: String,
+    pub path: String,
+    /// Its first heading, else its file name.
+    pub title: String,
+    /// Still there (and that repository cloned here); a missing one is
+    /// listed so it can be unpinned.
+    pub exists: bool,
+}
+
 /// A line of a document that matched a search (ticket 179).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocHit {

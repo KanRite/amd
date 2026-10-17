@@ -991,6 +991,19 @@ enum DocsAction {
     },
     /// The pages the start page links to, and what they link to, as a tree
     Tree,
+    /// Your pinned documents, kept in the project's documents repository so
+    /// they follow you to every machine
+    Pins,
+    /// Pin a document to your list: `<repository>/<path>`
+    Pin {
+        #[arg(value_name = "REPO/PATH")]
+        document: String,
+    },
+    /// Take a document off your pinned list
+    Unpin {
+        #[arg(value_name = "REPO/PATH")]
+        document: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1184,6 +1197,12 @@ fn run() -> Result<()> {
                 query: query.join(" "),
             },
             DocsAction::Tree => docs::Action::Tree,
+            DocsAction::Pins => docs::Action::Pins,
+            DocsAction::Pin { document } => docs::Action::Pin { document, on: true },
+            DocsAction::Unpin { document } => docs::Action::Pin {
+                document,
+                on: false,
+            },
         });
     }
     // Ideas are documents, found from the project; no board command needed

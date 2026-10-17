@@ -1,7 +1,8 @@
 //! `amd docs` (ticket 179): the project's documents from the command line —
-//! the start page, a search, and the page tree the start page links to.
-//! Reading only: the documents repository is a clone like any other, so
-//! changes are made there directly.
+//! the start page, a search, the page tree the start page links to, and
+//! your own pinned documents (ticket 232). Otherwise reading only: the
+//! documents repository is a clone like any other, so changes are made
+//! there directly.
 
 use anyhow::{Context, Result, bail};
 
@@ -14,6 +15,8 @@ pub enum Action {
     Start { path: bool },
     Search { query: String },
     Tree,
+    Pins,
+    Pin { document: String, on: bool },
 }
 
 pub fn run(action: Action) -> Result<()> {
@@ -73,6 +76,54 @@ pub fn run(action: Action) -> Result<()> {
             for page in documents_edit::link_tree(&root, &start)? {
                 println!("{}{}  {}", "  ".repeat(page.depth), page.title, page.path);
             }
+            Ok(())
+        }
+        Action::Pins => {
+            let root = own_root()?;
+            let me = agile_md::doc_pins::me(&root)?;
+            let pins = agile_md::doc_pins::pins(&root, &me);
+            if pins.is_empty() {
+                println!("nothing pinned — `amd docs pin <repository>/<path>` pins one");
+            }
+            for pin in pins {
+                let there = sources
+                    .iter()
+                    .find(|s| s.name == pin.source)
+                    .and_then(|s| s.root.as_ref())
+                    .is_some_and(|r| r.join(&pin.path).is_file());
+                let gone = if there { "" } else { "  (not there)" };
+                println!("{}/{}{gone}", pin.source, pin.path);
+            }
+            Ok(())
+        }
+        Action::Pin { document, on } => {
+            let root = own_root()?;
+            let me = agile_md::doc_pins::me(&root)?;
+            let Some((source, path)) = document.split_once('/') else {
+                bail!(
+                    "name it as <repository>/<path>, e.g. {}/docs/guide.md",
+                    own.name
+                );
+            };
+            if on {
+                let there = sources
+                    .iter()
+                    .find(|s| s.name == source)
+                    .with_context(|| {
+                        format!("{source} isn't one of this project's documents repositories")
+                    })?
+                    .root
+                    .as_ref()
+                    .is_some_and(|r| documents::resolve(r, path).is_ok_and(|p| p.is_file()));
+                if !there {
+                    bail!("{document} isn't a document here");
+                }
+            }
+            let done = agile_md::doc_pins::set(&root, &me, source, path, on)?;
+            if let Some(warning) = &done.warning {
+                eprintln!("amd: {warning}");
+            }
+            println!("{}", done.message);
             Ok(())
         }
     }

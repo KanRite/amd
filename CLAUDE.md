@@ -1662,8 +1662,20 @@ changes):
   `ensure_board()`): `amd docs start [--path]`, `amd docs search <text>`
   (`repo/path:line: text`), and `amd docs tree` — the link tree from the
   start page (`documents_edit::link_tree`: depth first, each page once,
-  only markdown documents in the repository that exist). Pinning stays in
-  amdui; the CLI changes documents through the clone itself. Ticket 138's editing is covered here. The demo board has `acme-documents` and a shared
+  only markdown documents in the repository that exist). Pinning the start
+  page stays in amdui; the CLI changes documents through the clone itself.
+  **Your own pins** (ticket 232, `crates/amd-lib/src/doc_pins.rs`): per
+  person and across machines, so in the project's own documents
+  repository, one file each, `.agile-md-pins/<git user.email>` (other
+  characters made `-`), one `<repository>/<path>` a line, own or shared
+  repository. `doc_pins::set` commits `pin:`/`unpin:` through
+  `commit_change` (re-reading the file after catching up; the file and
+  folder go when empty); `moved` repoints everyone's pins in
+  `move_document`'s link commit (a move in the shared repository leaves
+  pins stale; they're listed as gone). amdui: **☆ Pin / ★ Pinned** in the
+  reader, a Pinned section at the top of the sidebar (× unpins; a gone one
+  is struck through), commands `my_pins`, `set_doc_pin`. CLI: `amd docs
+  pins|pin|unpin`. Ticket 138's editing is covered here. The demo board has `acme-documents` and a shared
   `acme-handbook`.
 - **The bottom panel** (ticket 185): on the board only, a one-line bar
   with **Terminal** and **AI** tabs; a click or Ctrl+` opens it, its top

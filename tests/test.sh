@@ -2068,6 +2068,15 @@ assert "amd docs search finds lines across documents, ignoring case" \
 assert "a pinned start page is what amd docs start prints" \
   bash -c "${ix_fns}; echo 'start-page = docs/setup.md' > '${ix}/idp-documents/.agile-md' \
     && in_ix docs start | head -1 | grep -qx '# Setup' && rm '${ix}/idp-documents/.agile-md'"
+assert "amd docs pin keeps your own pins in the documents repository, pushed (ticket 232)" \
+  bash -c "${ix_fns}; in_ix docs pin idp-documents/docs/guide.md | grep -q 'pin: idp-documents/docs/guide.md' \
+    && grep -qx 'idp-documents/docs/guide.md' '${ix}/idp-documents/.agile-md-pins/sam@acme.io' \
+    && git -C '${ix}/origin-documents.git' log -1 --format=%s main | grep -q '^pin: idp-documents/docs/guide.md' \
+    && in_ix docs pins | grep -qx 'idp-documents/docs/guide.md' \
+    && ! in_ix docs pin idp-documents/docs/nothing.md 2>/dev/null"
+assert "...and amd docs unpin takes it off" \
+  bash -c "${ix_fns}; in_ix docs unpin idp-documents/docs/guide.md | grep -q '^unpin:' \
+    && ! test -e '${ix}/idp-documents/.agile-md-pins' && in_ix docs pins | grep -q 'nothing pinned'"
 rm -rf "${ix}"
 
 echo "importing documents (ticket 079):"

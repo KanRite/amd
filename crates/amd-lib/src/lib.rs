@@ -21,6 +21,7 @@ pub mod clone;
 pub mod columns;
 pub mod create;
 pub mod current_project;
+pub mod doc_pins;
 pub mod documents;
 pub mod documents_edit;
 pub mod git;

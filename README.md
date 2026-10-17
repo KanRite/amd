@@ -99,7 +99,8 @@ a solo developer without it.
   optional one every project shares. Changes go straight to main, with
   history and restore.
 - **Write in amdui:** rich text or markdown, folders, moves that keep links
-  working, archiving, a pinned start page and search.
+  working, archiving, a pinned start page and search, and your own pinned
+  documents, first in your list on every machine.
 - **Ideas** before they're tickets: everyone votes up to ±3 and adds notes,
   and an idea becomes a backlog ticket in one click, or (for the project's
   admins) an epic or a sprint with the idea's write-up as its description
@@ -619,7 +620,11 @@ disagree.
   **＋folder** makes a folder, and an empty one can be deleted. **Archive**
   marks a document as kept for the record: it shows muted, with a badge.
   Drag a document onto a folder, or use **Move…**, to move it; links to it
-  are rewritten so they keep working. Every change is pushed straight to
+  are rewritten so they keep working. **☆ Pin** puts a document you're
+  writing or working from at the top of your own list, under Pinned; pins
+  are yours, kept in the documents repository so they follow you to every
+  machine (`amd docs pins`, `amd docs pin <repository>/<path>`, `amd docs
+  unpin`). Every change is pushed straight to
   main rather than reviewed in pull requests. A
   documents repository the whole organisation shares (standards, the
   handbook) can sit beside it: name it in Admin, or with
