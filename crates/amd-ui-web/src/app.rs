@@ -385,7 +385,14 @@ pub fn App() -> impl IntoView {
                         }
                     }
                 >
-                    <span class="whitespace-nowrap text-lg font-semibold">"agile-md"</span>
+                    // The version (ticket 240): the page is built with amdui,
+                    // so its own is amdui's.
+                    <span class="flex items-baseline gap-1.5 whitespace-nowrap">
+                        <span class="text-lg font-semibold">"agile-md"</span>
+                        <span class="text-xs text-slate-500" title="The version of agile-md running">
+                            {concat!("v", env!("CARGO_PKG_VERSION"))}
+                        </span>
+                    </span>
                 </Show>
                 <span class="min-w-0 flex-1 truncate text-xs text-slate-500" title=tasks_dir>
                     {move || {
