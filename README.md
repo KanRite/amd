@@ -5,55 +5,48 @@
   </picture>
 </p>
 
-# agile-md - AI friendly but not a requirement!
+# agile-md
 
-A fully featured AI friendly agile management system featuring kanban boards, documents and ideation all backed with git. 
+**An open source, fully featured, multi-project agile management system for
+individuals and teams.**
 
-**AI is NOT a requirement.**
-
- Agile-MD works well with AI but there is no AI requirement and is equally beneficial and feature rich for teams and solo use.  
-
-Your tickets and documents are not hosted in someone elses cloud, they are with your work, written in markdown fully accessible to your teams and your AI without any additional costs.
-
-The tickets become your audit trail with every change to your tickets and documents pushed to your repository with consise documentation.
-
-
-Agile-md provides you with all the tooling you need to be productive in the  writtem and documents remain in your git repositories with your work and  written in markdown 
-
-
-
-A tiny **filesystem Kanban** — tasks are markdown files moved between
-`backlog/`, `todo/`, `doing/` and `done/` directories (or columns of your own).
-Two static binaries plus `git`; no runtime, no daemon, no database.
-
-- **Status is the folder.** A task's column is simply which directory it's in.
-- **Git is the audit trail.** Moving a task is a `git mv`, so `git log --follow`
-  reconstructs exactly when it started and finished.
-- **Tickets come from templates.** Task files are rendered from
-  [MiniJinja](https://github.com/mitsuhiko/minijinja) templates, so the format
-  is consistent by construction and yours to change.
-- **The template is the form.** Leave an argument out in a terminal and `amd`
-  asks — including the fields your own template declares.
-- **One flexible ticket.** No ticket types to choose between: a `branch-type`
-  gives it a branch (entering `todo` puts you on `bugfix/crash-on-save`), and
-  without one it's a ticket with nothing to check out.
-- **One command, any repo.** Install `amd` once on your PATH; it finds the
-  board at `<repository-root>/tasks` from wherever you are.
-
-## Features
+Your tickets, documents and ideas live in your own git repositories, as
+markdown, right beside your work: not in someone else's cloud. agile-md works
+well with AI, but AI is never a requirement; it's just as useful to a team or
+a solo developer without it.
 
 ![The board: a running sprint beside the backlog, todo, doing and done](pages/screenshots/board.png)
 
-### The idea
+## Main features
 
-- **Tickets are markdown files in Git.** The column is the folder a ticket is
-  in (backlog, todo, doing, done), and a move is a `git mv`, so history is the
-  audit trail.
-- **It lives where you work:** a `<project>-tickets` repository beside your
-  code, not a cloud service. No server, no database, no account.
-- **Two programs over one library:** `amd` on the command line and `amdui` on
-  the desktop, sharing exactly the same rules.
-- **Open source** (MIT), with releases for Linux and macOS.
+- **Kanban boards** across several projects and several boards, with
+  optional sprints and automatic ticket prioritisation to help manage your
+  workflow.
+- **Customisable tickets** with an optional draft status, parent and child
+  tickets nested to any depth, relationships, priorities and tags for
+  filtering and sorting.
+- **Your own board**: add, remove and rename columns, and set the workflow
+  that suits your team.
+- **Roadmaps and milestones** that set up their epics or sprints for you, to
+  help manage larger projects and delivery dates.
+- **Ideas**, to incubate new ideas and solve problems together, and turn them
+  into backlog tickets, epics or sprints.
+- **Documents** your team reads and writes, and can pin when they're reading
+  or working from them: everything you need to be productive and informed.
+- **Everything is backed by git**, giving you a full, intelligible audit
+  trail and recovery when required.
+- **Markdown in your repositories**, so your tickets, documents and ideas are
+  accessible to your team, and to your AI.
+- **A landing page** showing your priorities across all your projects, with
+  statistics and navigation.
+- **A desktop app** with rich text editing, and a **command line** for those
+  who prefer it.
+- **A built-in terminal**, and optional AI integration.
+- **Optional speech to text**, run entirely on your machine.
+- **Free to use:** no servers, no hidden costs. Your data is where you need
+  it, and in your control.
+
+## In more detail
 
 ### Tickets
 
@@ -162,7 +155,8 @@ Two static binaries plus `git`; no runtime, no daemon, no database.
 
 ## Install
 
-Needs **git 2.29 or later** (`git --version`) on your `PATH`.
+Runs on **Linux and macOS**, and needs **git 2.29 or later** (`git --version`)
+on your `PATH`.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash
