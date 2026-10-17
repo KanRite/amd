@@ -283,6 +283,8 @@ impl Project {
             clones: task.clones(),
             links: task.links().iter().map(|link| link.entry()).collect(),
             priority_from: task.meta("priority-from").unwrap_or_default(),
+            due: task.due().unwrap_or_default(),
+            recur: task.recur().unwrap_or_default(),
         }
     }
 

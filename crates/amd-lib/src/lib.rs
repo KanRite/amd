@@ -39,6 +39,7 @@ pub mod new_repo;
 pub mod numbering;
 pub mod project_trust;
 pub mod recover;
+pub mod recur;
 pub mod registry;
 pub mod renumber;
 pub mod requires;

@@ -1621,6 +1621,30 @@ assert "amd stats counts tickets raised, done and closed from git history" \
     && '${AMD}' stats --days 7 | grep -q 'done   1\$'"
 rm -rf "${stats_repo}"
 
+echo "recurring tickets and due dates (ticket 143):"
+recur_repo="$(mktemp -d)"
+( cd "${recur_repo}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
+  && git config commit.gpgsign false && AMD_YES=1 "${AMD}" init recurtest --local-only >/dev/null \
+  && git add -A && git commit -q -m "board for ticket 143" )
+assert "a recurring ticket done makes the next one, due after today, in the same commit" \
+  bash -c "cd '${recur_repo}' && '${AMD}' new 'Renew the certificate' --recur Monthly --due 2026-01-01 --no-edit >/dev/null \
+    && grep -q '^recur: \"monthly\"' tasks/backlog/001-renew-the-certificate.md \
+    && '${AMD}' show 1 2>&1 >/dev/null | grep -q 'overdue: it was due 2026-01-01' \
+    && '${AMD}' --plain board | grep -q 'overdue:2026-01-01 repeats:monthly' \
+    && '${AMD}' todo 1 --no-branch >/dev/null && '${AMD}' doing 1 >/dev/null \
+    && out=\$('${AMD}' done 1) && printf '%s\\n' \"\$out\" | grep -q '001 repeats: made 002, due 20' \
+    && f=tasks/backlog/002-renew-the-certificate.md && grep -q '^recurs-from: \"001\"' \$f \
+    && grep -q '^recur: \"monthly\"' \$f \
+    && due=\$(sed -n 's/^due: \"\\(.*\\)\"/\\1/p' \$f) && [ \"\$due\" \\> \"\$(date -u +%F)\" ] \
+    && git show --stat --pretty=format: HEAD | grep -q '002-renew-the-certificate.md'"
+assert "amd set due and recur check what they're given; empty clears" \
+  bash -c "cd '${recur_repo}' && ! '${AMD}' set 2 due tomorrow 2>/dev/null \
+    && ! '${AMD}' set 2 recur sometimes 2>/dev/null \
+    && '${AMD}' set 2 recur 'every 2 weeks' | grep -q '002 repeats fortnightly' \
+    && '${AMD}' set 2 recur '' | grep -q \"002 doesn't repeat\" \
+    && ! grep -q '^recur:' tasks/backlog/002-renew-the-certificate.md"
+rm -rf "${recur_repo}"
+
 echo "commit-and-push:"
 commit_repo="$(mktemp -d)"
 commit_origin="$(mktemp -d)/origin.git"

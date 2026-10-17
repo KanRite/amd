@@ -20,6 +20,10 @@ use crate::api;
 use crate::app::{Ctx, Modal, Overlay};
 use crate::rich_dom;
 
+/// The repeats the editor offers (ticket 143); any other rule amd reads
+/// (`every 10 days`) is kept as written.
+const REPEATS: [&str; 5] = ["weekly", "fortnightly", "monthly", "quarterly", "yearly"];
+
 /// Why the editor's banner is showing: its ticket changed on disk under
 /// unsaved edits, or isn't where it was opened from any more.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -579,6 +583,39 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                                                     {format!("{bad} (not valid)")}
                                                 </option>
                                             }
+                                        })
+                                })
+                            }}
+                        </select>
+                    </label>
+                    <label class=label>
+                        "Due"
+                        <input
+                            type="date"
+                            class=input
+                            title="When it's due; a card past its date says overdue"
+                            prop:value=move || fields.with(|f| f.due.clone())
+                            on:change=set_field(|f, v| f.due = v)
+                        />
+                    </label>
+                    <label class=label>
+                        "Repeats"
+                        <select
+                            class=input
+                            title="Done makes the next one, due one interval on"
+                            prop:value=move || fields.with(|f| f.recur.clone())
+                            on:change=set_field(|f, v| f.recur = v)
+                        >
+                            <option value="">"never"</option>
+                            {REPEATS.map(|r| view! { <option value=r>{r}</option> }).collect_view()}
+                            // A rule written by hand (every 10 days) stays shown.
+                            {move || {
+                                fields.with(|f| {
+                                    let r = f.recur.trim();
+                                    (!r.is_empty() && !REPEATS.contains(&r))
+                                        .then(|| {
+                                            let own = r.to_string();
+                                            view! { <option value=own.clone()>{own.clone()}</option> }
                                         })
                                 })
                             }}

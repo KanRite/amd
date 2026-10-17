@@ -93,6 +93,8 @@ rest:
 | `tags`        | optional | always UPPERCASE; from the project's tag list (DRAFT and TRIAGE are always on it) |
 | `created`     | automatic | the date |
 | `created-by`  | automatic | who made it, `Name <email>`; never changes |
+| `due`         | optional | when it's due, `YYYY-MM-DD`; past it and not done, it's overdue |
+| `recur`       | optional | how it repeats: `weekly`, `fortnightly`, `monthly`, `quarterly`, `yearly`, or `every N days|weeks|months|years` |
 
 **Who to ask.** `amd show` and the desktop board's editor say who created a
 ticket and who last edited it: "created by Priya Shah on 2026-10-02; last
@@ -111,6 +113,25 @@ TRIAGE until you add more. Turn it off (`amd tags only off`) to allow other tags
 new` then only warns about and the editor shows dashed. A tag can only be removed from
 the list once no ticket carries it. Matching ignores case, so a ticket written
 before tags were uppercase still matches.
+
+**Due dates and recurring tickets.** Any ticket can have a due date: the
+card shows it, red and marked overdue once the date has passed and it isn't
+done, and `amd show` says so too. A ticket that comes round again (a
+monthly report, a certificate renewal, a weekly backup check) gets a
+repeat: when it's moved to done, the next one is made in the same commit,
+a new ticket in the backlog with the same title, body (its checklist
+unticked), tags, points, priority, repository and assignee, due one
+interval after this one (or after today, if this one was done late) and
+noting which ticket it follows. Nothing else makes a copy: an overdue one
+just shows as overdue until it's done.
+
+```bash
+amd new "Renew the certificate" --recur yearly --due 2027-03-01
+amd set 12 due 2026-11-30          # empty clears
+amd set 12 recur "every 2 weeks"   # stored as fortnightly; empty stops it
+```
+
+In the editor they're **Due** and **Repeats**.
 
 **Drafts.** A ticket tagged **DRAFT** is a draft: it can't leave the
 backlog, or go into a sprint, until the tag is taken off. It can still be

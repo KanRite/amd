@@ -404,6 +404,53 @@ impl Task {
         })
     }
 
+    /// When it's due (ticket 143): `YYYY-MM-DD`.
+    pub fn due(&self) -> Option<String> {
+        self.meta("due").filter(|due| !due.is_empty())
+    }
+
+    /// Set when it's due, or clear it with an empty value; anything but a
+    /// `YYYY-MM-DD` date is refused.
+    pub fn set_due(&self, expected: ContentHash, due: &str) -> Result<()> {
+        let due = due.trim();
+        if !due.is_empty() {
+            crate::recur::parse_date(due)?;
+        }
+        self.write_checked(expected, |text| match due {
+            "" => Ok(remove_meta(text, "due")),
+            due => set_meta(text, "due", &format!("{due:?}")),
+        })
+    }
+
+    /// How it repeats (ticket 143), as written: `monthly`, `every 2 weeks`.
+    pub fn recur(&self) -> Option<String> {
+        self.meta("recur").filter(|rule| !rule.is_empty())
+    }
+
+    /// Make it repeat (`weekly`, `monthly`, `every 3 days`…), or stop it
+    /// with an empty value. Stored in the rule's plain form.
+    pub fn set_recur(&self, expected: ContentHash, rule: &str) -> Result<()> {
+        let rule = match rule.trim() {
+            "" => String::new(),
+            given => crate::recur::Every::parse(given)?.to_string(),
+        };
+        self.write_checked(expected, |text| match rule.as_str() {
+            "" => Ok(remove_meta(text, "recur")),
+            rule => set_meta(text, "recur", &format!("{rule:?}")),
+        })
+    }
+
+    /// The ticket a recurring one was made from (ticket 143).
+    pub fn recurs_from(&self) -> Option<String> {
+        self.meta("recurs-from").filter(|id| !id.is_empty())
+    }
+
+    pub(crate) fn set_recurs_from(&self, expected: ContentHash, id: &str) -> Result<()> {
+        self.write_checked(expected, |text| {
+            set_meta(text, "recurs-from", &format!("{id:?}"))
+        })
+    }
+
     /// Assign the ticket, or clear it with an empty name.
     pub fn assign(&self, expected: ContentHash, who: &str) -> Result<()> {
         let quoted = format!("{who:?}");
@@ -436,6 +483,13 @@ impl Task {
         let text = uppercase_tags(&text)?;
         if let Some(points) = meta_in(&text, "points") {
             validate_points(points)?;
+        }
+        // Ticket 143: a due date and a repeat amd can read.
+        if let Some(due) = meta_in(&text, "due").filter(|d| !d.trim().is_empty()) {
+            crate::recur::parse_date(due)?;
+        }
+        if let Some(rule) = meta_in(&text, "recur").filter(|r| !r.trim().is_empty()) {
+            crate::recur::Every::parse(rule)?;
         }
         // Re-pointing the ticket at another repository needs that one to be
         // here; leaving a teammate's choice alone never does.

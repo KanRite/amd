@@ -1130,8 +1130,12 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
         points,
         lock,
         lapsed,
+        due,
+        recur,
         ..
     } = ticket;
+    // Ticket 143: overdue is past its due date and not in a done column.
+    let overdue = !due.is_empty() && !column.is(Kind::Done) && due.as_str() < today().as_str();
     // Someone else's lock: the card can be opened to read, but not dragged.
     let held = lock.as_ref().is_some_and(|l| !l.mine);
     // A draft (ticket 114) says so first, and its outline is dashed.
@@ -1358,6 +1362,28 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                             </span>
                         }
                     })}
+                {(!due.is_empty())
+                    .then(|| {
+                        let class = if overdue {
+                            "rounded bg-red-100 px-1.5 font-medium text-red-800 dark:bg-red-900/60 dark:text-red-200"
+                        } else {
+                            "rounded bg-slate-200 px-1.5 text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+                        };
+                        let text = if overdue { format!("overdue {due}") } else { format!("due {due}") };
+                        view! { <span class=class title="When it's due">{text}</span> }
+                    })}
+                {(!recur.is_empty())
+                    .then(|| {
+                        view! {
+                            <span
+                                class="text-slate-500"
+                                title=format!("Repeats {recur}: done makes the next one")
+                                aria-label=format!("Repeats {recur}")
+                            >
+                                "↻"
+                            </span>
+                        }
+                    })}
                 {(!assignee.is_empty())
                     .then(|| {
                         view! { <span class="text-slate-500">"@" {assignee}</span> }
@@ -1489,4 +1515,15 @@ fn priority_tone(priority: &str) -> &'static str {
         "high" => "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100",
         _ => "border border-red-500 text-red-700 dark:text-red-300",
     }
+}
+
+/// Today as `YYYY-MM-DD`, from the page's clock (local date), for due dates.
+pub fn today() -> String {
+    let now = js_sys::Date::new_0();
+    format!(
+        "{:04}-{:02}-{:02}",
+        now.get_full_year(),
+        now.get_month() + 1,
+        now.get_date()
+    )
 }

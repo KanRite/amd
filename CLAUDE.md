@@ -986,6 +986,26 @@ off**, ticket 141) to
 
 ## Ticket fields (`crates/amd-lib/src/branch.rs`, `templates/ticket.md.jinja`)
 
+- **Due dates and recurring tickets** (ticket 143,
+  `crates/amd-lib/src/recur.rs`): `due: "YYYY-MM-DD"` on any ticket
+  (`Task::due`/`set_due`, empty removes the key) and `recur: "<rule>"`
+  (`Task::recur`/`set_recur`, stored in `Every`'s plain form: daily,
+  weekly, fortnightly, monthly, quarterly, yearly, `every N
+  days|weeks|months|years`; months clamp to the month's last day).
+  `transition::move_to`, on a move into a done kind from another, calls
+  `recur::make_next` inside its `with_auto_commit`, so the next ticket
+  and the counter are in the move's commit: a new ticket (Draft, landing
+  column) with title, body through `clone_body`, tags, points, priority,
+  repository, branch type, assignee and the rule, `recurs-from` the old
+  id, and `due` from `next_due` (one interval after the old due, else
+  today, stepped past today). No daemon: overdue (`recur::overdue`: past
+  due, not done-kind) is only shown, on the card (red "overdue"), in `amd
+  show` (stderr) and `amd board` (`overdue:DATE`, `repeats:RULE`). Both
+  are checked on every write path (`set_text` too). CLI `amd new --due
+  --recur`, `amd set <ref> due|recur`; amdui: the editor's **Due** (date)
+  and **Repeats** (select, a hand-written rule kept), `Fields.due/recur`,
+  `TicketSummary.due/recur`, the card's due badge and ↻. Not in the MCP
+  tools yet.
 - **Duplicating a ticket** (ticket 198, `amd duplicate <ref>`, the editor's
   Duplicate button, the MCP `clone_ticket`; `transition::clone_ticket`). `amd
   clone` was already taken (it clones a declared repository). The copy goes
