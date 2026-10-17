@@ -804,6 +804,16 @@ enum Cmd {
     /// status only, never the commit message, so it works over history from
     /// before this existed too
     Log,
+    /// Tickets raised, done and closed lately, and each running sprint's
+    /// burn-up and burn-down, across the project's boards
+    ///
+    /// Read from git history when asked; nothing is stored. Done is a move
+    /// into a done column; closed is a ticket abandoned or deleted
+    Stats {
+        /// The period in days (default: the landing page's, else 30)
+        #[arg(long, value_name = "N")]
+        days: Option<u32>,
+    },
     /// Move a task into an epic, or list it with no ref — checked against
     /// the board's current epics (the four columns and `abandon` are their
     /// own named commands above, and always win if a name collides)
@@ -1558,6 +1568,7 @@ fn run() -> Result<()> {
         }
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
         Cmd::Log => cmd_log(&board),
+        Cmd::Stats { days } => cmd_stats(days),
         Cmd::Tree { task, done } => {
             let around = task.map(|t| board.find(&t)).transpose()?;
             let trees = agile_md::requires::family(&board, around.as_ref(), done)?;
@@ -3130,6 +3141,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::Show { .. }
         | Cmd::Tree { .. }
         | Cmd::Log
+        | Cmd::Stats { .. }
         | Cmd::Templates { .. }
         | Cmd::Register { .. }
         | Cmd::Clone { .. }
@@ -3687,6 +3699,61 @@ fn log_left_out(here: &Path, path: &Path, left_out: &[String]) -> Result<()> {
 /// status from `git log --name-status -M`, never the commit message
 /// (`%s`), so it's indifferent to whatever wrote the commit — including
 /// history from before auto-commit existed, or a hand-written message.
+/// `amd stats` (ticket 233): counts over a period and each running
+/// sprint's burn, for every board of the project.
+fn cmd_stats(days: Option<u32>) -> Result<()> {
+    use agile_md::stats;
+    let days = days.unwrap_or_else(stats::period);
+    let found = agile_md::model::find_repos()?;
+    let boards: Vec<&Board> = found.repos.iter().map(|(_, _, b)| b).collect();
+    let now = stats::now();
+    let c = stats::counts(&boards, days, now)?;
+    println!(
+        "last {days} days: {} raised · {} done · {} closed",
+        c.raised, c.done, c.closed
+    );
+    let row = |pick: fn(&stats::Week) -> usize| {
+        c.weeks
+            .iter()
+            .map(|w| pick(w).to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    println!("  by week, oldest first:");
+    println!("    raised {}", row(|w| w.raised));
+    println!("    done   {}", row(|w| w.done));
+    println!("    closed {}", row(|w| w.closed));
+    for (name, _, board) in &found.repos {
+        for burn in stats::burns(board, name, now)? {
+            let done = burn.done_by_day.last().copied().unwrap_or(0);
+            println!(
+                "sprint {} ({name}): started {}, day {} of {}, {done} of {} points done",
+                burn.sprint,
+                burn.start,
+                burn.done_by_day.len(),
+                burn.days,
+                burn.total
+            );
+            println!("  burn-up   {}", spark(&burn.done_by_day, burn.total));
+            let left: Vec<u32> = burn.done_by_day.iter().map(|d| burn.total - d).collect();
+            println!("  burn-down {}", spark(&left, burn.total));
+        }
+    }
+    Ok(())
+}
+
+/// One block a day, its height the share of `top`.
+fn spark(values: &[u32], top: u32) -> String {
+    const BLOCKS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    values
+        .iter()
+        .map(|&v| {
+            let step = (v.min(top) * 7 + top / 2).checked_div(top).unwrap_or(0);
+            BLOCKS[step as usize]
+        })
+        .collect()
+}
+
 fn cmd_log(board: &Board) -> Result<()> {
     let repo = board.repo_root();
     let board_rel = board

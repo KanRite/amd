@@ -5,7 +5,7 @@
 //! that documents, ideas and collaboration will join.
 
 use amd_ui_model::epic::Place;
-use amd_ui_model::{Home, HomeProject, WorkItem};
+use amd_ui_model::{Home, HomeProject, ProjectStats, SprintBurn, WorkItem};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -63,7 +63,7 @@ pub fn HomeView(home: RwSignal<Option<Result<Home, String>>>) -> impl IntoView {
                             include_unassigned=h.include_unassigned
                             home=home
                         />
-                        <Projects projects=h.projects.clone() home=home />
+                        <Projects projects=h.projects.clone() home=home stats_days=h.stats_days />
                     }
                         .into_any()
                 }
@@ -390,8 +390,19 @@ fn work_row(w: WorkItem) -> impl IntoView {
 fn Projects(
     projects: Vec<HomeProject>,
     home: RwSignal<Option<Result<Home, String>>>,
+    stats_days: u32,
 ) -> impl IntoView {
     let ctx = Ctx::get();
+    // The statistics' period (ticket 233), remembered on this machine.
+    let days = RwSignal::new(stats_days);
+    let pick_days = move |d: u32| {
+        days.set(d);
+        spawn_local(async move {
+            if let Err(e) = api::set_stats_days(d).await {
+                ctx.error.set(Some(e));
+            }
+        });
+    };
     // The same name in two folders: say which folder, so they can be told
     // apart (ticket 095).
     let twice = |name: &str| projects.iter().filter(|p| p.name == name).count() > 1;
@@ -456,8 +467,10 @@ fn Projects(
         let root = p.root.clone();
         let flip = p.root.clone();
         let hide = !p.hidden;
+        let stats_root = p.root.clone();
         view! {
-            <li class="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
+            <li class="flex flex-col gap-1 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
+                <div class="flex items-center gap-3">
                 <button
                     type="button"
                     class="flex-1 text-left font-medium hover:underline"
@@ -475,12 +488,40 @@ fn Projects(
                 >
                     {if hide { "Hide" } else { "Show" }}
                 </button>
+                </div>
+                <ProjectStatsView root=stats_root days />
             </li>
         }
     };
     view! {
         <section aria-labelledby="projects" class="flex flex-col gap-2">
-            <h2 id="projects" class="text-lg font-semibold">"Projects"</h2>
+            <div class="flex items-center gap-3">
+                <h2 id="projects" class="flex-1 text-lg font-semibold">"Projects"</h2>
+                <div role="group" aria-label="Statistics period" class="flex overflow-hidden rounded border border-slate-300 text-xs dark:border-slate-600">
+                    {[7u32, 30, 90]
+                        .into_iter()
+                        .map(|d| {
+                            view! {
+                                <button
+                                    type="button"
+                                    class=move || {
+                                        if days.get() == d {
+                                            "bg-accent-600 px-2 py-0.5 text-white"
+                                        } else {
+                                            "px-2 py-0.5 hover:bg-slate-100 dark:hover:bg-slate-700"
+                                        }
+                                    }
+                                    aria-pressed=move || (days.get() == d).to_string()
+                                    title=format!("Statistics for the last {d} days")
+                                    on:click=move |_| pick_days(d)
+                                >
+                                    {format!("{d} days")}
+                                </button>
+                            }
+                        })
+                        .collect_view()}
+                </div>
+            </div>
             <ul class="flex flex-col gap-1.5">{shown.into_iter().map(row).collect_view()}</ul>
             <Show when=move || { hidden_count > 0 }>
                 <button
@@ -517,5 +558,165 @@ fn Projects(
                 <ul class="flex flex-col gap-1.5">{archived.clone().into_iter().map(archived_row).collect_view()}</ul>
             </Show>
         </section>
+    }
+}
+
+/// A project's statistics under its row (ticket 233): raised, done and
+/// closed over the period with a bar a week, and each running sprint's
+/// burn-up and burn-down. Read from git history when shown.
+#[component]
+fn ProjectStatsView(root: String, days: RwSignal<u32>) -> impl IntoView {
+    let stats = RwSignal::new(None::<Result<ProjectStats, String>>);
+    let root = StoredValue::new(root);
+    Effect::new(move |_| {
+        let d = days.get();
+        spawn_local(async move {
+            let got = api::project_stats(&root.get_value(), d).await;
+            // Only the answer for the period still chosen.
+            if days.get_untracked() == d {
+                stats.set(Some(got));
+            }
+        });
+    });
+    move || {
+        match stats.get() {
+        None => view! { <p class="text-xs text-slate-400">"Reading the history…"</p> }.into_any(),
+        Some(Err(e)) => view! { <p class="text-xs text-slate-500">{format!("No statistics: {e}")}</p> }.into_any(),
+        Some(Ok(s)) => view! {
+            <div class="flex flex-col gap-2">
+                <div class="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                    <span>
+                        {format!("{} raised · ", s.raised)}
+                        <span class="text-accent-700 dark:text-accent-300">{format!("{} done", s.done)}</span>
+                        {format!(" · {} closed in the last {} days", s.closed, s.days)}
+                    </span>
+                    <WeekBars stats=s.clone() />
+                </div>
+                {s.sprints.iter().map(|b| view! { <BurnCharts burn=b.clone() /> }).collect_view()}
+            </div>
+        }.into_any(),
+    }
+    }
+}
+
+/// A pair of bars a week, oldest first: raised (grey) and done (accent).
+#[component]
+fn WeekBars(stats: ProjectStats) -> impl IntoView {
+    let top = stats
+        .weeks
+        .iter()
+        .map(|w| w.raised.max(w.done))
+        .max()
+        .unwrap_or(0)
+        .max(1);
+    let (w, h) = (8.0_f64, 18.0_f64);
+    let width = stats.weeks.len() as f64 * w;
+    let bars = stats
+        .weeks
+        .iter()
+        .enumerate()
+        .map(|(i, week)| {
+            let x = i as f64 * w;
+            let raised = week.raised as f64 / top as f64 * h;
+            let done = week.done as f64 / top as f64 * h;
+            view! {
+                <rect x=x y=h - raised width="3" height=raised class="fill-slate-400 dark:fill-slate-500">
+                    <title>{format!("raised {}, done {}, closed {}", week.raised, week.done, week.closed)}</title>
+                </rect>
+                <rect x=x + 3.5 y=h - done width="3" height=done class="fill-accent-500" />
+            }
+        })
+        .collect_view();
+    view! {
+        <svg
+            role="img"
+            aria-label="Raised and done, a week at a time"
+            viewBox=format!("0 0 {width} {h}")
+            width=width
+            height=h
+        >
+            {bars}
+        </svg>
+    }
+}
+
+/// A running sprint's burn-up (scope and done) and burn-down (points left
+/// against the ideal straight line), over its days.
+#[component]
+fn BurnCharts(burn: SprintBurn) -> impl IntoView {
+    let today = burn.done_by_day.len();
+    let done = burn.done_by_day.last().copied().unwrap_or(0);
+    let heading = format!(
+        "Sprint {} · day {today} of {} · {done} of {} points done",
+        burn.sprint, burn.days, burn.total
+    );
+    let up = burn.clone();
+    let down = burn;
+    view! {
+        <div class="flex flex-col gap-1 rounded bg-slate-50 p-2 dark:bg-slate-900">
+            <p class="text-xs font-medium">{heading}</p>
+            <div class="flex flex-wrap gap-4">
+                <Chart burn=up down=false />
+                <Chart burn=down down=true />
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn Chart(burn: SprintBurn, down: bool) -> impl IntoView {
+    let (w, h) = (240.0_f64, 90.0_f64);
+    let days = f64::from(burn.days.max(1));
+    let total = f64::from(burn.total.max(1));
+    let x = move |d: f64| d / days * w;
+    // Room above the top line for the points label.
+    let y = move |v: f64| h - v / total * (h - 12.0);
+    // From the start (day 0), then the end of each day so far.
+    let mut points = vec![(0.0, if down { f64::from(burn.total) } else { 0.0 })];
+    for (i, &v) in burn.done_by_day.iter().enumerate() {
+        let v = f64::from(v);
+        points.push((
+            (i + 1) as f64,
+            if down { f64::from(burn.total) - v } else { v },
+        ));
+    }
+    let line = points
+        .iter()
+        .map(|(d, v)| format!("{:.1},{:.1}", x(*d), y(*v)))
+        .collect::<Vec<_>>()
+        .join(" ");
+    // Burn-up's guide is the scope; burn-down's the ideal line to zero.
+    let guide = if down {
+        format!("0,{:.1} {w:.1},{h:.1}", y(f64::from(burn.total)))
+    } else {
+        format!(
+            "0,{:.1} {w:.1},{:.1}",
+            y(f64::from(burn.total)),
+            y(f64::from(burn.total))
+        )
+    };
+    let label = if down { "Burn-down" } else { "Burn-up" };
+    let guide_name = if down { "ideal" } else { "scope" };
+    view! {
+        <figure class="flex flex-col gap-0.5">
+            <svg
+                role="img"
+                aria-label=format!("{label} of sprint {}", burn.sprint)
+                viewBox=format!("-2 -2 {} {}", w + 4.0, h + 14.0)
+                width=w + 4.0
+                height=h + 16.0
+                class="overflow-visible"
+            >
+                <line x1="0" y1=h x2=w y2=h class="stroke-slate-300 dark:stroke-slate-600" stroke-width="1" />
+                <polyline points=guide fill="none" stroke-width="1" stroke-dasharray="4 3" class="stroke-slate-400" />
+                <polyline points=line fill="none" stroke-width="2" class="stroke-accent-500" />
+                <text x="0" y="7" font-size="9" class="fill-slate-500">{format!("{} pts", burn.total)}</text>
+                <text x="0" y=h + 10.0 font-size="9" class="fill-slate-500">"day 1"</text>
+                <text x=w y=h + 10.0 font-size="9" text-anchor="end" class="fill-slate-500">{format!("day {}", burn.days)}</text>
+            </svg>
+            <figcaption class="text-[11px] text-slate-500">
+                {format!("{label}: points {}, dashed {guide_name}", if down { "left" } else { "done" })}
+            </figcaption>
+        </figure>
     }
 }

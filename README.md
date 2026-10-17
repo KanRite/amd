@@ -133,7 +133,9 @@ a solo developer without it.
 
 
 - **Drag and drop**, with the rules shown while you drag.
-- **A landing page** with My work and every project.
+- **A landing page** with My work and every project, each with its tickets
+  raised, done and closed over 7, 30 or 90 days and its running sprint's
+  burn-up and burn-down (`amd stats` on the command line).
 - **Live:** changes made anywhere (the command line, an editor, a pull) show
   within a second.
 - **A bottom panel** with a terminal and an AI tab running your own AI tool.
@@ -602,7 +604,10 @@ disagree.
   across every project on this machine, highest priority first; click one
   to open it on its board) and **Projects** (click one to open its board,
   or **Documents** for its documents; **Hide** leaves it out of My work on
-  this machine). **⌂ Home** in a board's header comes back. "You" is git's
+  this machine). Each project shows its tickets raised, done and closed
+  (abandoned or deleted) over the last 7, 30 or 90 days, with a bar a week,
+  and each running sprint's burn-up and burn-down in points, all read from
+  git history when the page opens. **⌂ Home** in a board's header comes back. "You" is git's
   identity in each project's own repository, so a different email per
   organisation works.
 - **Documents**: a project's documents, from the landing page's top bar

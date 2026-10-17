@@ -2469,6 +2469,7 @@ async fn home() -> Result<amd_ui_model::Home> {
                 })
                 .collect(),
             me: me.map(|(email, _)| email).unwrap_or_default(),
+            stats_days: agile_md::stats::period(),
             // The project open in this process: what the launch directory
             // found, or the last one opened (ticket 168).
             current: Project::open()
@@ -2478,6 +2479,59 @@ async fn home() -> Result<amd_ui_model::Home> {
         })
     })
     .await
+}
+
+/// A project's statistics (ticket 233) over `days`, across its boards:
+/// raised, done and closed, by week, and each running sprint's burn.
+#[tauri::command]
+async fn project_stats(root: String, days: u32) -> Result<amd_ui_model::ProjectStats> {
+    blocking(move || {
+        use agile_md::{my_work, stats};
+        let project = my_work::projects()
+            .into_iter()
+            .find(|p| p.root == Path::new(&root))
+            .ok_or_else(|| format!("no project at {root}"))?;
+        let boards = my_work::boards_of(&project, &agile_md::registry::Registry::load());
+        let now = stats::now();
+        let refs: Vec<&Board> = boards.iter().map(|(_, b)| b).collect();
+        let counts = stats::counts(&refs, days, now).map_err(err)?;
+        let mut sprints = Vec::new();
+        for (name, board) in &boards {
+            for b in stats::burns(board, name, now).map_err(err)? {
+                sprints.push(amd_ui_model::SprintBurn {
+                    repo: b.repo,
+                    sprint: b.sprint,
+                    start: b.start,
+                    days: b.days,
+                    total: b.total,
+                    done_by_day: b.done_by_day,
+                });
+            }
+        }
+        Ok(amd_ui_model::ProjectStats {
+            days,
+            raised: counts.raised,
+            done: counts.done,
+            closed: counts.closed,
+            weeks: counts
+                .weeks
+                .into_iter()
+                .map(|w| amd_ui_model::StatWeek {
+                    raised: w.raised,
+                    done: w.done,
+                    closed: w.closed,
+                })
+                .collect(),
+            sprints,
+        })
+    })
+    .await
+}
+
+/// Remembers the statistics period (7, 30 or 90 days) on this machine.
+#[tauri::command]
+async fn set_stats_days(days: u32) -> Result<()> {
+    blocking(move || agile_md::stats::set_period(days).map_err(err)).await
 }
 
 /// Archives a project, or brings it back (ticket 157), with `github` its
@@ -2635,6 +2689,8 @@ pub fn run() {
             home,
             set_project_hidden,
             set_project_archived,
+            project_stats,
+            set_stats_days,
             pin_start_page,
             my_pins,
             set_doc_pin,
