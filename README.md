@@ -10,6 +10,11 @@
 **An open source, fully featured, multi-project agile management system for
 individuals and teams.**
 
+**[Website](https://agile-md.github.io/amd/)** ·
+[Install](#install) ·
+[Releases](https://github.com/agile-md/amd/releases) ·
+[Contributing](CONTRIBUTING.md)
+
 Your tickets, documents and ideas live in your own git repositories, as
 markdown, right beside your work: not in someone else's cloud. agile-md works
 well with AI, but AI is never a requirement; it's just as useful to a team or
