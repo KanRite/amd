@@ -685,8 +685,34 @@ fn ticket_tool(args: &Value) -> Result<Reply> {
     if let Some(summary) = authorship::summary(board, &task) {
         text.push_str(&format!(" {summary}."));
     }
+    // Every ticket linked to it, either way (ticket 121): a link recorded
+    // only on the other ticket isn't in this one's text.
+    let linked = crate::links::linked(board, &task).unwrap_or_default();
+    if !linked.is_empty() {
+        text.push_str("\nLinked:");
+        for l in &linked {
+            text.push_str(&format!(
+                "\n- {} {} {} ({})",
+                l.kind.phrase(),
+                l.task.id_display(),
+                l.task.title(),
+                place(&l.task)
+            ));
+        }
+    }
     text.push_str(&format!("\nversion: {version}\n\n{content}"));
     let mut data = card(repo, &task);
+    data["linked"] = json!(
+        linked
+            .iter()
+            .map(|l| json!({
+                "kind": l.kind.slug(),
+                "ticket": format!("{repo}#{}", l.task.id_display()),
+                "title": l.task.title(),
+                "recorded_here": l.recorded_here,
+            }))
+            .collect::<Vec<_>>()
+    );
     data["content"] = json!(content);
     data["version"] = json!(version);
     Ok(project.reply(text, data))

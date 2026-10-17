@@ -361,6 +361,23 @@ pub const LINK_KINDS: [(&str, &str); 9] = [
     ("superseded-by", "Superseded by"),
 ];
 
+/// The kind as the other ticket records it (ticket 121), as
+/// `agile_md::links::LinkType::inverse`: `requires` is `required-by` from
+/// the other end. An unknown slug is its own.
+pub fn link_inverse(slug: &str) -> &str {
+    match slug {
+        "requires" => "required-by",
+        "required-by" => "requires",
+        "parent-of" => "child-of",
+        "child-of" => "parent-of",
+        "clone-of" => "cloned-by",
+        "cloned-by" => "clone-of",
+        "supersedes" => "superseded-by",
+        "superseded-by" => "supersedes",
+        other => other,
+    }
+}
+
 /// The label for a link kind's slug (the slug itself if it's unknown).
 pub fn link_label(slug: &str) -> String {
     LINK_KINDS

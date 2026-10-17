@@ -1645,6 +1645,23 @@ assert "amd set due and recur check what they're given; empty clears" \
     && ! grep -q '^recur:' tasks/backlog/002-renew-the-certificate.md"
 rm -rf "${recur_repo}"
 
+echo "every ticket linked to a ticket (ticket 121):"
+links_repo="$(mktemp -d)"
+( cd "${links_repo}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
+  && git config commit.gpgsign false && AMD_YES=1 "${AMD}" init linkstest --local-only >/dev/null \
+  && for t in One Two Three; do "${AMD}" new "$t" --no-edit >/dev/null; done \
+  && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 3 1 --type supersedes --one-way >/dev/null )
+assert "amd links lists every link either way, saying which are one-sided" \
+  bash -c "cd '${links_repo}' && out=\$('${AMD}' links 1) \
+    && printf '%s\\n' \"\$out\" | grep -q '^  requires  *002 Two · backlog\$' \
+    && printf '%s\\n' \"\$out\" | grep -q '^  is superseded by  *003 Three · backlog  (recorded on 003 only)\$' \
+    && '${AMD}' links 2 | grep -q 'is required by  *001 One' \
+    && '${AMD}' related 3 | grep -q 'supersedes  *001 One'"
+assert "...and --json gives the same, for scripts" \
+  bash -c "cd '${links_repo}' && '${AMD}' links 1 --json | grep -q '\"kind\": \"superseded-by\"' \
+    && '${AMD}' links 1 --json | grep -q '\"recorded_here\": false'"
+rm -rf "${links_repo}"
+
 echo "commit-and-push:"
 commit_repo="$(mktemp -d)"
 commit_origin="$(mktemp -d)/origin.git"

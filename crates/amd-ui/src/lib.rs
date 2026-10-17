@@ -3383,6 +3383,13 @@ mod tests {
             .map(|kind| (kind.slug(), kind.label()))
             .collect();
         assert_eq!(lib, amd_ui_model::LINK_KINDS);
+        // ...and turn round the same way (ticket 121).
+        for kind in agile_md::links::LinkType::ALL {
+            assert_eq!(
+                amd_ui_model::link_inverse(kind.slug()),
+                kind.inverse().slug()
+            );
+        }
     }
 
     /// The tree amd-lib builds reads back as the page's own copy (ticket

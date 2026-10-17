@@ -531,6 +531,65 @@ pub fn all(task: &Task) -> Vec<Link> {
     out
 }
 
+/// A ticket linked to another, as [`linked`] finds it.
+#[derive(Clone, Debug)]
+pub struct Linked {
+    /// How the asked-about ticket stands to this one: `Requires` means the
+    /// asked-about ticket requires it.
+    pub kind: LinkType,
+    pub task: Task,
+    /// Recorded on the asked-about ticket itself; false when only the other
+    /// ticket records it (a one-sided link, from `--one-way`, a hand edit
+    /// or an import).
+    pub recorded_here: bool,
+}
+
+/// Every ticket on `board` linked to `task` in any way, in either direction
+/// (ticket 121): its own `links`, `related`, `parent`, `## Children`,
+/// `clone-of` and `clones`, and every other ticket's that names it, turned
+/// round (another's `requires` naming it is `RequiredBy` here). So a link
+/// recorded on only one side is found from either end. Each ticket and kind
+/// once, in the picker's order of kinds, then by number. Tickets not on the
+/// board (abandoned, missing) aren't listed.
+pub fn linked(board: &Board, task: &Task) -> Result<Vec<Linked>> {
+    let others: Vec<Task> = board
+        .tasks()?
+        .into_iter()
+        .filter(|other| other.path != task.path)
+        .collect();
+    let mine = all(task);
+    let my_children = children_stems(task);
+    let mut out: Vec<Linked> = Vec::new();
+    let mut add = |kind: LinkType, other: &Task, here: bool| match out
+        .iter_mut()
+        .find(|l| l.kind == kind && l.task.path == other.path)
+    {
+        Some(found) => found.recorded_here |= here,
+        None => out.push(Linked {
+            kind,
+            task: other.clone(),
+            recorded_here: here,
+        }),
+    };
+    for other in &others {
+        for link in mine.iter().filter(|l| same_id(&l.id, other)) {
+            add(link.kind, other, true);
+        }
+        if my_children.contains(&other.stem) {
+            add(LinkType::ParentOf, other, true);
+        }
+        for link in all(other).iter().filter(|l| same_id(&l.id, task)) {
+            add(link.kind.inverse(), other, false);
+        }
+        if children_stems(other).contains(&task.stem) {
+            add(LinkType::ChildOf, other, false);
+        }
+    }
+    let order = |kind: LinkType| LinkType::ALL.iter().position(|k| *k == kind).unwrap_or(0);
+    out.sort_by_key(|l| (order(l.kind), l.task.id, l.task.stem.clone()));
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,6 +633,67 @@ mod tests {
 
     fn find(board: &Board, id: &str) -> Task {
         board.find(id).unwrap()
+    }
+
+    #[test]
+    fn linked_finds_every_link_from_either_end_one_sided_too() {
+        let (_dir, board) = board_with(&["One", "Two", "Three", "Four", "Five"]);
+        // Both ends: 001 requires 002.
+        apply(
+            &find(&board, "1"),
+            LinkType::Requires,
+            &find(&board, "2"),
+            false,
+            false,
+        )
+        .unwrap();
+        // One-sided, recorded only on 003: 003 supersedes 001.
+        apply(
+            &find(&board, "3"),
+            LinkType::Supersedes,
+            &find(&board, "1"),
+            false,
+            true,
+        )
+        .unwrap();
+        // 004's parent is 001 (recorded on 004 only), 005 relates to 001 one way.
+        apply(
+            &find(&board, "4"),
+            LinkType::ChildOf,
+            &find(&board, "1"),
+            false,
+            true,
+        )
+        .unwrap();
+        apply(
+            &find(&board, "5"),
+            LinkType::RelatesTo,
+            &find(&board, "1"),
+            false,
+            true,
+        )
+        .unwrap();
+        let got: Vec<(LinkType, String, bool)> = linked(&board, &find(&board, "1"))
+            .unwrap()
+            .into_iter()
+            .map(|l| (l.kind, l.task.id_display(), l.recorded_here))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (LinkType::RelatesTo, "005".to_string(), false),
+                (LinkType::Requires, "002".to_string(), true),
+                (LinkType::ParentOf, "004".to_string(), false),
+                (LinkType::SupersededBy, "003".to_string(), false),
+            ]
+        );
+        // From the other end, 002 sees it's required by 001.
+        let back = linked(&board, &find(&board, "2")).unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!(
+            (back[0].kind, back[0].recorded_here),
+            (LinkType::RequiredBy, true)
+        );
     }
 
     #[test]
