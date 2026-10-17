@@ -1154,6 +1154,27 @@ struct PinArgs<'a> {
     path: Option<&'a str>,
 }
 
+/// Your pinned documents (ticket 232).
+pub async fn my_pins() -> Result<Vec<amd_ui_model::DocPin>, String> {
+    call("my_pins", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct DocPinArgs<'a> {
+    source: &'a str,
+    path: &'a str,
+    on: bool,
+}
+
+/// Pins a document to your own list, or unpins it.
+pub async fn set_doc_pin(
+    source: &str,
+    path: &str,
+    on: bool,
+) -> Result<amd_ui_model::DocChange, String> {
+    call("set_doc_pin", &DocPinArgs { source, path, on }).await
+}
+
 /// Pins a document as the start page (ticket 179); `None` goes back to the
 /// README.
 pub async fn pin_start_page(

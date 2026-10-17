@@ -386,6 +386,13 @@ pub fn move_document(root: &Path, from: &str, to_folder: &str) -> Result<(String
     if repin {
         touched.push(SETTINGS);
     }
+    // Everyone's own pins of it go with it too (ticket 232).
+    let source = root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let pins = crate::doc_pins::moved(root, &source, from, &to);
+    touched.extend(pins.iter().map(|(f, _)| f.as_str()));
     ensure_clean(root, &touched)?;
     let links = format!("move: links to {to}");
     let done = commit_change(root, &links, || {
@@ -405,6 +412,10 @@ pub fn move_document(root: &Path, from: &str, to_folder: &str) -> Result<(String
         if repin {
             set_pin(root, Some(&to))?;
             paths.push(PathBuf::from(SETTINGS));
+        }
+        for (file, text) in &pins {
+            fs::write(root.join(file), text).with_context(|| format!("writing {file}"))?;
+            paths.push(PathBuf::from(file));
         }
         Ok(paths)
     })?;
@@ -941,6 +952,19 @@ mod tests {
             err.to_string().contains("changed since you opened it"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn a_moved_document_keeps_its_pins() {
+        let (_dir, root) = repo();
+        crate::doc_pins::set(&root, "t@t.co", "p-documents", "adr/adr/0001-x.md", true).unwrap();
+        create_folder(&root, "adr/adr", "old").unwrap();
+        let (to, _) = move_document(&root, "adr/adr/0001-x.md", "adr/adr/old").unwrap();
+        let pins = crate::doc_pins::pins(&root, "t@t.co");
+        assert_eq!(pins.len(), 1);
+        assert_eq!(pins[0].path, to);
+        let status = git::checked(&root, &["status", "--porcelain"]).unwrap();
+        assert!(status.trim().is_empty(), "committed: {status}");
     }
 
     #[test]

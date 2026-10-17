@@ -130,8 +130,15 @@ pub fn DocumentsView() -> impl IntoView {
         });
     };
 
+    // Your own pinned documents (ticket 232), first in the list.
+    let my_pins = RwSignal::new(Vec::<amd_ui_model::DocPin>::new());
     let load_list = move || {
         spawn_local(async move { sources.set(Some(api::list_documents().await)) });
+        spawn_local(async move {
+            if let Ok(list) = api::my_pins().await {
+                my_pins.set(list);
+            }
+        });
     };
     load_list();
 
@@ -409,6 +416,17 @@ pub fn DocumentsView() -> impl IntoView {
                 .unwrap_or_default()
         })
     };
+    let set_my_pin = move |source: String, path: String, on: bool| {
+        spawn_local(async move {
+            match api::set_doc_pin(&source, &path, on).await {
+                Ok(change) => after(source, change),
+                Err(e) => note.set(Some(e)),
+            }
+        });
+    };
+    let is_my_pin = move |source: &str, path: &str| {
+        my_pins.with(|l| l.iter().any(|p| p.source == source && p.path == path))
+    };
     let pin = move |source: String, path: Option<String>| {
         spawn_local(async move {
             match api::pin_start_page(&source, path.as_deref()).await {
@@ -530,6 +548,54 @@ pub fn DocumentsView() -> impl IntoView {
                         })
                     })
                 }}
+                <Show when=move || !my_pins.with(Vec::is_empty)>
+                    <section aria-label="Pinned" class="mb-3">
+                        <h3 class="px-2 text-xs font-semibold uppercase tracking-wide text-slate-500">"Pinned"</h3>
+                        <ul>
+                            <For
+                                each=move || my_pins.get()
+                                key=|p| (p.source.clone(), p.path.clone())
+                                children=move |p| {
+                                    let (source, path) = (p.source.clone(), p.path.clone());
+                                    let (unpin_source, unpin_path) = (source.clone(), path.clone());
+                                    let current = {
+                                        let (source, path) = (source.clone(), path.clone());
+                                        move || open.with(|o| o.as_ref() == Some(&(source.clone(), path.clone())))
+                                    };
+                                    let title = format!("{} / {}", p.source, p.path);
+                                    view! {
+                                        <li class="group flex items-center">
+                                            <button
+                                                type="button"
+                                                class=move || format!(
+                                                    "min-w-0 flex-1 truncate rounded px-2 py-1 text-left hover:bg-slate-100 disabled:cursor-default disabled:text-slate-400 disabled:line-through dark:hover:bg-slate-700 {}",
+                                                    if current() { "bg-slate-100 font-medium dark:bg-slate-700" } else { "" },
+                                                )
+                                                title=if p.exists { title } else { format!("{title}: not there any more") }
+                                                disabled=!p.exists
+                                                on:click={
+                                                    let (source, path) = (source.clone(), path.clone());
+                                                    move |_| actions.open_doc(source.clone(), path.clone())
+                                                }
+                                            >
+                                                {format!("★ {}", p.title)}
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="px-1 text-xs text-slate-400 opacity-0 hover:text-slate-700 group-hover:opacity-100 focus:opacity-100 dark:hover:text-slate-200"
+                                                title="Unpin"
+                                                aria-label=format!("Unpin {}", p.title)
+                                                on:click=move |_| set_my_pin(unpin_source.clone(), unpin_path.clone(), false)
+                                            >
+                                                "×"
+                                            </button>
+                                        </li>
+                                    }
+                                }
+                            />
+                        </ul>
+                    </section>
+                </Show>
                 <Show when=move || hits.with(Option::is_some)>
                     <SearchResults hits query on_open=Callback::new(move |(source, path): (String, String)| {
                         find.set(Some(query.get_untracked()));
@@ -691,10 +757,32 @@ pub fn DocumentsView() -> impl IntoView {
                                     .into_any()
                             }
                         });
+                        let (mine_source, mine_path) = (d.source.clone(), d.path.clone());
+                        let my_pin_button = (!old).then(|| {
+                            let pinned_by_me = {
+                                let (source, path) = (mine_source.clone(), mine_path.clone());
+                                move || is_my_pin(&source, &path)
+                            };
+                            let label = {
+                                let pinned_by_me = pinned_by_me.clone();
+                                move || if pinned_by_me() { "★ Pinned" } else { "☆ Pin" }
+                            };
+                            view! {
+                                <button
+                                    type="button"
+                                    class=SMALL
+                                    title="Your own pins, first in your Documents list on every machine"
+                                    on:click=move |_| set_my_pin(mine_source.clone(), mine_path.clone(), !pinned_by_me())
+                                >
+                                    {label}
+                                </button>
+                            }
+                        });
                         view! {
                             <div class="mx-auto max-w-4xl p-8">
                                 <div class="mb-4 flex flex-wrap items-center gap-2">
                                     <p class="flex-1 font-mono text-xs text-slate-500">{place}</p>
+                                    {my_pin_button}
                                     {pin_button}
                                     <Show when=move || !old && editing.with(Option::is_none)>
                                         <button type="button" class=SMALL on:click=move |_| edit()>

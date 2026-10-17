@@ -1910,6 +1910,80 @@ async fn doc_change(
     .await
 }
 
+/// Your pinned documents (ticket 232), kept in the project's own documents
+/// repository so they follow you across machines. Empty when it isn't
+/// cloned or git has no email for you there.
+#[tauri::command]
+async fn my_pins() -> Result<Vec<amd_ui_model::DocPin>> {
+    blocking(|| {
+        let project = Project::open()?;
+        let sources = agile_md::documents::sources(&project.repos[0].1);
+        let Some(own) = sources
+            .iter()
+            .find(|s| s.kind == agile_md::documents::Kind::Own)
+            .and_then(|s| s.root.clone())
+        else {
+            return Ok(Vec::new());
+        };
+        let Ok(me) = agile_md::doc_pins::me(&own) else {
+            return Ok(Vec::new());
+        };
+        let mut lists = std::collections::HashMap::new();
+        Ok(agile_md::doc_pins::pins(&own, &me)
+            .into_iter()
+            .map(|pin| {
+                let docs = lists.entry(pin.source.clone()).or_insert_with(|| {
+                    sources
+                        .iter()
+                        .find(|s| s.name == pin.source)
+                        .and_then(|s| s.root.as_deref())
+                        .and_then(|root| agile_md::documents::list(root).ok())
+                        .unwrap_or_default()
+                });
+                let found = docs.iter().find(|d| d.path == pin.path);
+                amd_ui_model::DocPin {
+                    title: found.map_or_else(
+                        || pin.path.rsplit('/').next().unwrap_or(&pin.path).to_string(),
+                        |d| d.title.clone(),
+                    ),
+                    exists: found.is_some(),
+                    source: pin.source,
+                    path: pin.path,
+                }
+            })
+            .collect())
+    })
+    .await
+}
+
+/// Pins a document to your own list (ticket 232), or unpins it: committed
+/// to the project's own documents repository, wherever the document is.
+#[tauri::command]
+async fn set_doc_pin(
+    state: Tauri<'_, AppState>,
+    source: String,
+    path: String,
+    on: bool,
+) -> Result<amd_ui_model::DocChange> {
+    let own = blocking(|| {
+        let project = Project::open()?;
+        agile_md::documents::sources(&project.repos[0].1)
+            .into_iter()
+            .find(|s| s.kind == agile_md::documents::Kind::Own)
+            .map(|s| s.name)
+            .ok_or_else(|| "this project has no documents repository".to_string())
+    })
+    .await?;
+    doc_change(&state, own, move |root| {
+        let me = agile_md::doc_pins::me(root)?;
+        Ok((
+            None,
+            agile_md::doc_pins::set(root, &me, &source, &path, on)?,
+        ))
+    })
+    .await
+}
+
 /// Pins a document as the project's start page (ticket 179), or with no
 /// path goes back to the README.
 #[tauri::command]
@@ -2562,6 +2636,8 @@ pub fn run() {
             set_project_hidden,
             set_project_archived,
             pin_start_page,
+            my_pins,
+            set_doc_pin,
             search_documents,
             list_ideas,
             read_idea,
