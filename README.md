@@ -22,9 +22,9 @@ Agile-md provides you with all the tooling you need to be productive in the  wri
 
 
 
-A tiny **filesystem Kanban** — tasks are markdown files moved between `todo/`,
-`doing/` and `done/` directories. A single static binary plus `git`; no runtime,
-no daemon, no database.
+A tiny **filesystem Kanban** — tasks are markdown files moved between
+`backlog/`, `todo/`, `doing/` and `done/` directories (or columns of your own).
+Two static binaries plus `git`; no runtime, no daemon, no database.
 
 - **Status is the folder.** A task's column is simply which directory it's in.
 - **Git is the audit trail.** Moving a task is a `git mv`, so `git log --follow`
@@ -165,11 +165,12 @@ no daemon, no database.
 Needs **git 2.29 or later** (`git --version`) on your `PATH`.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mrdoodles/agile-md/v4/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash
 ```
 
-Downloads the prebuilt binary for your platform (Linux/macOS, x86_64/aarch64)
-into `/usr/local/bin` when it's writable, otherwise `~/bin`. Override with
+Downloads the newest release's binaries for your platform (Linux/macOS,
+x86_64/aarch64), `amd` and the desktop board `amdui`, into `/usr/local/bin`
+when it's writable, otherwise `~/bin`. Override with
 `install.sh --dir <dir>`, pin with `--version vX.Y.Z`, or build locally with
 `--from-source` (needs [Rust](https://rustup.rs)). From a clone:
 
@@ -196,10 +197,17 @@ board. `amd gui` opens the same window as `amdui`.
 
 ## Use
 
-In any git repository:
+Start a project, or join one:
 
 ```bash
-amd init                          # scaffold tasks/{todo,doing,done} here
+amd init acme                     # make acme-tickets and acme-documents on GitHub and clone them here
+amd join acme                     # …or join a project someone else made
+amd init acme --local-only        # …or keep the board in the repository you're in (tasks/)
+```
+
+Then, from any of its repositories (or the folder holding them):
+
+```bash
 amd new "Publish to Marketplace" --branch-type feature --assignee @me
 amd board                         # show all columns (the default)
 amd todo    1                     # backlog -> todo, and switch to feature/publish-to-marketplace
@@ -221,7 +229,7 @@ amd tags                          # the project's tag list, with how many ticket
 amd tags add future               # add a tag (saved as FUTURE); `amd tags remove` takes an unused one off
 amd new     "Idea" --draft        # a draft: tagged DRAFT, it stays in the backlog
 amd ready   1                     # take it out of draft (`amd draft 1` puts it back)
-amd todo    --tag urgent          # any listing form narrows to a tag: board, ls, a
+amd todo    --tag urgent          # any listing form narrows to a tag: board, a
                                    # destination verb, or an epic by name
 amd lock    1                     # claim a ticket so someone else's edits and moves
                                    # are refused until you release it or it lapses
@@ -229,8 +237,9 @@ amd unlock  1                     # release your own lease
 amd unlock  1 --force             # break someone else's — a separate, deliberate act
 ```
 
-`amd` works from any subdirectory — it resolves the board from the repo root.
-Set `AMD_DIR` to use a board directory other than `tasks`.
+`amd` works from any subdirectory — it resolves the board from the repo root,
+and from a code repository it finds the project's tickets repository beside
+it. Set `AMD_DIR` to use a board directory other than `tasks`.
 
 ## What's on a ticket
 
@@ -242,10 +251,14 @@ rest:
 | `id`          | automatic | `007`, from the board's counter |
 | `title`       | required | names the file, and the branch |
 | `assignee`    | optional | who's doing it; assignable later |
+| `priority`    | default `low` | `low`, `medium` or `high` |
+| `points`      | optional | its size: 1, 2, 3, 5, 8 or 13 |
+| `repository`  | optional | the repository it's about, where its branch is made |
 | `branch-type` | optional | `feature`, `bugfix`, `hotfix`, `release`, `chore` |
 | `branch-name` | automatic | `<branch-type>/<title>`, empty without a branch type |
 | `parent`      | optional | the ticket this sits under, any depth |
-| `related`     | optional | ids of tickets this depends on |
+| `related`     | optional | ids of tickets this relates to |
+| `links`       | optional | typed links: `requires`, `supersedes` and the like |
 | `tags`        | optional | always UPPERCASE; from the project's tag list (DRAFT and TRIAGE are always on it) |
 | `created`     | automatic | the date |
 | `created-by`  | automatic | who made it, `Name <email>`; never changes |
@@ -312,13 +325,15 @@ amd assign 3                          # unassign it
 ```
 
 Tickets are meant to be created now and assigned later, so `assignee` starts
-empty. It shows on the board as `@sam`, and the desktop board's User filter
-narrows to one person. Who *created* a ticket isn't a field — `git log --follow` on the
-file already knows.
+empty. The name lands in the ticket's frontmatter (`assignee: "sam"`), so it
+moves with the file and shows in the diff; the board shows it as `@sam`, and
+the desktop board's User filter narrows to one person. In a terminal, a bare
+`amd assign 3` offers the project's users to pick from. Who *created* a
+ticket is recorded separately, as `created-by`.
 
 ## Related tickets
 
-Tickets that depend on each other carry a `related` list — empty by default,
+Tickets that belong together carry a `related` list — empty by default,
 holding ids so a link survives a rename or a move between columns:
 
 ```bash
@@ -392,38 +407,30 @@ first, then oldest.
 related: [001,002]
 ```
 
-Prose can still point at tickets with `[[NNN-slug]]` wikilinks; `related` is for
-the dependency itself.
+Prose can still point at tickets with `[[NNN-slug]]` wikilinks. For a real
+dependency, use `requires`: that's the one done and sprints wait for.
 
 ## Several repositories at once
 
-**The list fills itself.** Every repository you run `amd` in is remembered, so
-the boards you actually work on are all there next session — nothing to
-maintain:
+A project's tickets live on one board, in `{project}-tickets`, and a ticket
+says which repository it's about (`--repository`, or `amd set <ref>
+repository <name>`), which is also where its branch is made. The
+repositories a project spans are declared in its `.settings`, so the whole
+team shares the list:
 
 ```bash
-amd repos                     # what's been seen so far
-amd repos add ../other-repo   # add one you haven't visited yet
-amd repos remove other-repo   # by name or by path
+amd register ../acme-api      # add a repository to the project (and note where it's cloned here)
+amd clone                     # the project's repositories this machine hasn't got
+amd clone acme-api            # clone one beside the others, and note it
+amd deregister acme-api       # take one off the project
 ```
 
-`amd repos` works anywhere, including outside a repository, and asking what's on
-the list doesn't add to it. A removed repository comes back the next time you
-work in it; `AMD_NO_REGISTER=1` keeps the list entirely manual, and then removal
-sticks.
-
-On the desktop board a checkbox per repository says which are in view, and the
-backlog shows one at a time. With more than one board in view each card says
-which repository it came from, since ids restart at 001 in every repo.
-
-The registry is a **list of repositories, and nothing else** — one path per line
-in `~/.config/agile-md/repos`, written only when a repository is first seen:
-
-```
-# Repositories agile-md knows about, one path per line.
-/Users/you/code/agile-md
-/Users/you/code/other-repo
-```
+Where each repository is cloned is kept per machine, one path per line in
+`~/.config/agile-md/repos`; which repositories the project has is shared.
+A repository can also have a board of its own (a `tasks/` in it); its
+tickets show on the project's board too, each card saying which repository
+it came from, since ids restart at 001 on every board. The desktop board's
+Repository filter narrows it to one.
 
 **A repository the project hasn't got yet** can be made from the ticket that
 needs it: the editor's Repository list has **＋ New repository…** (for the
@@ -446,17 +453,6 @@ The tickets themselves are never copied into a store. They're markdown in each
 repo, they change when you check out a branch or pull someone's work, and an
 index of them would be wrong the moment it was written. Reading a board is a
 directory listing and a few small files.
-
-## Assignees
-
-```bash
-amd new "Add login" --assignee alex   # or -a @me for whoever git says you are
-amd assign 3 sam                      # assign an existing ticket
-amd assign 3                          # unassign it
-```
-
-The name lands in the ticket's frontmatter (`assignee: "sam"`) and shows on the
-board as `@sam`, so it moves with the file and is visible in the diff.
 
 ## My work, across every project
 
@@ -596,8 +592,8 @@ nothing else is waiting to be pushed.
 
 ## The desktop board
 
-`amdui` opens the board in a window, across every registered repository at
-once. It's the front end as its own command — launch it from a dock or a
+`amdui` opens a project's board in a window, with the tickets of all its
+repositories. It's the front end as its own command — launch it from a dock or a
 runner, no subcommand to remember — and `amd gui` opens the same window if
 you're already in a terminal. Launched from outside a project, it opens the
 board it showed last. It is a Tauri window over a Leptos page, and every
@@ -632,7 +628,7 @@ disagree.
   handbook) can sit beside it: name it in Admin, or with
   `amd shared-documents <repository>`, and clone it next to the project's
   repositories. Raw HTML in a document is shown as text, never run.
-- **A Backlogs column** of sprints, then epics, beside the four columns. Drag
+- **A Backlogs column** of sprints, then epics, beside the board's columns. Drag
   a card to the next column, or into and out of an epic or sprint; the move is
   a `git mv`, committed and pushed like `amd`'s. Moving into doing
   locks the ticket for you, and moving it out again unlocks it: a ticket is
@@ -650,12 +646,14 @@ disagree.
 - **New ticket**, **+ Sprint**, **+ Epic**; start a sprint from its box.
 - **Preferences**, your own settings on this machine, in
   `~/.config/agile-md/config`: the colour scheme (light, dark or the
-  system's, with an accent colour), the zoom, and the board to open when
-  amdui starts outside a project.
+  system's, with an accent colour), the zoom, the board to open when amdui
+  starts outside a project, the AI tab's command, speech to text, and your
+  editor.
 - **Admin**, the project's settings, shared with the team through the
-  tickets repository: auto-commit, tags, the WIP limit on doing, how long a
-  lock lasts, renaming epics and sprints, and the ticket template (with a
-  preview). It's shown to the project's admins: anyone on its `admins` list
+  tickets repository: auto-commit, tags, the columns and how tickets move
+  between them, WIP limits, how long a lock lasts, auto priority, GitHub
+  issues, the shared documents, renaming epics and sprints, archiving the
+  project, and the ticket template (with a preview). It's shown to the project's admins: anyone on its `admins` list
   (`admins = Alex Morgan <alex@example.com>, sam@example.com` in the tickets
   `.settings`), or with admin or maintain access to the tickets repository
   on GitHub (asked through the `gh` CLI). When amd can't tell (no list, no
@@ -696,8 +694,9 @@ amd todo 001 --no-branch && amd doing 001 && amd done 001
 ```
 
 The rules live in the board, not the window, so the command line gets them
-too: tickets move one column at a time, a sprint refuses an unsized ticket,
-and a started sprint takes nothing more and gives nothing back.
+too: tickets move one column at a time (unless the team allows other moves),
+a sprint refuses an unsized ticket, and a started sprint takes nothing more
+and gives nothing back.
 
 `doing` carries a WIP limit: 2 unless changed (`amd wip-limit <n>`,
 `AMD_WIP_LIMIT`, or the board's own `.settings`; 0 turns it off). Todo is
@@ -771,12 +770,12 @@ clicked:
 
 ```
 TODO  (3)
-├── [001] Checkout revamp  (feat)
-│   └── [002] Guest checkout  (feat)
-└── [004] Update the guide  (docs)
+├── [001] Checkout revamp  (feature @Priya Shah)
+│   └── [002] Guest checkout  (feature)
+└── [004] Update the guide
 ```
 
-Piped or redirected output stays plain text (`    [002] Guest checkout  (feat)`,
+Piped or redirected output stays plain text (`    [002] Guest checkout  (feature)`,
 indented by depth), so `amd board | grep` keeps working and log files don't fill
 with escape sequences. `--plain` or `NO_COLOR=1` forces that everywhere.
 
