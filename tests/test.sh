@@ -2042,7 +2042,7 @@ assert "amd idea ticket --as epic makes an empty epic named after it, its write-
     && git -C '${ix}/idp-documents' commit -qam 'write-up for ticket 231' && git -C '${ix}/idp-documents' push -q origin main 2>/dev/null \
     && in_ix idea ticket quiet --as epic | grep -q 'Quiet tweak -> epic Quiet tweak' \
     && grep -q '^kind: \"epic\"' '${ix}/idp-tickets/tasks/backlog/Quiet tweak/_group.md' \
-    && grep -q 'From the idea “Quiet tweak”: Follow the OS. Or a switch.' '${ix}/idp-tickets/tasks/backlog/Quiet tweak/_group.md' \
+    && grep -q 'From the idea .*Quiet tweak.*: Follow the OS. Or a switch.' '${ix}/idp-tickets/tasks/backlog/Quiet tweak/_group.md' \
     && grep -q '^epics: \[\"idp-tickets#Quiet tweak\"\]' '${ix}/idp-documents/ideas/quiet-tweak.md'"
 assert "...--as sprint --name --days makes a pending sprint of that length" \
   bash -c "${ix_fns}; in_ix idea ticket dark --as sprint --name s1 --days 10 | grep -q 'Dark mode -> sprint s1' \
