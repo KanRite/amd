@@ -401,6 +401,17 @@ impl Board {
         self.root.parent().unwrap_or(&self.root)
     }
 
+    /// Whether this board lives in a dedicated tickets repository, the
+    /// `{project}-tickets` that `amd init <project>` and `amd join` make,
+    /// rather than inside the code it tracks. A ticket's branch can't go in
+    /// one, so it has to name the repository it's about (tickets 053, 066).
+    pub fn is_tickets_board(&self) -> bool {
+        self.repo_root()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with("-tickets"))
+    }
+
     pub fn templates_dir(&self) -> PathBuf {
         self.root.join("templates")
     }

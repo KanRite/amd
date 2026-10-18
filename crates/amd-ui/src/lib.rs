@@ -478,21 +478,24 @@ async fn create_repository(
         let made = new_repo::create(board, &new, &mut new_repo::gh).map_err(err)?;
         new_repo::register(&made).map_err(err)?;
         let same_board = task.as_ref().is_none_or(|(on, _)| on.root == board.root);
+        let mut drafted = None;
         let mut report = committed(board, "repo", "new", &made.name, || {
             new_repo::declare(board, &made.name)?;
             if same_board && let Some((_, task)) = &task {
-                new_repo::record_on_ticket(board, task, &made)?;
+                drafted = new_repo::record_on_ticket(board, task, &made)?;
             }
             Ok(())
         })?;
         // A ticket on one of the project's other boards: its own commit.
         if !same_board && let Some((on, task)) = &task {
             committed(on, "repo", "new", &made.name, || {
-                new_repo::record_on_ticket(on, task, &made)
+                drafted = new_repo::record_on_ticket(on, task, &made)?;
+                Ok(())
             })?;
         }
-        if !made.notes.is_empty() {
-            let notes = made.notes.join("; ");
+        let notes: Vec<String> = made.notes.iter().cloned().chain(drafted).collect();
+        if !notes.is_empty() {
+            let notes = notes.join("; ");
             report.warning = Some(match report.warning {
                 Some(w) => format!("{w}; {notes}"),
                 None => notes,
@@ -3378,6 +3381,27 @@ mod tests {
             assert_eq!(
                 amd_ui_model::link_inverse(kind.slug()),
                 kind.inverse().slug()
+            );
+        }
+    }
+
+    /// The page says why a repository and branch type don't go together
+    /// exactly as amd-lib does (ticket 066), and agrees on `none`.
+    #[test]
+    fn the_pages_pairing_rule_is_amd_libs() {
+        assert_eq!(amd_ui_model::ticket::NO_BRANCH, agile_md::branch::NO_BRANCH);
+        for (repository, kind) in [
+            ("acme-api", ""),
+            ("", "feature"),
+            ("acme-api", "feature"),
+            ("acme-api", "none"),
+            ("", "none"),
+            ("", ""),
+        ] {
+            assert_eq!(
+                amd_ui_model::ticket::pairing_mismatch(repository, kind),
+                agile_md::pairing::mismatch(repository, kind),
+                "{repository:?} {kind:?}"
             );
         }
     }

@@ -605,7 +605,9 @@ enum Cmd {
         force: bool,
     },
     /// Set a field on a ticket: points, epic, order, title, priority,
-    /// repository, due (YYYY-MM-DD), recur (weekly, fortnightly, monthly,
+    /// repository, branch-type (a branch type, `none` for no branch, empty
+    /// for not chosen; with a repository it must be one or the other),
+    /// due (YYYY-MM-DD), recur (weekly, fortnightly, monthly,
     /// quarterly, yearly or `every N days|weeks|months|years`: done makes the
     /// next one), or requires (the tickets it requires, as a list:
     /// `amd set 12 requires 3,7`; both ends are linked, empty clears)
@@ -614,7 +616,7 @@ enum Cmd {
         task: String,
         #[arg(
             value_name = "FIELD",
-            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title", "priority", "repository", "due", "recur", "requires"]),
+            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title", "priority", "repository", "branch-type", "due", "recur", "requires"]),
         )]
         field: String,
         /// The new value; empty clears the field
@@ -819,6 +821,13 @@ enum Cmd {
     /// status only, never the commit message, so it works over history from
     /// before this existed too
     Log,
+    /// List the tickets whose repository and branch type don't go together
+    ///
+    /// On a tickets board a ticket with a repository needs a branch type
+    /// (`none` for no branch), and one with a branch type needs a
+    /// repository. New and edited tickets are made drafts until they do;
+    /// this lists ones that don't, done excepted. It only reads
+    Check,
     /// Tickets raised, done and closed lately, and each running sprint's
     /// burn-up and burn-down, across the project's boards
     ///
@@ -1551,7 +1560,16 @@ fn run() -> Result<()> {
                             agile_md::auto_priority::set_by_hand(&board, &task, &value)?
                         );
                     }
+                    // A repository and a branch type go together (ticket
+                    // 066): one without the other is a draft in the
+                    // backlog, and refused past it.
                     "repository" => {
+                        let why = transition::check_pairing(
+                            &board,
+                            &task,
+                            &value,
+                            &task.branch_type().unwrap_or_default(),
+                        )?;
                         task.set_repository(task.hash()?, &value)?;
                         let name = agile_md::task::repo_name(&value);
                         if !name.is_empty() && !board_settings::load(&board).repos().contains(&name)
@@ -1561,6 +1579,26 @@ fn run() -> Result<()> {
                             );
                         }
                         println!("{} repository {}", task.id_display(), display(&name));
+                        if let Some(drafted) = transition::settle_pairing(&task, why)? {
+                            eprintln!("amd: {drafted}");
+                        }
+                    }
+                    "branch-type" => {
+                        let why = transition::check_pairing(
+                            &board,
+                            &task,
+                            &task.repository().unwrap_or_default(),
+                            &value,
+                        )?;
+                        task.set_branch_type(task.hash()?, &value)?;
+                        println!(
+                            "{} branch type {}",
+                            task.id_display(),
+                            display(&branch::normalise(&value))
+                        );
+                        if let Some(drafted) = transition::settle_pairing(&task, why)? {
+                            eprintln!("amd: {drafted}");
+                        }
                     }
                     // Ticket 143: a due date, and a repeat that makes the
                     // next one when this one is done.
@@ -1635,6 +1673,7 @@ fn run() -> Result<()> {
         Cmd::Templates { command } => cmd_templates(&board, command.unwrap_or(TemplateCmd::List)),
         Cmd::Log => cmd_log(&board),
         Cmd::Stats { days } => cmd_stats(days),
+        Cmd::Check => cmd_check(&board),
         Cmd::Links { task, json } => {
             let task = board.find(&task)?;
             let linked = agile_md::links::linked(&board, &task)?;
@@ -1968,12 +2007,43 @@ fn cmd_lock(board: &Board, reference: &str) -> Result<()> {
     })
 }
 
+/// `amd check` (ticket 066): tickets whose repository and branch type don't
+/// go together. Reads only; fixing one is `amd set`.
+fn cmd_check(board: &Board) -> Result<()> {
+    let found = agile_md::pairing::mismatched(board)?;
+    if found.is_empty() {
+        if board.is_tickets_board() {
+            println!("every ticket's repository and branch type go together");
+        } else {
+            println!("this board is inside its code repository, so a ticket needs no repository");
+        }
+        return Ok(());
+    }
+    for (task, why) in &found {
+        println!(
+            "{} {}/ {}: {why}",
+            task.id_display(),
+            task.column,
+            task.title()
+        );
+    }
+    println!(
+        "{} to settle: `amd set <ref> branch-type <type|none>` or `amd set <ref> repository <name>`",
+        found.len()
+    );
+    Ok(())
+}
+
 /// `amd draft` / `amd ready` (ticket 114): add or remove the DRAFT tag. A
 /// ticket that's already so says so and changes nothing.
 fn cmd_draft(board: &Board, reference: &str, draft: bool) -> Result<()> {
     let task = board.find(reference)?;
     let (id_display, title) = (task.id_display(), task.title());
     let verb = if draft { "draft" } else { "ready" };
+    // Not while its repository and branch type don't go together (ticket 066).
+    if !draft {
+        agile_md::pairing::ready(board, &task)?;
+    }
     with_auto_commit(board, verb, &id_display, &title, || {
         let changed = task.set_draft(task.hash()?, draft)?;
         let id = task.id_display();
@@ -2606,19 +2676,19 @@ fn cmd_repo(board: &Board, action: RepoAction) -> Result<()> {
     };
     let made = new_repo::create(board, &new, &mut new_repo::gh)?;
     new_repo::register(&made)?;
-    with_auto_commit(board, "repo", "new", &made.name, || {
+    let drafted = with_auto_commit(board, "repo", "new", &made.name, || {
         new_repo::declare(board, &made.name)?;
-        if let Some(task) = &task {
-            new_repo::record_on_ticket(board, task, &made)?;
+        match &task {
+            Some(task) => new_repo::record_on_ticket(board, task, &made),
+            None => Ok(None),
         }
-        Ok(())
     })?;
     let what = if made.created { "created" } else { "connected" };
     println!("{what} {} at {}", made.name, made.path.display());
     if let Some(task) = &task {
         println!("{} is now about {}", task.id_display(), made.name);
     }
-    for note in &made.notes {
+    for note in made.notes.iter().chain(&drafted) {
         eprintln!("amd: {note}");
     }
     Ok(())
@@ -3303,6 +3373,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::Tree { .. }
         | Cmd::Links { .. }
         | Cmd::Log
+        | Cmd::Check
         | Cmd::Stats { .. }
         | Cmd::Templates { .. }
         | Cmd::Register { .. }
@@ -3606,6 +3677,9 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         println!("{id} now links to {}", created.task.id_display());
     }
     println!("created {}/{name}{note}", created.task.column);
+    if let Some(drafted) = &created.drafted {
+        eprintln!("amd: {drafted}");
+    }
     if let Some(warning) = created
         .task
         .assignee()
@@ -3722,6 +3796,15 @@ fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {
         line.push_str(" — nothing written");
     }
     println!("{line}");
+    // Ticket 066: a repository without a branch type, or the reverse.
+    let mismatched = summary.mismatched_count();
+    if mismatched > 0 {
+        println!(
+            "note: {mismatched} {} a repository and a branch type that don't go together: \
+             drafts in the backlog, the rest left as they are; `amd check` lists them",
+            if mismatched == 1 { "has" } else { "have" }
+        );
+    }
     Ok(())
 }
 

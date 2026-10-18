@@ -1034,6 +1034,34 @@ off**, ticket 141) to
 
 ## Ticket fields (`crates/amd-lib/src/branch.rs`, `templates/ticket.md.jinja`)
 
+- **A repository and a branch type go together** (ticket 066,
+  `crates/amd-lib/src/pairing.rs`), on a dedicated tickets board only
+  (`Board::is_tickets_board`, moved from `transition`: the repository is
+  named `*-tickets`; a `--local-only` board in its code repo is exempt).
+  `branch::NO_BRANCH` (`none`) is a branch type meaning "no branch, on
+  purpose" (`makes_branch` false, no `branch-name`, `amd todo` silent);
+  the picker's empty choice is `branch::NONE`, now "(not chosen)" (old
+  "(none)" still normalises to empty). `pairing::mismatch(repository,
+  branch_type)`: a repository with no branch type, or a real branch type
+  with no repository. Not refused: the ticket becomes a **draft**.
+  `pairing::check` answers `Some(why)` in a backlog-kind column and errors
+  past it. Applied in `Draft::write` (every creation path; `Created.drafted`
+  says why, the CLI prints it, `create_ticket` adds a warning),
+  `transition::save_text` (DRAFT put back even if the editor took it off),
+  `edit_ticket` and the MCP `edit_ticket` (`check_pairing` before,
+  `settle_pairing` after), `amd set <ref> repository|branch-type`
+  (`Task::set_branch_type`, new), `amd import tickets` (`ImportedTicket.
+  mismatched`, a note), and `new_repo::record_on_ticket` (now returns a
+  note: past the backlog it can't refuse a repository already made). `amd
+  ready` refuses (`pairing::ready`). Fixing the fields never takes DRAFT off.
+  `amd check` lists mismatched tickets not done (`pairing::mismatched`),
+  read only. The MCP `create_ticket`/`edit_ticket` take `branch_type`.
+  amdui: `RepoInfo.tickets_only`, `Board::tickets_only(repo)`,
+  `amd_ui_model::ticket::{NO_BRANCH, pairing_mismatch}` (amd-ui's tests
+  check it words things as amd-lib does); the editor's Branch type has "not
+  chosen" and "none (no branch)", a note under it, and Mark ready disabled
+  with the reason.
+
 - **Due dates and recurring tickets** (ticket 143,
   `crates/amd-lib/src/recur.rs`): `due: "YYYY-MM-DD"` on any ticket
   (`Task::due`/`set_due`, empty removes the key) and `recur: "<rule>"`

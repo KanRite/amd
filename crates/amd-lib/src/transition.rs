@@ -246,6 +246,8 @@ pub fn enter_todo(board: &Board, task: &Task, options: &TodoOptions) -> Result<O
     // ticket is about, when it names one — not whichever repository amd
     // happens to be run from. Read before the move, like everything else.
     let repository = task.repository();
+    // `none` says no branch on purpose (ticket 066), so nothing to say.
+    let on_purpose = task.branch_type().as_deref() == Some(branch::NO_BRANCH);
     let branching = !(options.no_branch || std::env::var("AMD_NO_BRANCH").as_deref() == Ok("1"));
 
     // A dedicated tickets repository holds tickets, not code (ticket 053):
@@ -253,7 +255,7 @@ pub fn enter_todo(board: &Board, task: &Task, options: &TodoOptions) -> Result<O
     // or its branch would land here. Refused before the move, so nothing
     // is half done. A board inside a code repository (`amd init
     // --local-only` there) is that code repository, and branches as before.
-    if branching && wanted.is_some() && repository.is_none() && is_tickets_repo(board) {
+    if branching && wanted.is_some() && repository.is_none() && board.is_tickets_board() {
         let id = task.id_display();
         bail!(
             "{id} wants a branch but names no repository, and this board's repository only holds tickets: \
@@ -284,9 +286,11 @@ pub fn enter_todo(board: &Board, task: &Task, options: &TodoOptions) -> Result<O
         },
     };
     let Some(name) = wanted else {
-        outcome.events.push(Event::Warn(
-            "no branch type on this ticket; left the branch alone".to_string(),
-        ));
+        if !on_purpose {
+            outcome.events.push(Event::Warn(
+                "no branch type on this ticket; left the branch alone".to_string(),
+            ));
+        }
         return Ok(outcome);
     };
     branch::validate(&name)?;
@@ -307,17 +311,6 @@ pub fn enter_todo(board: &Board, task: &Task, options: &TodoOptions) -> Result<O
         if exists { "switched to" } else { "branch" }
     )));
     Ok(outcome)
-}
-
-/// Whether `board` lives in a dedicated tickets repository, the
-/// `{project}-tickets` that `amd init <project>` and `amd join` make, rather
-/// than inside the code it tracks.
-fn is_tickets_repo(board: &Board) -> bool {
-    board
-        .repo_root()
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.ends_with("-tickets"))
 }
 
 /// Best-effort: a failure here (no git email configured, or someone else
@@ -451,6 +444,9 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
         outcome.events.push(Event::Warn(format!(
             "could not list {id_display} as a clone on {reason}"
         )));
+    }
+    if let Some(drafted) = &created.drafted {
+        outcome.events.push(Event::Warn(drafted.clone()));
     }
     // Where it landed (ticket 225): the board's landing column, or the
     // backlog for one filed straight into an epic or sprint.
@@ -607,6 +603,34 @@ pub fn retype_link(
     Ok(outcome)
 }
 
+/// A repository and a branch type go together (ticket 066), on a save:
+/// `check` before writing, which refuses one past the backlog; then
+/// [`settle_pairing`] after it.
+pub fn check_pairing(
+    board: &Board,
+    task: &Task,
+    repository: &str,
+    branch_type: &str,
+) -> Result<Option<String>> {
+    crate::pairing::check(
+        board,
+        &task.id_display(),
+        task.column,
+        repository,
+        branch_type,
+    )
+}
+
+/// After a save [`check_pairing`] said must be a draft: the DRAFT tag (back)
+/// on, and what to tell the person.
+pub fn settle_pairing(task: &Task, why: Option<String>) -> Result<Option<String>> {
+    let Some(why) = why else {
+        return Ok(None);
+    };
+    task.set_draft(task.hash()?, true)?;
+    Ok(Some(crate::pairing::drafted(&task.id_display(), &why)))
+}
+
 /// Save every editable field of an existing ticket in one write, checked
 /// against `expected` — the fingerprint taken when the form opened — so a
 /// ticket that changed underneath it is refused with the conflict rather than
@@ -618,7 +642,12 @@ pub fn edit_ticket(
     fields: &TicketFields,
 ) -> Result<Outcome> {
     let (id_display, title) = (task.id_display(), task.title());
-    let ((), warning) = with_auto_commit(board, "edit", &id_display, &title, || {
+    let repository = match &fields.repository {
+        Some(repository) => crate::task::repo_name(repository),
+        None => task.repository().unwrap_or_default(),
+    };
+    let why = check_pairing(board, task, &repository, &fields.branch_type)?;
+    let (drafted, warning) = with_auto_commit(board, "edit", &id_display, &title, || {
         task.apply_edit(
             expected,
             board,
@@ -641,13 +670,17 @@ pub fn edit_ticket(
         if !fields.priority.trim().is_empty() && fields.priority.trim() != task.priority() {
             crate::auto_priority::set_by_hand(board, task, fields.priority.trim())?;
         }
+        let drafted = settle_pairing(task, why)?;
         board.set_epic(task, fields.epic.as_deref())?;
-        Ok(())
+        Ok(drafted)
     })?;
     let mut outcome = Outcome::default();
     outcome
         .events
         .push(Event::Info(format!("saved {id_display}")));
+    if let Some(drafted) = drafted {
+        outcome.events.push(Event::Warn(drafted));
+    }
     if let Some(warning) = warning {
         outcome.events.push(Event::Warn(warning));
     }
@@ -682,6 +715,14 @@ pub fn save_text(
         Some("auto") => crate::task::set_meta(&text, "priority", &format!("{before:?}"))?,
         _ => text,
     };
+    // A repository and a branch type go together (ticket 066): refused past
+    // the backlog, and a draft in it, even if the editor took DRAFT off.
+    let drafted = crate::pairing::check_text(board, &id_display, task.column, &text)?
+        .map(|why| crate::pairing::drafted(&id_display, &why));
+    let text = match drafted {
+        Some(_) => crate::pairing::with_draft_tag(&text)?,
+        None => text,
+    };
     let ((), warning) = with_auto_commit(board, "edit", &id_display, &title, || {
         task.set_text(expected, &text)?;
         if let Some(wanted) = wanted.filter(|w| *w == "auto" || *w != before) {
@@ -693,6 +734,9 @@ pub fn save_text(
     outcome
         .events
         .push(Event::Info(format!("saved {id_display}")));
+    if let Some(drafted) = drafted {
+        outcome.events.push(Event::Warn(drafted));
+    }
     if let Some(warning) = warning {
         outcome.events.push(Event::Warn(warning));
     }

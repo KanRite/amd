@@ -150,6 +150,7 @@ pub fn tools() -> Vec<Tool> {
                 "parent": {"type": "string", "description": "The parent ticket's number"},
                 "requires": {"type": "array", "items": {"type": "string"}, "description": "Tickets this one requires (numbers): linked both ways; they must be done before it, and be in the same sprint for a sprint to start"},
                 "repository": {"type": "string", "description": "The code repository it's about"},
+                "branch_type": {"type": "string", "description": "feature, bugfix, hotfix, release, chore (the project may differ), or `none` for no branch. With a repository it must be given (else the ticket is a draft); a branch type needs a repository"},
                 "draft": {"type": "boolean", "description": "Mark it DRAFT: it can't leave the backlog until it's ready"},
                 "board": {"type": "string", "description": "Which repository's board to put it on; the project's own when left out"}
             }, "required": ["title"]}),
@@ -200,6 +201,7 @@ pub fn tools() -> Vec<Tool> {
                 "assignee": {"type": "string"},
                 "parent": {"type": "string"},
                 "repository": {"type": "string"},
+                "branch_type": {"type": "string", "description": "feature, bugfix, hotfix, release, chore (the project may differ), or `none` for no branch. With a repository it must be given (else the ticket is a draft); a branch type needs a repository"},
                 "version": {"type": "string"}
             }, "required": ["ticket"]}),
         },
@@ -960,7 +962,7 @@ fn create_ticket(args: &Value) -> Result<Reply> {
         points: arg(args, "points").unwrap_or_default(),
         epic: arg(args, "epic").filter(|e| !e.trim().is_empty()),
         tags,
-        branch_type: String::new(),
+        branch_type: arg(args, "branch_type").unwrap_or_default(),
         parent: arg(args, "parent").unwrap_or_default(),
         related: Vec::new(),
         clone_of: String::new(),
@@ -1083,7 +1085,7 @@ fn edit_ticket(args: &Value) -> Result<Reply> {
         .unwrap_or_else(|| task.assignee().unwrap_or_default());
     let points = keep("points", task.points().unwrap_or_default());
     let tags = list(args, "tags").unwrap_or_else(|| task.tags());
-    let branch_type = task.branch_type().unwrap_or_default();
+    let branch_type = keep("branch_type", task.branch_type().unwrap_or_default());
     let parent = keep("parent", task.parent().unwrap_or_default());
     let related = task.related();
     let body = keep("body", task.body()?);
@@ -1094,7 +1096,17 @@ fn edit_ticket(args: &Value) -> Result<Reply> {
         None => None,
     };
     let (id_display, old_title) = (task.id_display(), task.title());
-    let ((), warning) =
+    // A repository and a branch type go together (ticket 066).
+    let why = transition::check_pairing(
+        board,
+        &task,
+        &repository
+            .as_deref()
+            .map(crate::task::repo_name)
+            .unwrap_or_else(|| task.repository().unwrap_or_default()),
+        &branch_type,
+    )?;
+    let (drafted, warning) =
         transition::with_auto_commit(board, "edit", &id_display, &old_title, || {
             task.apply_edit(
                 expected,
@@ -1120,9 +1132,10 @@ fn edit_ticket(args: &Value) -> Result<Reply> {
             {
                 task.set_repository(task.hash()?, repository)?;
             }
-            Ok(())
+            transition::settle_pairing(&task, why)
         })?;
     let mut lines = vec![format!("Saved {}", line(&repo, &task))];
+    lines.extend(drafted.into_iter().map(|d| format!("warning: {d}")));
     lines.extend(warning.into_iter().map(|w| format!("warning: {w}")));
     lines.extend(tag_warning.into_iter().map(|w| format!("warning: {w}")));
     if arg(args, "assignee").is_some() {

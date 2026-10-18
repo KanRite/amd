@@ -36,7 +36,10 @@ impl TypedValueParser for BranchType {
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
         Some(Box::new(
-            branch::branch_types().into_iter().map(PossibleValue::new),
+            branch::branch_types()
+                .into_iter()
+                .chain([branch::NO_BRANCH.to_string()])
+                .map(PossibleValue::new),
         ))
     }
 }

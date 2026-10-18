@@ -303,8 +303,11 @@ pub fn declare(board: &Board, name: &str) -> Result<()> {
 }
 
 /// Sets the ticket's repository and says so in its notes, signed and dated:
-/// "Created repository acme-payments (private)".
-pub fn record_on_ticket(board: &Board, task: &Task, made: &Made) -> Result<()> {
+/// "Created repository acme-payments (private)". A ticket with no branch
+/// type is then a draft in the backlog (ticket 066); past it, it can't be,
+/// and the repository is made already, so that's only what it returns to
+/// say.
+pub fn record_on_ticket(board: &Board, task: &Task, made: &Made) -> Result<Option<String>> {
     task.set_repository(task.hash()?, &made.name)?;
     let task = Task::from_path(&task.path, task.column).unwrap_or_else(|| task.clone());
     let who = authorship::current_person(board)
@@ -312,7 +315,15 @@ pub fn record_on_ticket(board: &Board, task: &Task, made: &Made) -> Result<()> {
         .unwrap_or_else(|| "someone".into());
     let today = time::OffsetDateTime::now_utc().date().to_string();
     let body = crate::task::with_note(&task.body()?, &note_for(made, &who, &today));
-    task.set_body(task.hash()?, &body)
+    task.set_body(task.hash()?, &body)?;
+    let kind = task.branch_type().unwrap_or_default();
+    match crate::pairing::check(board, &task.id_display(), task.column, &made.name, &kind) {
+        Ok(why) => crate::transition::settle_pairing(&task, why),
+        Err(err) => Ok(Some(format!(
+            "{err:#}; set one with `amd set {} branch-type <type|none>`",
+            task.id_display()
+        ))),
+    }
 }
 
 /// The ticket's note: "**Alex Morgan, 2026-10-16:** Created repository

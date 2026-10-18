@@ -81,6 +81,9 @@ pub struct Created {
     /// The original of a clone that couldn't list it (leased by someone
     /// else, say), with the reason.
     pub unlinked: Option<String>,
+    /// Why it was made a draft: a repository with no branch type, or the
+    /// reverse (ticket 066). Already worded for a person.
+    pub drafted: Option<String>,
 }
 
 impl Draft {
@@ -217,6 +220,16 @@ impl Draft {
             }
             _ => body,
         };
+        // A repository and a branch type go together (ticket 066): one
+        // without the other makes it a draft, on every way a ticket is made.
+        let (body, drafted) = match crate::pairing::check_text(board, &self.id, self.column, &body)?
+        {
+            Some(why) => (
+                crate::pairing::with_draft_tag(&body)?,
+                Some(crate::pairing::drafted(&self.id, &why)),
+            ),
+            None => (body, None),
+        };
         let dir = self
             .path
             .parent()
@@ -262,6 +275,7 @@ impl Draft {
             branch: self.branch,
             linked,
             unlinked,
+            drafted,
         })
     }
 }

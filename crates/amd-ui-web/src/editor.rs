@@ -8,9 +8,9 @@
 use amd_ui_model::epic::Place;
 use amd_ui_model::rich::{parse_markdown, to_html, to_markdown};
 use amd_ui_model::ticket::{
-    self, BRANCH_TYPES, DEFAULT_PRIORITY, Fields, PRIORITIES, VALID_POINTS,
+    self, BRANCH_TYPES, DEFAULT_PRIORITY, Fields, NO_BRANCH, PRIORITIES, VALID_POINTS,
 };
-use amd_ui_model::{TicketDocument, parse_frontmatter};
+use amd_ui_model::{Kind, TicketDocument, parse_frontmatter};
 use leptos::html::Div;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -109,6 +109,18 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
     let fm = parse_frontmatter(&content);
     let has_frontmatter = RwSignal::new(ticket::split(&content).frontmatter.is_some());
     let fields = RwSignal::new(Fields::from(&fm));
+    // Repository and branch type don't go together (ticket 066), on a
+    // tickets board: why, as the fields stand.
+    let mismatch = move || {
+        let paired = place.with_value(|p| {
+            ctx.board
+                .with(|b| b.as_ref().is_some_and(|b| b.tickets_only(&p.repo)))
+        });
+        if !paired {
+            return None;
+        }
+        fields.with(|f| ticket::pairing_mismatch(&f.repository, &f.branch_type))
+    };
     let id = RwSignal::new(fm.id);
     let body_touched = RwSignal::new(false);
     let dirty = RwSignal::new(false);
@@ -426,7 +438,8 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                     </span>
                     <button
                         class="rounded bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-500 disabled:opacity-50"
-                        disabled=held
+                        disabled=move || held() || mismatch().is_some()
+                        title=move || mismatch().map(|why| format!("Not ready yet: {why}"))
                         on:click=move |_| {
                             fields.update(|f| {
                                 f.tags.retain(|t| !t.trim().eq_ignore_ascii_case(amd_ui_model::epic::DRAFT_TAG))
@@ -552,10 +565,26 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                             prop:value=move || fields.with(|f| f.branch_type.clone())
                             on:change=set_field(|f, v| f.branch_type = v)
                         >
-                            <option value="">"none"</option>
+                            <option value="">"not chosen"</option>
+                            <option value=NO_BRANCH>"none (no branch)"</option>
                             {BRANCH_TYPES.map(|t| view! { <option value=t>{t}</option> }).collect_view()}
                         </select>
                     </label>
+                    // Repository and branch type go together (ticket 066):
+                    // saved like this, it's a draft (or refused past the
+                    // backlog).
+                    {move || {
+                        mismatch().map(|why| view! {
+                            <p role="status" class="text-xs text-amber-800 sm:col-span-2 dark:text-amber-200">
+                                {format!("This ticket {}", why.trim_start_matches("it "))}
+                                {if column.kind() == Kind::Backlog {
+                                    ". Saved like this, it's a draft."
+                                } else {
+                                    ". It can't be saved like this past the backlog."
+                                }}
+                            </p>
+                        })
+                    }}
                     <div class=label>
                         "Tags"
                         <TagPicker fields on_change=refresh_dirty class=input />

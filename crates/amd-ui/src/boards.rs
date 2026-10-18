@@ -124,6 +124,7 @@ impl Project {
                 },
                 lease_hours: settings.lease_hours().round().max(1.0) as u32,
                 workflow: ui_workflow(board),
+                tickets_only: board.is_tickets_board(),
             });
             for column in board.workflow().columns() {
                 for task in board.tasks_in(column).map_err(err)? {
@@ -169,6 +170,7 @@ impl Project {
             wip: WipLimits::default(),
             lease_hours: ui::DEFAULT_LEASE_HOURS,
             workflow: ui::Workflow::standard(),
+            tickets_only: false,
         }));
         for column in &mut columns {
             column.tickets.sort_by(ui::ticket::default_order);
