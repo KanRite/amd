@@ -29,6 +29,9 @@ pub struct ImportedTicket {
     pub title: String,
     pub column: Column,
     pub duplicate: bool,
+    /// Its repository and branch type don't go together (ticket 066): made
+    /// a draft in the backlog; past it, only reported (`amd check`).
+    pub mismatched: bool,
 }
 
 #[derive(Debug, Default)]
@@ -49,6 +52,12 @@ pub struct ImportSummary {
 impl ImportSummary {
     pub fn duplicate_count(&self) -> usize {
         self.imported.iter().filter(|t| t.duplicate).count()
+    }
+
+    /// Imported tickets whose repository and branch type don't go together
+    /// (ticket 066).
+    pub fn mismatched_count(&self) -> usize {
+        self.imported.iter().filter(|t| t.mismatched).count()
     }
 }
 
@@ -182,6 +191,12 @@ pub fn import(dest: &Board, source_root: &Path, dry_run: bool) -> Result<ImportS
         } else {
             item.text
         };
+        let (text, mismatched) =
+            match crate::pairing::check_text(dest, &item.new_id, item.column, &text) {
+                Ok(None) => (text, false),
+                Ok(Some(_)) => (crate::pairing::with_draft_tag(&text)?, true),
+                Err(_) => (text, true),
+            };
 
         if !dry_run {
             if let Some(parent) = item.dest_path.parent() {
@@ -198,6 +213,7 @@ pub fn import(dest: &Board, source_root: &Path, dry_run: bool) -> Result<ImportS
             title: item.title,
             column: item.column,
             duplicate,
+            mismatched,
         });
     }
 

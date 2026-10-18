@@ -633,8 +633,9 @@ impl Task {
         board: &Board,
         fields: EditFields,
     ) -> Result<()> {
-        branch::validate_branch_type(fields.branch_type)?;
-        let branch_name = branch::for_title(fields.branch_type, fields.title)?;
+        let branch_type = branch::normalise(fields.branch_type);
+        branch::validate_branch_type(&branch_type)?;
+        let branch_name = branch::for_title(&branch_type, fields.title)?;
         validate_points(fields.points)?;
         let parent = match fields.parent {
             "" => String::new(),
@@ -653,7 +654,7 @@ impl Task {
             let text = set_meta(&text, "points", &format!("{:?}", fields.points))?;
             let tags = normalize_tags(fields.tags);
             let text = set_meta(&text, "tags", &format!("[{}]", tags.join(",")))?;
-            let text = set_meta(&text, "branch-type", &format!("{:?}", fields.branch_type))?;
+            let text = set_meta(&text, "branch-type", &format!("{branch_type:?}"))?;
             let text = set_meta(&text, "branch-name", &format!("{branch_name:?}"))?;
             let text = set_meta(&text, "parent", &format!("{parent:?}"))?;
             let text = set_meta(&text, "related", &format!("[{}]", related.join(",")))?;
@@ -668,6 +669,18 @@ impl Task {
                 out.push('\n');
             }
             Ok(out)
+        })
+    }
+
+    /// Set the branch type (`none` for no branch, empty for not chosen), and
+    /// the `branch-name` it gives with the title, as creation does.
+    pub fn set_branch_type(&self, expected: ContentHash, kind: &str) -> Result<()> {
+        let kind = branch::normalise(kind);
+        branch::validate_branch_type(&kind)?;
+        let name = branch::for_title(&kind, &self.title())?;
+        self.write_checked(expected, |text| {
+            let text = set_meta(text, "branch-type", &format!("{kind:?}"))?;
+            set_meta(&text, "branch-name", &format!("{name:?}"))
         })
     }
 

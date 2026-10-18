@@ -85,8 +85,8 @@ rest:
 | `priority`    | default `low` | `low`, `medium` or `high` |
 | `points`      | optional | its size: 1, 2, 3, 5, 8 or 13 |
 | `repository`  | optional | the repository it's about, where its branch is made |
-| `branch-type` | optional | `feature`, `bugfix`, `hotfix`, `release`, `chore` |
-| `branch-name` | automatic | `<branch-type>/<title>`, empty without a branch type |
+| `branch-type` | optional | `feature`, `bugfix`, `hotfix`, `release`, `chore`, or `none` for no branch |
+| `branch-name` | automatic | `<branch-type>/<title>`, empty without a branch type or with `none` |
 | `parent`      | optional | the ticket this sits under, any depth |
 | `related`     | optional | ids of tickets this relates to |
 | `links`       | optional | typed links: `requires`, `supersedes` and the like |
@@ -156,7 +156,34 @@ The branch is made in the repository the ticket names (`--repository`, or
 `amd set <ref> repository <name>`). On a board in its own `*-tickets`
 repository, the layout `amd init <project>` makes, a ticket that wants a
 branch but names no repository is refused on entering todo rather than
-branching the tickets repository; `--no-branch` moves it anyway.
+branching the tickets repository.
+
+**On such a board, a repository and a branch type go together.** A ticket
+that names a repository has to say its branch type, and one with a branch
+type has to name the repository its branch goes in. The branch type `none`
+says "no branch, on purpose", for work about a repository that needs no
+branch, such as a release or an investigation. Until the two go together
+the ticket is a **draft**: nothing you typed is lost, but it stays in the
+backlog, and `amd ready` (or **Mark ready**) refuses it, saying why. That
+covers every way a ticket is made, GitHub issues included (which arrive
+with a repository and no branch type, so as drafts as well as TRIAGE).
+Fixing the fields doesn't take DRAFT off by itself; mark it ready when it
+is. Past the backlog a ticket can't be a draft, so a change there that
+would leave the two apart is refused.
+
+```bash
+amd new "Fix the API" --repository acme-api       # a draft: no branch type
+amd set 3 branch-type bugfix                      # or none, for no branch
+amd ready 3
+amd check       # tickets whose repository and branch type don't go together
+```
+
+`amd check` only reads: it lists tickets that don't meet the rule, such as
+ones from before it or edited by hand, and changes nothing. A board inside
+its own code repository (`amd init --local-only` there) is exempt, since
+the code is the board's own repository. In the desktop board, the editor's
+Branch type offers **not chosen** and **none (no branch)**, says when the
+two fields don't go together, and holds Mark ready until they do.
 
 The branch types are the ones
 [conventional-validator](https://github.com/mrdoodles/conventional-validator)

@@ -23,8 +23,19 @@ use crate::task;
 /// set (`docs/adr/0005-settings-state-and-precedence.md`).
 pub const DEFAULT_BRANCH_TYPES: [&str; 5] = ["feature", "bugfix", "hotfix", "release", "chore"];
 
-/// What an empty branch type looks like in a picker.
-pub const NONE: &str = "(none)";
+/// What an empty branch type looks like in a picker: not chosen yet.
+pub const NONE: &str = "(not chosen)";
+
+/// The branch type that says "no branch, on purpose" (ticket 066): a ticket
+/// about a repository that needs no branch (a release, an investigation)
+/// says so, where an empty one hasn't been decided. It makes no branch.
+pub const NO_BRANCH: &str = "none";
+
+/// Whether a branch type makes a branch: a real type, not empty or `none`.
+pub fn makes_branch(kind: &str) -> bool {
+    let kind = normalise(kind);
+    !kind.is_empty() && kind != NO_BRANCH
+}
 
 /// The branch types this board accepts.
 pub fn branch_types() -> Vec<String> {
@@ -53,17 +64,17 @@ fn defaults() -> Vec<String> {
         .collect()
 }
 
-/// The choices a form offers: no branch, then each branch type.
+/// The choices a form offers: not chosen, no branch, then each branch type.
 pub fn choices() -> Vec<String> {
-    let mut all = vec![NONE.to_string()];
+    let mut all = vec![NONE.to_string(), NO_BRANCH.to_string()];
     all.extend(branch_types());
     all
 }
 
-/// Check a branch type against the accepted list. Empty is always fine — that's
-/// a ticket with no branch.
+/// Check a branch type against the accepted list. Empty (not chosen) and
+/// `none` (no branch) are always fine.
 pub fn validate_branch_type(kind: &str) -> Result<()> {
-    if kind.is_empty() || kind == NONE {
+    if kind.is_empty() || kind == NONE || kind == NO_BRANCH {
         return Ok(());
     }
     let types = branch_types();
@@ -71,24 +82,25 @@ pub fn validate_branch_type(kind: &str) -> Result<()> {
         return Ok(());
     }
     bail!(
-        "unknown branch type '{kind}' (expected one of: {}; set AMD_BRANCH_TYPES to change the list)",
+        "unknown branch type '{kind}' (expected one of: {}, or {NO_BRANCH} for no branch; set AMD_BRANCH_TYPES to change the list)",
         types.join(", ")
     )
 }
 
-/// `(none)` and an empty answer mean the same thing: no branch.
+/// `(not chosen)` and an empty answer mean the same thing: not chosen.
+/// (`(none)`, the picker's old label, too.)
 pub fn normalise(kind: &str) -> String {
     match kind.trim() {
-        NONE => String::new(),
+        NONE | "(none)" => String::new(),
         kind => kind.to_string(),
     }
 }
 
 /// `("bugfix", "Crash on save")` -> `bugfix/crash-on-save`. An empty branch
-/// type gives an empty name: the ticket simply has no branch.
+/// type, or `none`, gives an empty name: the ticket simply has no branch.
 pub fn for_title(kind: &str, title: &str) -> Result<String> {
     let kind = normalise(kind);
-    if kind.is_empty() {
+    if !makes_branch(&kind) {
         return Ok(String::new());
     }
     let slug = task::slugify(title);

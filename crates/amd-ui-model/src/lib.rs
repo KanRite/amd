@@ -583,6 +583,14 @@ pub struct BoardColumn {
 impl Board {
     /// The workflow `repo`'s tickets move by: that board's own, else the
     /// one drawn.
+    /// Whether `repo`'s board pairs repository and branch type (ticket 066).
+    pub fn tickets_only(&self, repo: &str) -> bool {
+        self.repos
+            .iter()
+            .find(|r| r.name == repo && r.available)
+            .is_some_and(|r| r.tickets_only)
+    }
+
     pub fn workflow_of(&self, repo: &str) -> &Workflow {
         self.repos
             .iter()
@@ -806,6 +814,10 @@ pub struct RepoInfo {
     /// 225): each board reads its own `.settings`, as amd does.
     #[serde(default)]
     pub workflow: Workflow,
+    /// Its board is a dedicated `*-tickets` repository, where a ticket's
+    /// repository and branch type go together (ticket 066).
+    #[serde(default)]
+    pub tickets_only: bool,
 }
 
 /// How long a lock lasts unless a board says otherwise: a working day.

@@ -525,20 +525,67 @@ rm -rf "${rp}"
 
 echo "a tickets repository holds no code branches (ticket 053):"
 tr="$(mktemp -d)"
-( cd "${tr}" && git init -q -b main demo-tickets && cd demo-tickets \
+( cd "${tr}" && git init -q -b main demo-tickets && git init -q -b main demo-api && cd demo-tickets \
   && git config user.email t@t.co && git config user.name t && git config commit.gpgsign false \
   && AMD_COMMIT=0 "${AMD}" init demo --local-only >/dev/null 2>&1 \
+  && XDG_CONFIG_HOME="${tr}/config" AMD_COMMIT=0 "${AMD}" register ../demo-api >/dev/null 2>&1 \
   && AMD_COMMIT=0 "${AMD}" new 'Needs code' --branch-type feature --no-edit >/dev/null 2>&1 )
-in_tr() { (cd "${tr}/demo-tickets" && AMD_COMMIT=0 "${AMD}" "$@"); }
+in_tr() { (cd "${tr}/demo-tickets" && XDG_CONFIG_HOME="${tr}/config" AMD_COMMIT=0 "${AMD}" "$@"); }
 assert "a ticket that wants a branch but names no repository is refused, unmoved" \
   bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; ! in_tr todo 1 >/dev/null 2>&1 \
     && in_tr todo 1 2>&1 | grep -q 'names no repository' \
     && ls '${tr}'/demo-tickets/tasks/backlog/001-needs-code.md >/dev/null \
     && [ \"\$(git -C '${tr}/demo-tickets' symbolic-ref --short HEAD)\" = main ]"
-assert "...and --no-branch moves it without a branch" \
-  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; in_tr todo 1 --no-branch >/dev/null 2>&1 \
-    && ls '${tr}'/demo-tickets/tasks/todo/001-needs-code.md >/dev/null \
-    && [ \"\$(git -C '${tr}/demo-tickets' symbolic-ref --short HEAD)\" = main ]"
+assert "...and it's a draft (ticket 066), so --no-branch can't move it either" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; ! in_tr todo 1 --no-branch >/dev/null 2>&1 \
+    && grep -q '^tags: \[DRAFT\]' '${tr}'/demo-tickets/tasks/backlog/001-needs-code.md"
+
+echo "a repository and a branch type go together (ticket 066):"
+assert "amd new with a repository and no branch type makes a draft, and says why" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
+    in_tr new 'Fix the api' --repository demo-api --no-edit 2>&1 | grep -q 'draft until.*no branch type' \
+    && grep -q '^tags: \[DRAFT\]' '${tr}'/demo-tickets/tasks/backlog/002-fix-the-api.md"
+assert "with --branch-type none it isn't a draft, has no branch name, and todo says nothing of a branch" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
+    in_tr new 'Release it' --repository demo-api --branch-type none --no-edit >/dev/null 2>&1 \
+    && f='${tr}'/demo-tickets/tasks/backlog/003-release-it.md && ! grep -q DRAFT \"\$f\" \
+    && grep -q '^branch-name: \"\"' \"\$f\" \
+    && out=\"\$(in_tr todo 3 2>&1)\" && ! echo \"\$out\" | grep -q 'branch' \
+    && [ \"\$(git -C '${tr}/demo-api' symbolic-ref --short HEAD)\" = main ]"
+assert "amd ready refuses a draft until its repository and branch type go together" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
+    in_tr ready 2 2>&1 | grep -q \"can't be ready yet\" \
+    && in_tr set 2 branch-type bugfix 2>&1 | grep -q '002 branch type bugfix' \
+    && grep -q '^branch-name: \"bugfix/fix-the-api\"' '${tr}'/demo-tickets/tasks/backlog/002-fix-the-api.md \
+    && grep -q DRAFT '${tr}'/demo-tickets/tasks/backlog/002-fix-the-api.md \
+    && in_tr ready 2 >/dev/null && ! grep -q DRAFT '${tr}'/demo-tickets/tasks/backlog/002-fix-the-api.md"
+assert "amd set repository past the backlog with no branch type is refused, unchanged" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
+    in_tr new 'Plain' --no-edit >/dev/null 2>&1 && in_tr todo 4 >/dev/null 2>&1 \
+    && in_tr set 4 repository demo-api 2>&1 | grep -q 'past the backlog' \
+    && grep -q '^repository: \"\"' '${tr}'/demo-tickets/tasks/todo/004-plain.md"
+assert "amd set repository on a backlog ticket with no branch type makes it a draft" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
+    in_tr new 'Later' --no-edit >/dev/null 2>&1 \
+    && in_tr set 5 repository demo-api 2>&1 | grep -q 'draft until' \
+    && grep -q DRAFT '${tr}'/demo-tickets/tasks/backlog/005-later.md"
+sed -i 's/^repository: \"\"/repository: \"demo-api\"/' "${tr}"/demo-tickets/tasks/todo/004-plain.md
+tr_before="$(sha1sum < "${tr}"/demo-tickets/tasks/todo/004-plain.md)"
+assert "amd check lists a ticket mismatched by hand, and changes nothing" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; out=\"\$(in_tr check 2>/dev/null)\" \
+    && echo \"\$out\" | grep -q '^004 todo/ Plain: it names a repository (demo-api) but no branch type' \
+    && echo \"\$out\" | grep -q '^001 backlog/' && echo \"\$out\" | grep -q '^005 backlog/' && echo \"\$out\" | grep -q '^3 to settle' \
+    && [ \"\$(sha1sum < '${tr}'/demo-tickets/tasks/todo/004-plain.md)\" = '${tr_before}' ]"
+assert "the branch-type completions and amd set offer none" \
+  bash -c "'${AMD}' completions fish 2>/dev/null | grep -q 'none' && '${AMD}' set --help | grep -q 'branch-type'"
+pl="$(mktemp -d)"
+assert "a board inside its code repository is unaffected" \
+  bash -c "cd '${pl}' && git init -q && git config user.email t@t.co && git config user.name t \
+    && AMD_YES=1 AMD_COMMIT=0 '${AMD}' init plain --local-only >/dev/null \
+    && AMD_COMMIT=0 '${AMD}' new 'Code work' --branch-type feature --no-edit >/dev/null 2>&1 \
+    && ! grep -q DRAFT tasks/backlog/001-code-work.md \
+    && AMD_COMMIT=0 '${AMD}' check | grep -q 'inside its code repository'"
+rm -rf "${pl}"
 rm -rf "${tr}"
 
 echo "register in a folder of several projects (ticket 103):"

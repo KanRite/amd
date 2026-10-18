@@ -6,6 +6,29 @@ use crate::{Frontmatter, parse_frontmatter, slugify};
 /// The branch types `amd` accepts; empty means the ticket has no branch.
 pub const BRANCH_TYPES: [&str; 5] = ["feature", "bugfix", "hotfix", "release", "chore"];
 
+/// The branch type that says "no branch, on purpose" (ticket 066), as
+/// `agile_md::branch::NO_BRANCH`.
+pub const NO_BRANCH: &str = "none";
+
+/// Why a ticket's repository and branch type don't go together on a
+/// tickets board (ticket 066), worded as `agile_md::pairing::mismatch`
+/// (amd-ui's tests check they agree).
+pub fn pairing_mismatch(repository: &str, branch_type: &str) -> Option<String> {
+    let repository = repository.trim();
+    let kind = branch_type.trim();
+    if !repository.is_empty() && kind.is_empty() {
+        Some(format!(
+            "it names a repository ({repository}) but no branch type: choose one, or `{NO_BRANCH}` for no branch"
+        ))
+    } else if repository.is_empty() && !kind.is_empty() && kind != NO_BRANCH {
+        Some(format!(
+            "it has a branch type ({kind}) but no repository for its branch to go in"
+        ))
+    } else {
+        None
+    }
+}
+
 /// Every valid priority, lowest first — the order the editor lists them.
 pub const PRIORITIES: [&str; 3] = ["low", "medium", "high"];
 
@@ -261,7 +284,7 @@ pub fn apply_fields(content: &str, new: &Fields) -> String {
     }
     if new.branch_type != old.branch_type {
         fm = set_line(&fm, "branch-type", &quote(&new.branch_type));
-        let name = if new.branch_type.is_empty() {
+        let name = if new.branch_type.is_empty() || new.branch_type == NO_BRANCH {
             String::new()
         } else {
             format!("{}/{}", new.branch_type, slugify(&new.title))
