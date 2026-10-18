@@ -11,10 +11,13 @@ name: Dependabot gate
 #
 # Approving happens only in the weekly and manual runs: workflows Dependabot
 # starts can't read Actions secrets, so those runs only assess.
+#
+# No pull_request trigger (ticket 250): it listed this workflow's jobs as
+# skipped checks on every PR. A Dependabot PR is assessed when its CI
+# finishes instead (CI runs on every push to it), and those runs aren't
+# PR checks. Closing a PR's issue is dependabot-gate-closed.yml.
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, closed]
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -32,27 +35,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  closed:
-    if: >-
-      github.event_name == 'pull_request' && github.event.action == 'closed'
-      && github.event.pull_request.user.login == 'dependabot[bot]'
-    runs-on: ubuntu-latest
-    steps:
-      # The script from main, never from the PR.
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-      - run: scripts/dependabot-gate.sh closed "${{ github.event.pull_request.number }}"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   assess:
     if: >-
-      (github.event_name == 'pull_request' && github.event.action != 'closed'
-        && github.event.pull_request.user.login == 'dependabot[bot]')
-      || (github.event_name == 'workflow_run'
-        && startsWith(github.event.workflow_run.head_branch, 'dependabot/')
-        && github.event.workflow_run.pull_requests[0] != null)
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+      && github.event.workflow_run.pull_requests[0] != null
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -61,7 +47,7 @@ jobs:
       - run: scripts/dependabot-gate.sh assess "$PR"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+          PR: ${{ github.event.workflow_run.pull_requests[0].number }}
 
   apply:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
