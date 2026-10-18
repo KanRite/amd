@@ -807,6 +807,17 @@ pub async fn set_auto_priority(on: bool) -> Result<SyncReport, String> {
     call("set_auto_priority", &OnArgs { on }).await
 }
 
+#[derive(Serialize)]
+struct DueDaysArgs {
+    medium: u32,
+    high: u32,
+}
+
+/// When a due date raises a ticket (ticket 252).
+pub async fn set_due_days(medium: u32, high: u32) -> Result<SyncReport, String> {
+    call("set_due_days", &DueDaysArgs { medium, high }).await
+}
+
 /// Whether a priority set by hand pins its ticket (ticket 215).
 pub async fn set_priority_override(on: bool) -> Result<SyncReport, String> {
     call("set_priority_override", &OnArgs { on }).await

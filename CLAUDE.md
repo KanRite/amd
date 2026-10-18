@@ -1203,7 +1203,8 @@ off**, ticket 141) to
   folded column unfolded), which `open_ticket` now uses before opening
   the editor. Each sprint gap has "Show the tree".
   **Auto priority** (ticket 215, `crates/amd-lib/src/auto_priority.rs`):
-  `auto-priority` (off unless on) and `priority-override` (on unless off)
+  `auto-priority` (**on unless off** since ticket 252; it was off unless
+  on) and `priority-override` (on unless off)
   in the tickets `.settings`, read per board. When on, a ticket not done
   is at least as urgent as the most urgent not-done ticket that requires
   it, down a chain (repeated to a fixpoint; three steps, so cycles end).
@@ -1226,7 +1227,19 @@ off**, ticket 141) to
   section (`set_auto_priority`, `set_priority_override`), the editor's
   `auto` option (the page's `ensure_priority` accepts it) and note
   (`TicketDocument.priority_note`), and `↑ high` on a raised card
-  (`TicketSummary.priority_from`). **Automatic sort** (ticket 230):
+  (`TicketSummary.priority_from`). **Due dates** (ticket 252): `due_rank`
+  gives high within `due-high-days` (2) or overdue, medium within
+  `due-medium-days` (7) (`board_settings::DueDays`, `due_days`/
+  `set_due_days`; 0 turns a step off); it's a ticket's starting point
+  before the requires chain, so it passes down, recorded as `priority-from:
+  "due"` (`auto_priority::DUE`; `note` and the card say "due DATE").
+  `reconcile` is now `plan` + apply, `reconcile_at(board, today)` takes the
+  clock, and `pending(board, today)` says whether it would write. Nothing
+  changes on disk as days pass, so amdui's `sync_board` calls
+  `raise_for_due_dates` (hourly a board, `AppState.due_checked`), which
+  commits `priority: due dates` through `with_auto_commit` when `pending`.
+  CLI `amd auto-priority due [MEDIUM HIGH]`; Admin's due days and the
+  `set_due_days` command; `Board.due_days`. **Automatic sort** (ticket 230):
   `SortOrder::Automatic` ("Automatic: what's needed first") is a
   dependency order, `SortOrder::sort` (a pairwise `compare` can't express
   it): the column pre-sorted by priority then age, then each ticket placed

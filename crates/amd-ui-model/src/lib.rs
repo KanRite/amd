@@ -667,9 +667,13 @@ pub struct Board {
     /// (ticket 173).
     #[serde(default)]
     pub import_issues: bool,
-    /// Priorities follow requires links (ticket 215).
+    /// Priorities follow requires links (ticket 215) and due dates (252).
     #[serde(default)]
     pub auto_priority: bool,
+    /// Days left at which a due date raises a ticket to medium, then high
+    /// (ticket 252); 0 is off.
+    #[serde(default)]
+    pub due_days: (u32, u32),
     /// A priority set by hand pins its ticket against auto priority.
     #[serde(default)]
     pub priority_override: bool,
@@ -1632,6 +1636,7 @@ mod assigned_tests {
             shared_documents: String::new(),
             import_issues: true,
             auto_priority: false,
+            due_days: (7, 2),
             priority_override: true,
             archived: false,
         };

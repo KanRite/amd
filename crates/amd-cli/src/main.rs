@@ -635,14 +635,21 @@ enum Cmd {
         limit: u32,
     },
     /// Show or switch auto priority: priorities set from requires links
+    /// and due dates
     ///
     /// When on, a ticket is at least as urgent as the most urgent ticket
-    /// that requires it, down a chain; raised tickets record why
-    /// (`priority-from`, `priority-own`). Switching it off puts them back.
-    /// With no value, says whether it's on and lists the raised tickets
+    /// that requires it, down a chain, and is raised as its due date nears:
+    /// to medium within 7 days, to high within 2 or once overdue (`due
+    /// MEDIUM HIGH` changes the days; 0 turns a step off). Raised tickets
+    /// record why (`priority-from`, `priority-own`). Switching it off puts
+    /// them back. With no value, says whether it's on and lists the raised
+    /// tickets
     AutoPriority {
-        #[arg(value_name = "on|off", value_parser = PossibleValuesParser::new(["on", "off"]))]
+        #[arg(value_name = "on|off|due", value_parser = PossibleValuesParser::new(["on", "off", "due"]))]
         action: Option<String>,
+        /// With `due`: the days left at which a ticket becomes medium, then high
+        #[arg(value_name = "DAYS", num_args = 0..=2)]
+        days: Vec<u32>,
     },
     /// Show or switch whether a priority set by hand wins over auto priority
     ///
@@ -1346,7 +1353,7 @@ fn run() -> Result<()> {
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
         Cmd::SharedDocuments { name, clear } => cmd_shared_documents(&board, name, clear),
         Cmd::TriagePriority { priority } => cmd_triage_priority(&board, priority),
-        Cmd::AutoPriority { action } => cmd_auto_priority(&board, action.as_deref()),
+        Cmd::AutoPriority { action, days } => cmd_auto_priority(&board, action.as_deref(), &days),
         Cmd::PriorityOverride { action } => cmd_priority_override(&board, action.as_deref()),
         Cmd::Register { .. } | Cmd::Deregister { .. } => unreachable!("handled above"),
         Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
@@ -2487,10 +2494,18 @@ fn cmd_shared_documents(board: &Board, name: Option<String>, clear: bool) -> Res
 
 /// `amd auto-priority [on|off]` (ticket 215): switching commits the
 /// setting and every priority it moves, together.
-fn cmd_auto_priority(board: &Board, action: Option<&str>) -> Result<()> {
+fn cmd_auto_priority(board: &Board, action: Option<&str>, days: &[u32]) -> Result<()> {
+    if action != Some("due") && !days.is_empty() {
+        bail!("days go with `due`: amd auto-priority due MEDIUM HIGH");
+    }
+    if action == Some("due") {
+        return cmd_due_days(board, days);
+    }
     let Some(action) = action else {
-        let on = board_settings::load(board).auto_priority();
+        let settings = board_settings::load(board);
+        let on = settings.auto_priority();
         println!("auto priority is {}", if on { "on" } else { "off" });
+        println!("{}", due_days_line(settings.due_days()));
         for task in board.tasks()? {
             if let Some(note) = agile_md::auto_priority::note(board, &task) {
                 println!("{}: {note}", task.id_display());
@@ -2507,11 +2522,60 @@ fn cmd_auto_priority(board: &Board, action: Option<&str>) -> Result<()> {
     println!(
         "{}",
         if on {
-            "auto priority is on: a ticket is at least as urgent as what requires it"
+            "auto priority is on: a ticket is at least as urgent as what requires it, and rises as its due date nears"
         } else {
             "auto priority is off: raised priorities are put back"
         }
     );
+    Ok(())
+}
+
+/// How auto priority treats due dates (ticket 252), in a line.
+fn due_days_line(days: board_settings::DueDays) -> String {
+    match (days.medium, days.high) {
+        (0, 0) => "due dates don't raise a priority".to_string(),
+        (0, high) => format!("due dates raise a ticket to high within {high} days or once overdue"),
+        (medium, 0) => {
+            format!("due dates raise a ticket to medium within {medium} days or once overdue")
+        }
+        (medium, high) => format!(
+            "due dates raise a ticket to medium within {medium} days, and to high within {high} or once overdue"
+        ),
+    }
+}
+
+/// `amd auto-priority due [MEDIUM HIGH]` (ticket 252): show or set when a
+/// due date raises a ticket. One commit, with the priorities it moves.
+fn cmd_due_days(board: &Board, days: &[u32]) -> Result<()> {
+    let [medium, high] = days else {
+        if days.is_empty() {
+            println!("{}", due_days_line(board_settings::load(board).due_days()));
+            return Ok(());
+        }
+        bail!("give both: amd auto-priority due MEDIUM HIGH (e.g. 7 2; 0 turns a step off)");
+    };
+    if *high > 0 && *medium > 0 && high > medium {
+        bail!("high ({high} days) can't come before medium ({medium} days)");
+    }
+    let wanted = board_settings::DueDays {
+        medium: *medium,
+        high: *high,
+    };
+    with_auto_commit(
+        board,
+        "settings",
+        "due-days",
+        &format!("{medium} {high}"),
+        || {
+            let mut settings = board_settings::load(board);
+            settings.set_due_days(wanted);
+            settings.save(board)
+        },
+    )?;
+    println!("{}", due_days_line(wanted));
+    if !board_settings::load(board).auto_priority() {
+        println!("(auto priority is off: `amd auto-priority on` to use them)");
+    }
     Ok(())
 }
 
@@ -3333,7 +3397,10 @@ fn changes_board(command: &Cmd) -> bool {
             command,
             Cmd::WipLimit { .. }
                 | Cmd::TriagePriority { priority: Some(_) }
-                | Cmd::AutoPriority { action: Some(_) }
+                | Cmd::AutoPriority {
+                    action: Some(_),
+                    ..
+                }
                 | Cmd::PriorityOverride { action: Some(_) }
                 | Cmd::SharedDocuments { name: Some(_), .. }
                 | Cmd::SharedDocuments { clear: true, .. }
@@ -3381,7 +3448,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::WipLimit { .. }
         | Cmd::SharedDocuments { .. }
         | Cmd::TriagePriority { .. }
-        | Cmd::AutoPriority { action: None }
+        | Cmd::AutoPriority { action: None, .. }
         | Cmd::PriorityOverride { action: None }
         | Cmd::Group {
             command: None | Some(GroupCmd::List),

@@ -19,16 +19,20 @@
 
 use std::cell::RefCell;
 
+use time::Date;
+
 use anyhow::{Result, bail};
 
 use crate::board::{Board, Kind};
-use crate::board_settings;
+use crate::board_settings::{self, DueDays};
 use crate::links::{LinkType, same_id};
 use crate::task::{PRIORITIES, Task, meta_in};
 
 const FROM: &str = "priority-from";
 const OWN: &str = "priority-own";
 const PINNED: &str = "priority-pinned";
+/// `priority-from` for a raise by the ticket's own due date (ticket 252).
+pub const DUE: &str = "due";
 
 thread_local! {
     /// What reconcile changed since a front end last asked.
@@ -53,6 +57,7 @@ struct Seen {
     own: Option<String>,
     pinned: bool,
     done: bool,
+    due: Option<String>,
 }
 
 impl Seen {
@@ -69,6 +74,7 @@ impl Seen {
             own: get(OWN),
             pinned: get(PINNED).is_some_and(|v| v != "no" && v != "false"),
             done: task.column.is(Kind::Done),
+            due: task.due(),
             task,
         })
     }
@@ -82,41 +88,100 @@ impl Seen {
     }
 }
 
-/// Bring every ticket on `board` in line with its auto priority setting.
-/// Returns (and queues for [`take_notes`]) a line for each change.
+/// The priority, by rank in [`PRIORITIES`], a due date asks for on
+/// `today` (ticket 252): high with `days.high` days or fewer left (overdue
+/// included), medium with `days.medium` or fewer, else none. A step set to
+/// 0 is off; overdue with only medium on is medium.
+pub fn due_rank(due: Option<&str>, today: Date, days: DueDays) -> Option<usize> {
+    let due = crate::recur::parse_date(due?).ok()?;
+    let left = (due - today).whole_days();
+    let within = |limit: u32| limit > 0 && left <= i64::from(limit);
+    if within(days.high) {
+        Some(2)
+    } else if within(days.medium) || (left < 0 && days.medium > 0) {
+        Some(1)
+    } else {
+        None
+    }
+}
+
+/// What raised a ticket: a ticket that requires it, or its own due date.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Why {
+    Requirer(usize),
+    Due,
+}
+
+/// One write [`plan`] wants, and what to say about it.
+struct Planned {
+    at: usize,
+    priority: String,
+    from: Option<String>,
+    own: Option<String>,
+    line: String,
+}
+
+/// Bring every ticket on `board` in line with its auto priority setting,
+/// as of today. Returns (and queues for [`take_notes`]) a line for each
+/// change.
 pub fn reconcile(board: &Board) -> Result<Vec<String>> {
+    reconcile_at(board, crate::recur::today())
+}
+
+/// [`reconcile`] with the date passed in.
+pub fn reconcile_at(board: &Board, today: Date) -> Result<Vec<String>> {
+    let (seen, planned) = plan(board, today)?;
+    let mut lines = Vec::new();
+    for p in planned {
+        let s = &seen[p.at];
+        let result = s.task.hash().and_then(|h| {
+            s.task.write_priority(
+                h,
+                &p.priority,
+                p.from.as_deref(),
+                p.own.as_deref(),
+                s.pinned,
+            )
+        });
+        match result {
+            Ok(()) => lines.push(p.line),
+            Err(err) => lines.push(format!(
+                "auto priority left {} alone: {err:#}",
+                s.task.id_display()
+            )),
+        }
+    }
+    Ok(queue(lines))
+}
+
+/// Whether [`reconcile_at`] would change anything: on a board nobody has
+/// touched, that's a due date coming near (ticket 252), which a front end
+/// that's open can commit without waiting for the next change.
+pub fn pending(board: &Board, today: Date) -> bool {
+    plan(board, today).is_ok_and(|(_, planned)| !planned.is_empty())
+}
+
+/// Works out every priority write auto priority wants, writing nothing.
+fn plan(board: &Board, today: Date) -> Result<(Vec<Seen>, Vec<Planned>)> {
     let settings = board_settings::load(board);
     let on = settings.auto_priority();
     let override_on = settings.priority_override();
+    let days = settings.due_days();
     let seen: Vec<Seen> = board.tasks()?.into_iter().filter_map(Seen::read).collect();
-    let mut lines = Vec::new();
-    let mut write =
-        |s: &Seen, priority: &str, from: Option<&str>, own: Option<&str>, why: String| {
-            let result = s
-                .task
-                .hash()
-                .and_then(|h| s.task.write_priority(h, priority, from, own, s.pinned));
-            match result {
-                Ok(()) => lines.push(why),
-                Err(err) => lines.push(format!(
-                    "auto priority left {} alone: {err:#}",
-                    s.task.id_display()
-                )),
-            }
-        };
+    let mut planned = Vec::new();
 
     if !on {
-        for s in seen.iter().filter(|s| s.from.is_some()) {
+        for (at, s) in seen.iter().enumerate().filter(|(_, s)| s.from.is_some()) {
             let own = s.own().to_string();
-            write(
-                s,
-                &own,
-                None,
-                None,
-                format!("{} back to {own} (auto priority off)", s.task.id_display()),
-            );
+            planned.push(Planned {
+                at,
+                line: format!("{} back to {own} (auto priority off)", s.task.id_display()),
+                priority: own,
+                from: None,
+                own: None,
+            });
         }
-        return Ok(queue(lines));
+        return Ok((seen, planned));
     }
 
     // Who requires whom: `requirers[j]` are the tickets that require j.
@@ -138,19 +203,25 @@ pub fn reconcile(board: &Board) -> Result<Vec<String>> {
     }
 
     let pinned = |s: &Seen| override_on && s.pinned;
-    // Start from each ticket's own; raise until nothing changes. Three
-    // steps of priority, so this ends, cycles included.
-    let mut effective: Vec<usize> = seen
-        .iter()
-        .map(|s| {
-            if pinned(s) {
-                rank(&s.priority)
-            } else {
-                rank(s.own())
+    // Start from each ticket's own, raised by its due date (ticket 252);
+    // then raise until nothing changes. Three steps of priority, so this
+    // ends, cycles included.
+    let mut effective: Vec<usize> = Vec::with_capacity(seen.len());
+    let mut source: Vec<Option<Why>> = vec![None; seen.len()];
+    for (j, s) in seen.iter().enumerate() {
+        if pinned(s) {
+            effective.push(rank(&s.priority));
+            continue;
+        }
+        let own = rank(s.own());
+        match due_rank(s.due.as_deref(), today, days).filter(|r| !s.done && *r > own) {
+            Some(r) => {
+                effective.push(r);
+                source[j] = Some(Why::Due);
             }
-        })
-        .collect();
-    let mut source: Vec<Option<usize>> = vec![None; seen.len()];
+            None => effective.push(own),
+        }
+    }
     loop {
         let mut changed = false;
         for j in 0..seen.len() {
@@ -160,7 +231,7 @@ pub fn reconcile(board: &Board) -> Result<Vec<String>> {
             for &i in &requirers[j] {
                 if !seen[i].done && effective[i] > effective[j] {
                     effective[j] = effective[i];
-                    source[j] = Some(i);
+                    source[j] = Some(Why::Requirer(i));
                     changed = true;
                 }
             }
@@ -176,36 +247,56 @@ pub fn reconcile(board: &Board) -> Result<Vec<String>> {
         }
         let own = s.own().to_string();
         match source[j].filter(|_| effective[j] > rank(&own)) {
-            Some(i) => {
+            Some(why) => {
                 let to = PRIORITIES[effective[j]];
-                let by = seen[i].task.id_display();
+                let (by, line) = match why {
+                    Why::Requirer(i) => {
+                        let by = seen[i].task.id_display();
+                        let line =
+                            format!("{} raised to {to}: {by} requires it", s.task.id_display());
+                        (by, line)
+                    }
+                    Why::Due => (
+                        DUE.to_string(),
+                        format!(
+                            "{} raised to {to}: due {}",
+                            s.task.id_display(),
+                            s.due.as_deref().unwrap_or_default()
+                        ),
+                    ),
+                };
                 if s.priority != to
                     || s.from.as_deref() != Some(by.as_str())
                     || s.own.as_deref() != Some(own.as_str())
                 {
-                    write(
-                        s,
-                        to,
-                        Some(&by),
-                        Some(&own),
-                        format!("{} raised to {to}: {by} requires it", s.task.id_display()),
-                    );
+                    planned.push(Planned {
+                        at: j,
+                        priority: to.to_string(),
+                        from: Some(by),
+                        own: Some(own),
+                        line,
+                    });
                 }
             }
-            None if s.from.is_some() || s.priority != own => write(
-                s,
-                &own,
-                None,
-                None,
-                format!(
-                    "{} back to {own}: nothing more urgent requires it",
-                    s.task.id_display()
+            None if s.from.is_some() || s.priority != own => planned.push(Planned {
+                at: j,
+                line: format!(
+                    "{} back to {own}: nothing more urgent requires it{}",
+                    s.task.id_display(),
+                    if s.due.is_some() {
+                        ", and it isn't due soon"
+                    } else {
+                        ""
+                    }
                 ),
-            ),
+                priority: own,
+                from: None,
+                own: None,
+            }),
             None => {}
         }
     }
-    Ok(queue(lines))
+    Ok((seen, planned))
 }
 
 /// Records a reconcile that failed outright, for [`take_notes`].
@@ -262,6 +353,15 @@ pub fn set_by_hand(board: &Board, task: &Task, value: &str) -> Result<String> {
 pub fn note(board: &Board, task: &Task) -> Option<String> {
     let s = Seen::read(task.clone())?;
     let settings = board_settings::load(board);
+    if let (Some(from), Some(own)) = (&s.from, &s.own)
+        && from == DUE
+    {
+        return Some(format!(
+            "priority {}: raised by auto priority, due {} (own: {own})",
+            s.priority,
+            s.due.as_deref().unwrap_or("soon")
+        ));
+    }
     if let (Some(from), Some(own)) = (&s.from, &s.own) {
         return Some(format!(
             "priority {}: raised by auto priority, {from} requires it (own: {own})",
@@ -350,13 +450,96 @@ mod tests {
         t.set_priority(t.hash().unwrap(), value).unwrap();
     }
 
+    fn due(board: &Board, id: &str, date: &str) {
+        let t = find(board, id);
+        t.set_due(t.hash().unwrap(), date).unwrap();
+    }
+
+    fn on(y: i32, m: u8, d: u8) -> Date {
+        Date::from_calendar_date(y, time::Month::try_from(m).unwrap(), d).unwrap()
+    }
+
+    #[test]
+    fn auto_priority_is_on_unless_a_board_turns_it_off() {
+        let (_dir, board) = board_with(&[]);
+        assert!(board_settings::load(&board).auto_priority());
+        settings(&board, false, true);
+        assert!(!board_settings::load(&board).auto_priority());
+    }
+
+    #[test]
+    fn a_due_date_asks_for_medium_then_high_then_stays_high_once_overdue() {
+        let days = board_settings::DEFAULT_DUE_DAYS;
+        let today = on(2026, 10, 18);
+        let rank = |date: &str| due_rank(Some(date), today, days);
+        assert_eq!(rank("2026-11-01"), None);
+        assert_eq!(rank("2026-10-25"), Some(1));
+        assert_eq!(rank("2026-10-20"), Some(2));
+        assert_eq!(rank("2026-10-18"), Some(2));
+        assert_eq!(rank("2026-10-01"), Some(2));
+        assert_eq!(due_rank(None, today, days), None);
+        assert_eq!(due_rank(Some("not a date"), today, days), None);
+        let off = DueDays { medium: 0, high: 0 };
+        assert_eq!(due_rank(Some("2026-10-01"), today, off), None);
+        let medium_only = DueDays { medium: 7, high: 0 };
+        assert_eq!(due_rank(Some("2026-10-01"), today, medium_only), Some(1));
+    }
+
+    #[test]
+    fn a_ticket_is_raised_as_its_due_date_nears_and_passes_it_on() {
+        let (_dir, board) = board_with(&["Ship", "Build"]);
+        settings(&board, true, true);
+        requires(&board, "1", "2");
+        due(&board, "1", "2026-10-25");
+        // Two weeks out: nothing.
+        reconcile_at(&board, on(2026, 10, 11)).unwrap();
+        assert_eq!(priorities(&board), ["low", "low"]);
+        assert!(!pending(&board, on(2026, 10, 11)));
+        // A week out: medium, and what it requires with it.
+        assert!(pending(&board, on(2026, 10, 18)));
+        let lines = reconcile_at(&board, on(2026, 10, 18)).unwrap();
+        assert_eq!(priorities(&board), ["medium", "medium"]);
+        assert!(
+            lines.contains(&"001 raised to medium: due 2026-10-25".to_string()),
+            "{lines:?}"
+        );
+        assert!(
+            lines.contains(&"002 raised to medium: 001 requires it".to_string()),
+            "{lines:?}"
+        );
+        let note = note(&board, &find(&board, "1")).unwrap();
+        assert!(note.contains("due 2026-10-25 (own: low)"), "{note}");
+        // Two days out: high.
+        reconcile_at(&board, on(2026, 10, 23)).unwrap();
+        assert_eq!(priorities(&board), ["high", "high"]);
+        // Moved out a month: back to its own.
+        due(&board, "1", "2026-11-30");
+        reconcile_at(&board, on(2026, 10, 23)).unwrap();
+        assert_eq!(priorities(&board), ["low", "low"]);
+    }
+
+    #[test]
+    fn a_pinned_or_done_ticket_is_left_alone_and_off_puts_it_back() {
+        let (_dir, board) = board_with(&["Pinned", "Raised"]);
+        settings(&board, true, true);
+        due(&board, "1", "2026-10-19");
+        due(&board, "2", "2026-10-19");
+        set_by_hand(&board, &find(&board, "1"), "low").unwrap();
+        reconcile_at(&board, on(2026, 10, 18)).unwrap();
+        assert_eq!(priorities(&board), ["low", "high"]);
+        settings(&board, false, true);
+        reconcile_at(&board, on(2026, 10, 18)).unwrap();
+        assert_eq!(priorities(&board), ["low", "low"]);
+    }
+
     #[test]
     fn a_chain_inherits_the_most_urgent_priority_and_says_why() {
         let (_dir, board) = board_with(&["Goal", "Middle", "Base", "Other"]);
         set(&board, "001", "high");
         requires(&board, "001", "002");
         requires(&board, "002", "003");
-        // Off: nothing moves.
+        // Off: nothing moves. (On by default since ticket 252.)
+        settings(&board, false, true);
         reconcile(&board).unwrap();
         assert_eq!(priorities(&board), ["high", "low", "low", "low"]);
 

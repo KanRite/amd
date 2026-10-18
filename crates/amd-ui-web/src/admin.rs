@@ -1208,6 +1208,13 @@ fn PriorityAdmin() -> impl IntoView {
         ctx.board
             .with(|b| b.as_ref().is_none_or(|b| b.priority_override))
     };
+    // When a due date raises a ticket (ticket 252), as typed and as saved.
+    let saved_days = move || {
+        ctx.board
+            .with(|b| b.as_ref().map_or((7, 2), |b| b.due_days))
+    };
+    let medium = RwSignal::new(saved_days().0);
+    let high = RwSignal::new(saved_days().1);
     let note = RwSignal::new(None::<String>);
     let apply = move |result: Result<amd_ui_model::SyncReport, String>| match result {
         Ok(report) => {
@@ -1221,7 +1228,7 @@ fn PriorityAdmin() -> impl IntoView {
         <section class="flex flex-col gap-2">
             <h3 class="text-sm font-semibold">"Auto priority"</h3>
             <p class="text-xs text-slate-500">
-                "A ticket becomes at least as urgent as the most urgent ticket that requires it, down a chain, so the priorities on your goals flow to the work they wait on. Raised tickets say why, and switching it off puts them back."
+                "A ticket becomes at least as urgent as the most urgent ticket that requires it, down a chain, so the priorities on your goals flow to the work they wait on, and it rises as its due date nears. Raised tickets say why, and switching it off puts them back."
             </p>
             <label class="flex items-center gap-2 text-sm font-semibold">
                 <input
@@ -1232,8 +1239,40 @@ fn PriorityAdmin() -> impl IntoView {
                         spawn_local(async move { apply(api::set_auto_priority(on).await) });
                     }
                 />
-                "Set priorities from requires links"
+                "Set priorities from requires links and due dates"
             </label>
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+                <span>"A due date raises a ticket to medium with"</span>
+                <input
+                    type="number"
+                    min="0"
+                    class="input w-16"
+                    aria-label="Days left for medium"
+                    prop:value=move || medium.get().to_string()
+                    on:input=move |ev| medium.set(event_target_value(&ev).parse().unwrap_or(0))
+                />
+                <span>"days left, and to high with"</span>
+                <input
+                    type="number"
+                    min="0"
+                    class="input w-16"
+                    aria-label="Days left for high"
+                    prop:value=move || high.get().to_string()
+                    on:input=move |ev| high.set(event_target_value(&ev).parse().unwrap_or(0))
+                />
+                <span>"or once overdue."</span>
+                <button
+                    class="rounded border border-slate-400 px-2 py-0.5 text-xs disabled:opacity-50"
+                    disabled=move || (medium.get(), high.get()) == saved_days()
+                    on:click=move |_| {
+                        let (m, h) = (medium.get_untracked(), high.get_untracked());
+                        spawn_local(async move { apply(api::set_due_days(m, h).await) });
+                    }
+                >
+                    "Save"
+                </button>
+            </div>
+            <p class="text-xs text-slate-500">"0 turns a step off."</p>
             <label class="flex items-center gap-2 text-sm font-semibold">
                 <input
                     type="checkbox"

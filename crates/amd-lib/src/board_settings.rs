@@ -114,6 +114,21 @@ const SHARED_DOCUMENTS: &str = "shared-documents";
 const IMPORT_ISSUES: &str = "import-issues";
 const AUTO_PRIORITY: &str = "auto-priority";
 const PRIORITY_OVERRIDE: &str = "priority-override";
+const DUE_MEDIUM_DAYS: &str = "due-medium-days";
+const DUE_HIGH_DAYS: &str = "due-high-days";
+
+/// How near its due date a ticket is raised to medium, and to high, by
+/// auto priority (ticket 252), in days, unless the board says otherwise.
+pub const DEFAULT_DUE_DAYS: DueDays = DueDays { medium: 7, high: 2 };
+
+/// When auto priority raises a ticket for its due date (ticket 252): to
+/// medium with `medium` days or fewer left, to high with `high` or fewer, or
+/// once overdue. 0 turns that step off; both 0 turns due dates off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DueDays {
+    pub medium: u32,
+    pub high: u32,
+}
 /// Set once the documents `.settings/` has been carried across (ticket
 /// 182), so it's never read again.
 const MIGRATED: &str = "migrated-from-documents";
@@ -618,15 +633,16 @@ impl BoardSettings {
             .set(IMPORT_ISSUES, if on { "on" } else { "off" });
     }
 
-    /// Whether priorities follow requires links (ticket 215):
-    /// `auto-priority`, off unless set on.
+    /// Whether priorities follow requires links (ticket 215) and due dates
+    /// (ticket 252): `auto-priority`, on unless set off.
     pub fn auto_priority(&self) -> bool {
-        matches!(
+        // On unless set off (ticket 252; it was off unless set on).
+        !matches!(
             self.config
                 .get(AUTO_PRIORITY)
                 .map(|v| v.trim().to_lowercase())
                 .as_deref(),
-            Some("on" | "true" | "1" | "yes")
+            Some("off" | "false" | "0" | "no")
         )
     }
 
@@ -652,6 +668,33 @@ impl BoardSettings {
     pub fn set_priority_override(&mut self, on: bool) {
         self.config
             .set(PRIORITY_OVERRIDE, if on { "on" } else { "off" });
+    }
+
+    /// When auto priority raises a ticket for its due date (ticket 252):
+    /// `due-medium-days` and `due-high-days`, [`DEFAULT_DUE_DAYS`] when
+    /// unset or unreadable.
+    pub fn due_days(&self) -> DueDays {
+        let read = |key: &str, default: u32| {
+            self.config
+                .get(key)
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(default)
+        };
+        DueDays {
+            medium: read(DUE_MEDIUM_DAYS, DEFAULT_DUE_DAYS.medium),
+            high: read(DUE_HIGH_DAYS, DEFAULT_DUE_DAYS.high),
+        }
+    }
+
+    /// Sets [`due_days`](Self::due_days); the defaults leave no keys.
+    pub fn set_due_days(&mut self, days: DueDays) {
+        if days == DEFAULT_DUE_DAYS {
+            self.config.remove(DUE_MEDIUM_DAYS);
+            self.config.remove(DUE_HIGH_DAYS);
+        } else {
+            self.config.set(DUE_MEDIUM_DAYS, &days.medium.to_string());
+            self.config.set(DUE_HIGH_DAYS, &days.high.to_string());
+        }
     }
 
     /// Whether the project is archived (ticket 157): `archived`, off unless

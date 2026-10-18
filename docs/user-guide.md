@@ -280,10 +280,17 @@ Each card also says how many tickets it's linked to (beside the tree icon,
 or a link icon when it has no tree), and a ticket linked to nothing at all
 shows a small blue circle, so loose tickets are easy to spot.
 
-**Auto priority** (off unless switched on: `amd auto-priority on`, or
+**Auto priority** (on unless switched off: `amd auto-priority off`, or
 Admin → Auto priority) makes a ticket at least as urgent as the most urgent
 ticket that requires it, down a chain, so the priorities you set on your
-goals flow to the work they wait on. A raised ticket records why
+goals flow to the work they wait on. **It also raises a ticket as its due
+date nears**: to medium with 7 days or fewer left, and to high with 2 or
+fewer, or once it's overdue, passing that on to what it requires. `amd
+auto-priority due 10 3` changes the days (0 turns a step off, `due 0 0`
+turns due dates off), as does Admin. A priority is written into the ticket,
+and nothing runs in the background, so a due date coming near is picked up
+by the next change anyone makes on the board, or within the hour by an open
+desktop board, which commits it as `priority: due dates`. A raised ticket records why
 (`priority-from`, `priority-own`; `amd show` says it, and its card shows
 `↑ high`), and switching it off puts them back. With **allow override** on
 (the default, `amd priority-override`), a priority you set by hand pins that

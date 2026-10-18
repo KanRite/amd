@@ -1409,12 +1409,15 @@ echo "auto priority (ticket 215):"
 ap="$(mktemp -d)"
 ( cd "${ap}" && git init -q && git config user.email t@t.co && git config user.name t \
   && AMD_YES=1 "${AMD}" init autop --local-only >/dev/null \
+  && "${AMD}" auto-priority > "${ap}.default" && "${AMD}" auto-priority off >/dev/null \
   && for t in Goal Middle Base Extra; do "${AMD}" new "$t" >/dev/null; done \
   && "${AMD}" set 1 priority high >/dev/null \
   && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 2 3 --type requires >/dev/null )
 in_ap() { (cd "${ap}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
-assert "auto priority is off until switched on" \
-  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap auto-priority | grep -qx 'auto priority is off' \
+assert "auto priority is on by default (ticket 252), and a board can switch it off" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; grep -qx 'auto priority is on' '${ap}.default' \
+    && grep -q 'due dates raise a ticket to medium within 7 days, and to high within 2' '${ap}.default' \
+    && in_ap auto-priority | grep -qx 'auto priority is off' \
     && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/003-base.md"
 assert "amd auto-priority on raises a chain in the setting's own commit, saying why" \
   bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; out=\$(in_ap auto-priority on) \
@@ -1443,7 +1446,23 @@ assert "amd auto-priority off puts raised tickets back" \
     && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/002-middle.md \
     && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/001-goal.md \
     && ! grep -q 'priority-from' '${ap}'/tasks/backlog/00[234]-*.md"
-rm -rf "${ap}"
+ap_soon="$(date -u -d '+1 day' +%F)"
+assert "a ticket due tomorrow is raised to high in its own commit, saying why (ticket 252)" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap auto-priority on >/dev/null \
+    && in_ap new Deadline --due '${ap_soon}' >/dev/null 2>&1 \
+    && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/005-deadline.md \
+    && grep -q '^priority-from: \"due\"' '${ap}'/tasks/backlog/005-deadline.md \
+    && in_ap show 5 2>&1 >/dev/null | grep -q 'raised by auto priority, due ${ap_soon} (own: low)'"
+assert "amd auto-priority due sets the days in one commit, and 0 0 puts it back" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap auto-priority due 0 0 | grep -qx \"due dates don't raise a priority\" \
+    && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/005-deadline.md \
+    && git -C '${ap}' log --format=%s -1 | grep -q '^settings: due-days' \
+    && git -C '${ap}' show --stat HEAD | grep -q '005-deadline.md'"
+assert "amd auto-priority due refuses high before medium, and shows the days" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; ! in_ap auto-priority due 1 5 2>/dev/null \
+    && in_ap auto-priority due 7 2 >/dev/null && in_ap auto-priority due | grep -q 'medium within 7 days' \
+    && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/005-deadline.md"
+rm -rf "${ap}" "${ap}.default"
 
 echo "your own columns (ticket 224):"
 cl="$(mktemp -d)"
