@@ -1,0 +1,26 @@
+name: Dependabot gate (closed)
+
+# Ticket 250: when a Dependabot PR is merged or closed, close the issue the
+# gate raised for it (scripts/dependabot-gate.sh closed). Its own workflow
+# with the one job, so on anyone else's PR it shows only once that PR is
+# closed, as a single skipped check, never in the merge box.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  issues: write
+
+jobs:
+  close-issue:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      # The script from main, never from the PR.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - run: scripts/dependabot-gate.sh closed "${{ github.event.pull_request.number }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

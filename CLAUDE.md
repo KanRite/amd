@@ -542,9 +542,12 @@ redundant. Their history is in git if it is ever wanted again.
   by the weekly run; **needs a person** (a major, a 0.x minor, failed
   checks, or superseded by a newer open PR for the same dependency) gets an
   issue marked `<!-- dependabot-pr: N -->`, closed when the PR closes, which
-  reaches the board as a TRIAGE ticket through amd's issue import. Runs on
-  PR events and CI completion (assess only: Dependabot-started runs can't
-  read Actions secrets) and weekly on Mondays or by hand (apply).
+  reaches the board as a TRIAGE ticket through amd's issue import. Runs
+  when CI completes on a Dependabot branch (assess only: Dependabot-started
+  runs can't read Actions secrets) and weekly on Mondays or by hand
+  (apply); never on `pull_request`, which listed its jobs as skipped
+  checks on every PR (ticket 250). Closing a PR's issue is
+  `dependabot-gate-closed.yml`, on `pull_request: closed` only.
   `DRY_RUN=1` prints instead of acting.
 - `.github/workflows/release.yml` — on a `vX.Y.Z` tag, builds `amd` and
   `amdui` for Linux and macOS, x86_64 and aarch64 (ticket 085): WebKitGTK on
