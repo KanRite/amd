@@ -8,11 +8,20 @@
 //! The value-level completions come from the parsers in `value.rs`: `--type`
 //! offers the change types this board accepts, `--template` the built-in ticket
 //! types, `amd set` its fields.
+//!
+//! **Epic names and added columns** (ticket 028) are destination verbs too
+//! (`amd checkout 7`), but they're the board's, not clap's, so no generated
+//! script can know them. For bash, zsh and fish the script gets a hook that
+//! runs the hidden `amd __destinations` at TAB time and offers what it
+//! prints: an epic made, renamed or deleted (here, by a pull, or in amdui)
+//! shows on the next TAB, with no shell reload. Only a new `amd` release's
+//! own commands need the script made again.
 
 use std::env;
-use std::io;
+use std::io::{self, Write};
 use std::path::Path;
 
+use agile_md::board::{Board, Column};
 use anyhow::{Result, bail};
 use clap::Command;
 use clap_complete::{Shell, generate};
@@ -23,12 +32,102 @@ pub fn print(shell: Option<Shell>, command: &mut Command) -> Result<()> {
         Some(shell) => shell,
         None => from_env()?,
     };
-    let name = command.get_name().to_string();
-    generate(shell, command, name, &mut io::stdout());
+    io::stdout().write_all(script(shell, command).as_bytes())?;
     // The script goes to stdout so it can be redirected; the hint goes to
     // stderr so it survives the redirect without corrupting the script.
     eprintln!("# install it with:\n# {}", install_hint(shell));
     Ok(())
+}
+
+/// The generated script, with the destination hook for the shells that take
+/// one.
+fn script(shell: Shell, command: &mut Command) -> String {
+    let name = command.get_name().to_string();
+    let mut out = Vec::new();
+    generate(shell, command, name, &mut out);
+    let script = String::from_utf8_lossy(&out).into_owned();
+    with_destinations(shell, script)
+}
+
+/// The argument `amd` answers with its destinations, before clap parses.
+pub const DESTINATIONS: &str = "__destinations";
+
+/// What the shell runs at TAB time. `command` skips an alias or function of
+/// the same name; errors go nowhere, so a folder with no board offers nothing.
+const LIST: &str = "command amd __destinations 2>/dev/null";
+
+/// Adds the destination hook to a generated script. Each shell's change is
+/// made against a line clap_complete writes; if a later version stops
+/// writing it, the script is left as generated (the unit tests notice).
+fn with_destinations(shell: Shell, script: String) -> String {
+    match shell {
+        Shell::Bash => {
+            const REGISTER: &str = "complete -F _amd ";
+            if !script.contains(REGISTER) {
+                return script;
+            }
+            let hook = format!(
+                "_amd_destinations() {{\n\
+                 \x20   _amd \"$@\"\n\
+                 \x20   local cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n\
+                 \x20   if [[ ${{COMP_CWORD}} -eq 1 && ${{cur}} != -* ]]; then\n\
+                 \x20       COMPREPLY+=( $(compgen -W \"$({LIST})\" -- \"${{cur}}\") )\n\
+                 \x20   fi\n\
+                 }}\n\n"
+            );
+            let script = script.replace(REGISTER, "complete -F _amd_destinations ");
+            match script.rfind("if [[ \"${BASH_VERSINFO") {
+                Some(at) => format!("{}{hook}{}", &script[..at], &script[at..]),
+                None => format!("{script}\n{hook}"),
+            }
+        }
+        Shell::Zsh => {
+            const DESCRIBE: &str = "    _describe -t commands 'amd commands' commands \"$@\"";
+            let add = format!(
+                "    local -a destinations; destinations=(${{(f)\"$({LIST})\"}})\n\
+                 \x20   commands+=(${{^destinations}}':move a ticket there, or list it')\n"
+            );
+            script.replacen(DESCRIBE, &format!("{add}{DESCRIBE}"), 1)
+        }
+        Shell::Fish => format!(
+            "{script}complete -c amd -n \"__fish_amd_needs_command\" -f -a \"({LIST})\" \
+             -d 'Move a ticket there, or list it'\n"
+        ),
+        _ => script,
+    }
+}
+
+/// Prints the board's destination verbs that aren't clap's own: added
+/// columns' folders and the backlog's epics and sprints, one a line. A name
+/// a command already has is left out (named commands win, ADR-0006), and so
+/// is one with a space, which a shell would split. Nothing at all when
+/// there's no board: it's run on every TAB, anywhere.
+pub fn destinations(command: &Command) {
+    let Ok(board) = Board::discover() else {
+        return;
+    };
+    let mut names: Vec<String> = board
+        .workflow()
+        .columns()
+        .filter(|column| !Column::STANDARD.contains(column))
+        .map(|column| column.to_string())
+        .collect();
+    names.extend(board.epics_in(Column::Backlog).unwrap_or_default());
+    let mut out = io::stdout().lock();
+    for name in names {
+        if name.contains(char::is_whitespace) || is_command(command, &name) {
+            continue;
+        }
+        if writeln!(out, "{name}").is_err() {
+            return;
+        }
+    }
+}
+
+fn is_command(command: &Command, name: &str) -> bool {
+    command
+        .get_subcommands()
+        .any(|sub| sub.get_name() == name || sub.get_all_aliases().any(|alias| alias == name))
 }
 
 /// Work the shell out from `$SHELL` (`/bin/zsh` -> zsh).
@@ -73,11 +172,40 @@ mod tests {
     use clap::CommandFactory;
 
     fn script(shell: Shell) -> String {
-        let mut command = crate::Cli::command();
-        let mut out = Vec::new();
-        let name = command.get_name().to_string();
-        generate(shell, &mut command, name, &mut out);
-        String::from_utf8(out).expect("completions are utf-8")
+        super::script(shell, &mut crate::Cli::command())
+    }
+
+    #[test]
+    fn bash_zsh_and_fish_ask_amd_for_the_destinations_at_tab_time() {
+        let bash = script(Shell::Bash);
+        assert!(bash.contains("_amd_destinations() {"), "{bash}");
+        assert!(bash.contains("complete -F _amd_destinations "), "{bash}");
+        assert!(!bash.contains("complete -F _amd "), "{bash}");
+        assert!(bash.contains(LIST), "{bash}");
+        let zsh = script(Shell::Zsh);
+        assert!(zsh.contains("commands+=(${^destinations}"), "{zsh}");
+        assert!(zsh.contains(LIST), "{zsh}");
+        let fish = script(Shell::Fish);
+        assert!(fish.contains(&format!("-a \"({LIST})\"")), "{fish}");
+    }
+
+    #[test]
+    fn the_hidden_command_stays_out_of_the_scripts() {
+        for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+            let script = script(shell);
+            assert!(
+                !script.replace(LIST, "").contains("__destinations"),
+                "{shell}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_command_name_is_never_offered_as_a_destination() {
+        let command = crate::Cli::command();
+        assert!(is_command(&command, "draft"));
+        assert!(is_command(&command, "related"));
+        assert!(!is_command(&command, "checkout"));
     }
 
     #[test]

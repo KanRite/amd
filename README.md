@@ -166,8 +166,8 @@ a solo developer without it.
 
 - **Everything the board does is a command**, safe in scripts and CI: it
   never prompts without a terminal.
-- **Shell completion** for bash, zsh and fish, and `amd log` for a board's
-  history.
+- **Shell completion** for bash, zsh and fish, epic names included, and
+  `amd log` for a board's history.
 
 Everything is explained in the [user guide](docs/user-guide.md).
 
