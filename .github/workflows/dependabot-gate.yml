@@ -1,0 +1,74 @@
+name: Dependabot gate
+
+# Ticket 247: what happens to Dependabot's PRs. Dependabot opens one only
+# once a release is a week old (its cooldown, in dependabot.yml). Then
+# scripts/dependabot-gate.sh checks each one: compatible (a patch, or a minor
+# of 1.x or later), no security advisory for the versions it brings, CI
+# passed. Ready ones are approved (as the code owner whose token is
+# DEPENDABOT_APPROVER_TOKEN) and auto-merged; one held by an advisory is
+# looked at again each week; the rest get an issue, which reaches the
+# agile-md board as a TRIAGE ticket.
+#
+# Approving happens only in the weekly and manual runs: workflows Dependabot
+# starts can't read Actions secrets, so those runs only assess.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: dependabot-gate
+  cancel-in-progress: false
+
+jobs:
+  closed:
+    if: >-
+      github.event_name == 'pull_request' && github.event.action == 'closed'
+      && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      # The script from main, never from the PR.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - run: scripts/dependabot-gate.sh closed "${{ github.event.pull_request.number }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  assess:
+    if: >-
+      (github.event_name == 'pull_request' && github.event.action != 'closed'
+        && github.event.pull_request.user.login == 'dependabot[bot]')
+      || (github.event_name == 'workflow_run'
+        && startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+        && github.event.workflow_run.pull_requests[0] != null)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - run: scripts/dependabot-gate.sh assess "$PR"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+
+  apply:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: scripts/dependabot-gate.sh apply
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPROVER_TOKEN: ${{ secrets.DEPENDABOT_APPROVER_TOKEN }}
