@@ -333,8 +333,12 @@ redundant. Their history is in git if it is ever wanted again.
   the name added to `.git/info/exclude`, so never committed).
 - `crates/amd-lib/src/import.rs` — `amd import tickets <PATH>` (or a bare
   path), run from the destination board's `tasks/` directory (`cmd_import`
-  guards that, and that `<PATH>` has the four column folders and isn't this
-  board). Reads the source as a read-only `Board` (`Board::at`) and copies
+  guards that, and that `<PATH>` isn't this board and has something to
+  import: `import::looks_importable`, at least one standard column folder
+  or tickets loose in it, ticket 251). A missing column folder is taken as
+  empty (`ImportSummary.missing_columns`), and `NNN-*.md` lying directly in
+  the source folder go to the backlog (`loose_tickets`, `ImportSummary.loose`);
+  the CLI says both. Reads the source as a read-only `Board` (`Board::at`) and copies
   each ticket in — status kept, id renumbered against the destination's
   own counter, `parent`/`related` remapped when both ends are part of the
   same batch. A ticket whose title is already on the board is **skipped

@@ -629,6 +629,13 @@ related links within the batch. A ticket whose title is already on this
 board is left out (and logged); two same-titled tickets within the batch are
 both brought in, tagged `DUPLICATE`. The import is one commit.
 
+The source doesn't have to be a tidy board. A column folder it hasn't got
+is taken as empty, and tickets lying loose in the folder itself, outside any
+column, are brought into the backlog; the import says both ("has no
+backlog/ folder, taken as empty", "2 tickets are loose … into the
+backlog"). A folder with no column folders and no tickets is refused,
+saying what it looked for.
+
 **Documents**: from the folder of a documents repository the files should go
 into, name the folder to copy:
 

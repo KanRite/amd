@@ -2017,8 +2017,10 @@ import_dst="$(mktemp -d)"
   && AMD_YES=1 "${AMD}" init imported --local-only >/dev/null )
 assert "amd import tickets is refused outside the board's tasks directory (ticket 173)" \
   bash -c "cd '${import_dst}' && '${AMD}' import '${import_src}' 2>&1 | grep -q 'from the board.s tasks directory: cd .*/tasks'"
-assert "...and when the path isn't a tasks directory" \
-  bash -c "cd '${import_dst}/tasks' && '${AMD}' import tickets '${import_src}/backlog' 2>&1 | grep -q 'isn.t a tasks directory'"
+assert "...and when the path has nothing to import, saying what it looked for (ticket 251)" \
+  bash -c "empty=\$(mktemp -d) && cd '${import_dst}/tasks' \
+    && '${AMD}' import tickets \"\$empty\" 2>&1 | grep -q 'has nothing to import: no backlog/, todo/, doing/ or done/ folder, and no tickets' \
+    ; rc=\$?; rm -rf \"\$empty\"; exit \$rc"
 assert "amd import lands tickets in their original columns with fresh ids, in one commit" \
   bash -c "cd '${import_dst}/tasks' && '${AMD}' import '${import_src}' >/dev/null \
     && test -f backlog/001-old-backlog-ticket.md \
@@ -2035,6 +2037,27 @@ assert "importing the same source again leaves out what's already here, logged t
     && grep -q 'already on this board' <<<\"\$out\" && ! ls backlog/004-* 2>/dev/null \
     && grep -q 'amd import tickets' import.log && grep -q 'Shipped feature.* is already on this board' import.log \
     && ! git status --porcelain --untracked-files=all | grep -q import.log"
+# Ticket 251: a source with no backlog/ and tickets loose outside any column,
+# as agile-md-hosted's was.
+loose_src="$(mktemp -d)"
+mkdir -p "${loose_src}/todo" "${loose_src}/doing" "${loose_src}/done"
+for t in "124 Loose one" "127 Loose two"; do
+  printf -- '---\nid: "%s"\ntitle: "%s"\nparent: ""\nrelated: []\ntags: []\n---\n\nbody\n' "${t%% *}" "${t#* }" \
+    > "${loose_src}/${t%% *}-$(printf '%s' "${t#* }" | tr 'A-Z ' 'a-z-').md"
+done
+printf -- '---\nid: "130"\ntitle: "Started elsewhere"\nparent: ""\nrelated: []\ntags: []\n---\n\nbody\n' \
+  > "${loose_src}/todo/130-started-elsewhere.md"
+loose_dst="$(mktemp -d)"
+( cd "${loose_dst}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init loosetest --local-only >/dev/null )
+assert "amd import takes a source missing backlog/, with tickets loose outside any column, saying so (ticket 251)" \
+  bash -c "cd '${loose_dst}/tasks' && out=\$('${AMD}' import tickets '${loose_src}' --dry-run 2>&1) \
+    && printf '%s\\n' \"\$out\" | grep -q 'has no backlog/ folder, taken as empty' \
+    && printf '%s\\n' \"\$out\" | grep -q '2 tickets are loose in .*outside any column: would go into the backlog' \
+    && printf '%s\\n' \"\$out\" | grep -q 'would import 3 tickets' \
+    && '${AMD}' import tickets '${loose_src}' >/dev/null 2>&1 \
+    && test -f todo/001-started-elsewhere.md && test -f backlog/002-loose-one.md && test -f backlog/003-loose-two.md"
+rm -rf "${loose_src}" "${loose_dst}"
 ( cd "${import_dst}" && "${AMD}" tags add duplicate >/dev/null && "${AMD}" new "Old backlog ticket" -t duplicate --no-edit >/dev/null 2>&1 )
 assert "amd tag finds nothing for a tag nobody has" \
   bash -c "cd '${import_dst}' && ! '${AMD}' tag NO-SUCH-TAG | grep -q 'Old backlog ticket'"

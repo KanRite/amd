@@ -3625,14 +3625,11 @@ fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {
             board.root.display()
         );
     }
-    let is_tasks = |dir: &Path| {
-        Column::STANDARD
-            .iter()
-            .all(|c| dir.join(c.to_string()).is_dir())
-    };
-    if !is_tasks(path) {
+    // Anything a board has is enough (ticket 251): some of its column
+    // folders, or tickets lying loose in it.
+    if !agile_md::import::looks_importable(path) {
         bail!(
-            "{} isn't a tasks directory (it needs backlog/, todo/, doing/ and done/)",
+            "{} has nothing to import: no backlog/, todo/, doing/ or done/ folder, and no tickets (NNN-title.md) in it",
             path.display()
         );
     }
@@ -3654,6 +3651,28 @@ fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {
         .collect();
     for line in &left_out {
         eprintln!("skipped {line}");
+    }
+    // What the source was missing or had out of place (ticket 251).
+    if !summary.missing_columns.is_empty() {
+        eprintln!(
+            "note: {} has no {} folder, taken as empty",
+            path.display(),
+            summary
+                .missing_columns
+                .iter()
+                .map(|c| format!("{c}/"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if summary.loose > 0 {
+        eprintln!(
+            "note: {} ticket{} loose in {}, outside any column: {} into the backlog",
+            summary.loose,
+            if summary.loose == 1 { " is" } else { "s are" },
+            path.display(),
+            if dry_run { "would go" } else { "imported" }
+        );
     }
     if !dry_run
         && let Some(log) = agile_md::import_log::append(
