@@ -120,9 +120,16 @@ impl Templates {
         env.set_undefined_behavior(UndefinedBehavior::Strict);
         // Markdown output: HTML escaping would mangle it.
         env.set_auto_escape_callback(|_| AutoEscape::None);
-        env.set_keep_trailing_newline(true);
-        env.set_trim_blocks(true);
-        env.set_lstrip_blocks(true);
+        // Whitespace is part of the syntax since MiniJinja 3.
+        let syntax = env
+            .syntax()
+            .to_builder()
+            .keep_trailing_newline(true)
+            .trim_blocks(true)
+            .lstrip_blocks(true)
+            .build()
+            .map_err(|err| anyhow!("template syntax: {err}"))?;
+        env.set_syntax(syntax);
         // Frontmatter safety: quote and escape a value so a title containing a
         // quote can't corrupt the block.
         env.add_filter("yaml", yaml_filter);
@@ -216,7 +223,9 @@ impl Templates {
             .env
             .get_template(name)
             .map_err(|_| anyhow!(unknown_template(name)))?;
-        template.render(ctx).map_err(|err| render_error(name, err))
+        template
+            .render(Value::from(minijinja::value::Serde(&ctx)))
+            .map_err(|err| render_error(name, err))
     }
 }
 
