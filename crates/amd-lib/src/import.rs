@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::board::{Board, Column};
-use crate::task;
+use crate::task::{self, Task};
 
 const DUPLICATE_TAG: &str = "DUPLICATE";
 
@@ -39,6 +39,11 @@ pub struct ImportSummary {
     /// consolidation that lost its frontmatter, an unreadable file); one
     /// bad ticket shouldn't sink the rest of the batch.
     pub skipped: Vec<(PathBuf, String)>,
+    /// Column folders the source didn't have, taken as empty (ticket 251).
+    pub missing_columns: Vec<String>,
+    /// Tickets lying loose in the source's tasks folder, outside any column,
+    /// imported into the backlog (ticket 251).
+    pub loose: usize,
 }
 
 impl ImportSummary {
@@ -78,8 +83,23 @@ pub fn import(dest: &Board, source_root: &Path, dry_run: bool) -> Result<ImportS
     let mut skipped: Vec<(PathBuf, String)> = Vec::new();
     let mut next = dest.next_id()?;
 
+    // What the source has (ticket 251): a missing column folder is just
+    // empty, and tickets loose in the folder itself go to the backlog.
+    let mut missing_columns = Vec::new();
+    let mut found: Vec<(Task, Column)> = Vec::new();
     for column in source.workflow().columns() {
-        for task in source.tasks_in(column)? {
+        if !source.dir(column).is_dir() {
+            missing_columns.push(column.to_string());
+            continue;
+        }
+        found.extend(source.tasks_in(column)?.into_iter().map(|t| (t, column)));
+    }
+    let loose = loose_tickets(source_root);
+    let loose_count = loose.len();
+    found.extend(loose.into_iter().map(|t| (t, Column::Backlog)));
+
+    {
+        for (task, column) in found {
             let Some(old_number) = task.id else {
                 continue;
             };
@@ -188,7 +208,38 @@ pub fn import(dest: &Board, source_root: &Path, dry_run: bool) -> Result<ImportS
         dest.record_id(next.saturating_sub(1))?;
     }
 
-    Ok(ImportSummary { imported, skipped })
+    Ok(ImportSummary {
+        imported,
+        skipped,
+        missing_columns,
+        loose: loose_count,
+    })
+}
+
+/// Tickets (`NNN-title.md`) lying directly in a source's tasks folder,
+/// outside any column folder (ticket 251), by number.
+pub fn loose_tickets(source_root: &Path) -> Vec<Task> {
+    let Ok(entries) = fs::read_dir(source_root) else {
+        return Vec::new();
+    };
+    let mut tasks: Vec<Task> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file())
+        .filter_map(|p| Task::from_path(&p, Column::Backlog))
+        .filter(|t| t.id.is_some())
+        .collect();
+    tasks.sort_by(|a, b| a.id.cmp(&b.id).then_with(|| a.stem.cmp(&b.stem)));
+    tasks
+}
+
+/// Whether `dir` has anything to import: at least one of the standard
+/// column folders, or tickets loose in it (ticket 251).
+pub fn looks_importable(dir: &Path) -> bool {
+    Column::STANDARD
+        .iter()
+        .any(|c| dir.join(c.to_string()).is_dir())
+        || !loose_tickets(dir).is_empty()
 }
 
 fn normalize_title(title: &str) -> String {
@@ -311,6 +362,29 @@ mod tests {
         )
         .unwrap();
         path
+    }
+
+    #[test]
+    fn a_missing_column_is_empty_and_loose_tickets_go_to_the_backlog() {
+        let src_dir = tempfile::tempdir().unwrap();
+        let src = src_dir.path().join("tasks");
+        fs::create_dir_all(src.join("done")).unwrap();
+        fs::write(
+            src.join("124-loose.md"),
+            "---\nid: \"124\"\ntitle: \"Loose\"\n---\n\nbody\n",
+        )
+        .unwrap();
+        fs::write(src.join("notes.md"), "not a ticket\n").unwrap();
+        assert!(looks_importable(&src));
+        assert!(!looks_importable(src_dir.path()), "nothing there");
+        let dst_dir = tempfile::tempdir().unwrap();
+        let dest = board_at(dst_dir.path());
+        let summary = import(&dest, &src, false).unwrap();
+        assert_eq!(summary.loose, 1);
+        assert_eq!(summary.missing_columns, ["backlog", "todo", "doing"]);
+        assert_eq!(summary.imported.len(), 1);
+        assert_eq!(summary.imported[0].column, Column::Backlog);
+        assert!(dest.dir(Column::Backlog).join("001-loose.md").exists());
     }
 
     #[test]
