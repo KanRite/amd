@@ -497,6 +497,13 @@ project out on this machine (`--unhide` puts it back, `--all` shows
 everything); scratch boards under the temporary directory are never
 listed. It reads each board as this machine last saw it.
 
+**Tickets waiting to be triaged come first.** Every open ticket tagged
+TRIAGE (an imported GitHub issue, or a dependency update that needs a
+person) heads everyone's My work on its project, marked TRIAGE, unless it's
+assigned to someone else. A hidden project with one is shown again. A
+TRIAGE ticket is always high priority: you can't set it lower until you've
+looked at it and taken TRIAGE off.
+
 With nothing in todo or doing, it offers work to pick instead (never a
 draft, or a ticket locked by someone else). With unassigned tickets
 included (the landing page's "Include unassigned tickets" checkbox, on
@@ -644,8 +651,8 @@ every five minutes per project), tagged `TRIAGE`, with a link back to the
 issue and its text, as one commit. A label becomes a tag when it's on the
 project's tag list; any other is named in the ticket's notes. An issue is
 only ever imported once, so abandoning a `TRIAGE` ticket turns its issue down
-for good. New tickets start at the project's triage priority (`amd
-triage-priority medium`, or Admin). Admin's "GitHub issues" switch, or `amd
+for good. New tickets are high priority, as every TRIAGE ticket is, and
+head everyone's My work until they're triaged. Admin's "GitHub issues" switch, or `amd
 issues off`, stops the automatic pull; `amd issues` checks now (`--repo
 owner/repo` and `--label` for a one-off, `--dry-run` to preview). It reads
 GitHub with `gh`.

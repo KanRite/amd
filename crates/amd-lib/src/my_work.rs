@@ -76,6 +76,10 @@ pub struct WorkItem {
     /// The backlog folder it's filed in (an epic or sprint), which a front
     /// end needs to find it there; `None` outside the backlog.
     pub folder: Option<String>,
+    /// Tagged TRIAGE (ticket 248): waiting to be triaged, so first in My
+    /// work, for everyone on the project.
+    #[serde(default)]
+    pub triage: bool,
 }
 
 /// How to order My work.
@@ -203,6 +207,9 @@ fn names_for(board: &Board, email: &str, fallback: Option<&str>) -> Vec<String> 
 /// use a different email per organisation, as leases already allow), else
 /// `email`/`name`. A board that can't be read is skipped, not fatal.
 pub fn my_work(email: &str, name: Option<&str>, include_hidden: bool, sort: Sort) -> Vec<WorkItem> {
+    // TRIAGE tickets first (ticket 248), from every project, hidden ones
+    // too: the caller shows a hidden project again (`show_projects_of`).
+    let triage = triage(email, name);
     let mut items = Vec::new();
     each_board(include_hidden, email, name, |project, repo, board, mine| {
         // Todo- and doing-kind columns (ticket 223).
@@ -217,13 +224,51 @@ pub fn my_work(email: &str, name: Option<&str>, include_hidden: bool, sort: Sort
             };
             for task in tasks {
                 let assignee = task.assignee().unwrap_or_default().to_lowercase();
-                if !assignee.is_empty() && mine.contains(&assignee) {
+                if !assignee.is_empty()
+                    && mine.contains(&assignee)
+                    && !task.has_tag(crate::task::TRIAGE_TAG)
+                {
                     items.push(item(project, repo, &task));
                 }
             }
         }
     });
     sort_items(&mut items, sort);
+    triage.into_iter().chain(items).collect()
+}
+
+/// Every open TRIAGE ticket on every project on this machine, hidden ones
+/// included (ticket 248): an imported GitHub issue, or a Dependabot update
+/// that needs a person, waiting to be looked at. Each is for everyone on its
+/// project, unless it's assigned to someone else. Not done-kind columns or
+/// the archive. Oldest first.
+pub fn triage(email: &str, name: Option<&str>) -> Vec<WorkItem> {
+    let mut items = Vec::new();
+    each_board(true, email, name, |project, repo, board, mine| {
+        if project.archived {
+            return;
+        }
+        let columns: Vec<Column> = board
+            .workflow()
+            .columns()
+            .filter(|c| !c.is(Kind::Done))
+            .collect();
+        for column in columns {
+            let Ok(tasks) = board.tasks_in(column) else {
+                continue;
+            };
+            for task in tasks {
+                if !task.has_tag(crate::task::TRIAGE_TAG) {
+                    continue;
+                }
+                let assignee = task.assignee().unwrap_or_default().to_lowercase();
+                if assignee.trim().is_empty() || mine.contains(&assignee) {
+                    items.push(item(project, repo, &task));
+                }
+            }
+        }
+    });
+    sort_items(&mut items, Sort::Age);
     items
 }
 
@@ -406,6 +451,7 @@ fn item(project: &Project, repo: &str, task: &crate::task::Task) -> WorkItem {
             .unwrap_or_default(),
         epic: task.epic_meta().unwrap_or_default(),
         folder: task.epic.clone(),
+        triage: task.has_tag(crate::task::TRIAGE_TAG),
     }
 }
 
@@ -472,6 +518,7 @@ mod tests {
             created: created.into(),
             epic: String::new(),
             folder: None,
+            triage: false,
         }
     }
 

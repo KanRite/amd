@@ -241,6 +241,13 @@ pub fn set_by_hand(board: &Board, task: &Task, value: &str) -> Result<String> {
         task.write_priority(task.hash()?, &own, None, None, false)?;
         return Ok(format!("{id} priority follows auto priority again"));
     }
+    // Waiting to be triaged is high, full stop (ticket 248).
+    if value != "high" && task.has_tag(crate::task::TRIAGE_TAG) {
+        bail!(
+            "{id} is waiting to be triaged, so it's high: take {} off first",
+            crate::task::TRIAGE_TAG
+        );
+    }
     let pin = settings.auto_priority() && settings.priority_override();
     task.write_priority(task.hash()?, &value, None, None, pin)?;
     Ok(if pin {

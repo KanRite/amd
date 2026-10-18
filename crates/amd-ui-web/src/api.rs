@@ -791,11 +791,6 @@ pub async fn set_shared_documents(name: &str) -> Result<SyncReport, String> {
     call("set_shared_documents", &SharedArgs { name }).await
 }
 
-#[derive(Serialize)]
-struct PriorityArgs<'a> {
-    priority: &'a str,
-}
-
 /// Pulls in GitHub issues for every project whose switch is on (ticket
 /// 173): what the landing page does when it loads.
 pub async fn pull_issues() -> Result<Vec<SyncReport>, String> {
@@ -815,11 +810,6 @@ pub async fn set_auto_priority(on: bool) -> Result<SyncReport, String> {
 /// Whether a priority set by hand pins its ticket (ticket 215).
 pub async fn set_priority_override(on: bool) -> Result<SyncReport, String> {
     call("set_priority_override", &OnArgs { on }).await
-}
-
-/// Sets the priority imported GitHub issues start at (ticket 158).
-pub async fn set_triage_priority(priority: &str) -> Result<SyncReport, String> {
-    call("set_triage_priority", &PriorityArgs { priority }).await
 }
 
 #[derive(Serialize)]

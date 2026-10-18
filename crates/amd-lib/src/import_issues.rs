@@ -87,7 +87,7 @@ pub struct Planned {
     pub tags: Vec<String>,
     /// Labels the project doesn't list, named in the notes instead.
     pub dropped: Vec<String>,
-    /// The project's `triage-priority`: what the ticket starts at.
+    /// Always high: a TRIAGE ticket is (ticket 248).
     pub priority: String,
 }
 
@@ -383,7 +383,8 @@ pub fn plan_with(
     let seen = imported_sources(board)?;
     let settings = board_settings::load(board);
     let listed = settings.tags();
-    let priority = settings.triage_priority();
+    // Every TRIAGE ticket is high (ticket 248).
+    let priority = "high".to_string();
     let mut next = board.next_id()?;
     let mut plan = Plan::default();
     let mut first_error = None;
@@ -713,12 +714,8 @@ mod tests {
     }
 
     #[test]
-    fn tickets_start_at_the_projects_triage_priority() {
+    fn tickets_start_high_as_every_triage_ticket_is() {
         let (_dir, board) = board();
-        let mut settings = board_settings::load(&board);
-        assert_eq!(settings.triage_priority(), "low", "low unless set");
-        settings.set_triage_priority("High").unwrap();
-        settings.save(&board).unwrap();
         let plan = plan_with(&board, &web(), None, canned).unwrap();
         assert!(
             plan.new[0].line().ends_with("[TRIAGE] high"),

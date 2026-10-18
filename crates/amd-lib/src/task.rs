@@ -511,6 +511,11 @@ impl Task {
 
     /// How urgent the ticket is: one of [`PRIORITIES`], `low` when unset.
     pub fn priority(&self) -> String {
+        // A ticket waiting to be triaged is always high (ticket 248), even
+        // one written before that rule, whatever its file says.
+        if self.has_tag(TRIAGE_TAG) {
+            return "high".to_string();
+        }
         self.meta("priority")
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| DEFAULT_PRIORITY.to_string())
@@ -520,6 +525,12 @@ impl Task {
     /// refused.
     pub fn set_priority(&self, expected: ContentHash, priority: &str) -> Result<()> {
         validate_priority(priority)?;
+        if priority != "high" && self.has_tag(TRIAGE_TAG) {
+            bail!(
+                "{} is waiting to be triaged, so it's high: take {TRIAGE_TAG} off first",
+                self.id_display()
+            );
+        }
         self.write_checked(expected, |text| {
             set_meta(text, "priority", &format!("{priority:?}"))
         })
@@ -540,6 +551,12 @@ impl Task {
         if let Some(own) = own {
             validate_priority(own)?;
         }
+        // A TRIAGE ticket stays high (ticket 248), whatever is being put back.
+        let priority = if self.has_tag(TRIAGE_TAG) {
+            "high"
+        } else {
+            priority
+        };
         self.write_checked(expected, |text| {
             let mut text = set_meta(text, "priority", &format!("{priority:?}"))?;
             for (key, value) in [
@@ -640,6 +657,8 @@ impl Task {
             let text = set_meta(&text, "branch-name", &format!("{branch_name:?}"))?;
             let text = set_meta(&text, "parent", &format!("{parent:?}"))?;
             let text = set_meta(&text, "related", &format!("[{}]", related.join(",")))?;
+            // Adding TRIAGE makes it high (ticket 248).
+            let text = ensure_priority(&text)?;
             let head = split_body(&text)
                 .map(|(head, _)| head.to_string())
                 .ok_or_else(|| anyhow::anyhow!("no frontmatter in {}", self.path.display()))?;
@@ -1040,6 +1059,10 @@ pub fn ensure_priority(text: &str) -> Result<String> {
     if !text.starts_with("---") {
         return Ok(text.to_string());
     }
+    // A TRIAGE ticket is always high (ticket 248), whatever it was given.
+    if text_has_triage(text) {
+        return set_meta(text, "priority", "\"high\"");
+    }
     match meta_in(text, "priority").filter(|p| !p.is_empty()) {
         Some(priority) => {
             validate_priority(priority)?;
@@ -1047,6 +1070,15 @@ pub fn ensure_priority(text: &str) -> Result<String> {
         }
         None => set_meta(text, "priority", &format!("{DEFAULT_PRIORITY:?}")),
     }
+}
+
+/// Whether a ticket's text carries the TRIAGE tag, case ignored.
+fn text_has_triage(text: &str) -> bool {
+    meta_in(text, "tags")
+        .map(parse_list)
+        .unwrap_or_default()
+        .iter()
+        .any(|t| t.trim().eq_ignore_ascii_case(TRIAGE_TAG))
 }
 
 /// Empty (unsized) or one of `VALID_POINTS` — checked here so every write
@@ -1797,6 +1829,28 @@ mod tests {
         assert!(err.contains("invalid priority 'urgent'"), "{err}");
         assert!(err.contains("low, medium, high"), "{err}");
         assert_eq!(task.priority(), "high", "the rejected write must not land");
+    }
+
+    #[test]
+    fn a_triage_ticket_is_always_high() {
+        let text = "---\nid: \"001\"\ntags: [triage]\npriority: \"low\"\n---\n\nb\n";
+        let saved = ensure_priority(text).unwrap();
+        assert!(saved.contains("priority: \"high\""), "{saved}");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("backlog")).unwrap();
+        let path = dir.path().join("backlog/001-x.md");
+        std::fs::write(&path, text).unwrap();
+        let task = Task::from_path(&path, crate::board::Column::Backlog).unwrap();
+        assert_eq!(
+            task.priority(),
+            "high",
+            "read as high even before it's rewritten"
+        );
+        let err = task
+            .set_priority(task.hash().unwrap(), "medium")
+            .unwrap_err();
+        assert!(err.to_string().contains("take TRIAGE off first"), "{err}");
+        task.set_priority(task.hash().unwrap(), "high").unwrap();
     }
 
     #[test]

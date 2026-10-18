@@ -695,8 +695,8 @@ gi_env="XDG_CONFIG_HOME=${gi}/config AMD_NO_INPUT=1 GH_LOG=${gi}/gh.log PATH=${g
 gib="${gi}/issues-tickets"
 assert "amd issues --dry-run lists what it would import and writes nothing" \
   bash -c "cd '${gib}' && out=\$(env ${gi_env} '${AMD}' issues --repo acme/web --dry-run) \
-    && printf '%s\\n' \"\$out\" | grep -q '#2 -> 001 \"Dark mode\" (acme/web) \[TRIAGE\] low\$' \
-    && printf '%s\\n' \"\$out\" | grep -q '#4 -> 002 \"Checkout button overlaps\" (acme/web) \[TRIAGE, BUG\] low, labels not on the tag list: needs-info' \
+    && printf '%s\\n' \"\$out\" | grep -q '#2 -> 001 \"Dark mode\" (acme/web) \[TRIAGE\] high\$' \
+    && printf '%s\\n' \"\$out\" | grep -q '#4 -> 002 \"Checkout button overlaps\" (acme/web) \[TRIAGE, BUG\] high, labels not on the tag list: needs-info' \
     && printf '%s\\n' \"\$out\" | grep -q 'would import 2 issues — nothing written' \
     && ! ls tasks/backlog/*.md 2>/dev/null | grep -v README"
 assert "...a real run makes TRIAGE tickets with their source, in one commit" \
@@ -722,12 +722,12 @@ assert "TRIAGE is built in: it can't be added to or removed from the list" \
     && env ${gi_env} '${AMD}' tags remove TRIAGE 2>&1 | grep -q 'built in'"
 assert "a TRIAGE ticket isn't a draft" \
   bash -c "cd '${gib}' && env ${gi_env} AMD_NO_BRANCH=1 '${AMD}' todo 2 >/dev/null 2>&1 && ls tasks/todo/002-* >/dev/null"
-assert "amd triage-priority sets what imported tickets start at, and refuses a made-up one" \
-  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' triage-priority | grep -qx low \
-    && ! env ${gi_env} '${AMD}' triage-priority urgent 2>/dev/null \
-    && env ${gi_env} '${AMD}' triage-priority High | grep -q 'start at priority high' \
-    && grep -qx 'triage-priority = high' .settings \
-    && env ${gi_env} '${AMD}' issues --repo acme/other --dry-run | grep -q '\[TRIAGE\] high'"
+assert "a TRIAGE ticket is always high, and its priority can't be lowered (ticket 248)" \
+  bash -c "cd '${gib}' && grep -q '^priority: \"high\"' tasks/backlog/002-checkout-button-overlaps.md 2>/dev/null \
+      || grep -q '^priority: \"high\"' tasks/todo/002-checkout-button-overlaps.md \
+    && env ${gi_env} '${AMD}' set 2 priority low 2>&1 | grep -q 'waiting to be triaged, so it.s high' \
+    && env ${gi_env} '${AMD}' triage-priority | grep -q '^high' \
+    && ! env ${gi_env} '${AMD}' triage-priority low 2>/dev/null"
 assert "with no repository on GitHub, it asks for owner/repo" \
   bash -c "cd '${gib}' && env ${gi_env} '${AMD}' issues 2>&1 | grep -q 'amd issues --repo owner/repo'"
 assert "amd issues off and on set whether the landing page pulls them in (ticket 173)" \
@@ -1783,6 +1783,14 @@ assert "amd mine --hide leaves a project out, --all brings it back, --unhide res
     && in_mw mine --all | grep -q beta && in_mw mine --unhide beta >/dev/null && in_mw mine | grep -q beta"
 assert "amd mine --json gives the same list for scripts" \
   bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --json | grep -c '\"project\"' | grep -qx 6"
+assert "a TRIAGE ticket heads everyone's My work, high, and brings its hidden project back (ticket 248)" \
+  bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --hide gamma >/dev/null \
+    && (cd '${mwh}/other/gamma-tickets' && env XDG_CONFIG_HOME='${mw}/config' AMD_COMMIT=0 '${AMD}' new 'Look at this issue' --tag TRIAGE --no-edit >/dev/null 2>&1) \
+    && out=\$(in_mw mine 2>&1) \
+    && printf '%s\\n' \"\$out\" | grep -q 'gamma has tickets to triage' \
+    && printf '%s\\n' \"\$out\" | grep -v 'has tickets' | head -1 | grep -q 'backlog  high .*gamma .*TRIAGE  Look at this issue' \
+    && in_mw mine | grep -q 'gamma doing' \
+    && (cd '${mwh}/other/gamma-tickets' && env XDG_CONFIG_HOME='${mw}/config' AMD_COMMIT=0 '${AMD}' abandon 5 >/dev/null 2>&1; rm -rf tasks/archive)"
 
 echo "archiving a project (ticket 157):"
 in_beta() { (cd "${mwh}/work/beta-tickets" && env XDG_CONFIG_HOME="${mw}/config" TMPDIR="${mw_bin}" AMD_NO_BRANCH=1 "${AMD}" "$@"); }

@@ -651,10 +651,9 @@ enum Cmd {
         #[arg(value_name = "on|off", value_parser = PossibleValuesParser::new(["on", "off"]))]
         action: Option<String>,
     },
-    /// Show or set the priority imported GitHub issues start at
-    ///
-    /// low, medium or high, for tickets `amd import issues` makes. With no
-    /// value, says which it is
+    /// Retired: a TRIAGE ticket, such as an imported GitHub issue, is
+    /// always high (ticket 248)
+    #[command(hide = true)]
     TriagePriority {
         #[arg(value_name = "PRIORITY")]
         priority: Option<String>,
@@ -1878,16 +1877,26 @@ fn cmd_mine(
         } else {
             format!("{:>2} pts", item.points)
         };
+        // Waiting to be triaged (ticket 248): first, and said so.
+        let triage = if item.triage { "TRIAGE  " } else { "" };
         println!(
-            "{:<5}  {:<6}  {}  {:<16}  {}  {}",
+            "{:<5}  {:<6}  {}  {:<16}  {}  {triage}{}",
             item.column, item.priority, points, item.project, item.id, item.title
         );
     };
     items.iter().for_each(line);
+    // A hidden project with a ticket to triage is shown again (ticket 248).
+    let triage: Vec<my_work::WorkItem> = items.iter().filter(|i| i.triage).cloned().collect();
+    for shown in my_work::show_projects_of(&triage)? {
+        eprintln!("{shown} has tickets to triage, so it's back in your work");
+    }
     // Nothing to do (ticket 160): work you could take (unassigned todo and
     // doing first, when unassigned work is included, then the backlog's
     // highest priority), and any hidden project it's in shown again.
     let mut projects = projects;
+    if !triage.is_empty() {
+        projects = my_work::projects();
+    }
     if items.is_empty() {
         let pick = my_work::to_pick(&email, name.as_deref(), my_work::include_unassigned());
         if pick.is_empty() {
@@ -2460,20 +2469,15 @@ fn cmd_priority_override(board: &Board, action: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Sets the priority imported GitHub issues start at (ticket 158),
-/// committed and pushed like any setting; with no value, says which it is.
-fn cmd_triage_priority(board: &Board, priority: Option<String>) -> Result<()> {
-    let Some(priority) = priority else {
-        println!("{}", board_settings::load(board).triage_priority());
-        return Ok(());
-    };
-    let priority = priority.trim().to_lowercase();
-    with_auto_commit(board, "settings", "triage-priority", &priority, || {
-        let mut settings = board_settings::load(board);
-        settings.set_triage_priority(&priority)?;
-        settings.save(board)
-    })?;
-    println!("imported issues start at priority {priority}");
+/// `amd triage-priority` is retired (ticket 248): every TRIAGE ticket is
+/// high, so there's nothing to choose.
+fn cmd_triage_priority(_board: &Board, priority: Option<String>) -> Result<()> {
+    match priority {
+        None => println!("high (every TRIAGE ticket is high; it's no longer a setting)"),
+        Some(_) => bail!(
+            "the triage priority is no longer a setting: every TRIAGE ticket is high, and heads everyone's My work"
+        ),
+    }
     Ok(())
 }
 
