@@ -377,6 +377,13 @@ fn work_row(w: WorkItem) -> impl IntoView {
                 <span class=format!("rounded px-1.5 text-xs font-medium {tone}")>{priority.clone()}</span>
                 <span class="w-16 text-xs uppercase text-slate-500">{w.column.dir_name()}</span>
                 <span class="font-mono text-xs text-slate-500">{w.id.clone()}</span>
+                // Waiting to be triaged (ticket 248): first, for everyone.
+                {w.triage
+                    .then(|| view! {
+                        <span class="rounded border border-dashed border-amber-500 px-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300" title="Waiting to be triaged: look at it, then take TRIAGE off">
+                            "TRIAGE"
+                        </span>
+                    })}
                 <span class="flex-1 font-medium">{w.title.clone()}</span>
                 {(!w.points.is_empty())
                     .then(|| view! { <span class="font-mono text-xs text-slate-500">{format!("{} pts", w.points)}</span> })}

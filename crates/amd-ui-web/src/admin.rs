@@ -1289,27 +1289,6 @@ fn IssuesAdmin() -> impl IntoView {
         }
     });
     let busy = RwSignal::new(false);
-    let saved_priority = move || {
-        ctx.board.with(|b| {
-            b.as_ref()
-                .map(|b| b.triage_priority.clone())
-                .filter(|p| !p.is_empty())
-                .unwrap_or_else(|| "low".to_string())
-        })
-    };
-    let priority_note = RwSignal::new(None::<String>);
-    let set_priority = move |priority: String| {
-        spawn_local(async move {
-            match api::set_triage_priority(&priority).await {
-                Ok(report) => {
-                    ctx.report(report);
-                    priority_note.set(Some(format!("Imported issues start at {priority}.")));
-                    ctx.reload();
-                }
-                Err(e) => priority_note.set(Some(e)),
-            }
-        });
-    };
     let run = move |preview: bool| {
         busy.set(true);
         spawn_local(async move {
@@ -1374,23 +1353,7 @@ fn IssuesAdmin() -> impl IntoView {
                         })
                 }}
             </div>
-            <label class="flex items-center gap-2 text-sm">
-                "New tickets start at priority"
-                <select
-                    class="rounded border border-slate-300 bg-slate-50 px-2 py-1 text-sm appearance-none dark:border-slate-600 dark:bg-slate-900"
-                    aria-label="Priority imported issues start at"
-                    prop:value=saved_priority
-                    on:change=move |ev| set_priority(event_target_value(&ev))
-                >
-                    {amd_ui_model::ticket::PRIORITIES
-                        .iter()
-                        .map(|p| view! { <option value=*p selected=move || saved_priority() == *p>{*p}</option> })
-                        .collect_view()}
-                </select>
-            </label>
-            <Show when=move || priority_note.with(Option::is_some)>
-                <p class="text-xs text-slate-600 dark:text-slate-300">{move || priority_note.get().unwrap_or_default()}</p>
-            </Show>
+            <p class="text-xs text-slate-500">"They come in at high priority, as every TRIAGE ticket is, and head everyone's My work until they're triaged."</p>
         </section>
     }
 }

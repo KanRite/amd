@@ -1487,19 +1487,6 @@ async fn set_priority_override(state: Tauri<'_, AppState>, on: bool) -> Result<S
     .await
 }
 
-/// The priority an imported GitHub issue starts at (ticket 158).
-#[tauri::command]
-async fn set_triage_priority(state: Tauri<'_, AppState>, priority: String) -> Result<SyncReport> {
-    change(&state, move |p| {
-        let board = &p.repos[0].1;
-        let priority = priority.trim().to_lowercase();
-        save_setting(board, &format!("triage-priority {priority}"), |s| {
-            s.set_triage_priority(&priority)
-        })
-    })
-    .await
-}
-
 /// Brings a repository's open GitHub issues into the backlog, tagged
 /// TRIAGE (ticket 158), as `amd issues` does; `preview` only says
 /// what it would do. `repo` empty means every declared repository on
@@ -2486,6 +2473,9 @@ async fn home() -> Result<amd_ui_model::Home> {
             }
             None => Vec::new(),
         };
+        // A hidden project with a ticket to triage is shown again (ticket 248).
+        let triage: Vec<my_work::WorkItem> = work.iter().filter(|w| w.triage).cloned().collect();
+        my_work::show_projects_of(&triage).map_err(err)?;
         // Nothing to do (ticket 160): work to pick from the backlogs, and
         // any hidden project it's in shown again before the list is read.
         let include_unassigned = my_work::include_unassigned();
@@ -2512,6 +2502,7 @@ async fn home() -> Result<amd_ui_model::Home> {
             points: w.points,
             created: w.created,
             folder: w.folder,
+            triage: w.triage,
         };
         Ok(amd_ui_model::Home {
             work: work.into_iter().map(convert).collect(),
@@ -2818,7 +2809,6 @@ pub fn run() {
             set_tags_only,
             set_shared_documents,
             import_issues,
-            set_triage_priority,
             pull_issues,
             set_import_issues,
             set_auto_priority,

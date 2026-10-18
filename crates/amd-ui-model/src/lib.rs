@@ -655,9 +655,6 @@ pub struct Board {
     /// when the project names none.
     #[serde(default)]
     pub shared_documents: String,
-    /// The priority an imported GitHub issue starts at (ticket 158).
-    #[serde(default)]
-    pub triage_priority: String,
     /// Whether the landing page pulls in this project's GitHub issues
     /// (ticket 173).
     #[serde(default)]
@@ -1273,6 +1270,9 @@ pub struct WorkItem {
     /// The backlog folder (epic or sprint) it's filed in, to find it there.
     #[serde(default)]
     pub folder: Option<String>,
+    /// Tagged TRIAGE (ticket 248): first in My work, for everyone.
+    #[serde(default)]
+    pub triage: bool,
 }
 
 /// A newly created ticket and what happened when it was recorded.
@@ -1618,7 +1618,6 @@ mod assigned_tests {
             tags_only: false,
             admin: AdminAccess::default(),
             shared_documents: String::new(),
-            triage_priority: String::new(),
             import_issues: true,
             auto_priority: false,
             priority_override: true,

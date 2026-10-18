@@ -75,7 +75,7 @@ redundant. Their history is in git if it is ever wanted again.
   `Name <email>, …`, git's own identity shape, parsed on `>` so a comma in
   a name survives; email is the identity) live here. **So does every other
   board setting** (ticket 111): `project`, `repos`, `wip-limit`,
-  `lease-hours`, `ticket-numbering`, `sync`, `triage-priority`. Ticket 057 had moved some of
+  `lease-hours`, `ticket-numbering`, `sync`. Ticket 057 had moved some of
   them into `{project}-documents/.settings/` so they'd be PR-reviewed, but
   a change there only reached the team once a documents PR merged, and the
   copies drifted (agile-md's registered repos sat uncommitted in documents
@@ -382,7 +382,8 @@ redundant. Their history is in git if it is ever wanted again.
   the board's history (`git log -p -G`) plus the files on disk, archive
   included. `plan_with` takes the fetch as a closure, so it's tested
   without GitHub; `tests/test.sh` puts a fake `gh` on `PATH`. Tickets
-  start at the project's `triage-priority`.
+  are high: every TRIAGE ticket is (ticket 248; the `triage-priority`
+  setting is retired, `amd triage-priority` hidden and only says so).
 - `crates/amd-cli/src/main.rs` — the `amd` binary: clap CLI and command handlers; it also owns
   `form.rs`, `value.rs`, `completions.rs` and `init.rs`, which are CLI-only.
 - `crates/amd-cli/src/init.rs` — `amd init <project>`: finds or creates
@@ -780,6 +781,17 @@ off**, ticket 141) to
   what an imported GitHub issue arrives with. It holds nothing back (any
   move is fine); taking it off is triaging. Check for DRAFT itself, not
   `is_reserved_tag`, when deciding whether a ticket is a draft.
+  **A TRIAGE ticket is always high and heads My work** (ticket 248):
+  `Task::priority()` answers high for one whatever its file says;
+  `ensure_priority` (so `Draft::write`, `set_text`, `apply_edit`) stores
+  high; `set_priority` and `auto_priority::set_by_hand` refuse anything
+  lower ("take TRIAGE off first"), and `write_priority` keeps it high.
+  `my_work::triage` gathers every open TRIAGE ticket (not done-kind, not
+  archived projects) from every project, hidden ones too, unassigned or
+  yours; `my_work` puts them first (`WorkItem.triage`), and `amd mine` and
+  amdui's `home` call `show_projects_of` on them so a hidden project comes
+  back. The landing page marks them TRIAGE; the editor says why the
+  priority is high.
 - **Tag filtering**: `amd tag <tag>` lists every ticket carrying `<tag>`,
   across every column, via `Board::tasks_tagged()`/`Task::has_tag()`. Every
   listing form also takes `--tag <tag>` to narrow it down: `amd board`,
