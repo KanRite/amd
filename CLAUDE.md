@@ -527,12 +527,24 @@ redundant. Their history is in git if it is ever wanted again.
   up temp git repos. Unit tests live next to the code in `#[cfg(test)] mod tests`.
 - `.github/workflows/ci.yml` — fmt + clippy + cargo test + tests/test.sh, and
   shellcheck for the shell files.
-- `.github/dependabot.yml` / `dependabot-auto-merge.yml` (ticket 246):
-  weekly GitHub Actions and Cargo updates, Cargo's minor and patch grouped
-  into one PR. The workflow turns on auto-merge (squash) for a Dependabot
-  minor or patch PR; it still needs a code owner's approval, since main
-  requires one and the Actions bot isn't a code owner. Needs the repo's
-  "Allow auto-merge" setting.
+- `.github/dependabot.yml` and the **Dependabot gate** (tickets 246,
+  247; `.github/workflows/dependabot-gate.yml`, `scripts/dependabot-gate.sh`):
+  weekly GitHub Actions and Cargo updates (Cargo's minor and patch grouped),
+  each only once a release is 7 days old (`cooldown`; security updates
+  don't wait). The gate reads each PR's updates from Dependabot's
+  `updated-dependencies` commit metadata and decides: **ready** (every
+  update a patch, or a minor of a 1.x+ version; no unwithdrawn advisory in
+  GitHub's database for `name@new-version`, ecosystem rust/actions; CI's
+  `rust` and `shell` passed) is labelled, auto-merged, and approved as the
+  owner of `DEPENDABOT_APPROVER_TOKEN` (MrDClaudeBot, a code owner, since
+  main needs one); **held: advisory** gets a comment and is looked at again
+  by the weekly run; **needs a person** (a major, a 0.x minor, failed
+  checks, or superseded by a newer open PR for the same dependency) gets an
+  issue marked `<!-- dependabot-pr: N -->`, closed when the PR closes, which
+  reaches the board as a TRIAGE ticket through amd's issue import. Runs on
+  PR events and CI completion (assess only: Dependabot-started runs can't
+  read Actions secrets) and weekly on Mondays or by hand (apply).
+  `DRY_RUN=1` prints instead of acting.
 - `.github/workflows/release.yml` — on a `vX.Y.Z` tag, builds `amd` and
   `amdui` for Linux and macOS, x86_64 and aarch64 (ticket 085): WebKitGTK on
   Linux, the wasm target and Trunk, `trunk build`, then `cargo build -p

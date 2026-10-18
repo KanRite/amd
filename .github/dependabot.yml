@@ -4,6 +4,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Ticket 247: only releases at least a week old, which is when a bad
+    # one has usually been yanked or flagged. Security updates don't wait.
+    cooldown:
+      default-days: 7
     # Conventional commit prefix so Dependabot's commits pass commit validation
     # and read cleanly in the changelog. Its branch names are always
     # dependabot/… (with underscores), which the validation workflow accepts via
@@ -13,12 +17,13 @@ updates:
 
   # Rust crates (ticket 246): weekly, with every minor and patch update in
   # one grouped PR so it isn't noisy; a major update gets a PR of its own.
-  # The dependabot-auto-merge workflow merges the grouped one once a code
-  # owner approves and the checks pass.
+  # The Dependabot gate workflow applies it once it's checked (ticket 247).
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(deps)"
     groups:
