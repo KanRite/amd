@@ -32,7 +32,8 @@ clap_complete = "4"
 deunicode = "1.6.2"
 inquire = "0.9"
 libc = "0.2.189"
-minijinja = "3"
+# serde is a feature since MiniJinja 3; templates render serde contexts.
+minijinja = { version = "3", features = ["serde"] }
 richrs = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
