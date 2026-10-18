@@ -1137,6 +1137,13 @@ enum ProjectAction {
 }
 
 fn run() -> Result<()> {
+    // Run by the completion scripts on every TAB (ticket 028): quiet, no
+    // prompt, no fetch. Looked for before clap so it's no subcommand, which
+    // clap_complete would put in every script, hidden or not.
+    if env::args().nth(1).as_deref() == Some(completions::DESTINATIONS) {
+        completions::destinations(&Cli::command());
+        return Ok(());
+    }
     let cli = Cli::parse();
     form::set_no_input(cli.no_input);
     render::set_plain(cli.plain);

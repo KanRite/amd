@@ -2349,6 +2349,41 @@ assert "the install hint goes to stderr, not into the script" \
   bash -c "'${AMD}' completions bash 2>/dev/null | grep -qv '^# install it with:' && '${AMD}' completions bash 2>&1 >/dev/null | grep -q 'install it with'"
 assert "completions work without a board" \
   bash -c "cd '${nongit}' && '${AMD}' completions bash | grep -q '_amd'"
+# Epic names and added columns are destination verbs, so completion offers
+# them, read from the board at TAB time (ticket 028).
+dc="$(mktemp -d)"
+( cd "${dc}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init dests --local-only >/dev/null \
+  && AMD_NO_BRANCH=1 "${AMD}" group epic checkout >/dev/null \
+  && AMD_NO_BRANCH=1 "${AMD}" group sprint s1 >/dev/null \
+  && AMD_NO_BRANCH=1 "${AMD}" group epic draft >/dev/null \
+  && AMD_NO_BRANCH=1 "${AMD}" group epic "Launch plan" >/dev/null \
+  && AMD_NO_BRANCH=1 "${AMD}" column add Review --kind doing --after doing >/dev/null 2>&1 )
+# The bash script's hook, run as bash would on TAB after "amd <word>".
+tab() { # word -> the completions offered, one a line
+  bash -c "source comp.bash; cd '${dc}'; COMP_WORDS=(amd '$1'); COMP_CWORD=1; _amd_destinations amd '$1' amd; printf '%s\\n' \"\${COMPREPLY[@]}\"" 2>/dev/null
+}
+"${AMD}" completions bash 2>/dev/null > comp.bash
+dc_path="${PATH}"
+PATH="$(dirname "${AMD}"):${PATH}"
+assert "amd __destinations lists the epics, sprints and added columns (ticket 028)" \
+  bash -c "cd '${dc}' && out=\"\$('${AMD}' __destinations)\" && echo \"\${out}\" | grep -qx checkout \
+    && echo \"\${out}\" | grep -qx s1 && echo \"\${out}\" | grep -qx review"
+assert "it leaves out a name a command has, and one with a space" \
+  bash -c "cd '${dc}' && ! '${AMD}' __destinations | grep -qx draft && ! '${AMD}' __destinations | grep -q 'Launch'"
+assert "it prints nothing, and succeeds, where there's no board" \
+  bash -c "cd '${nongit}' && [ -z \"\$('${AMD}' __destinations 2>&1)\" ]"
+assert "bash completes an epic name as the command" \
+  bash -c "$(declare -f tab); dc='${dc}'; tab che | grep -qx checkout"
+assert "bash still completes the commands alongside them" \
+  bash -c "$(declare -f tab); dc='${dc}'; tab do | grep -qx doing && tab do | grep -qx done"
+( cd "${dc}" && AMD_NO_BRANCH=1 "${AMD}" group epic payments >/dev/null )
+assert "an epic made since the script was sourced is offered on the next TAB" \
+  bash -c "$(declare -f tab); dc='${dc}'; tab pay | grep -qx payments"
+assert "zsh and fish ask amd for them too" \
+  bash -c "'${AMD}' completions zsh 2>/dev/null | grep -q 'amd __destinations' && '${AMD}' completions fish 2>/dev/null | grep -q 'amd __destinations'"
+PATH="${dc_path}"
+rm -rf "${dc}"
 rm -f comp.bash
 
 # The desktop board is a second binary, so the suite checks it was built and

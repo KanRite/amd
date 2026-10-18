@@ -480,7 +480,14 @@ redundant. Their history is in git if it is ever wanted again.
   terminal, plain greppable text everywhere else. It lives in the CLI because
   it is the CLI's output; `richrs` is not an amd-lib dependency.
 - `crates/amd-cli/src/completions.rs` — `amd completions [SHELL]`, generated from the clap
-  command with `clap_complete`; `$SHELL` detection and install hints.
+  command with `clap_complete`; `$SHELL` detection and install hints. **Epic
+  names and added columns** (ticket 028) are completed at TAB time: bash, zsh
+  and fish scripts get a hook (`with_destinations`, patched against lines
+  clap_complete writes) that runs `amd __destinations`, so a new epic needs
+  no shell reload. `__destinations` is caught in `run()` before clap parses,
+  not a hidden subcommand, since clap_complete lists hidden ones in every
+  script; it prints nothing without a board, never fetches or prompts, and
+  leaves out command names and names with spaces.
 - `crates/amd-cli/src/value.rs` — `TypedValueParser`s that advertise their possible values, so
   completions and `--help` list them while validation stays ours.
 - `crates/amd-lib/src/git.rs` — thin wrappers over the `git` CLI: repo

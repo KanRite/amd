@@ -772,3 +772,11 @@ the branch types this board accepts (including anything you added with
 `AMD_BRANCH_TYPES`), `-T <TAB>` the templates, and
 `amd set <ref> <TAB>` the fields. Scripts are generated from the CLI itself, so
 they can't drift from it.
+
+In bash, zsh and fish, `amd <TAB>` also offers the board's epics and sprints,
+and any columns you've added, since each is a destination too (`amd checkout
+7`). These are read from the board when you press TAB, so an epic made,
+renamed or deleted — by you, by a pull, or in the desktop board — is offered
+straight away, with no need to reload your shell. A name a command already has,
+or one with a space in it, isn't offered (`amd group` reaches those). Make the
+script again after updating amd, so it knows the new release's commands.
