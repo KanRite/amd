@@ -1241,7 +1241,14 @@ off**, ticket 141) to
   ticket drawn once (`seen` back-references carry no marks); related
   drawn once, under whichever end comes first. Tickets in a started
   sprint (`!accepts_changes()`) are stubs, not expanded and not walked
-  through; asking for one is refused. Parent/child aren't drawn. A lone
+  through; asking for one is refused. Parent/child aren't drawn here:
+  they're `crates/amd-lib/src/hierarchy.rs` (ticket 261), the topmost
+  ancestor down through every child (`parent`, or the parent's `##
+  Children`), the same `TreeNode`s with `Edge::Child`, done ones left out
+  unless `include_done` except the ticket asked about and its ancestors;
+  `amd tree [<ref>] --children`; amdui's `ticket_hierarchy` command, the
+  card's hierarchy button when `waiting::has_hierarchy`, and `TreePanel`'s
+  `children` mode (`Overlay::Tree.children`). A lone
   ticket has no family (empty). Done tickets are left out unless
   `include_done` (ticket 217, `Facts::hide_done`: their links dropped, so
   a family held together only by a done ticket comes apart), except the

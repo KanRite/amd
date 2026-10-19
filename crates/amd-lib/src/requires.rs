@@ -153,6 +153,8 @@ pub enum Edge {
     Requires,
     /// Related to the parent (drawn dashed).
     Related,
+    /// The parent's child, in the hierarchy (ticket 261, `hierarchy`).
+    Child,
 }
 
 /// One ticket in the tree (ticket 214).
@@ -618,6 +620,7 @@ mod tests {
             Edge::Root => "root",
             Edge::Requires => "requires",
             Edge::Related => "related",
+            Edge::Child => "child",
         };
         let mut line = format!("{}{} {}", "  ".repeat(depth), edge, node.id);
         if node.seen {

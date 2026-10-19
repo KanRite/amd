@@ -391,7 +391,7 @@ fn holds(task: &Task, kind: LinkType, other: &Task) -> bool {
 }
 
 /// The `## Children` wikilinks a parent lists.
-fn children_stems(task: &Task) -> Vec<String> {
+pub(crate) fn children_stems(task: &Task) -> Vec<String> {
     let Ok(text) = std::fs::read_to_string(&task.path) else {
         return Vec::new();
     };

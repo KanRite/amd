@@ -145,6 +145,23 @@ pub fn sprint_gaps(
     gaps
 }
 
+/// Whether a card has a parent or children on its board (ticket 261), for
+/// the hierarchy panel: its `parent` names a ticket there, or another's
+/// names it.
+pub fn has_hierarchy<'a>(
+    ticket: &TicketSummary,
+    all: impl IntoIterator<Item = &'a TicketSummary>,
+) -> bool {
+    let me = number(&ticket.id);
+    let parent = number(&ticket.parent);
+    all.into_iter().any(|other| {
+        other.repo == ticket.repo
+            && other.file != ticket.file
+            && ((parent.is_some() && number(&other.id) == parent)
+                || (me.is_some() && number(&other.parent) == me))
+    })
+}
+
 /// Whether a card has a family for the tree (ticket 214): it requires or
 /// relates to another, or another requires or relates to it.
 pub fn has_family<'a>(
@@ -295,6 +312,22 @@ mod tests {
             ]
         );
         assert!(sprint_gaps(&all, "acme-tickets", "s13", &Workflow::standard()).is_empty());
+    }
+
+    #[test]
+    fn a_card_has_a_hierarchy_with_a_parent_or_children_on_its_board() {
+        let mut parent = card("001", Column::Backlog);
+        let mut child = card("002", Column::Todo);
+        child.parent = "001".into();
+        let alone = card("003", Column::Backlog);
+        let all = [parent.clone(), child.clone(), alone.clone()];
+        assert!(has_hierarchy(&parent, &all));
+        assert!(has_hierarchy(&child, &all));
+        assert!(!has_hierarchy(&alone, &all));
+        // A parent on another board isn't this one's.
+        parent.repo = "acme-api".into();
+        let all = [parent, child.clone()];
+        assert!(!has_hierarchy(&child, &all));
     }
 
     #[test]

@@ -15,6 +15,8 @@ pub enum Edge {
     Requires,
     /// Related to the parent: drawn dashed.
     Related,
+    /// The parent's child, in the hierarchy (ticket 261).
+    Child,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
