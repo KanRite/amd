@@ -276,6 +276,7 @@ impl Project {
             id: task.id_display(),
             title: task.title(),
             assignee: task.assignee().unwrap_or_default(),
+            assignees: task.assignees(),
             tags: task.tags(),
             priority: task.priority(),
             created: task.meta("created").unwrap_or_default(),

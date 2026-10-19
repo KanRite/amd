@@ -565,17 +565,25 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: Option<String>,
     },
-    /// Assign a ticket to someone
+    /// Assign a ticket to someone, or to several people
     ///
-    /// With no name, picks from the project's users in a terminal (and
-    /// unassigns elsewhere)
+    /// The names replace whoever is assigned, the first being the main
+    /// assignee; `--add` and `--remove` change the list instead. With no
+    /// name, picks one of the project's users in a terminal (and unassigns
+    /// elsewhere)
     Assign {
         #[arg(value_name = "REF")]
         task: String,
         /// Who it belongs to; `@me` is your git user name, empty unassigns
         #[arg(value_name = "WHO", conflicts_with = "clear")]
-        who: Option<String>,
-        /// Unassign it
+        who: Vec<String>,
+        /// Add these people after whoever is assigned
+        #[arg(long, conflicts_with_all = ["remove", "clear"], requires = "who")]
+        add: bool,
+        /// Take these people off
+        #[arg(long, conflicts_with = "clear", requires = "who")]
+        remove: bool,
+        /// Unassign everyone
         #[arg(long)]
         clear: bool,
     },
@@ -919,10 +927,11 @@ struct NewArgs {
     /// The ticket this one sits under (an epic, a story, anything)
     #[arg(short = 'p', long, value_name = "REF")]
     parent: Option<String>,
-    /// Who it's assigned to (nobody by default; `@me` is you). Tickets can be
+    /// Who it's assigned to (nobody by default; `@me` is you), repeatable
+    /// for several people, the first being the main one. Tickets can be
     /// created now and assigned later
     #[arg(short = 'a', long, alias = "owner", value_name = "WHO")]
-    assignee: Option<String>,
+    assignee: Vec<String>,
     /// The repository the work is in — one cloned on this machine. Its
     /// branch is made there on entering todo
     #[arg(short = 'R', long, value_name = "REPO")]
@@ -1713,7 +1722,13 @@ fn run() -> Result<()> {
             })
         }
         Cmd::Group { command } => cmd_group(&board, command.unwrap_or(GroupCmd::List)),
-        Cmd::Assign { task, who, clear } => {
+        Cmd::Assign {
+            task,
+            who,
+            add,
+            remove,
+            clear,
+        } => {
             let task = resolve(
                 &board,
                 Some(task),
@@ -1723,23 +1738,39 @@ fn run() -> Result<()> {
             let (id_display, title) = (task.id_display(), task.title());
             // No name: the picker in a terminal (ticket 089); anywhere else
             // it unassigns, as it always has, so scripts are unchanged.
-            let who = match who {
-                None if !clear && form::available() => form::assignee(
+            let named: Vec<String> = who
+                .iter()
+                .map(|who| resolve_assignee(&board.root, Some(who)))
+                .collect();
+            let current = task.assignees();
+            // Several people (ticket 254): the names replace the list, or
+            // `--add`/`--remove` change it.
+            let who = if add {
+                agile_md::task::regroup(&current, &named, &[])
+            } else if remove {
+                agile_md::task::regroup(&current, &[], &named)
+            } else if named.is_empty() && !clear && form::available() {
+                // No name: the picker in a terminal (ticket 089); anywhere
+                // else it unassigns, as it always has, so scripts are
+                // unchanged.
+                let one = form::assignee(
                     board_settings::load(&board).user_names(),
                     git::config(&board.root, "user.name"),
                     &task.assignee().unwrap_or_default(),
-                )?,
-                who => resolve_assignee(&board.root, who.as_deref()),
+                )?;
+                agile_md::task::regroup(&[one], &[], &[])
+            } else {
+                agile_md::task::regroup(&named, &[], &[])
             };
             with_auto_commit(&board, "assign", &id_display, &title, || {
-                task.assign(task.hash()?, &who)?;
+                task.set_assignees(task.hash()?, &who)?;
                 match who.is_empty() {
                     true => println!("{} unassigned", task.id_display()),
-                    false => println!("{} assigned to {who}", task.id_display()),
+                    false => println!("{} assigned to {}", task.id_display(), who.join(", ")),
                 }
                 Ok(())
             })?;
-            if let Some(warning) = board_settings::unknown_assignee(&board, &who) {
+            for warning in board_settings::unknown_assignees(&board, &who) {
                 eprintln!("warning: {warning}");
             }
             Ok(())
@@ -3841,14 +3872,19 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         None => None,
     };
 
-    let assignee = match args.assignee {
-        Some(who) => resolve_assignee(&board.root, Some(&who)),
-        None if full_form => form::assignee(
+    let assignees: Vec<String> = if !args.assignee.is_empty() {
+        args.assignee
+            .iter()
+            .map(|who| resolve_assignee(&board.root, Some(who)))
+            .collect()
+    } else if full_form {
+        vec![form::assignee(
             board_settings::load(board).user_names(),
             git::config(&board.root, "user.name"),
             "",
-        )?,
-        None => String::new(),
+        )?]
+    } else {
+        Vec::new()
     };
 
     let repository = match args.repository {
@@ -3918,7 +3954,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         &templates,
         NewTicket {
             title,
-            assignee,
+            assignees,
             repository,
             template,
             branch_type,
@@ -3996,11 +4032,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     if let Some(drafted) = &created.drafted {
         eprintln!("amd: {drafted}");
     }
-    if let Some(warning) = created
-        .task
-        .assignee()
-        .and_then(|who| board_settings::unknown_assignee(board, &who))
-    {
+    for warning in board_settings::unknown_assignees(board, &created.task.assignees()) {
         eprintln!("warning: {warning}");
     }
     Ok(())

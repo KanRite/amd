@@ -200,7 +200,8 @@ fn id_number(id: &str) -> u64 {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Fields {
     pub title: String,
-    pub assignee: String,
+    /// Everyone it's assigned to, the first the main one (ticket 254).
+    pub assignees: Vec<String>,
     /// The repository it's about, a bare name; empty for none.
     pub repository: String,
     pub tags: Vec<String>,
@@ -216,7 +217,7 @@ impl From<&Frontmatter> for Fields {
     fn from(fm: &Frontmatter) -> Fields {
         Fields {
             title: fm.title.clone(),
-            assignee: fm.assignee.clone(),
+            assignees: fm.assignees.clone(),
             repository: fm.repository.clone(),
             tags: fm.tags.clone(),
             branch_type: fm.branch_type.clone(),
@@ -273,8 +274,21 @@ pub fn apply_fields(content: &str, new: &Fields) -> String {
     if new.title != old.title {
         fm = set_line(&fm, "title", &quote(&new.title));
     }
-    if new.assignee != old.assignee {
-        fm = set_line(&fm, "assignee", &quote(&new.assignee));
+    if new.assignees != old.assignees {
+        // As amd writes it: one person is `assignee` alone; several keep
+        // `assignee` as the first and add the list (ticket 254).
+        let people = people(&new.assignees);
+        fm = set_line(
+            &fm,
+            "assignee",
+            &quote(people.first().map(String::as_str).unwrap_or("")),
+        );
+        fm = if people.len() > 1 {
+            let list: Vec<String> = people.iter().map(|who| quote(who)).collect();
+            set_line(&fm, "assignees", &format!("[{}]", list.join(",")))
+        } else {
+            remove_line(&fm, "assignees")
+        };
     }
     if new.repository != old.repository {
         fm = set_line(&fm, "repository", &quote(&new.repository));
@@ -369,6 +383,28 @@ fn quote(value: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// `names` trimmed, empty ones dropped, each once (ignoring case).
+pub fn people(names: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for who in names {
+        let who = who.trim();
+        if !who.is_empty() && !out.iter().any(|o| o.eq_ignore_ascii_case(who)) {
+            out.push(who.to_string());
+        }
+    }
+    out
+}
+
+/// Takes the `key:` line out of a frontmatter block, if it's there.
+fn remove_line(frontmatter: &str, key: &str) -> String {
+    frontmatter
+        .split_inclusive('\n')
+        .enumerate()
+        .filter(|(i, l)| *i == 0 || l.split_once(':').is_none_or(|(k, _)| k.trim() != key))
+        .map(|(_, l)| l)
+        .collect()
 }
 
 /// Replaces the `key:` line inside a frontmatter block, or adds one before
@@ -480,13 +516,54 @@ mod tests {
         let ticket = "---\nid: \"009\"\ntitle: \"T\"\n---\nBody\n";
         let fields = Fields {
             title: "T".into(),
-            assignee: "claude".into(),
+            assignees: vec!["claude".into()],
             ..Fields::default()
         };
         assert_eq!(
             apply_fields(ticket, &fields),
             "---\nid: \"009\"\ntitle: \"T\"\nassignee: \"claude\"\n---\nBody\n"
         );
+    }
+
+    #[test]
+    fn several_people_are_written_as_amd_writes_them() {
+        let ticket = "---\nid: \"009\"\ntitle: \"T\"\nassignee: \"\"\n---\nBody\n";
+        let mut fields = Fields::from(&crate::parse_frontmatter(ticket));
+        fields.assignees = vec!["Sam".into(), "Jo, Jr".into(), "sam".into()];
+        let two = apply_fields(ticket, &fields);
+        assert_eq!(
+            two,
+            "---\nid: \"009\"\ntitle: \"T\"\nassignee: \"Sam\"\nassignees: [\"Sam\",\"Jo, Jr\"]\n---\nBody\n"
+        );
+        let read = crate::parse_frontmatter(&two);
+        assert_eq!(read.assignees, ["Sam", "Jo, Jr"]);
+        fields.assignees = vec!["Jo, Jr".into()];
+        assert_eq!(
+            apply_fields(&two, &fields),
+            "---\nid: \"009\"\ntitle: \"T\"\nassignee: \"Jo, Jr\"\n---\nBody\n"
+        );
+        // A list an older build left behind, no longer starting with
+        // `assignee`, isn't believed.
+        let stale =
+            crate::parse_frontmatter("---\nassignee: \"Ann\"\nassignees: [\"Sam\",\"Jo\"]\n---\n");
+        assert_eq!(stale.assignees, ["Ann"]);
+    }
+
+    #[test]
+    fn the_user_filter_matches_any_of_them_and_the_card_shortens() {
+        let mut card = crate::TicketSummary {
+            assignee: "Alex".into(),
+            assignees: vec!["Alex".into(), "Sam".into()],
+            ..Default::default()
+        };
+        assert!(crate::Assigned::User("Sam".into()).matches(&card));
+        assert!(!crate::Assigned::Nobody.matches(&card));
+        assert_eq!(card.people_label().as_deref(), Some("@Alex +1"));
+        card.assignees.clear();
+        assert_eq!(card.people_label().as_deref(), Some("@Alex"));
+        card.assignee.clear();
+        assert!(crate::Assigned::Nobody.matches(&card));
+        assert_eq!(card.people_label(), None);
     }
 
     #[test]
@@ -559,6 +636,7 @@ mod tests {
             id: id.into(),
             title: format!("T{id}"),
             assignee: String::new(),
+            assignees: Vec::new(),
             tags: Vec::new(),
             priority: priority.into(),
             created: created.into(),

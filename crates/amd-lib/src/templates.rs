@@ -72,9 +72,13 @@ pub struct TaskContext {
     /// The branch this ticket is worked on, made from the branch type and the
     /// title. Empty when there's no branch type.
     pub branch_name: String,
-    /// Who the ticket is assigned to, or an empty string — tickets can be
-    /// created now and assigned later.
+    /// Who the ticket is assigned to (the first person, when several), or
+    /// an empty string — tickets can be created now and assigned later.
     pub assignee: String,
+    /// Everyone it's assigned to, in order (ticket 254); empty for nobody.
+    /// A built-in ticket writes the `assignees` list itself when there are
+    /// two or more.
+    pub assignees: Vec<String>,
     /// The repository the ticket is about (a bare name), or empty.
     pub repository: String,
     /// Id of this ticket's parent, or an empty string. One field instead of
@@ -360,6 +364,7 @@ pub fn example_context(board: &Board) -> TaskContext {
         branch_type: "feature".to_string(),
         branch_name: "feature/an-example-ticket".to_string(),
         assignee: String::new(),
+        assignees: Vec::new(),
         repository: String::new(),
         parent: String::new(),
         parent_link: String::new(),
@@ -442,6 +447,7 @@ mod tests {
             branch_type: "bugfix".to_string(),
             branch_name: "bugfix/first-task".to_string(),
             assignee: "tim".to_string(),
+            assignees: vec!["tim".to_string()],
             repository: String::new(),
             parent: "002".to_string(),
             parent_link: "002-checkout".to_string(),

@@ -146,6 +146,7 @@ pub fn tools() -> Vec<Tool> {
                 "points": {"type": "string", "enum": ["1", "2", "3", "5", "8", "13"]},
                 "tags": {"type": "array", "items": {"type": "string"}},
                 "assignee": {"type": "string", "description": "A name from the project's users, or `@me`"},
+                "assignees": {"type": "array", "items": {"type": "string"}, "description": "Several people, first the main one; instead of `assignee`"},
                 "epic": {"type": "string", "description": "An epic or sprint to file it in"},
                 "parent": {"type": "string", "description": "The parent ticket's number"},
                 "requires": {"type": "array", "items": {"type": "string"}, "description": "Tickets this one requires (numbers): linked both ways; they must be done before it, and be in the same sprint for a sprint to start"},
@@ -198,7 +199,8 @@ pub fn tools() -> Vec<Tool> {
                 "priority": {"type": "string", "enum": ["low", "medium", "high", "top", "auto"], "description": "Set by hand; with auto priority and override on it pins the ticket, and `auto` hands it back to auto priority"},
                 "points": {"type": "string", "enum": ["", "1", "2", "3", "5", "8", "13"]},
                 "tags": {"type": "array", "items": {"type": "string"}},
-                "assignee": {"type": "string"},
+                "assignee": {"type": "string", "description": "One person, replacing whoever is assigned; empty for nobody"},
+                "assignees": {"type": "array", "items": {"type": "string"}, "description": "Everyone assigned, first the main one; instead of `assignee`"},
                 "parent": {"type": "string"},
                 "repository": {"type": "string"},
                 "branch_type": {"type": "string", "description": "feature, bugfix, hotfix, release, chore (the project may differ), or `none` for no branch. With a repository it must be given (else the ticket is a draft); a branch type needs a repository"},
@@ -208,9 +210,15 @@ pub fn tools() -> Vec<Tool> {
         Tool {
             name: "assign_ticket",
             title: "Assign a ticket",
-            description: "Assign a ticket to someone in the project's users (`@me` for the user), or to nobody with an empty name, and commit it.",
+            description: "Assign a ticket to someone in the project's users (`@me` for the user), or to nobody with an empty name, and commit it. A ticket can have several people: `assignees` sets them all, `add` adds to whoever is assigned and `remove` takes people off.",
             read_only: false,
-            input: json!({"type": "object", "properties": {"ticket": reference, "assignee": {"type": "string"}}, "required": ["ticket", "assignee"]}),
+            input: json!({"type": "object", "properties": {
+                "ticket": reference,
+                "assignee": {"type": "string"},
+                "assignees": {"type": "array", "items": {"type": "string"}, "description": "Everyone assigned, first the main one"},
+                "add": {"type": "array", "items": {"type": "string"}, "description": "People to add after whoever is assigned"},
+                "remove": {"type": "array", "items": {"type": "string"}, "description": "People to take off"}
+            }, "required": ["ticket"]}),
         },
         Tool {
             name: "add_note",
@@ -409,6 +417,23 @@ fn assignee(board: &Board, who: &str) -> String {
     }
 }
 
+/// The people `args` names: `assignees` (a list), else `assignee` (one,
+/// empty for nobody), `@me` resolved; `None` when it names neither.
+fn people(board: &Board, args: &Value) -> Option<Vec<String>> {
+    let names = match list(args, "assignees") {
+        Some(names) => names,
+        None => {
+            let one = arg(args, "assignee")?;
+            if one.trim().is_empty() {
+                Vec::new()
+            } else {
+                vec![one]
+            }
+        }
+    };
+    Some(names.iter().map(|who| assignee(board, who)).collect())
+}
+
 /// Where a ticket is, in words.
 fn place(task: &Task) -> String {
     match (&task.epic, task.epic_meta()) {
@@ -430,6 +455,7 @@ fn card(repo: &str, task: &Task) -> Value {
         "priority": task.priority(),
         "points": task.points().filter(|p| !p.is_empty()),
         "assignee": task.assignee().filter(|a| !a.is_empty()),
+        "assignees": task.assignees(),
         "tags": task.tags(),
         "locked_by": task.lease_active().then(|| task.locked_by()).flatten(),
     })
@@ -446,8 +472,9 @@ fn line(repo: &str, task: &Task) -> String {
     if let Some(points) = task.points().filter(|p| !p.is_empty()) {
         out.push_str(&format!(" · {points} pts"));
     }
-    if let Some(who) = task.assignee().filter(|a| !a.is_empty()) {
-        out.push_str(&format!(" · {who}"));
+    let people = task.assignees();
+    if !people.is_empty() {
+        out.push_str(&format!(" · {}", people.join(", ")));
     }
     let tags = task.tags();
     if !tags.is_empty() {
@@ -547,11 +574,10 @@ fn board_tool(args: &Value) -> Result<Reply> {
         tag.as_ref()
             .is_none_or(|t| task.matches_tags(std::slice::from_ref(t)))
             && who.as_deref().is_none_or(|w| {
-                let assigned = task.assignee().unwrap_or_default();
                 if w.eq_ignore_ascii_case("nobody") {
-                    assigned.is_empty()
+                    task.assignees().is_empty()
                 } else {
-                    assigned.eq_ignore_ascii_case(w.trim())
+                    task.is_assigned_to(w.trim())
                 }
             })
             && epic.as_deref().is_none_or(|e| {
@@ -957,7 +983,7 @@ fn create_ticket(args: &Value) -> Result<Reply> {
     let tag_warning = board_settings::load(board).check_tags(&tags)?;
     let fields = TicketFields {
         title: required(args, "title")?,
-        assignee: assignee(board, &arg(args, "assignee").unwrap_or_default()),
+        assignees: people(board, args).unwrap_or_default(),
         repository: arg(args, "repository").filter(|r| !r.trim().is_empty()),
         points: arg(args, "points").unwrap_or_default(),
         epic: arg(args, "epic").filter(|e| !e.trim().is_empty()),
@@ -971,7 +997,7 @@ fn create_ticket(args: &Value) -> Result<Reply> {
         requires: list(args, "requires").unwrap_or_default(),
         required_by: Vec::new(),
     };
-    let unknown = board_settings::unknown_assignee(board, &fields.assignee);
+    let unknown = board_settings::unknown_assignees(board, &fields.assignees);
     let outcome = transition::create_ticket(board, &fields)?;
     let made = outcome
         .dest
@@ -1080,9 +1106,8 @@ fn edit_ticket(args: &Value) -> Result<Reply> {
     let expected = expected(&task, args)?;
     let keep = |key: &str, now: String| arg(args, key).unwrap_or(now);
     let title = keep("title", task.title());
-    let who = arg(args, "assignee")
-        .map(|w| assignee(board, &w))
-        .unwrap_or_else(|| task.assignee().unwrap_or_default());
+    let named = people(board, args);
+    let who = named.clone().unwrap_or_else(|| task.assignees());
     let points = keep("points", task.points().unwrap_or_default());
     let tags = list(args, "tags").unwrap_or_else(|| task.tags());
     let branch_type = keep("branch_type", task.branch_type().unwrap_or_default());
@@ -1113,7 +1138,7 @@ fn edit_ticket(args: &Value) -> Result<Reply> {
                 board,
                 crate::task::EditFields {
                     title: &title,
-                    assignee: &who,
+                    assignees: &who,
                     points: &points,
                     tags: &tags,
                     branch_type: &branch_type,
@@ -1138,9 +1163,9 @@ fn edit_ticket(args: &Value) -> Result<Reply> {
     lines.extend(drafted.into_iter().map(|d| format!("warning: {d}")));
     lines.extend(warning.into_iter().map(|w| format!("warning: {w}")));
     lines.extend(tag_warning.into_iter().map(|w| format!("warning: {w}")));
-    if arg(args, "assignee").is_some() {
+    if named.is_some() {
         lines.extend(
-            board_settings::unknown_assignee(board, &who)
+            board_settings::unknown_assignees(board, &who)
                 .into_iter()
                 .map(|w| format!("warning: {w}")),
         );
@@ -1154,19 +1179,31 @@ fn assign_ticket(args: &Value) -> Result<Reply> {
     let (i, task) = project.find(&required(args, "ticket")?)?;
     let repo = project.boards[i].0.clone();
     let board = project.ready(i)?;
-    let who = assignee(board, &arg(args, "assignee").unwrap_or_default());
+    let resolve = |key: &str| -> Vec<String> {
+        list(args, key)
+            .unwrap_or_default()
+            .iter()
+            .map(|who| assignee(board, who))
+            .collect()
+    };
+    let (add, remove) = (resolve("add"), resolve("remove"));
+    let named = people(board, args);
+    if named.is_none() && add.is_empty() && remove.is_empty() {
+        bail!("say who: `assignee`, `assignees`, `add` or `remove`");
+    }
+    let who = crate::task::regroup(&named.unwrap_or_else(|| task.assignees()), &add, &remove);
     let (id_display, title) = (task.id_display(), task.title());
     let ((), warning) = transition::with_auto_commit(board, "assign", &id_display, &title, || {
-        task.assign(task.hash()?, &who)
+        task.set_assignees(task.hash()?, &who)
     })?;
     let mut lines = vec![if who.is_empty() {
         format!("{repo}#{id_display} unassigned")
     } else {
-        format!("{repo}#{id_display} assigned to {who}")
+        format!("{repo}#{id_display} assigned to {}", who.join(", "))
     }];
     lines.extend(warning.into_iter().map(|w| format!("warning: {w}")));
     lines.extend(
-        board_settings::unknown_assignee(board, &who)
+        board_settings::unknown_assignees(board, &who)
             .into_iter()
             .map(|w| format!("warning: {w}")),
     );

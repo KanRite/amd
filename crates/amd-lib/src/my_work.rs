@@ -187,7 +187,7 @@ fn repo_name(root: &Path) -> String {
 /// comparing: the name its users list gives that email when it's listed
 /// (the list is how the team knows you), else `fallback` (git's
 /// `user.name`). The email itself always counts.
-fn names_for(board: &Board, email: &str, fallback: Option<&str>) -> Vec<String> {
+pub(crate) fn names_for(board: &Board, email: &str, fallback: Option<&str>) -> Vec<String> {
     let mut names: Vec<String> = crate::board_settings::load(board)
         .users()
         .into_iter()
@@ -223,11 +223,7 @@ pub fn my_work(email: &str, name: Option<&str>, include_hidden: bool, sort: Sort
                 continue;
             };
             for task in tasks {
-                let assignee = task.assignee().unwrap_or_default().to_lowercase();
-                if !assignee.is_empty()
-                    && mine.contains(&assignee)
-                    && !task.has_tag(crate::task::TRIAGE_TAG)
-                {
+                if is_mine(&task.assignees(), mine) && !task.has_tag(crate::task::TRIAGE_TAG) {
                     items.push(item(project, repo, &task));
                 }
             }
@@ -261,8 +257,8 @@ pub fn triage(email: &str, name: Option<&str>) -> Vec<WorkItem> {
                 if !task.has_tag(crate::task::TRIAGE_TAG) {
                     continue;
                 }
-                let assignee = task.assignee().unwrap_or_default().to_lowercase();
-                if assignee.trim().is_empty() || mine.contains(&assignee) {
+                let people = task.assignees();
+                if people.is_empty() || is_mine(&people, mine) {
                     items.push(item(project, repo, &task));
                 }
             }
@@ -301,15 +297,15 @@ pub fn to_pick(email: &str, name: Option<&str>, unassigned: bool) -> Vec<WorkIte
                 continue;
             };
             for task in tasks {
-                let assignee = task.assignee().unwrap_or_default();
+                let people = task.assignees();
                 // In todo and doing, only work nobody has taken: your own
                 // there is already My work.
-                if !column.is(Kind::Backlog) && !assignee.trim().is_empty() {
+                if !column.is(Kind::Backlog) && !people.is_empty() {
                     continue;
                 }
                 let lock = task.lease_active().then(|| task.locked_by()).flatten();
                 if pickable(
-                    &assignee,
+                    &people,
                     task.is_draft(),
                     lock.as_deref(),
                     mine,
@@ -333,19 +329,26 @@ pub fn to_pick(email: &str, name: Option<&str>, unassigned: bool) -> Vec<WorkIte
     top_tier(backlog)
 }
 
+/// Whether any of a ticket's people (ticket 254) is you: `mine` holds your
+/// names, lowercased.
+fn is_mine(people: &[String], mine: &[String]) -> bool {
+    people
+        .iter()
+        .any(|who| mine.contains(&who.trim().to_lowercase()))
+}
+
 /// Whether a ticket can be offered to you: yours (`mine`, lowercased) or,
 /// with `unassigned`, nobody's; not a draft; and not under a lease someone
 /// else holds (`lock`, the holder of a lease in force; `me`, your email).
 fn pickable(
-    assignee: &str,
+    people: &[String],
     draft: bool,
     lock: Option<&str>,
     mine: &[String],
     me: &str,
     unassigned: bool,
 ) -> bool {
-    let assignee = assignee.trim().to_lowercase();
-    let free = (unassigned && assignee.is_empty()) || mine.contains(&assignee);
+    let free = (unassigned && people.is_empty()) || is_mine(people, mine);
     let locked_by_other = lock.is_some_and(|who| !who.eq_ignore_ascii_case(me));
     free && !draft && !locked_by_other
 }
@@ -575,28 +578,54 @@ mod tests {
     fn unassigned_or_mine_and_not_a_draft_or_locked_by_someone_else() {
         let mine = vec!["sam lee".to_string(), "sam@x.co".to_string()];
         let me = "sam@x.co";
-        assert!(pickable("", false, None, &mine, me, true));
-        assert!(pickable("Sam Lee", false, None, &mine, me, false));
+        let none: Vec<String> = Vec::new();
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(pickable(&none, false, None, &mine, me, true));
+        assert!(pickable(
+            &names(&["Sam Lee"]),
+            false,
+            None,
+            &mine,
+            me,
+            false
+        ));
         assert!(
-            !pickable("", false, None, &mine, me, false),
+            !pickable(&none, false, None, &mine, me, false),
             "unassigned left out"
         );
         assert!(
-            !pickable("Jo", false, None, &mine, me, true),
+            !pickable(&names(&["Jo"]), false, None, &mine, me, true),
             "someone else's"
         );
         assert!(
-            !pickable("", true, None, &mine, me, true),
+            !pickable(&none, true, None, &mine, me, true),
             "a draft can't leave the backlog"
         );
         assert!(
-            !pickable("", false, Some("jo@x.co"), &mine, me, true),
+            !pickable(&none, false, Some("jo@x.co"), &mine, me, true),
             "locked by Jo"
         );
         assert!(
-            pickable("", false, Some("SAM@x.co"), &mine, me, true),
+            pickable(&none, false, Some("SAM@x.co"), &mine, me, true),
             "my own lock"
         );
+        // Several people (ticket 254): mine if I'm any of them.
+        assert!(pickable(
+            &names(&["Jo", "Sam Lee"]),
+            false,
+            None,
+            &mine,
+            me,
+            false
+        ));
+        assert!(!pickable(
+            &names(&["Jo", "Ann"]),
+            false,
+            None,
+            &mine,
+            me,
+            true
+        ));
     }
 
     #[test]

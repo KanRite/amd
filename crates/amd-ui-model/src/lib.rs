@@ -293,7 +293,11 @@ pub struct TicketSummary {
     pub column: Column,
     pub id: String,
     pub title: String,
+    /// The main assignee: the first of `assignees`.
     pub assignee: String,
+    /// Everyone it's assigned to, in order (ticket 254); empty for nobody.
+    #[serde(default)]
+    pub assignees: Vec<String>,
     pub tags: Vec<String>,
     /// Empty for tickets saved before priorities existed.
     pub priority: String,
@@ -471,6 +475,28 @@ pub struct Lock {
 }
 
 impl TicketSummary {
+    /// Everyone it's assigned to: `assignees`, or `assignee` alone from an
+    /// older amdui that didn't send the list.
+    pub fn people(&self) -> Vec<String> {
+        if !self.assignees.is_empty() {
+            return self.assignees.clone();
+        }
+        Some(self.assignee.trim().to_string())
+            .filter(|who| !who.is_empty())
+            .into_iter()
+            .collect()
+    }
+
+    /// The card's names (ticket 254): `@Alex`, or `@Alex +1` for two.
+    pub fn people_label(&self) -> Option<String> {
+        let people = self.people();
+        let first = people.first()?;
+        Some(match people.len() {
+            1 => format!("@{first}"),
+            n => format!("@{first} +{}", n - 1),
+        })
+    }
+
     /// Whether the ticket matches a search (ticket 123), ignoring case. The
     /// query is split on spaces into terms:
     ///
@@ -533,6 +559,7 @@ impl TicketSummary {
             self.file.as_str(),
             self.text.as_str(),
             self.assignee.as_str(),
+            &self.assignees.join("\n"),
             self.priority.as_str(),
             self.epic.as_deref().unwrap_or(""),
             self.epic_label.as_str(),
@@ -798,11 +825,12 @@ pub enum Assigned {
 
 impl Assigned {
     pub fn matches(&self, ticket: &TicketSummary) -> bool {
-        let assignee = ticket.assignee.trim();
+        let people = ticket.people();
         match self {
             Assigned::Anyone => true,
-            Assigned::User(name) => assignee == name,
-            Assigned::Nobody => assignee.is_empty(),
+            // Any of its people (ticket 254).
+            Assigned::User(name) => people.iter().any(|who| who.trim() == name),
+            Assigned::Nobody => people.is_empty(),
         }
     }
 
@@ -835,7 +863,8 @@ impl Board {
             .iter()
             .flat_map(|c| c.tickets.iter())
             .chain(self.epics.iter().flat_map(|e| e.tickets.iter()))
-            .map(|t| t.assignee.trim().to_string())
+            .flat_map(|t| t.people())
+            .map(|a| a.trim().to_string())
             .filter(|a| !a.is_empty())
             .collect();
         names.sort_by_key(|n| n.to_lowercase());
@@ -1372,6 +1401,9 @@ pub struct Frontmatter {
     pub id: String,
     pub title: String,
     pub assignee: String,
+    /// Everyone it's assigned to (ticket 254): the `assignees` list while it
+    /// starts with `assignee`, else `assignee` alone; empty for nobody.
+    pub assignees: Vec<String>,
     /// The repository it's about, as a bare name.
     pub repository: String,
     pub tags: Vec<String>,
@@ -1426,10 +1458,48 @@ pub fn parse_frontmatter(content: &str) -> Frontmatter {
             "locked-until" => fm.locked_until = unquote(value),
             "due" => fm.due = unquote(value),
             "recur" => fm.recur = unquote(value),
+            "assignees" => fm.assignees = parse_names(value),
             _ => {}
         }
     }
+    fm.assignees = if fm.assignee.trim().is_empty() {
+        Vec::new()
+    } else if fm.assignees.first() == Some(&fm.assignee) {
+        std::mem::take(&mut fm.assignees)
+    } else {
+        vec![fm.assignee.clone()]
+    };
     fm
+}
+
+/// A flow list of names, `["Alex Morgan","Jo, Jr"]`, as amd writes
+/// `assignees`: a quoted name may hold a comma. Mirrors
+/// `agile_md::task::parse_names`.
+pub fn parse_names(raw: &str) -> Vec<String> {
+    let inner = raw.trim().trim_start_matches('[').trim_end_matches(']');
+    let mut names = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for ch in inner.chars() {
+        match (quote, ch) {
+            (Some(_), '\\') if !escaped => escaped = true,
+            (Some(q), c) if c == q && !escaped => quote = None,
+            (Some(_), c) => {
+                current.push(c);
+                escaped = false;
+            }
+            (None, '"' | '\'') => quote = Some(ch),
+            (None, ',') => names.push(std::mem::take(&mut current)),
+            (None, c) => current.push(c),
+        }
+    }
+    names.push(current);
+    names
+        .into_iter()
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .collect()
 }
 
 fn unquote(value: &str) -> String {
@@ -1595,6 +1665,7 @@ mod assigned_tests {
             id: "001".into(),
             title: "T".into(),
             assignee: assignee.into(),
+            assignees: Vec::new(),
             tags: Vec::new(),
             priority: String::new(),
             created: String::new(),
@@ -1724,6 +1795,7 @@ mod search_tests {
             id: "001".into(),
             title: title.into(),
             assignee: String::new(),
+            assignees: Vec::new(),
             tags: tags.iter().map(|t| t.to_string()).collect(),
             priority: String::new(),
             created: String::new(),
@@ -1853,6 +1925,7 @@ mod link_tests {
             id: id.into(),
             title: title.into(),
             assignee: String::new(),
+            assignees: Vec::new(),
             tags: Vec::new(),
             priority: String::new(),
             created: String::new(),

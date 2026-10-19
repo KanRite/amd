@@ -167,7 +167,7 @@ pub fn make_next(board: &Board, done: &Task, today: Date) -> Result<Option<Next>
             title: done.title(),
             template: crate::templates::DEFAULT_TEMPLATE.to_string(),
             branch_type: done.branch_type().unwrap_or_default(),
-            assignee: done.assignee().unwrap_or_default(),
+            assignees: done.assignees(),
             repository: done.repository().unwrap_or_default(),
             tags: done.tags(),
             ..Default::default()

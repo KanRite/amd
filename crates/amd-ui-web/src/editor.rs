@@ -1224,10 +1224,12 @@ fn TagPicker(
     }
 }
 
-/// The assignee field (ticket 089): type to filter the project's users,
-/// pick one with a click or the arrow keys and Enter, or choose Nobody. A
-/// name that isn't one of the users is still accepted — someone may not
-/// have joined yet — with a note saying so. Not a native `<datalist>`:
+/// The assignee field (tickets 089, 254): the people it's assigned to as
+/// chips, the first the main assignee, each with a × to take them off, and
+/// a box to add someone that offers you and the project's users, narrowed
+/// as you type (arrow keys and Enter, or a click). A name that isn't one of
+/// the users is still accepted with Enter — someone may not have joined yet
+/// — with a note saying so. No chips is nobody. Not a native `<datalist>`:
 /// WebKitGTK's is patchy.
 #[component]
 fn AssigneePicker(
@@ -1238,132 +1240,196 @@ fn AssigneePicker(
     let ctx = Ctx::get();
     let open = RwSignal::new(false);
     let cursor = RwSignal::new(0usize);
-    let value = move || fields.with(|f| f.assignee.clone());
+    let typed = RwSignal::new(String::new());
+    let current = move || fields.with(|f| f.assignees.clone());
     let users = move || {
         ctx.board
             .with(|b| b.as_ref().map(|b| b.users.clone()).unwrap_or_default())
     };
     let me = move || ctx.board.with(|b| b.as_ref().and_then(|b| b.me.clone()));
-    // (label, value): Nobody, Me, then the users, narrowed by what's typed
-    // unless the field already holds one of them exactly.
+    let has = move |who: &str| current().iter().any(|c| c.eq_ignore_ascii_case(who));
+    // (label, value): Me, then the users, without anyone already on it,
+    // narrowed by what's typed.
     let options = move || {
-        let typed = value();
-        let query = typed.trim().to_lowercase();
-        let mut all = vec![("Nobody".to_string(), String::new())];
+        let query = typed.get().trim().to_lowercase();
+        let mut all = Vec::new();
         if let Some(me) = me() {
             all.push((format!("Me ({me})"), me));
         }
-        all.extend(users().into_iter().map(|u| (u.clone(), u)));
-        let exact = all.iter().any(|(_, v)| *v == typed);
-        if query.is_empty() || exact {
-            return all;
-        }
+        all.extend(
+            users()
+                .into_iter()
+                .filter(|u| Some(u) != me().as_ref())
+                .map(|u| (u.clone(), u)),
+        );
         all.into_iter()
-            .filter(|(label, v)| v.is_empty() || label.to_lowercase().contains(&query))
+            .filter(|(label, v)| {
+                !has(v) && (query.is_empty() || label.to_lowercase().contains(&query))
+            })
             .collect::<Vec<_>>()
     };
-    let choose = move |chosen: String| {
-        fields.update(|f| f.assignee = chosen);
-        open.set(false);
+    let add = move |who: String| {
+        let who = who.trim().to_string();
+        if who.is_empty() {
+            return;
+        }
+        if !has(&who) {
+            fields.update(|f| f.assignees.push(who));
+            on_change();
+        }
+        typed.set(String::new());
+        cursor.set(0);
+    };
+    let take_off = move |who: String| {
+        fields.update(|f| f.assignees.retain(|w| *w != who));
         on_change();
     };
-    let stranger = move || {
-        let v = value();
+    let strangers = move || {
         let names = users();
-        !v.trim().is_empty() && !names.is_empty() && !names.contains(&v) && me() != Some(v)
+        if names.is_empty() {
+            return Vec::new();
+        }
+        current()
+            .into_iter()
+            .filter(|who| !names.contains(who) && me().as_ref() != Some(who))
+            .collect::<Vec<_>>()
     };
 
     view! {
-        <div class="relative">
-            <input
-                type="text"
-                class=class
-                role="combobox"
-                aria-label="Assignee"
-                aria-expanded=move || open.get().to_string()
-                autocomplete="off"
-                placeholder="Nobody"
-                prop:value=value
-                on:focus=move |_| {
-                    cursor.set(0);
-                    open.set(true);
-                }
-                on:blur=move |_| open.set(false)
-                on:input=move |ev| {
-                    fields.update(|f| f.assignee = event_target_value(&ev));
-                    cursor.set(0);
-                    open.set(true);
-                    on_change();
-                }
-                on:keydown=move |ev| {
-                    let count = options().len();
-                    match ev.key().as_str() {
-                        "ArrowDown" => {
-                            ev.prevent_default();
-                            open.set(true);
-                            cursor.update(|c| *c = (*c + 1).min(count.saturating_sub(1)));
-                        }
-                        "ArrowUp" => {
-                            ev.prevent_default();
-                            cursor.update(|c| *c = c.saturating_sub(1));
-                        }
-                        "Enter" if open.get_untracked() => {
-                            ev.prevent_default();
-                            if let Some((_, v)) = options().get(cursor.get_untracked()).cloned() {
-                                choose(v);
-                            }
-                        }
-                        "Escape" if open.get_untracked() => {
-                            ev.prevent_default();
-                            ev.stop_propagation();
-                            open.set(false);
-                        }
-                        _ => {}
-                    }
-                }
-            />
-            <Show when=move || open.get()>
-                <ul
-                    role="listbox"
-                    class="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded border border-slate-300 bg-white py-1 text-sm shadow-lg dark:border-slate-600 dark:bg-slate-800"
-                >
-                    {move || {
-                        options()
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, (label, v))| {
-                                let selected = v == value();
-                                view! {
-                                    <li
-                                        role="option"
-                                        aria-selected=selected.to_string()
-                                        class=move || {
-                                            let base = "cursor-pointer px-2 py-1";
-                                            if cursor.get() == i {
-                                                format!("{base} bg-accent-600 text-white")
-                                            } else {
-                                                format!("{base} hover:bg-slate-100 dark:hover:bg-slate-700")
-                                            }
-                                        }
-                                        // Before the input's blur, so the click lands.
-                                        on:mousedown=move |ev| {
-                                            ev.prevent_default();
-                                            choose(v.clone());
-                                        }
+        <div class="flex flex-col gap-1">
+            <ul class="flex flex-wrap gap-1" aria-label="Who it's assigned to">
+                {move || {
+                    current()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, who)| {
+                            let title = if i == 0 { "Main assignee" } else { "" };
+                            let label = format!("Unassign {who}");
+                            let gone = who.clone();
+                            view! {
+                                <li
+                                    class="flex items-center gap-1 rounded bg-accent-100 px-1.5 text-sm font-normal text-accent-800 dark:bg-accent-900 dark:text-accent-200"
+                                    title=title
+                                >
+                                    {who}
+                                    <button
+                                        type="button"
+                                        class="text-slate-500 hover:text-red-600"
+                                        aria-label=label
+                                        on:click=move |_| take_off(gone.clone())
                                     >
-                                        {label}
-                                    </li>
+                                        "×"
+                                    </button>
+                                </li>
+                            }
+                        })
+                        .collect_view()
+                }}
+            </ul>
+            <div class="relative">
+                <input
+                    type="text"
+                    class=class
+                    role="combobox"
+                    aria-label="Add an assignee"
+                    aria-expanded=move || open.get().to_string()
+                    autocomplete="off"
+                    placeholder=move || if current().is_empty() { "Nobody" } else { "Add someone" }
+                    prop:value=move || typed.get()
+                    on:focus=move |_| {
+                        cursor.set(0);
+                        open.set(true);
+                    }
+                    on:blur=move |_| open.set(false)
+                    on:input=move |ev| {
+                        typed.set(event_target_value(&ev));
+                        cursor.set(0);
+                        open.set(true);
+                    }
+                    on:keydown=move |ev| {
+                        let count = options().len();
+                        match ev.key().as_str() {
+                            "ArrowDown" => {
+                                ev.prevent_default();
+                                open.set(true);
+                                cursor.update(|c| *c = (*c + 1).min(count.saturating_sub(1)));
+                            }
+                            "ArrowUp" => {
+                                ev.prevent_default();
+                                cursor.update(|c| *c = c.saturating_sub(1));
+                            }
+                            "Enter" => {
+                                ev.prevent_default();
+                                match options().get(cursor.get_untracked()).cloned() {
+                                    Some((_, v)) if open.get_untracked() => add(v),
+                                    _ => add(typed.get_untracked()),
                                 }
-                            })
-                            .collect_view()
-                    }}
-                </ul>
-            </Show>
-            <Show when=stranger>
-                <p class="mt-0.5 text-[11px] font-normal text-slate-500">
-                    "Not one of this project's users (amd join adds them)"
-                </p>
-            </Show>
+                            }
+                            "Backspace" if typed.get_untracked().is_empty() => {
+                                if let Some(last) = current().pop() {
+                                    take_off(last);
+                                }
+                            }
+                            "Escape" if open.get_untracked() => {
+                                ev.prevent_default();
+                                ev.stop_propagation();
+                                open.set(false);
+                            }
+                            _ => {}
+                        }
+                    }
+                />
+                <Show when=move || open.get() && !options().is_empty()>
+                    <ul
+                        role="listbox"
+                        class="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded border border-slate-300 bg-white py-1 text-sm shadow-lg dark:border-slate-600 dark:bg-slate-800"
+                    >
+                        {move || {
+                            options()
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, (label, v))| {
+                                    view! {
+                                        <li
+                                            role="option"
+                                            aria-selected=move || (cursor.get() == i).to_string()
+                                            class=move || {
+                                                let base = "cursor-pointer px-2 py-1";
+                                                if cursor.get() == i {
+                                                    format!("{base} bg-accent-600 text-white")
+                                                } else {
+                                                    format!("{base} hover:bg-slate-100 dark:hover:bg-slate-700")
+                                                }
+                                            }
+                                            // Before the input's blur, so the click lands.
+                                            on:mousedown=move |ev| {
+                                                ev.prevent_default();
+                                                add(v.clone());
+                                            }
+                                        >
+                                            {label}
+                                        </li>
+                                    }
+                                })
+                                .collect_view()
+                        }}
+                    </ul>
+                </Show>
+            </div>
+            {move || {
+                let names = strangers();
+                (!names.is_empty())
+                    .then(|| {
+                        view! {
+                            <p class="text-[11px] font-normal text-slate-500">
+                                {format!(
+                                    "{} isn't one of this project's users (amd join adds them)",
+                                    names.join(", "),
+                                )}
+                            </p>
+                        }
+                    })
+            }}
         </div>
     }
 }
