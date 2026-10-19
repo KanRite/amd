@@ -360,6 +360,32 @@ pub async fn delete_epic(repo: Option<&str>, name: &str) -> Result<SyncReport, S
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MoveEpicArgs<'a> {
+    repo: Option<&'a str>,
+    name: &'a str,
+    to_todo: bool,
+}
+
+/// Moves every ticket of an epic or sprint still in the backlog to the loose
+/// backlog, or to todo (ticket 256).
+pub async fn move_epic_tickets(
+    repo: Option<&str>,
+    name: &str,
+    to_todo: bool,
+) -> Result<SyncReport, String> {
+    call(
+        "move_epic_tickets",
+        &MoveEpicArgs {
+            repo,
+            name,
+            to_todo,
+        },
+    )
+    .await
+}
+
+#[derive(Serialize)]
 struct SprintArgs<'a> {
     name: &'a str,
     days: u32,

@@ -1815,6 +1815,18 @@ assert "amd group empty commits every ticket it moves in one commit" \
     && [ \$((after - before)) -eq 1 ] \
     && git show --stat --pretty=format: HEAD | grep -q '001-first-ticket.md' \
     && git show --stat --pretty=format: HEAD | grep -q '002-second-ticket.md'"
+assert "amd group empty --to todo moves a group's backlog tickets to todo in one commit; drafts stay (ticket 256)" \
+  bash -c "cd '${commit_repo}' && '${AMD}' group epic wave >/dev/null \
+    && for t in Third Fourth; do '${AMD}' new \"\$t\" --no-edit >/dev/null; done \
+    && '${AMD}' new Fifth --draft --no-edit >/dev/null 2>&1 \
+    && for id in 3 4 5; do '${AMD}' wave \$id >/dev/null; done \
+    && before=\$(git rev-list --count HEAD) \
+    && out=\$('${AMD}' group empty wave --to todo 2>/tmp/amd-wave.err) \
+    && after=\$(git rev-list --count HEAD) && [ \$((after - before)) -eq 1 ] \
+    && printf '%s' \"\$out\" | grep -q 'wave: 2 ticket(s) moved to todo/ (003, 004)' \
+    && grep -q '005 not moved: .*draft' /tmp/amd-wave.err \
+    && grep -q '^epic: \"wave\"' tasks/todo/003-third.md && grep -q '^todo-since: ' tasks/todo/004-fourth.md \
+    && ls tasks/backlog/wave/005-fifth.md >/dev/null"
 assert "amd link commits both ends of the relation in one commit (ticket 054)" \
   bash -c "cd '${commit_repo}' && before=\$(git rev-list --count HEAD) \
     && '${AMD}' link 1 2 >/dev/null \

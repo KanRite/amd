@@ -499,12 +499,19 @@ amd set 001 epic sprint-1              # refused unless the ticket is sized
 amd group start sprint-1               # one way: no route back to pending
 amd group                              # tickets and points per epic and sprint
 amd group empty checkout               # every ticket in it, back to backlog/ at once
+amd group empty checkout --to todo     # or on to todo, keeping the epic's name
 amd group rename checkout payments     # the folder and every ticket's epic
 amd group backfill sprint-1 --points 5 # top up a running sprint from the backlog
 amd group close sprint-1               # end it: read-only, and a report in the documents
 amd group delete payments              # once every ticket in it is done (or moved out)
 amd todo 001 --no-branch && amd doing 001 && amd done 001
 ```
+
+`--to todo` moves only the tickets still in that epic or sprint's backlog
+folder, in one commit; each keeps the group's name, so sent back from todo
+it returns to the group. Drafts stay behind, and no branches are made. In
+the desktop board, an open epic or sprint column has **All to backlog** and
+**All to todo**.
 
 The rules live in the board, not the window, so the command line gets them
 too: tickets move one column at a time (unless the team allows other moves),

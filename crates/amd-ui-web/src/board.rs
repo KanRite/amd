@@ -814,6 +814,18 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
         });
     };
     let kind_word = move || if is_sprint() { "sprint" } else { "epic" };
+    // Every ticket in it, at once (ticket 256): to the loose backlog, or on
+    // to todo (keeping its name, so sent back it returns here).
+    let move_all = move |to_todo: bool| {
+        let (repo, name) = ids.get_value();
+        spawn_local(async move {
+            match api::move_epic_tickets(Some(&repo), &name, to_todo).await {
+                Ok(report) => ctx.report(report),
+                Err(e) => ctx.error.set(Some(e)),
+            }
+            ctx.reload();
+        });
+    };
     // A running sprint (ticket 052): backfill it, or close it (asks once
     // more: closing is final).
     let backfill_points = RwSignal::new(String::new());
@@ -951,6 +963,28 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
                         on:blur=move |_| confirm_delete.set(false)
                     >
                         {move || if confirm_delete.get() { "Confirm: delete" } else { "Delete" }}
+                    </button>
+                </div>
+                <div class="flex flex-wrap gap-1 px-1" class:hidden=move || renaming.get() || count() == 0>
+                    <button
+                        type="button"
+                        class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                        class:hidden=started
+                        title=move || format!("Move every ticket in this {} to the loose backlog", kind_word())
+                        on:click=move |_| move_all(false)
+                    >
+                        "All to backlog"
+                    </button>
+                    <button
+                        type="button"
+                        class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                        title=move || format!(
+                            "Move every ticket in this {} to todo; they keep its name, so sent back they return here. Drafts stay.",
+                            kind_word()
+                        )
+                        on:click=move |_| move_all(true)
+                    >
+                        "All to todo"
                     </button>
                 </div>
                 <Show when=move || is_sprint() && !started() && !closed()>

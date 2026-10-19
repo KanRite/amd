@@ -231,6 +231,52 @@ pub fn move_to(board: &Board, task: &Task, to: Column, force: bool) -> Result<Ou
     Ok(outcome)
 }
 
+/// What moving a group's tickets did (ticket 256): the tickets moved, and
+/// those left where they were, with why.
+#[derive(Debug, Default)]
+pub struct GroupMoved {
+    pub moved: Vec<String>,
+    pub skipped: Vec<(String, String)>,
+}
+
+/// Every ticket of the epic or sprint `name` still in the backlog, moved to
+/// todo in one go (ticket 256): only that group's, each keeping its `epic`
+/// label (so sent back, it returns to the group), with when it entered
+/// todo recorded. A ticket the rules keep back (a draft, someone else's
+/// lease) is skipped and said; one already past the backlog is left alone.
+/// No branches are made, as on the desktop board. Doesn't commit: the
+/// caller wraps it, so the whole move is one commit.
+pub fn group_to_todo(board: &Board, name: &str) -> Result<GroupMoved> {
+    board.group(name)?;
+    let todo = board.workflow().first(Kind::Todo);
+    let mut result = GroupMoved::default();
+    for task in board.tasks_in(Column::Backlog)? {
+        if task.epic.as_deref() != Some(name) {
+            continue;
+        }
+        let label = task.id_display();
+        match board.move_task(&task, todo, false) {
+            Ok(dest) => {
+                if let Some(moved) = Task::from_path(&dest, todo) {
+                    // Outside the backlog the label is what says it's the
+                    // group's; one written by hand into the folder may lack it.
+                    if moved.epic_meta().as_deref() != Some(name)
+                        && let Ok(hash) = moved.hash()
+                    {
+                        let _ = moved.set_epic_meta(hash, name);
+                    }
+                    if let Some(moved) = Task::from_path(&dest, todo) {
+                        stamp_column_dates(&moved, task.column, todo);
+                    }
+                }
+                result.moved.push(label);
+            }
+            Err(err) => result.skipped.push((label, format!("{err:#}"))),
+        }
+    }
+    Ok(result)
+}
+
 /// A ticket with a due date this near goes straight to todo (ticket 253):
 /// one in the loose backlog, not a draft, due within the board's
 /// `due-to-todo-days` (or overdue). Moves it there, recording when, and says
@@ -935,6 +981,54 @@ mod tests {
                 .refuse_due_in_epic("001", None, Some("2026-10-30"))
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn an_epics_tickets_move_to_todo_together_keeping_their_epic_and_drafts_stay() {
+        let dir = tempfile::tempdir().unwrap();
+        let (board, _) = board_with(dir.path(), "009-loose.md", Column::Backlog);
+        board
+            .create_group(&crate::group::Group {
+                dir: board.dir(Column::Backlog).join("updates"),
+                name: "updates".to_string(),
+                kind: crate::group::Kind::Epic,
+                description: String::new(),
+                days: crate::group::DEFAULT_DAYS,
+                state: crate::group::State::Pending,
+            })
+            .unwrap();
+        for (file, tags) in [
+            ("001-a.md", "[]"),
+            ("002-b.md", "[]"),
+            ("003-c.md", "[DRAFT]"),
+        ] {
+            std::fs::write(
+                board.dir(Column::Backlog).join("updates").join(file),
+                format!(
+                    "---\nid: \"{}\"\ntitle: \"T\"\ntags: {tags}\n---\n\nbody\n",
+                    &file[..3]
+                ),
+            )
+            .unwrap();
+        }
+        let result = group_to_todo(&board, "updates").unwrap();
+        assert_eq!(result.moved, ["001", "002"]);
+        assert_eq!(result.skipped.len(), 1, "{:?}", result.skipped);
+        assert!(
+            result.skipped[0].1.contains("draft"),
+            "{:?}",
+            result.skipped
+        );
+        for id in ["1", "2"] {
+            let moved = board.find(id).unwrap();
+            assert_eq!(moved.column, Column::Todo);
+            assert_eq!(moved.epic_meta().as_deref(), Some("updates"));
+            assert!(moved.todo_since().is_some());
+        }
+        // The loose ticket and the draft stay.
+        assert_eq!(board.find("9").unwrap().column, Column::Backlog);
+        assert_eq!(board.find("3").unwrap().column, Column::Backlog);
+        assert!(group_to_todo(&board, "nonesuch").is_err());
     }
 
     #[test]
