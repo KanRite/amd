@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agile-md"
-version = "4.4.0"
+version = "4.5.0"
 dependencies = [
  "anyhow",
  "deunicode",
@@ -114,7 +114,7 @@ dependencies = [
 
 [[package]]
 name = "amd-cli"
-version = "4.4.0"
+version = "4.5.0"
 dependencies = [
  "agile-md",
  "anyhow",
@@ -130,7 +130,7 @@ dependencies = [
 
 [[package]]
 name = "amd-ui"
-version = "4.4.0"
+version = "4.5.0"
 dependencies = [
  "agile-md",
  "alacritty_terminal",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "amd-ui-model"
-version = "4.4.0"
+version = "4.5.0"
 dependencies = [
  "deunicode",
  "pulldown-cmark",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "amd-ui-web"
-version = "4.4.0"
+version = "4.5.0"
 dependencies = [
  "amd-ui-model",
  "console_error_panic_hook",
