@@ -189,8 +189,15 @@ would leave the two apart is refused.
 amd new "Fix the API" --repository acme-api       # a draft: no branch type
 amd set 3 branch-type bugfix                      # or none, for no branch
 amd ready 3
+amd set 7 repository acme-api branch-type feature  # both at once, past the backlog too
 amd check       # tickets whose repository and branch type don't go together
 ```
+
+`amd set` takes several fields at once (`amd set 7 points 3 priority high`),
+written in one go and committed together. That's how a ticket already in
+todo gets a repository and a branch type: either one alone would leave the
+pair apart, so the two are checked together, as they'll be once both are
+set.
 
 `amd check` only reads: it lists tickets that don't meet the rule, such as
 ones from before it or edited by hand, and changes nothing. A board inside

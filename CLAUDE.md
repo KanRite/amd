@@ -1088,7 +1088,9 @@ off**, ticket 141) to
   says why, the CLI prints it, `create_ticket` adds a warning),
   `transition::save_text` (DRAFT put back even if the editor took it off),
   `edit_ticket` and the MCP `edit_ticket` (`check_pairing` before,
-  `settle_pairing` after), `amd set <ref> repository|branch-type`
+  `settle_pairing` after), `amd set <ref> repository|branch-type` (several `FIELD VALUE` pairs in
+  one commit since ticket 258, `set_pairs`, the pair checked once as it
+  will end up, so a ticket past the backlog can gain both)
   (`Task::set_branch_type`, new), `amd import tickets` (`ImportedTicket.
   mismatched`, a note), and `new_repo::record_on_ticket` (now returns a
   note: past the backlog it can't refuse a repository already made). `amd
