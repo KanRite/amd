@@ -565,17 +565,25 @@ enum Cmd {
         #[arg(value_name = "REF")]
         task: Option<String>,
     },
-    /// Assign a ticket to someone
+    /// Assign a ticket to someone, or to several people
     ///
-    /// With no name, picks from the project's users in a terminal (and
-    /// unassigns elsewhere)
+    /// The names replace whoever is assigned, the first being the main
+    /// assignee; `--add` and `--remove` change the list instead. With no
+    /// name, picks one of the project's users in a terminal (and unassigns
+    /// elsewhere)
     Assign {
         #[arg(value_name = "REF")]
         task: String,
         /// Who it belongs to; `@me` is your git user name, empty unassigns
         #[arg(value_name = "WHO", conflicts_with = "clear")]
-        who: Option<String>,
-        /// Unassign it
+        who: Vec<String>,
+        /// Add these people after whoever is assigned
+        #[arg(long, conflicts_with_all = ["remove", "clear"], requires = "who")]
+        add: bool,
+        /// Take these people off
+        #[arg(long, conflicts_with = "clear", requires = "who")]
+        remove: bool,
+        /// Unassign everyone
         #[arg(long)]
         clear: bool,
     },
@@ -617,12 +625,17 @@ enum Cmd {
         task: String,
         #[arg(
             value_name = "FIELD",
-            value_parser = PossibleValuesParser::new(["points", "epic", "order", "title", "priority", "repository", "branch-type", "due", "recur", "requires"]),
+            value_parser = PossibleValuesParser::new(SET_FIELDS),
         )]
         field: String,
         /// The new value; empty clears the field
         #[arg(value_name = "VALUE", default_value = "")]
         value: String,
+        /// More fields and values, all set in one commit: `amd set 12
+        /// repository acme-api branch-type feature` gives a ticket past the
+        /// backlog both halves of the pair at once
+        #[arg(value_name = "FIELD VALUE")]
+        more: Vec<String>,
     },
     /// Epics and sprints: the folders the backlog is divided into
     Group {
@@ -919,10 +932,11 @@ struct NewArgs {
     /// The ticket this one sits under (an epic, a story, anything)
     #[arg(short = 'p', long, value_name = "REF")]
     parent: Option<String>,
-    /// Who it's assigned to (nobody by default; `@me` is you). Tickets can be
+    /// Who it's assigned to (nobody by default; `@me` is you), repeatable
+    /// for several people, the first being the main one. Tickets can be
     /// created now and assigned later
     #[arg(short = 'a', long, alias = "owner", value_name = "WHO")]
-    assignee: Option<String>,
+    assignee: Vec<String>,
     /// The repository the work is in — one cloned on this machine. Its
     /// branch is made there on entering todo
     #[arg(short = 'R', long, value_name = "REPO")]
@@ -1579,7 +1593,12 @@ fn run() -> Result<()> {
                 open_editor(&task.path)
             })
         }
-        Cmd::Set { task, field, value } if field == "requires" => {
+        Cmd::Set {
+            task,
+            field,
+            value,
+            more,
+        } if field == "requires" && more.is_empty() => {
             let task = resolve(
                 &board,
                 Some(task),
@@ -1597,7 +1616,13 @@ fn run() -> Result<()> {
             report(&transition::set_requires(&board, &task, &wanted)?);
             Ok(())
         }
-        Cmd::Set { task, field, value } => {
+        Cmd::Set {
+            task,
+            field,
+            value,
+            more,
+        } => {
+            let pairs = set_pairs(field, value, more)?;
             let task = resolve(
                 &board,
                 Some(task),
@@ -1605,115 +1630,135 @@ fn run() -> Result<()> {
                 &board.workflow().columns().collect::<Vec<_>>(),
             )?;
             let (id_display, title) = (task.id_display(), task.title());
+            let given = |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .map(|(_, value)| value.clone())
+            };
+            let (repository, branch_type) = (given("repository"), given("branch-type"));
             with_auto_commit(&board, "set", &id_display, &title, || {
-                match field.as_str() {
-                    "points" => {
-                        task.set_points(task.hash()?, &value)?;
-                        println!("{} sized {}", task.id_display(), display(&value));
-                    }
-                    // Filing goes through the board, not the ticket: it moves the
-                    // file, and the sprint rules live there.
-                    "epic" => {
-                        let epic = (!value.is_empty()).then_some(value.as_str());
-                        board.set_epic(&task, epic)?;
-                        println!("{} filed under {}", task.id_display(), display(&value));
-                    }
-                    "order" => {
-                        let rank: f64 = value
-                            .parse()
-                            .with_context(|| format!("{value} is not a number"))?;
-                        task.set_order(task.hash()?, rank)?;
-                        println!("{} ranked {rank}", task.id_display());
-                    }
-                    "title" => {
-                        task.set_title(task.hash()?, &value)?;
-                        println!("{} retitled", task.id_display());
-                    }
-                    // By hand (ticket 215): pins it against auto priority
-                    // when override is on; `auto` unpins.
-                    "priority" => {
-                        println!(
-                            "{}",
-                            agile_md::auto_priority::set_by_hand(&board, &task, &value)?
-                        );
-                    }
-                    // A repository and a branch type go together (ticket
-                    // 066): one without the other is a draft in the
-                    // backlog, and refused past it.
-                    "repository" => {
-                        let why = transition::check_pairing(
-                            &board,
-                            &task,
-                            &value,
-                            &task.branch_type().unwrap_or_default(),
-                        )?;
-                        task.set_repository(task.hash()?, &value)?;
-                        let name = agile_md::task::repo_name(&value);
-                        if !name.is_empty() && !board_settings::load(&board).repos().contains(&name)
-                        {
-                            eprintln!(
-                                "amd: {name} isn't declared for this project — `amd register` it there so the team sees it"
+                // A repository and a branch type go together (ticket 066):
+                // checked once, as they'll be after every field is set, so
+                // a ticket past the backlog can be given both at once
+                // (ticket 258). One without the other is a draft in the
+                // backlog, and refused past it.
+                let why = if repository.is_some() || branch_type.is_some() {
+                    transition::check_pairing(
+                        &board,
+                        &task,
+                        &repository
+                            .clone()
+                            .unwrap_or_else(|| task.repository().unwrap_or_default()),
+                        &branch_type
+                            .clone()
+                            .unwrap_or_else(|| task.branch_type().unwrap_or_default()),
+                    )?
+                } else {
+                    None
+                };
+                let mut due_changed = false;
+                for (field, value) in &pairs {
+                    match field.as_str() {
+                        "points" => {
+                            task.set_points(task.hash()?, value)?;
+                            println!("{} sized {}", task.id_display(), display(value));
+                        }
+                        // Filing goes through the board, not the ticket: it moves the
+                        // file, and the sprint rules live there.
+                        "epic" => {
+                            let epic = (!value.is_empty()).then_some(value.as_str());
+                            board.set_epic(&task, epic)?;
+                            println!("{} filed under {}", task.id_display(), display(value));
+                        }
+                        "order" => {
+                            let rank: f64 = value
+                                .parse()
+                                .with_context(|| format!("{value} is not a number"))?;
+                            task.set_order(task.hash()?, rank)?;
+                            println!("{} ranked {rank}", task.id_display());
+                        }
+                        "title" => {
+                            task.set_title(task.hash()?, value)?;
+                            println!("{} retitled", task.id_display());
+                        }
+                        // By hand (ticket 215): pins it against auto priority
+                        // when override is on; `auto` unpins.
+                        "priority" => {
+                            println!(
+                                "{}",
+                                agile_md::auto_priority::set_by_hand(&board, &task, value)?
                             );
                         }
-                        println!("{} repository {}", task.id_display(), display(&name));
-                        if let Some(drafted) = transition::settle_pairing(&task, why)? {
-                            eprintln!("amd: {drafted}");
+                        "repository" => {
+                            task.set_repository(task.hash()?, value)?;
+                            let name = agile_md::task::repo_name(value);
+                            if !name.is_empty()
+                                && !board_settings::load(&board).repos().contains(&name)
+                            {
+                                eprintln!(
+                                    "amd: {name} isn't declared for this project — `amd register` it there so the team sees it"
+                                );
+                            }
+                            println!("{} repository {}", task.id_display(), display(&name));
                         }
-                    }
-                    "branch-type" => {
-                        let why = transition::check_pairing(
-                            &board,
-                            &task,
-                            &task.repository().unwrap_or_default(),
-                            &value,
-                        )?;
-                        task.set_branch_type(task.hash()?, &value)?;
-                        println!(
-                            "{} branch type {}",
-                            task.id_display(),
-                            display(&branch::normalise(&value))
-                        );
-                        if let Some(drafted) = transition::settle_pairing(&task, why)? {
-                            eprintln!("amd: {drafted}");
+                        "branch-type" => {
+                            task.set_branch_type(task.hash()?, value)?;
+                            println!(
+                                "{} branch type {}",
+                                task.id_display(),
+                                display(&branch::normalise(value))
+                            );
                         }
-                    }
-                    // Ticket 143: a due date, and a repeat that makes the
-                    // next one when this one is done.
-                    "due" => {
-                        // Not in an epic (ticket 253).
-                        let epic = match task.column.kind() {
-                            agile_md::board::Kind::Backlog => task.epic.clone(),
-                            _ => task.epic_meta(),
-                        };
-                        board.refuse_due_in_epic(
-                            &task.id_display(),
-                            epic.as_deref(),
-                            Some(&value),
-                        )?;
-                        task.set_due(task.hash()?, &value)?;
-                        println!("{} due {}", task.id_display(), display(&value));
-                        // Due soon: straight to todo (ticket 253).
-                        if let Some(dated) =
-                            agile_md::task::Task::from_path(&task.path, task.column)
-                            && let Some(line) = transition::straight_to_todo(&board, &dated)
-                        {
-                            println!("{line}");
+                        // Ticket 143: a due date, and a repeat that makes the
+                        // next one when this one is done.
+                        "due" => {
+                            // Not in an epic (ticket 253).
+                            let epic = match task.column.kind() {
+                                agile_md::board::Kind::Backlog => task.epic.clone(),
+                                _ => task.epic_meta(),
+                            };
+                            board.refuse_due_in_epic(
+                                &task.id_display(),
+                                epic.as_deref(),
+                                Some(value),
+                            )?;
+                            task.set_due(task.hash()?, value)?;
+                            println!("{} due {}", task.id_display(), display(value));
+                            due_changed = true;
                         }
-                    }
-                    "recur" => {
-                        task.set_recur(task.hash()?, &value)?;
-                        match task.recur() {
-                            Some(rule) => println!("{} repeats {rule}", task.id_display()),
-                            None => println!("{} doesn't repeat", task.id_display()),
+                        "recur" => {
+                            task.set_recur(task.hash()?, value)?;
+                            match task.recur() {
+                                Some(rule) => println!("{} repeats {rule}", task.id_display()),
+                                None => println!("{} doesn't repeat", task.id_display()),
+                            }
                         }
+                        other => bail!("unknown field {other}"),
                     }
-                    other => bail!("unknown field {other}"),
+                }
+                if let Some(drafted) = transition::settle_pairing(&task, why)? {
+                    eprintln!("amd: {drafted}");
+                }
+                // Due soon: straight to todo (ticket 253), once every field
+                // is set, since it moves the file.
+                if due_changed
+                    && let Some(dated) = agile_md::task::Task::from_path(&task.path, task.column)
+                    && let Some(line) = transition::straight_to_todo(&board, &dated)
+                {
+                    println!("{line}");
                 }
                 Ok(())
             })
         }
         Cmd::Group { command } => cmd_group(&board, command.unwrap_or(GroupCmd::List)),
-        Cmd::Assign { task, who, clear } => {
+        Cmd::Assign {
+            task,
+            who,
+            add,
+            remove,
+            clear,
+        } => {
             let task = resolve(
                 &board,
                 Some(task),
@@ -1723,23 +1768,39 @@ fn run() -> Result<()> {
             let (id_display, title) = (task.id_display(), task.title());
             // No name: the picker in a terminal (ticket 089); anywhere else
             // it unassigns, as it always has, so scripts are unchanged.
-            let who = match who {
-                None if !clear && form::available() => form::assignee(
+            let named: Vec<String> = who
+                .iter()
+                .map(|who| resolve_assignee(&board.root, Some(who)))
+                .collect();
+            let current = task.assignees();
+            // Several people (ticket 254): the names replace the list, or
+            // `--add`/`--remove` change it.
+            let who = if add {
+                agile_md::task::regroup(&current, &named, &[])
+            } else if remove {
+                agile_md::task::regroup(&current, &[], &named)
+            } else if named.is_empty() && !clear && form::available() {
+                // No name: the picker in a terminal (ticket 089); anywhere
+                // else it unassigns, as it always has, so scripts are
+                // unchanged.
+                let one = form::assignee(
                     board_settings::load(&board).user_names(),
                     git::config(&board.root, "user.name"),
                     &task.assignee().unwrap_or_default(),
-                )?,
-                who => resolve_assignee(&board.root, who.as_deref()),
+                )?;
+                agile_md::task::regroup(&[one], &[], &[])
+            } else {
+                agile_md::task::regroup(&named, &[], &[])
             };
             with_auto_commit(&board, "assign", &id_display, &title, || {
-                task.assign(task.hash()?, &who)?;
+                task.set_assignees(task.hash()?, &who)?;
                 match who.is_empty() {
                     true => println!("{} unassigned", task.id_display()),
-                    false => println!("{} assigned to {who}", task.id_display()),
+                    false => println!("{} assigned to {}", task.id_display(), who.join(", ")),
                 }
                 Ok(())
             })?;
-            if let Some(warning) = board_settings::unknown_assignee(&board, &who) {
+            for warning in board_settings::unknown_assignees(&board, &who) {
                 eprintln!("warning: {warning}");
             }
             Ok(())
@@ -3606,6 +3667,44 @@ fn pick_repository(board: &Board) -> Result<String> {
     })
 }
 
+/// The fields `amd set` can change.
+const SET_FIELDS: [&str; 10] = [
+    "points",
+    "epic",
+    "order",
+    "title",
+    "priority",
+    "repository",
+    "branch-type",
+    "due",
+    "recur",
+    "requires",
+];
+
+/// `amd set`'s field and value, then any more `FIELD VALUE` pairs (ticket
+/// 258), each field once; a last field with no value clears it, as a lone
+/// one does. `requires` has a commit of its own, so it's set alone.
+fn set_pairs(field: String, value: String, more: Vec<String>) -> Result<Vec<(String, String)>> {
+    let mut pairs = vec![(field, value)];
+    let mut rest = more.into_iter();
+    while let Some(field) = rest.next() {
+        if !SET_FIELDS.contains(&field.as_str()) {
+            bail!(
+                "{field} isn't a field amd set knows: {}",
+                SET_FIELDS.join(", ")
+            );
+        }
+        if pairs.iter().any(|(seen, _)| *seen == field) {
+            bail!("{field} is given twice");
+        }
+        pairs.push((field, rest.next().unwrap_or_default()));
+    }
+    if pairs.len() > 1 && pairs.iter().any(|(field, _)| field == "requires") {
+        bail!("set requires on its own: `amd set <ref> requires 3,7`");
+    }
+    Ok(pairs)
+}
+
 /// `@me` is whoever git says you are — the name that ends up in the commits.
 fn resolve_assignee(repo: &Path, who: Option<&str>) -> String {
     match who {
@@ -3841,14 +3940,19 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         None => None,
     };
 
-    let assignee = match args.assignee {
-        Some(who) => resolve_assignee(&board.root, Some(&who)),
-        None if full_form => form::assignee(
+    let assignees: Vec<String> = if !args.assignee.is_empty() {
+        args.assignee
+            .iter()
+            .map(|who| resolve_assignee(&board.root, Some(who)))
+            .collect()
+    } else if full_form {
+        vec![form::assignee(
             board_settings::load(board).user_names(),
             git::config(&board.root, "user.name"),
             "",
-        )?,
-        None => String::new(),
+        )?]
+    } else {
+        Vec::new()
     };
 
     let repository = match args.repository {
@@ -3918,7 +4022,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         &templates,
         NewTicket {
             title,
-            assignee,
+            assignees,
             repository,
             template,
             branch_type,
@@ -3996,11 +4100,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     if let Some(drafted) = &created.drafted {
         eprintln!("amd: {drafted}");
     }
-    if let Some(warning) = created
-        .task
-        .assignee()
-        .and_then(|who| board_settings::unknown_assignee(board, &who))
-    {
+    for warning in board_settings::unknown_assignees(board, &created.task.assignees()) {
         eprintln!("warning: {warning}");
     }
     Ok(())

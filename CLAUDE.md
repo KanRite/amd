@@ -1088,7 +1088,9 @@ off**, ticket 141) to
   says why, the CLI prints it, `create_ticket` adds a warning),
   `transition::save_text` (DRAFT put back even if the editor took it off),
   `edit_ticket` and the MCP `edit_ticket` (`check_pairing` before,
-  `settle_pairing` after), `amd set <ref> repository|branch-type`
+  `settle_pairing` after), `amd set <ref> repository|branch-type` (several `FIELD VALUE` pairs in
+  one commit since ticket 258, `set_pairs`, the pair checked once as it
+  will end up, so a ticket past the backlog can gain both)
   (`Task::set_branch_type`, new), `amd import tickets` (`ImportedTicket.
   mismatched`, a note), and `new_repo::record_on_ticket` (now returns a
   note: past the backlog it can't refuse a repository already made). `amd
@@ -1356,6 +1358,25 @@ off**, ticket 141) to
   The *name* is stored. A name off the list is allowed with a warning
   (`board_settings::unknown_assignee`; never for a board with no list).
   Without a terminal, bare `amd assign` still clears; `--clear` says so.
+  **Several people** (ticket 254): one is `assignee` alone, exactly as
+  before; two or more keep `assignee` as the first and add `assignees:
+  ["A","B"]` (`task::with_assignees`, `parse_names` quote-aware), believed
+  only while its first name equals `assignee` (an older build reassigning
+  leaves a stale list, and `assignee` wins: `Task::assignees`,
+  `assignees_in`). `is_assigned_to`, `set_assignees`, `regroup` (add/remove,
+  ignoring case). Every match uses the list: My work (`is_mine`), triage,
+  `to_pick`, sprint backfill's unassigned, `Board::assignees`, the MCP
+  `board` filter. `check_lease` lets any assignee write a ticket someone
+  else has locked (`assigned_to_me`: the name the users list gives this
+  clone's email, else `user.name`). `EditFields.assignees`,
+  `TicketFields.assignees`, `NewTicket.assignees`, `TaskContext.assignees`
+  (`assignee` stays the first). CLI `amd assign <ref> A B [--add|--remove|
+  --clear]`, `amd new -a A -a B`, `amd board` shows `@A @B`. MCP
+  `assignees` on create/edit, `assign_ticket` `assignees`/`add`/`remove`.
+  amdui: `TicketSummary.assignees`/`people()`/`people_label()` (`@Alex
+  +1`), `Assigned::User` matches any, `Fields.assignees` written by
+  `apply_fields` as amd does (amd-ui's tests check they agree), the
+  editor's chip `AssigneePicker`.
 - **Frontmatter keys are hyphenated, template variables are not** —
   `branch-type: {{ branch_type | yaml }}`. Jinja would read `branch-type` as a
   subtraction, so the variable has to be `branch_type`; the key is just text.

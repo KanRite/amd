@@ -189,8 +189,15 @@ would leave the two apart is refused.
 amd new "Fix the API" --repository acme-api       # a draft: no branch type
 amd set 3 branch-type bugfix                      # or none, for no branch
 amd ready 3
+amd set 7 repository acme-api branch-type feature  # both at once, past the backlog too
 amd check       # tickets whose repository and branch type don't go together
 ```
+
+`amd set` takes several fields at once (`amd set 7 points 3 priority high`),
+written in one go and committed together. That's how a ticket already in
+todo gets a repository and a branch type: either one alone would leave the
+pair apart, so the two are checked together, as they'll be once both are
+set.
 
 `amd check` only reads: it lists tickets that don't meet the rule, such as
 ones from before it or edited by hand, and changes nothing. A board inside
@@ -213,16 +220,28 @@ rather than producing a ticket that can never start.
 
 ```bash
 amd new "Add login" --assignee alex   # or -a @me for whoever git says you are
+amd new "Big job" -a alex -a sam      # several people, alex first
 amd assign 3 sam                      # assign an existing ticket
-amd assign 3                          # unassign it
+amd assign 3 sam jo                   # to several people, replacing whoever had it
+amd assign 3 --add ann                # add someone
+amd assign 3 --remove sam             # take someone off
+amd assign 3                          # unassign it (or --clear)
 ```
 
 Tickets are meant to be created now and assigned later, so `assignee` starts
 empty. The name lands in the ticket's frontmatter (`assignee: "sam"`), so it
-moves with the file and shows in the diff; the board shows it as `@sam`, and
-the desktop board's User filter narrows to one person. In a terminal, a bare
-`amd assign 3` offers the project's users to pick from. Who *created* a
-ticket is recorded separately, as `created-by`.
+moves with the file and shows in the diff; the board shows it as `@sam`. In a
+terminal, a bare `amd assign 3` offers the project's users to pick from. Who
+*created* a ticket is recorded separately, as `created-by`.
+
+A big ticket can be shared. With several people, the first is the main
+assignee and stays in `assignee`, and the whole list is added beside it
+(`assignees: ["sam","jo"]`), so an older amd still sees the first person.
+Everyone on it sees it in My work, the desktop board's User filter finds it
+under any of them, and the card shows `@sam +1` (every name on hover). The
+editor's Assignee field is a row of names, each with a ×, and a box to add
+someone. In doing, the lock still names whoever started it, but every
+assignee can save the ticket; nobody else can.
 
 ## Related tickets
 

@@ -320,7 +320,9 @@ fn labels(node: &Node, root: bool) -> String {
     let task = &node.task;
     [
         task.branch_type(),
-        task.assignee().map(|who| format!("@{who}")),
+        Some(task.assignees())
+            .filter(|people| !people.is_empty())
+            .map(|people| format!("@{}", people.join(" @"))),
         // In the same column the tree already shows the parent; this marker is
         // for a child whose parent sits in another column.
         node.parent

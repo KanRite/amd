@@ -113,7 +113,8 @@ pub struct Task {
 /// frontmatter-only write; the editor calls that separately, after this one.
 pub struct EditFields<'a> {
     pub title: &'a str,
-    pub assignee: &'a str,
+    /// Everyone assigned, in order (ticket 254); empty for nobody.
+    pub assignees: &'a [String],
     pub points: &'a str,
     pub tags: &'a [String],
     /// Branch type; `branch-name` is not taken as input — it's re-derived
@@ -232,6 +233,25 @@ impl Task {
         Ok(true)
     }
 
+    /// Whether `email` (this clone's identity) is one of the people the
+    /// ticket `text` is assigned to: by the name the project's users list
+    /// gives that email, else git's `user.name`.
+    fn assigned_to_me(&self, text: &str, email: &str) -> bool {
+        let people = assignees_in(text);
+        if people.is_empty() {
+            return false;
+        }
+        let Some(repo) = self.path.ancestors().find(|dir| dir.join(".git").exists()) else {
+            return false;
+        };
+        let board = crate::board::Board::in_repo(repo);
+        let mine =
+            crate::my_work::names_for(&board, email, git::config(repo, "user.name").as_deref());
+        people
+            .iter()
+            .any(|who| mine.contains(&who.trim().to_lowercase()))
+    }
+
     /// `git config user.email`, resolved from this ticket's own directory
     /// rather than the process's current one — a desktop board open across
     /// several registered repositories isn't standing in any one of them.
@@ -273,7 +293,15 @@ impl Task {
         if until <= OffsetDateTime::now_utc() {
             return Ok(());
         }
-        if self.git_identity().as_deref() == Some(holder) {
+        let me = self.git_identity();
+        if me.as_deref() == Some(holder) {
+            return Ok(());
+        }
+        // Everyone the ticket is assigned to may write it while it's locked
+        // (ticket 254); the lease still names one holder.
+        if let Some(me) = &me
+            && self.assigned_to_me(text, me)
+        {
             return Ok(());
         }
         Err(LeaseHeld {
@@ -377,12 +405,37 @@ impl Task {
         })
     }
 
-    /// Who the ticket is assigned to, if anyone. Also reads `owner`, which the
-    /// field was briefly called, so no board is left stranded.
+    /// The first person the ticket is assigned to, if anyone: what
+    /// `assignee` holds. Also reads `owner`, which the field was briefly
+    /// called, so no board is left stranded. Everyone is [`assignees`].
+    ///
+    /// [`assignees`]: Self::assignees
     pub fn assignee(&self) -> Option<String> {
         self.meta("assignee")
             .or_else(|| self.meta("owner"))
             .filter(|who| !who.is_empty())
+    }
+
+    /// Everyone the ticket is assigned to, in order (ticket 254). One person
+    /// is `assignee` alone, as it always was; several also write an
+    /// `assignees` list whose first name is `assignee`, so a build from
+    /// before 254 still sees the first person. The list is believed only
+    /// while its first name matches `assignee`: one that doesn't was left
+    /// behind by an older build reassigning the ticket, and `assignee` wins.
+    pub fn assignees(&self) -> Vec<String> {
+        fs::read_to_string(&self.path)
+            .map(|text| assignees_in(&text))
+            .unwrap_or_default()
+    }
+
+    /// Whether `name` is one of the people assigned, ignoring case.
+    pub fn is_assigned_to(&self, name: &str) -> bool {
+        let name = name.trim().to_lowercase();
+        !name.is_empty()
+            && self
+                .assignees()
+                .iter()
+                .any(|who| who.trim().to_lowercase() == name)
     }
 
     /// The repository this ticket is about (tickets 101/107): its
@@ -482,10 +535,19 @@ impl Task {
         })
     }
 
-    /// Assign the ticket, or clear it with an empty name.
+    /// Assign the ticket to one person, or clear it with an empty name.
     pub fn assign(&self, expected: ContentHash, who: &str) -> Result<()> {
-        let quoted = format!("{who:?}");
-        self.write_checked(expected, |text| set_meta(text, "assignee", &quoted))
+        let who = who.trim();
+        let names: Vec<String> = (!who.is_empty())
+            .then(|| who.to_string())
+            .into_iter()
+            .collect();
+        self.set_assignees(expected, &names)
+    }
+
+    /// Assign the ticket to these people, in order, or nobody (ticket 254).
+    pub fn set_assignees(&self, expected: ContentHash, names: &[String]) -> Result<()> {
+        self.write_checked(expected, |text| with_assignees(text, names))
     }
 
     /// Story points, when the ticket has been sized. Free-form on purpose:
@@ -682,7 +744,7 @@ impl Task {
 
         self.write_checked(expected, |text| {
             let text = set_meta(text, "title", &format!("{:?}", fields.title))?;
-            let text = set_meta(&text, "assignee", &format!("{:?}", fields.assignee))?;
+            let text = with_assignees(&text, fields.assignees)?;
             let text = set_meta(&text, "points", &format!("{:?}", fields.points))?;
             let tags = normalize_tags(fields.tags);
             let text = set_meta(&text, "tags", &format!("[{}]", tags.join(",")))?;
@@ -1061,6 +1123,96 @@ fn uppercase_tags(text: &str) -> Result<String> {
         return Ok(text.to_string());
     }
     set_meta(text, "tags", &format!("[{}]", upper.join(",")))
+}
+
+/// The `assignees` key (ticket 254).
+pub const ASSIGNEES: &str = "assignees";
+
+/// `text` assigned to `names`, in order (ticket 254): `assignee` is the
+/// first (empty for nobody); an `assignees` list is written only for two or
+/// more, quoted so a comma in a name survives, and removed otherwise.
+/// Blank and repeated names are dropped.
+pub fn with_assignees(text: &str, names: &[String]) -> Result<String> {
+    let mut list: Vec<String> = Vec::new();
+    for name in names {
+        let name = name.trim();
+        if !name.is_empty() && !list.iter().any(|n| n.eq_ignore_ascii_case(name)) {
+            list.push(name.to_string());
+        }
+    }
+    let first = list.first().cloned().unwrap_or_default();
+    let text = set_meta(text, "assignee", &format!("{first:?}"))?;
+    if list.len() > 1 {
+        let quoted: Vec<String> = list.iter().map(|n| format!("{n:?}")).collect();
+        set_meta(&text, ASSIGNEES, &format!("[{}]", quoted.join(",")))
+    } else {
+        Ok(remove_meta(&text, ASSIGNEES))
+    }
+}
+
+/// [`Task::assignees`], read from a ticket's text.
+pub fn assignees_in(text: &str) -> Vec<String> {
+    let Some(first) = meta_in(text, "assignee")
+        .or_else(|| meta_in(text, "owner"))
+        .filter(|who| !who.is_empty())
+        .map(str::to_string)
+    else {
+        return Vec::new();
+    };
+    let list = meta_in(text, ASSIGNEES)
+        .map(parse_names)
+        .unwrap_or_default();
+    if list.first() == Some(&first) {
+        list
+    } else {
+        vec![first]
+    }
+}
+
+/// `current` with `add` put after it and `remove` taken out, each name once
+/// and compared ignoring case; the first left is the main assignee.
+pub fn regroup(current: &[String], add: &[String], remove: &[String]) -> Vec<String> {
+    let same = |a: &str, b: &str| a.trim().eq_ignore_ascii_case(b.trim());
+    let mut out: Vec<String> = Vec::new();
+    for who in current.iter().chain(add) {
+        let who = who.trim();
+        if !who.is_empty()
+            && !out.iter().any(|o| same(o, who))
+            && !remove.iter().any(|r| same(r, who))
+        {
+            out.push(who.to_string());
+        }
+    }
+    out
+}
+
+/// A flow list of names, `["Alex Morgan","Sam Lee"]`: like [`parse_list`],
+/// but a quoted name may hold a comma.
+pub fn parse_names(raw: &str) -> Vec<String> {
+    let inner = raw.trim().trim_start_matches('[').trim_end_matches(']');
+    let mut names = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for ch in inner.chars() {
+        match (quote, ch) {
+            (Some(_), '\\') if !escaped => escaped = true,
+            (Some(q), c) if c == q && !escaped => quote = None,
+            (Some(_), c) => {
+                current.push(c);
+                escaped = false;
+            }
+            (None, '"' | '\'') => quote = Some(ch),
+            (None, ',') => names.push(std::mem::take(&mut current)),
+            (None, c) => current.push(c),
+        }
+    }
+    names.push(current);
+    names
+        .into_iter()
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .collect()
 }
 
 pub fn parse_list(raw: &str) -> Vec<String> {
@@ -1649,7 +1801,7 @@ mod tests {
     fn no_edit() -> EditFields<'static> {
         EditFields {
             title: "",
-            assignee: "",
+            assignees: &[],
             points: "",
             tags: &[],
             branch_type: "",
@@ -1669,12 +1821,13 @@ mod tests {
         );
         let tags = ["urgent".to_string(), "gui".to_string()];
         let related = ["001".to_string()];
+        let sam = ["sam".to_string()];
         task.apply_edit(
             task.hash().unwrap(),
             &board,
             EditFields {
                 title: "New",
-                assignee: "sam",
+                assignees: &sam,
                 points: "5",
                 tags: &tags,
                 branch_type: "feature",
@@ -1924,13 +2077,14 @@ mod tests {
             "002-a.md",
             "---\nid: \"002\"\ntitle: \"Old\"\nassignee: \"\"\npoints: \"\"\n---\n\nbody\n",
         );
+        let sam = ["sam".to_string()];
         let err = task
             .apply_edit(
                 task.hash().unwrap(),
                 &board,
                 EditFields {
                     title: "New",
-                    assignee: "sam",
+                    assignees: &sam,
                     points: "7",
                     ..no_edit()
                 },
@@ -2210,5 +2364,61 @@ mod tests {
         task.break_lease(task.hash().unwrap()).unwrap();
         assert!(!task.lease_active());
         assert_eq!(task.locked_by(), None);
+    }
+
+    #[test]
+    fn one_assignee_is_written_as_before_and_several_add_a_list() {
+        let text = "---\nid: \"002\"\ntitle: \"A\"\nassignee: \"\"\n---\n\nbody\n";
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let one = with_assignees(text, &names(&["Sam Lee"])).unwrap();
+        assert!(one.contains("assignee: \"Sam Lee\""), "{one}");
+        assert!(!one.contains("assignees:"), "{one}");
+        let two = with_assignees(text, &names(&["Sam Lee", "Jo, Jr", " sam lee "])).unwrap();
+        assert!(two.contains("assignee: \"Sam Lee\""), "{two}");
+        assert!(two.contains("assignees: [\"Sam Lee\",\"Jo, Jr\"]"), "{two}");
+        // Back to one: the list goes.
+        let back = with_assignees(&two, &names(&["Jo, Jr"])).unwrap();
+        assert!(back.contains("assignee: \"Jo, Jr\""), "{back}");
+        assert!(!back.contains("assignees:"), "{back}");
+        let none = with_assignees(&two, &[]).unwrap();
+        assert!(none.contains("assignee: \"\""), "{none}");
+        assert!(!none.contains("assignees:"), "{none}");
+    }
+
+    #[test]
+    fn the_list_counts_only_while_it_starts_with_the_assignee() {
+        let dir = tempfile::tempdir().unwrap();
+        let backlog = dir.path().join("backlog");
+        fs::create_dir_all(&backlog).unwrap();
+        let task = ranked(
+            &backlog,
+            "003-a.md",
+            "---\nid: \"003\"\ntitle: \"A\"\nassignee: \"Sam\"\nassignees: [\"Sam\",\"Jo\"]\n---\n",
+        );
+        assert_eq!(task.assignees(), ["Sam", "Jo"]);
+        assert!(task.is_assigned_to("jo"));
+        assert!(!task.is_assigned_to("Ann"));
+        // An older build changed `assignee` and left the list: the field wins.
+        let stale = ranked(
+            &backlog,
+            "004-a.md",
+            "---\nid: \"004\"\ntitle: \"A\"\nassignee: \"Ann\"\nassignees: [\"Sam\",\"Jo\"]\n---\n",
+        );
+        assert_eq!(stale.assignees(), ["Ann"]);
+        assert!(!stale.is_assigned_to("Jo"));
+    }
+
+    #[test]
+    fn regroup_adds_after_and_removes_ignoring_case() {
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            regroup(
+                &names(&["Sam", "Jo"]),
+                &names(&["ann", "jo"]),
+                &names(&["SAM"])
+            ),
+            ["Jo", "ann"]
+        );
+        assert!(regroup(&names(&["Sam"]), &[], &names(&["sam"])).is_empty());
     }
 }

@@ -416,7 +416,7 @@ async fn create_ticket(
         let related: Vec<String> = related_to.into_iter().collect();
         let fields = TicketFields {
             title: title.clone(),
-            assignee: String::new(),
+            assignees: Vec::new(),
             // What it's about: the repository being filtered to, if any.
             repository,
             points: String::new(),
@@ -3789,7 +3789,7 @@ mod tests {
     fn new_ticket(project: &Project, title: &str) -> String {
         let fields = TicketFields {
             title: title.into(),
-            assignee: String::new(),
+            assignees: Vec::new(),
             repository: None,
             points: String::new(),
             epic: None,
@@ -3993,6 +3993,26 @@ mod tests {
             "{rendered}"
         );
         assert!(preview(board, "{{ nope").is_err());
+    }
+
+    #[test]
+    fn the_editor_writes_and_reads_several_people_as_amd_does() {
+        let ticket = "---\nid: \"001\"\ntitle: \"T\"\nassignee: \"\"\n---\n\nbody\n";
+        let people = vec!["Alex \"Al\" Morgan".to_string(), "Jo, Jr".to_string()];
+        let mut fields =
+            amd_ui_model::ticket::Fields::from(&amd_ui_model::parse_frontmatter(ticket));
+        fields.assignees = people.clone();
+        assert_eq!(
+            amd_ui_model::ticket::apply_fields(ticket, &fields),
+            agile_md::task::with_assignees(ticket, &people).unwrap()
+        );
+        for raw in [r#"["Alex \"Al\" Morgan","Jo, Jr"]"#, "[a, 'b, c']", "[]"] {
+            assert_eq!(
+                amd_ui_model::parse_names(raw),
+                agile_md::task::parse_names(raw),
+                "{raw}"
+            );
+        }
     }
 
     #[test]

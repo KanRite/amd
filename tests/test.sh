@@ -569,6 +569,27 @@ assert "amd set repository on a backlog ticket with no branch type makes it a dr
     in_tr new 'Later' --no-edit >/dev/null 2>&1 \
     && in_tr set 5 repository demo-api 2>&1 | grep -q 'draft until' \
     && grep -q DRAFT '${tr}'/demo-tickets/tasks/backlog/005-later.md"
+assert "amd set gives a todo ticket a repository and a branch type at once, in one commit (ticket 258)" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
+    in_tr new 'Both at once' --no-edit >/dev/null 2>&1 && in_tr todo 6 >/dev/null 2>&1 \
+    && before=\"\$(git -C '${tr}/demo-tickets' rev-list --count HEAD 2>/dev/null || echo 0)\" \
+    && out=\"\$(cd '${tr}/demo-tickets' && XDG_CONFIG_HOME='${tr}/config' '${AMD}' set 6 repository demo-api branch-type feature 2>&1)\" \
+    && echo \"\$out\" | grep -q '006 repository demo-api' && echo \"\$out\" | grep -q '006 branch type feature' \
+    && f='${tr}'/demo-tickets/tasks/todo/006-both-at-once.md \
+    && grep -q '^repository: \"demo-api\"' \"\$f\" && grep -q '^branch-type: \"feature\"' \"\$f\" \
+    && grep -q '^branch-name: \"feature/both-at-once\"' \"\$f\" && ! grep -q DRAFT \"\$f\" \
+    && [ \"\$(git -C '${tr}/demo-tickets' rev-list --count HEAD)\" = \"\$((before + 1))\" ] \
+    && [ -z \"\$(git -C '${tr}/demo-tickets' status --porcelain -- \"\$f\")\" ]"
+assert "...still refused when the pair would be left mismatched, changing nothing" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
+    in_tr set 6 repository '' title 'Renamed' 2>&1 | grep -q 'past the backlog' \
+    && grep -q '^title: \"Both at once\"' '${tr}'/demo-tickets/tasks/todo/006-both-at-once.md"
+assert "amd set refuses an unknown or repeated field, and requires with others" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
+    in_tr set 6 points 3 colour red 2>&1 | grep -q \"colour isn't a field\" \
+    && in_tr set 6 points 3 points 5 2>&1 | grep -q 'points is given twice' \
+    && in_tr set 6 requires 1 points 3 2>&1 | grep -q 'set requires on its own' \
+    && ! grep -q '^points: \"3\"' '${tr}'/demo-tickets/tasks/todo/006-both-at-once.md"
 sed -i 's/^repository: \"\"/repository: \"demo-api\"/' "${tr}"/demo-tickets/tasks/todo/004-plain.md
 tr_before="$(sha1sum < "${tr}"/demo-tickets/tasks/todo/004-plain.md)"
 assert "amd check lists a ticket mismatched by hand, and changes nothing" \
@@ -1221,6 +1242,33 @@ assert "amd assign with no name clears it" \
 assert "@me resolves to the git user" \
   bash -c "'${AMD}' assign 1 @me >/dev/null && grep -q '^assignee: \"t\"$' tasks/*/001-first-task.md"
 assert "the board shows the assignee" bash -c "'${AMD}' board --plain | grep -q '@t'"
+# Ticket 254: several people. One is written as before; two or more keep
+# `assignee` as the first and add an `assignees` list.
+assert "amd assign with two names assigns both, the first as assignee" \
+  bash -c "'${AMD}' assign 1 sam jo >/dev/null && grep -q '^assignee: \"sam\"$' tasks/*/001-first-task.md \
+    && grep -q '^assignees: \[\"sam\",\"jo\"\]$' tasks/*/001-first-task.md"
+assert "the board shows every assignee" bash -c "'${AMD}' board --plain | grep -q '@sam @jo'"
+assert "amd assign --add adds after them" \
+  bash -c "'${AMD}' assign 1 --add ann | grep -q 'assigned to sam, jo, ann' \
+    && grep -q '^assignees: \[\"sam\",\"jo\",\"ann\"\]$' tasks/*/001-first-task.md"
+assert "amd assign --remove takes the first off and the next leads" \
+  bash -c "'${AMD}' assign 1 --remove SAM >/dev/null && grep -q '^assignee: \"jo\"$' tasks/*/001-first-task.md \
+    && grep -q '^assignees: \[\"jo\",\"ann\"\]$' tasks/*/001-first-task.md"
+assert "down to one person, the list goes" \
+  bash -c "'${AMD}' assign 1 --remove ann >/dev/null && grep -q '^assignee: \"jo\"$' tasks/*/001-first-task.md \
+    && ! grep -q '^assignees:' tasks/*/001-first-task.md"
+"${AMD}" new "Shared work" -a @me -a jo --no-edit >/dev/null
+shared="$(ls tasks/backlog/*-shared-work.md)"
+assert "amd new -a twice assigns both" \
+  bash -c "grep -q '^assignee: \"t\"$' '${shared}' && grep -q '^assignees: \[\"t\",\"jo\"\]$' '${shared}'"
+# Someone else's lease: every assignee may still write the ticket.
+sed -i 's/^assignee: "t"$/assignee: "t"\nlocked-by: "jo@elsewhere.co"\nlocked-until: "2999-01-01T00:00:00Z"/' "${shared}"
+assert "an assignee can write a ticket someone else has locked" \
+  bash -c "'${AMD}' set \$(basename '${shared}' | cut -c1-3) points 3 >/dev/null 2>&1 && grep -q '^points: \"3\"$' '${shared}'"
+sed -i 's/^assignee: "t"$/assignee: "jo"/; s/^assignees: .*$/assignees: ["jo"]/' "${shared}"
+assert "...and anyone else can't" \
+  bash -c "! '${AMD}' set \$(basename '${shared}' | cut -c1-3) points 5 >/dev/null 2>&1 && grep -q '^points: \"3\"$' '${shared}'"
+sed -i '/^locked-by:/d; /^locked-until:/d' "${shared}"
 # Ticket 089: the users list is what assignees are picked from; anyone
 # else is allowed, with a warning, and a board with no list never warns.
 as_list="$(mktemp -d)"

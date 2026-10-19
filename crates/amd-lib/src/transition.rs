@@ -446,7 +446,8 @@ fn maybe_take_lease(board: &Board, task: &Task) -> Option<String> {
 #[derive(Debug, Default, Clone)]
 pub struct TicketFields {
     pub title: String,
-    pub assignee: String,
+    /// Who it's assigned to, in order; empty for nobody (ticket 254).
+    pub assignees: Vec<String>,
     /// The repository it's about. On creation, `None` or empty means none;
     /// on an edit, `None` leaves it as it is and `Some("")` clears it.
     pub repository: Option<String>,
@@ -493,7 +494,7 @@ pub fn create_ticket(board: &Board, fields: &TicketFields) -> Result<Outcome> {
             title: fields.title.trim().to_string(),
             template: crate::templates::DEFAULT_TEMPLATE.to_string(),
             branch_type: fields.branch_type.trim().to_string(),
-            assignee: fields.assignee.trim().to_string(),
+            assignees: fields.assignees.clone(),
             repository: fields.repository.clone().unwrap_or_default(),
             parent: Some(fields.parent.trim().to_string()).filter(|p| !p.is_empty()),
             related: fields.related.clone(),
@@ -770,7 +771,7 @@ pub fn edit_ticket(
             board,
             crate::task::EditFields {
                 title: &fields.title,
-                assignee: &fields.assignee,
+                assignees: &fields.assignees,
                 points: &fields.points,
                 tags: &fields.tags,
                 branch_type: &fields.branch_type,
@@ -1364,7 +1365,7 @@ mod tests {
         let task = Task::from_path(&path, Column::Backlog).unwrap();
         let hash = task.hash().unwrap();
         let mut edited = fields("New title");
-        edited.assignee = "sam".to_string();
+        edited.assignees = vec!["sam".to_string()];
         edited.body = "## Notes\nchanged\n".to_string();
         edit_ticket(&board, &task, hash, &edited).unwrap();
         let task = Task::from_path(&path, Column::Backlog).unwrap();
