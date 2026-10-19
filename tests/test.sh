@@ -950,13 +950,16 @@ st_env="XDG_CONFIG_HOME=${st}/config"
   echo "old-repo,docs-repo" >../proj-documents/.settings/repos
   echo "4" >../proj-documents/.settings/wip-limit
 )
-assert "the first command carries documents settings across, and says so" \
-  bash -c "cd '${st}/proj-tickets' && out=\"\$(env ${st_env} '${AMD}' board --plain 2>&1)\" \
+assert "reading the board carries nothing across: no migration on open (ticket 193)" \
+  bash -c "cd '${st}/proj-tickets' && ! env ${st_env} '${AMD}' board --plain 2>&1 | grep -q 'moved ' \
+    && ! grep -q 'docs-repo' .settings && [ -z \"\$(git status --porcelain)\" ]"
+assert "the first change carries documents settings across, and says so" \
+  bash -c "cd '${st}/proj-tickets' && out=\"\$(env ${st_env} '${AMD}' new 'First change' --no-edit 2>&1)\" \
     && grep -q '^moved .*repos.* from .*proj-documents/.settings' <<<\"\${out}\" && grep -q '^moved .*wip-limit' <<<\"\${out}\""
 assert "...repos is the union, wip-limit filled in, in the tickets .settings" \
   bash -c "grep -qx 'repos = old-repo,docs-repo' '${st}/proj-tickets/.settings' && grep -qx 'wip-limit = 4' '${st}/proj-tickets/.settings'"
 assert "...committed, like any change" \
-  bash -c "git -C '${st}/proj-tickets' log -1 --format=%s | grep -q '^settings: migrate'"
+  bash -c "git -C '${st}/proj-tickets' log -2 --format=%s | grep -q '^settings: migrate'"
 assert "...and silent once everything is across" \
   bash -c "cd '${st}/proj-tickets' && ! env ${st_env} '${AMD}' board --plain 2>&1 | grep -q 'moved '"
 assert "...once only: a repository deregistered stays off, though documents still names it (ticket 182)" \
@@ -2523,6 +2526,52 @@ rm -f comp.bash
 # than that, and this is what catches `amdui` disappearing from Cargo.toml.
 # A CLI-only build (`cargo build -p amd-cli`) has no amdui, and that's not a
 # failure.
+echo "versions read each other's boards (ticket 193):"
+cmp_repo="$(mktemp -d)"
+cp -r "${ROOT}/tests/fixtures/board-4.5.0/." "${cmp_repo}/"
+rm -f "${cmp_repo}/README.md"
+( cd "${cmp_repo}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
+  && git config commit.gpgsign false && git add -A && git commit -q -m "a board written by 4.5.0" )
+in_cmp() { (cd "${cmp_repo}" && AMD_NO_BRANCH=1 AMD_SYNC=0 XDG_CONFIG_HOME="${cmp_repo}.config" "$@"); }
+assert "this build reads a board 4.5.0 wrote: every ticket, epic, sprint, link and repeat" \
+  bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; out=\$(in_cmp '${AMD}' board --plain) \
+    && for id in 001 002 003 004 005 006 009; do printf '%s' \"\$out\" | grep -q \"\\[\$id\\]\" || exit 1; done \
+    && in_cmp '${AMD}' checkout | grep -q '007' && in_cmp '${AMD}' s1 2>/dev/null | grep -q '008' \
+    && in_cmp '${AMD}' links 4 | grep -q '002' && in_cmp '${AMD}' show 9 | grep -q 'recurs-from: \"003\"'"
+assert "...and changes it: moves, a new ticket, a field" \
+  bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; in_cmp '${AMD}' doing 1 >/dev/null \
+    && in_cmp '${AMD}' done 2 >/dev/null && in_cmp '${AMD}' new 'Written by the new build' --due 2031-01-01 --no-edit >/dev/null 2>&1 \
+    && in_cmp '${AMD}' set 4 priority high >/dev/null && ls '${cmp_repo}'/tasks/backlog/010-written-by-the-new-build.md >/dev/null"
+assert "reading the board changes nothing (no migration on open)" \
+  bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; before=\$(git -C '${cmp_repo}' rev-parse HEAD) \
+    && in_cmp '${AMD}' board --plain >/dev/null && in_cmp '${AMD}' show 4 >/dev/null 2>&1 \
+    && [ \"\$(git -C '${cmp_repo}' rev-parse HEAD)\" = \"\$before\" ] && [ -z \"\$(git -C '${cmp_repo}' status --porcelain)\" ]"
+if [ -n "${AMD_PREVIOUS:-}" ] && [ -x "${AMD_PREVIOUS}" ]; then
+  assert "the previous release ($("${AMD_PREVIOUS}" --version)) reads and changes the board this build wrote" \
+    bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; in_cmp '${AMD_PREVIOUS}' board --plain | grep -q 'Written by the new build' \
+      && in_cmp '${AMD_PREVIOUS}' show 10 | grep -q 'due: \"2031-01-01\"' \
+      && in_cmp '${AMD_PREVIOUS}' todo 10 --no-branch >/dev/null && ls '${cmp_repo}'/tasks/todo/010-written-by-the-new-build.md >/dev/null"
+else
+  echo "  skip - the previous release reading this build's board (set AMD_PREVIOUS to its amd; CI does)"
+fi
+assert "amd require-version refuses one above this build, and needs --yes without a terminal" \
+  bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; ! in_cmp '${AMD}' require-version 999.0.0 2>&1 | grep -q 'needs' \
+    && in_cmp '${AMD}' require-version 999.0.0 2>&1 | grep -q 'update first' \
+    && in_cmp '${AMD}' require-version 1.0.0 2>&1 | grep -q 'Add --yes to confirm' \
+    && ! grep -q 'min-version' '${cmp_repo}'/.settings"
+assert "with --yes it's set and committed, and says who it affects" \
+  bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; in_cmp '${AMD}' require-version 1.0.0 --yes | grep -q 'needs agile-md 1.0.0 or newer' \
+    && grep -qx 'min-version = 1.0.0' '${cmp_repo}'/.settings && git -C '${cmp_repo}' log -1 --format=%s | grep -q 'min-version'"
+# A project requiring a version newer than this build: as an older build
+# would see it.
+sed -i 's/^min-version = .*/min-version = 999.0.0/' "${cmp_repo}/.settings"
+assert "a project needing a newer agile-md is read-only here, naming amd update" \
+  bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; in_cmp '${AMD}' board --plain >/dev/null \
+    && ! in_cmp '${AMD}' new 'Refused' --no-edit 2>/tmp/amd-cmp.err && grep -q 'needs agile-md 999.0.0 or newer' /tmp/amd-cmp.err \
+    && grep -q 'amd update' /tmp/amd-cmp.err && ! in_cmp '${AMD}' doing 4 2>/dev/null \
+    && in_cmp '${AMD}' require-version | grep -q '999.0.0'"
+rm -rf "${cmp_repo}" "${cmp_repo}.config" /tmp/amd-cmp.err
+
 echo "amd update (ticket 191):"
 upd="$(mktemp -d)"
 mkdir -p "${upd}/bin" "${upd}/rel" "${upd}/plain" "${upd}/project/tasks/backlog"

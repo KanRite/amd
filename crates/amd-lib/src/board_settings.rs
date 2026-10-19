@@ -136,6 +136,9 @@ pub struct TimeLimits {
 const MIGRATED: &str = "migrated-from-documents";
 /// The project is archived (ticket 157): read-only for amd until unarchived.
 const ARCHIVED: &str = "archived";
+/// The oldest agile-md allowed to change this project (ticket 193), set
+/// only by the team (`amd require-version`).
+const MIN_VERSION: &str = "min-version";
 const TAGS_ONLY: &str = "prevent-arbitrary-tags";
 /// `prevent-arbitrary-tags`' name until ticket 141. Still read, and renamed
 /// the next time the setting is written.
@@ -741,6 +744,25 @@ impl BoardSettings {
 
     /// Whether the project is archived (ticket 157): `archived`, off unless
     /// set on. amd and amdui refuse changes to an archived project.
+    /// The oldest agile-md allowed to change this project (ticket 193):
+    /// `min-version`, `None` unless the team set one.
+    pub fn min_version(&self) -> Option<String> {
+        self.config
+            .get(MIN_VERSION)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    }
+
+    /// Sets or clears [`min_version`](Self::min_version).
+    pub fn set_min_version(&mut self, version: Option<&str>) {
+        match version {
+            Some(v) => self.config.set(MIN_VERSION, v),
+            None => {
+                self.config.remove(MIN_VERSION);
+            }
+        }
+    }
+
     pub fn archived(&self) -> bool {
         matches!(
             self.config

@@ -664,6 +664,23 @@ enum Cmd {
         #[arg(value_name = "on|off", value_parser = PossibleValuesParser::new(["on", "off"]))]
         action: Option<String>,
     },
+    /// Show or set the oldest agile-md allowed to change this project
+    ///
+    /// For a team that has adopted a change older builds don't understand:
+    /// anyone on an older agile-md can then only read the project until
+    /// they update (`amd update`). Only you set it, never a release; it
+    /// asks first (or --yes), and is committed for the team. --clear
+    /// removes it
+    RequireVersion {
+        #[arg(value_name = "VERSION")]
+        version: Option<String>,
+        /// Remove the requirement
+        #[arg(long, conflicts_with = "version")]
+        clear: bool,
+        /// Don't ask
+        #[arg(long)]
+        yes: bool,
+    },
     /// Show or set how near a due date sends a ticket straight to todo
     ///
     /// A ticket in the loose backlog, not a draft, made or given a due date
@@ -1378,7 +1395,11 @@ fn run() -> Result<()> {
             transition::Event::Warn(text) => eprintln!("amd: {text}"),
         }
     }
-    migrate_settings(&board)?;
+    // A one-time carry-over from the documents repository: only on a
+    // change, never by just reading the board (ticket 193).
+    if changes_board(&command) {
+        migrate_settings(&board)?;
+    }
     match command {
         Cmd::Init { .. }
         | Cmd::Join { .. }
@@ -1398,6 +1419,11 @@ fn run() -> Result<()> {
         Cmd::AutoPriority { action, days } => cmd_auto_priority(&board, action.as_deref(), &days),
         Cmd::PriorityOverride { action } => cmd_priority_override(&board, action.as_deref()),
         Cmd::DueToTodo { days } => cmd_due_to_todo(&board, days),
+        Cmd::RequireVersion {
+            version,
+            clear,
+            yes,
+        } => cmd_require_version(&board, version.as_deref(), clear, yes),
         Cmd::BacklogAlwaysShown { action } => cmd_backlog_always_shown(&board, action.as_deref()),
         Cmd::Register { .. } | Cmd::Deregister { .. } => unreachable!("handled above"),
         Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
@@ -2675,6 +2701,60 @@ fn cmd_time_limits(board: &Board, days: &[u32]) -> Result<()> {
     Ok(())
 }
 
+/// `amd require-version [VERSION] [--clear] [--yes]` (ticket 193).
+fn cmd_require_version(board: &Board, version: Option<&str>, clear: bool, yes: bool) -> Result<()> {
+    let current = board_settings::load(board).min_version();
+    if clear {
+        if current.is_none() {
+            println!("this project requires no version");
+            return Ok(());
+        }
+        with_auto_commit(board, "settings", "min-version", "none", || {
+            let mut settings = board_settings::load(board);
+            settings.set_min_version(None);
+            settings.save(board)
+        })?;
+        println!("this project no longer requires a version");
+        return Ok(());
+    }
+    let Some(version) = version else {
+        match current {
+            Some(v) => println!(
+                "this project needs agile-md {v} or newer to change it; older builds only read it"
+            ),
+            None => println!("this project requires no version: any agile-md can change it"),
+        }
+        return Ok(());
+    };
+    let version = agile_md::compat::check_required(version)?;
+    let warning = format!(
+        "Everyone on agile-md older than {version} will only be able to read this project until they update. Continue?"
+    );
+    if !yes {
+        if !form::available() {
+            bail!("{warning} Add --yes to confirm");
+        }
+        if !form::confirm(&warning)? {
+            bail!("cancelled");
+        }
+    }
+    with_auto_commit(
+        board,
+        "settings",
+        "min-version",
+        &version.to_string(),
+        || {
+            let mut settings = board_settings::load(board);
+            settings.set_min_version(Some(&version.to_string()));
+            settings.save(board)
+        },
+    )?;
+    println!(
+        "this project now needs agile-md {version} or newer to change it; older builds only read it"
+    );
+    Ok(())
+}
+
 /// `amd due-to-todo [DAYS]` (ticket 253).
 fn cmd_due_to_todo(board: &Board, days: Option<u32>) -> Result<()> {
     let say = |days: u32| match days {
@@ -3550,6 +3630,11 @@ fn changes_board(command: &Cmd) -> bool {
                 }
                 | Cmd::PriorityOverride { action: Some(_) }
                 | Cmd::DueToTodo { days: Some(_) }
+                | Cmd::RequireVersion {
+                    version: Some(_),
+                    ..
+                }
+                | Cmd::RequireVersion { clear: true, .. }
                 | Cmd::BacklogAlwaysShown { action: Some(_) }
                 | Cmd::SharedDocuments { name: Some(_), .. }
                 | Cmd::SharedDocuments { clear: true, .. }
@@ -3600,6 +3685,11 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::AutoPriority { action: None, .. }
         | Cmd::PriorityOverride { action: None }
         | Cmd::DueToTodo { days: None }
+        | Cmd::RequireVersion {
+            version: None,
+            clear: false,
+            ..
+        }
         | Cmd::BacklogAlwaysShown { action: None }
         | Cmd::Group {
             command: None | Some(GroupCmd::List),

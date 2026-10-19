@@ -684,6 +684,11 @@ pub struct Board {
     /// A priority set by hand pins its ticket against auto priority.
     #[serde(default)]
     pub priority_override: bool,
+    /// The agile-md version the project's team requires, when it's newer
+    /// than this build (ticket 193): the board is read-only here until
+    /// updated, and the update bar has no Later.
+    #[serde(default)]
+    pub needs_version: Option<String>,
     /// The project is archived (ticket 157): read-only until unarchived.
     #[serde(default)]
     pub archived: bool,
@@ -1676,6 +1681,7 @@ mod assigned_tests {
             time_limits: (0, 0),
             due_to_todo_days: 3,
             backlog_always_shown: false,
+            needs_version: None,
             priority_override: true,
             archived: false,
         };

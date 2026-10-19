@@ -775,6 +775,28 @@ names it as that and changes nothing, so your clone, which still holds the
 old history, is there to put it back. Branch protection on `main` stops a
 force push in the first place.
 
+## Versions and your team
+
+Every release reads what earlier ones wrote, and an older agile-md keeps
+working on a board a newer one has changed. Updating never rewrites your
+tickets, documents or settings, and opening a board never migrates
+anything. So taking an update, or putting it off with Later, is always
+safe, and teammates on different versions can share a project.
+
+If your team adopts something older versions can't follow, it can require a
+minimum version:
+
+```bash
+amd require-version 4.6.0    # asks first; --yes to skip; committed for the team
+amd require-version          # what's required, if anything
+amd require-version --clear
+```
+
+Anyone on an older agile-md can then only read the project: changes are
+refused with a message saying to run `amd update`, and amdui's update bar
+has Update but no Later until they do. Nobody but a person on the team sets
+this; no release ever does. Versions before 4.6 don't know the setting.
+
 ## Who can change the project's settings
 
 The project's settings (the WIP limit, lock length, tags, admins,

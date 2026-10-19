@@ -5,6 +5,10 @@
 //! why and how instead. **Later** hides that version for a day, across
 //! restarts; a still newer release shows at once.
 //!
+//! When the project's team requires a newer agile-md (ticket 193), the bar
+//! is the **required** kind: the board is read-only here, and there's
+//! Update but no Later.
+//!
 //! When amdui's own program is replaced while it runs (`amd update` in a
 //! terminal, the installer, a package manager: ticket 208), the bar says so
 //! instead, with **Restart**. Nothing restarts without the click.
@@ -130,6 +134,11 @@ pub fn UpdateBar() -> impl IntoView {
             });
         }
     };
+    // The team requires a newer agile-md (ticket 193).
+    let required = move || {
+        ctx.board
+            .with(|b| b.as_ref().and_then(|b| b.needs_version.clone()))
+    };
     let button = "rounded px-2.5 py-1 text-sm font-medium focus:outline-2 focus:outline-offset-1 focus:outline-orange-700";
     view! {
         <Show when=move || replaced.with(Option::is_some)>
@@ -153,7 +162,36 @@ pub fn UpdateBar() -> impl IntoView {
                 {move || restart_note.get().map(|note| view! { <p class="text-sm">{note}</p> })}
             </section>
         </Show>
-        <Show when=move || offer.with(Option::is_some) && replaced.with(Option::is_none)>
+        <Show when=move || required().is_some() && replaced.with(Option::is_none)>
+            <section
+                role="alert"
+                aria-label="Update required"
+                class="flex flex-col gap-1 border-b border-orange-300 bg-orange-100 px-4 py-2 text-orange-950 dark:border-orange-700 dark:bg-orange-900 dark:text-orange-50"
+            >
+                <div class="flex flex-wrap items-center gap-3">
+                    <p class="flex-1 text-sm">
+                        {move || format!(
+                            "This project needs agile-md {} or newer (its team set that), so it's read-only here until you update.",
+                            required().unwrap_or_default()
+                        )}
+                    </p>
+                    <button
+                        class=format!("{button} bg-orange-600 text-white hover:bg-orange-500 disabled:opacity-60")
+                        disabled=move || phase.with(|p| matches!(p, Phase::Working | Phase::Updated(_)))
+                        on:click=move |_| update()
+                    >
+                        {move || match phase.get() {
+                            Phase::Working => "Updating…",
+                            Phase::Failed { .. } => "Retry",
+                            _ => "Update",
+                        }}
+                    </button>
+                </div>
+                {move || status_line(phase.get())}
+                <UnmanagedHelp phase />
+            </section>
+        </Show>
+        <Show when=move || offer.with(Option::is_some) && replaced.with(Option::is_none) && required().is_none()>
             <section
                 role="status"
                 aria-live="polite"
@@ -203,52 +241,65 @@ pub fn UpdateBar() -> impl IntoView {
                         "Later"
                     </button>
                 </div>
-                {move || {
-                    let line = match phase.get() {
-                        Phase::Idle | Phase::Unmanaged(..) => return None,
-                        Phase::EditorOpen => {
-                            "Close the ticket you're editing first, so nothing you've typed is lost, then Update.".to_string()
-                        }
-                        Phase::Working => {
-                            "Downloading and checking the release; amdui restarts when it's in. Your boards, documents and settings aren't touched.".to_string()
-                        }
-                        Phase::Updated(v) => format!("Updated to {v}. Restarting…"),
-                        Phase::Failed { why, now } => {
-                            if now.is_empty() {
-                                format!("The update didn't finish: {why}")
-                            } else {
-                                format!("The update didn't finish: {why}. amdui is {now}, working as before.")
-                            }
-                        }
-                    };
-                    Some(view! { <p class="text-sm">{line}</p> })
-                }}
-                <Show when=move || phase.with(|p| matches!(p, Phase::Unmanaged(..)))>
-                    <p class="text-sm">{move || match phase.get() { Phase::Unmanaged(why, _) => format!("{why}."), _ => String::new() }}</p>
-                </Show>
-                <Show when=move || phase.with(|p| matches!(p, Phase::Unmanaged(_, true)))>
-                    <div class="flex flex-col gap-1 text-sm">
-                        <label for="update-command">
-                            "The installer, to run in a terminal, then restart amdui. Your boards, documents and settings aren't touched."
-                        </label>
-                        <input
-                            id="update-command"
-                            readonly
-                            class="w-full rounded border border-orange-400 bg-white px-2 py-1 font-mono text-xs text-slate-900 dark:bg-slate-900 dark:text-slate-100"
-                            prop:value=INSTALL_COMMAND
-                            on:focus=move |ev| {
-                                use wasm_bindgen::JsCast;
-                                if let Some(input) = ev
-                                    .target()
-                                    .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-                                {
-                                    input.select();
-                                }
-                            }
-                        />
-                    </div>
-                </Show>
+                {move || status_line(phase.get())}
+                <UnmanagedHelp phase />
             </section>
+        </Show>
+    }
+}
+
+/// The line under the bar saying where Update has got to.
+fn status_line(phase: Phase) -> Option<impl IntoView> {
+    let line = match phase {
+        Phase::Idle | Phase::Unmanaged(..) => return None,
+        Phase::EditorOpen => {
+            "Close the ticket you're editing first, so nothing you've typed is lost, then Update."
+                .to_string()
+        }
+        Phase::Working => {
+            "Downloading and checking the release; amdui restarts when it's in. Your boards, documents and settings aren't touched.".to_string()
+        }
+        Phase::Updated(v) => format!("Updated to {v}. Restarting…"),
+        Phase::Failed { why, now } => {
+            if now.is_empty() {
+                format!("The update didn't finish: {why}")
+            } else {
+                format!("The update didn't finish: {why}. amdui is {now}, working as before.")
+            }
+        }
+    };
+    Some(view! { <p class="text-sm">{line}</p> })
+}
+
+/// Why amdui can't update this install, and the installer's command when
+/// that's the way (both forms of the bar).
+#[component]
+fn UnmanagedHelp(phase: RwSignal<Phase>) -> impl IntoView {
+    view! {
+        <Show when=move || phase.with(|p| matches!(p, Phase::Unmanaged(..)))>
+            <p class="text-sm">{move || match phase.get() { Phase::Unmanaged(why, _) => format!("{why}."), _ => String::new() }}</p>
+        </Show>
+        <Show when=move || phase.with(|p| matches!(p, Phase::Unmanaged(_, true)))>
+            <div class="flex flex-col gap-1 text-sm">
+                <label for="update-command">
+                    "The installer, to run in a terminal, then restart amdui. Your boards, documents and settings aren't touched."
+                </label>
+                <input
+                    id="update-command"
+                    readonly
+                    class="w-full rounded border border-orange-400 bg-white px-2 py-1 font-mono text-xs text-slate-900 dark:bg-slate-900 dark:text-slate-100"
+                    prop:value=INSTALL_COMMAND
+                    on:focus=move |ev| {
+                        use wasm_bindgen::JsCast;
+                        if let Some(input) = ev
+                            .target()
+                            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+                        {
+                            input.select();
+                        }
+                    }
+                />
+            </div>
         </Show>
     }
 }

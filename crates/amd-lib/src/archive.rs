@@ -23,7 +23,9 @@ pub fn is_archived(board: &Board) -> bool {
     board_settings::load(board).archived()
 }
 
-/// Refuses a change to an archived project, naming the way back.
+/// Refuses a change to an archived project, naming the way back; and to a
+/// project whose team requires a newer agile-md than this one (ticket 193,
+/// [`crate::compat::ensure_version`]).
 pub fn ensure_writable(board: &Board) -> Result<()> {
     if is_archived(board) {
         bail!(
@@ -31,7 +33,7 @@ pub fn ensure_writable(board: &Board) -> Result<()> {
             current_project::project_name(board.repo_root())
         );
     }
-    Ok(())
+    crate::compat::ensure_version(board)
 }
 
 /// The project's repositories on GitHub, as `owner/repo`: its tickets

@@ -47,6 +47,36 @@ jobs:
         run: cargo clippy -p amd-ui-web -p amd-ui-model --target wasm32-unknown-unknown -- -D warnings
       - name: Unit tests
         run: cargo test --locked
+      # The latest release, so the CLI tests check it still reads and
+      # changes a board this build has written (ticket 193). Cached by its
+      # tag, so CI downloads each release about once, rather than adding a
+      # download to its count on every run.
+      - name: Which release is the latest
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "tag=$(gh release view --repo agile-md/amd --json tagName --jq .tagName || true)" >> "$GITHUB_OUTPUT"
+      - name: Cache the previous release
+        if: steps.latest.outputs.tag != ''
+        uses: actions/cache@v6
+        with:
+          path: ~/previous-release
+          key: previous-release-${{ steps.latest.outputs.tag }}-x86_64-linux
+      - name: The previous release
+        if: steps.latest.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.latest.outputs.tag }}
+        run: |
+          dir="$HOME/previous-release"
+          if [ ! -x "$dir/amd" ]; then
+            mkdir -p "$dir"
+            gh release download "$TAG" --repo agile-md/amd \
+              --pattern 'amd-x86_64-unknown-linux-gnu.zip' --dir "$dir" \
+              && unzip -q -o "$dir/amd-x86_64-unknown-linux-gnu.zip" -d "$dir" \
+              && rm -f "$dir/amd-x86_64-unknown-linux-gnu.zip" || true
+          fi
+          if [ -x "$dir/amd" ]; then echo "AMD_PREVIOUS=$dir/amd" >> "$GITHUB_ENV"; fi
       - name: CLI tests
         run: bash tests/test.sh
 
