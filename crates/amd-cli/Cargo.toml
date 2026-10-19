@@ -28,3 +28,4 @@ richrs.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 time.workspace = true
+ureq.workspace = true

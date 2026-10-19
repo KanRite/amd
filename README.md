@@ -184,8 +184,13 @@ curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash
 
 That installs two commands, **`amd`** (the command line) and **`amdui`**
 (the desktop board), into `/usr/local/bin` when it can, otherwise `~/bin`,
-and on Linux adds the board to your application menu. Run it again to
-update. To choose the folder or pin a version, pass them after `bash -s --`:
+and on Linux adds the board to your application menu. To update, press
+**Update** on the desktop board's update bar, or run `amd update`: each
+release is checked against GitHub's checksum and only the two programs are
+replaced, never your projects or settings (`amd update --rollback` goes
+back). Running the installer again works too, and is how an install from
+before 4.6 starts updating itself. To choose the folder or pin a version,
+pass them after `bash -s --`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash -s -- --dir ~/.local/bin --version v4.5.0

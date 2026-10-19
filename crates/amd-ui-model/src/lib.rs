@@ -700,7 +700,21 @@ pub struct UpdateInfo {
     pub current: String,
 }
 
-/// How to update until amdui applies updates itself (ticket 191): the
+/// What the update bar's Update did (ticket 191).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "result", rename_all = "lowercase")]
+pub enum UpdateResult {
+    /// Updated to this version; amdui restarts into it.
+    Updated { version: String },
+    /// Not an install amdui replaces (a source build, a package manager's),
+    /// and why; `reinstall` when running the installer is the way, so the
+    /// bar shows [`INSTALL_COMMAND`].
+    Unmanaged { why: String, reinstall: bool },
+    /// It stopped: why, and the version amd and amdui are now.
+    Failed { why: String, now: String },
+}
+
+/// How to update by hand (an install amdui doesn't replace): the
 /// installer, run again.
 pub const INSTALL_COMMAND: &str =
     "curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash";

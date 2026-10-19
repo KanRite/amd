@@ -13,6 +13,7 @@ mod join;
 mod mcp;
 mod project;
 mod render;
+mod update;
 mod value;
 
 use std::collections::BTreeMap;
@@ -829,6 +830,20 @@ enum Cmd {
         #[arg(long)]
         no_unassigned: bool,
     },
+    /// Update amd and amdui to the newest release
+    ///
+    /// One release at a time, each verified against GitHub's checksum and
+    /// run once before it replaces the last; only the two binaries are
+    /// written, never your projects or settings. Only an install made by
+    /// agile-md's installer updates itself; anything else says how
+    Update {
+        /// Only say whether there's a newer release
+        #[arg(long)]
+        check: bool,
+        /// Put back the binaries the last update replaced
+        #[arg(long, conflicts_with = "check")]
+        rollback: bool,
+    },
     /// Print a shell completion script (bash, zsh, fish, …)
     Completions {
         /// Shell to generate for; defaults to $SHELL
@@ -1188,6 +1203,10 @@ fn run() -> Result<()> {
     let command = cli.command.unwrap_or(Cmd::Board { tag: Vec::new() });
 
     // Completions don't need a board — and often run before there is one.
+    // Updating amd needs no board, and works from anywhere (ticket 191).
+    if let Cmd::Update { check, rollback } = command {
+        return update::run(check, rollback);
+    }
     if let Cmd::Completions { shell } = command {
         return completions::print(shell, &mut Cli::command());
     }
@@ -1369,6 +1388,7 @@ fn run() -> Result<()> {
         | Cmd::Mcp { .. }
         | Cmd::Mine { .. }
         | Cmd::Completions { .. }
+        | Cmd::Update { .. }
         | Cmd::Gui => {
             unreachable!("handled above")
         }

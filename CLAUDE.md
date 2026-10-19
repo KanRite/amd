@@ -268,8 +268,29 @@ redundant. Their history is in git if it is ever wanted again.
   sits above the header on every view, asks on start and every 6 hours,
   and is **orange**: the accents are only indigo, teal and slate (rose and
   amber were dropped, a saved one reads back as indigo), so nothing else
-  is orange. Update shows `amd_ui_model::INSTALL_COMMAND` until 191
-  applies updates itself; the required variant (no Later) is 193.
+  is orange. The required variant (no Later) is 193.
+- `crates/amd-lib/src/update_apply.rs` — **applying an update** (ticket
+  191). `install_dir(exe)`: only a folder whose `amd-uninstall` says
+  `# agile-md install: release` (install.sh now writes `release` or
+  `source`, `METHOD`) is `Managed`; anything else is `Unmanaged {why,
+  reinstall}` (reinstall: the installer command is the fix; not for a
+  source build). `apply(dir, current, releases, fetch, progress)` goes
+  through `steps` (newer releases, oldest first), one at a time, stopping
+  at the first failure (`Applied {reached, failed}`): the asset
+  `amd-<target>.zip` (`target()` from ARCH/OS), its SHA-256 checked
+  against GitHub's `digest` (`update::Asset`, parsed by `parse_releases`;
+  every release file has one), `amd` (required) and `amdui` unzipped to
+  `.<bin>.new-<pid>` beside the live ones, each run with `--version`
+  (must name the version), then the live one renamed to `<bin>.previous`
+  and the new one renamed in (put back on failure). Nothing else is
+  written. `rollback(dir)`. `Fetch` is the front end's (`ureq`); deps
+  `zip` (deflate via zlib-rs) and `sha2`. CLI `amd update [--check]
+  [--rollback]` (`crates/amd-cli/src/update.rs`, before `ensure_board`);
+  amdui's `apply_update` (`amd_ui_model::UpdateResult`) and `restart_app`
+  (`AppHandle::restart`), the bar's Update (refuses while the editor is
+  open; the modal's backdrop already covers the bar). Both read
+  `AMD_UPDATE_RELEASES=file://…` and `file://` downloads, which
+  `tests/test.sh` uses with a pretend 9.9.9.
 - `crates/amd-lib/src/renumber.rs` — `amd renumber [--keep T] [--apply]`
   (ticket 146): tickets sharing a number (`local` numbering can clash when
   clones create apart). The first committed keeps it, judged by commit

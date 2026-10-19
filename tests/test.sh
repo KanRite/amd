@@ -2523,6 +2523,56 @@ rm -f comp.bash
 # than that, and this is what catches `amdui` disappearing from Cargo.toml.
 # A CLI-only build (`cargo build -p amd-cli`) has no amdui, and that's not a
 # failure.
+echo "amd update (ticket 191):"
+upd="$(mktemp -d)"
+mkdir -p "${upd}/bin" "${upd}/rel" "${upd}/plain" "${upd}/project/tasks/backlog"
+cp "${AMD}" "${upd}/bin/amd"
+printf '#!/usr/bin/env bash\n# agile-md install: release\n' > "${upd}/bin/amd-uninstall"
+cp "${AMD}" "${upd}/plain/amd"
+printf -- '---\nid: "001"\n---\n' > "${upd}/project/tasks/backlog/001-x.md"
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64) upd_target=x86_64-unknown-linux-gnu ;;
+  Linux-aarch64) upd_target=aarch64-unknown-linux-gnu ;;
+  Darwin-x86_64) upd_target=x86_64-apple-darwin ;;
+  *) upd_target=aarch64-apple-darwin ;;
+esac
+# A pretend 9.9.9: amd and amdui that only say their version, zipped as the
+# release workflow does, and the release list naming its checksum.
+python3 - "${upd}/rel/amd-${upd_target}.zip" <<'PYZIP'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    for name in ("amd", "amdui"):
+        info = zipfile.ZipInfo(name)
+        info.external_attr = 0o100755 << 16
+        z.writestr(info, '#!/bin/sh\necho "%s 9.9.9"\n' % name)
+PYZIP
+upd_sha="$(sha256sum "${upd}/rel/amd-${upd_target}.zip" | cut -d' ' -f1)"
+upd_list() { # digest -> the release list
+  printf '[{"tag_name":"v9.9.9","html_url":"https://example.test/9.9.9","draft":false,"prerelease":false,"assets":[{"name":"amd-%s.zip","browser_download_url":"file://%s/rel/amd-%s.zip","digest":"sha256:%s"}]}]' \
+    "${upd_target}" "${upd}" "${upd_target}" "$1"
+}
+upd_list "$(printf '0%.0s' $(seq 64))" > "${upd}/rel/bad.json"
+upd_list "${upd_sha}" > "${upd}/rel/releases.json"
+upd_project="$(cd "${upd}/project" && find . -type f -exec sha256sum {} + | sort)"
+assert "amd update --check says what's out" \
+  bash -c "AMD_UPDATE_RELEASES='file://${upd}/rel/releases.json' '${upd}/bin/amd' update --check | grep -q 'agile-md 9.9.9 is out'"
+assert "amd update refuses an install the installer didn't make, and says how" \
+  bash -c "! AMD_UPDATE_RELEASES='file://${upd}/rel/releases.json' '${upd}/plain/amd' update 2>/tmp/amd-upd.err \
+    && grep -q \"wasn't put there by agile-md's installer\" /tmp/amd-upd.err && '${upd}/plain/amd' --version | grep -qv 9.9.9"
+assert "a checksum that doesn't match changes nothing" \
+  bash -c "! AMD_UPDATE_RELEASES='file://${upd}/rel/bad.json' '${upd}/bin/amd' update >/dev/null 2>/tmp/amd-upd.err \
+    && grep -q \"doesn't match its checksum\" /tmp/amd-upd.err && ! test -e '${upd}/bin/amd.previous' \
+    && '${upd}/bin/amd' --version | grep -qv 9.9.9"
+assert "amd update installs the release, keeps the one before, and leaves the project byte-identical" \
+  bash -c "AMD_UPDATE_RELEASES='file://${upd}/rel/releases.json' '${upd}/bin/amd' update | grep -q 'amd is now 9.9.9' \
+    && '${upd}/bin/amd' --version | grep -qx 'amd 9.9.9' && '${upd}/bin/amdui' --version | grep -qx 'amdui 9.9.9' \
+    && test -x '${upd}/bin/amd.previous' \
+    && [ \"\$(cd '${upd}/project' && find . -type f -exec sha256sum {} + | sort)\" = '${upd_project}' ]"
+assert "amd update --rollback puts the previous amd back" \
+  bash -c "'${upd}/bin/amd.previous' update --rollback | grep -q 'put back the previous amd' \
+    && '${upd}/bin/amd' --version | grep -qv 9.9.9 && ! test -e '${upd}/bin/amd.previous'"
+rm -rf "${upd}" /tmp/amd-upd.err
+
 echo "the desktop binary:"
 AMDUI="${AMDUI_BIN:-${ROOT}/target/debug/amdui}"
 if [ -x "${AMDUI}" ]; then

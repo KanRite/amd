@@ -1028,6 +1028,19 @@ async fn update_status() -> Result<Option<amd_ui_model::UpdateInfo>> {
     blocking(|| Ok(updates::status())).await
 }
 
+/// The update bar's Update (ticket 191): installs the newest release; the
+/// page then calls `restart_app`.
+#[tauri::command]
+async fn apply_update() -> Result<amd_ui_model::UpdateResult> {
+    blocking(|| Ok(updates::apply())).await
+}
+
+/// Starts amdui again: after an update, into the new version (ticket 191).
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
 /// The update bar's Later (ticket 192): this version, hidden for a day.
 #[tauri::command]
 async fn snooze_update(version: String) -> Result<()> {
@@ -2942,6 +2955,8 @@ pub fn run() {
             move_epic_tickets,
             update_status,
             snooze_update,
+            apply_update,
+            restart_app,
             archive_ticket,
             lock_ticket,
             unlock_ticket,

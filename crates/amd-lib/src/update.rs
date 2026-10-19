@@ -62,6 +62,18 @@ impl fmt::Display for Version {
 pub struct Release {
     pub version: Version,
     pub notes_url: String,
+    /// Its downloadable files (ticket 191); empty where only the version
+    /// matters, such as the remembered list.
+    pub assets: Vec<Asset>,
+}
+
+/// One file attached to a release: its name, where to download it, and the
+/// SHA-256 GitHub publishes for it (lowercase hex; empty if it gave none).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Asset {
+    pub name: String,
+    pub url: String,
+    pub sha256: String,
 }
 
 /// Where releases come from. The caller supplies the network.
@@ -92,6 +104,17 @@ pub fn parse_releases(json: &str) -> Result<Vec<Release>> {
         draft: bool,
         #[serde(default)]
         prerelease: bool,
+        #[serde(default)]
+        assets: Vec<File>,
+    }
+    #[derive(Deserialize)]
+    struct File {
+        name: String,
+        #[serde(default)]
+        browser_download_url: String,
+        /// `sha256:<hex>`, which GitHub gives every release file.
+        #[serde(default)]
+        digest: Option<String>,
     }
     let items: Vec<Item> = serde_json::from_str(json)?;
     Ok(items
@@ -101,6 +124,20 @@ pub fn parse_releases(json: &str) -> Result<Vec<Release>> {
             Some(Release {
                 version: Version::parse(&item.tag_name)?,
                 notes_url: item.html_url,
+                assets: item
+                    .assets
+                    .into_iter()
+                    .map(|file| Asset {
+                        name: file.name,
+                        url: file.browser_download_url,
+                        sha256: file
+                            .digest
+                            .as_deref()
+                            .and_then(|d| d.strip_prefix("sha256:"))
+                            .unwrap_or_default()
+                            .to_lowercase(),
+                    })
+                    .collect(),
             })
         })
         .collect())
@@ -164,6 +201,7 @@ impl State {
                 Some(Release {
                     version: Version::parse(tag)?,
                     notes_url: url.clone(),
+                    assets: Vec::new(),
                 })
             })
             .collect()
@@ -283,6 +321,7 @@ mod tests {
         Release {
             version: Version::parse(version).unwrap(),
             notes_url: format!("https://example.test/{version}"),
+            assets: Vec::new(),
         }
     }
 
@@ -318,6 +357,7 @@ mod tests {
         Release {
             version: v(version),
             notes_url: url.into(),
+            assets: Vec::new(),
         }
     }
 
