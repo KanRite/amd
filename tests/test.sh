@@ -569,6 +569,27 @@ assert "amd set repository on a backlog ticket with no branch type makes it a dr
     in_tr new 'Later' --no-edit >/dev/null 2>&1 \
     && in_tr set 5 repository demo-api 2>&1 | grep -q 'draft until' \
     && grep -q DRAFT '${tr}'/demo-tickets/tasks/backlog/005-later.md"
+assert "amd set gives a todo ticket a repository and a branch type at once, in one commit (ticket 258)" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
+    in_tr new 'Both at once' --no-edit >/dev/null 2>&1 && in_tr todo 6 >/dev/null 2>&1 \
+    && before=\"\$(git -C '${tr}/demo-tickets' rev-list --count HEAD 2>/dev/null || echo 0)\" \
+    && out=\"\$(cd '${tr}/demo-tickets' && XDG_CONFIG_HOME='${tr}/config' '${AMD}' set 6 repository demo-api branch-type feature 2>&1)\" \
+    && echo \"\$out\" | grep -q '006 repository demo-api' && echo \"\$out\" | grep -q '006 branch type feature' \
+    && f='${tr}'/demo-tickets/tasks/todo/006-both-at-once.md \
+    && grep -q '^repository: \"demo-api\"' \"\$f\" && grep -q '^branch-type: \"feature\"' \"\$f\" \
+    && grep -q '^branch-name: \"feature/both-at-once\"' \"\$f\" && ! grep -q DRAFT \"\$f\" \
+    && [ \"\$(git -C '${tr}/demo-tickets' rev-list --count HEAD)\" = \"\$((before + 1))\" ] \
+    && [ -z \"\$(git -C '${tr}/demo-tickets' status --porcelain -- \"\$f\")\" ]"
+assert "...still refused when the pair would be left mismatched, changing nothing" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
+    in_tr set 6 repository '' title 'Renamed' 2>&1 | grep -q 'past the backlog' \
+    && grep -q '^title: \"Both at once\"' '${tr}'/demo-tickets/tasks/todo/006-both-at-once.md"
+assert "amd set refuses an unknown or repeated field, and requires with others" \
+  bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
+    in_tr set 6 points 3 colour red 2>&1 | grep -q \"colour isn't a field\" \
+    && in_tr set 6 points 3 points 5 2>&1 | grep -q 'points is given twice' \
+    && in_tr set 6 requires 1 points 3 2>&1 | grep -q 'set requires on its own' \
+    && ! grep -q '^points: \"3\"' '${tr}'/demo-tickets/tasks/todo/006-both-at-once.md"
 sed -i 's/^repository: \"\"/repository: \"demo-api\"/' "${tr}"/demo-tickets/tasks/todo/004-plain.md
 tr_before="$(sha1sum < "${tr}"/demo-tickets/tasks/todo/004-plain.md)"
 assert "amd check lists a ticket mismatched by hand, and changes nothing" \
