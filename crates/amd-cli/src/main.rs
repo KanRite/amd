@@ -634,15 +634,25 @@ enum Cmd {
         #[arg(value_name = "N")]
         limit: u32,
     },
-    /// Show or switch auto priority: priorities set from requires links
+    /// Show or switch auto priority: priorities set from requires links,
+    /// due dates and time limits
     ///
     /// When on, a ticket is at least as urgent as the most urgent ticket
-    /// that requires it, down a chain; raised tickets record why
-    /// (`priority-from`, `priority-own`). Switching it off puts them back.
-    /// With no value, says whether it's on and lists the raised tickets
+    /// that requires it, down a chain. It's raised as its due date nears, a
+    /// step for each quarter of the time from its creation to its due date:
+    /// medium from 25%, high from 50%, top from 75% (and once overdue). With time limits
+    /// (`limits TODO DOING`, days; 0 is none), it's raised a step for each
+    /// quarter of the limit it spends in todo or doing: medium from 25%,
+    /// high from 50%, top from 75%; time in todo keeps counting once it's in
+    /// doing. Raised tickets record why (`priority-from`, `priority-own`).
+    /// Switching it off puts them back. With no value, says whether it's on
+    /// and lists the raised tickets
     AutoPriority {
-        #[arg(value_name = "on|off", value_parser = PossibleValuesParser::new(["on", "off"]))]
+        #[arg(value_name = "on|off|limits", value_parser = PossibleValuesParser::new(["on", "off", "limits"]))]
         action: Option<String>,
+        /// With `limits`: the days a ticket should take in todo, then doing
+        #[arg(value_name = "DAYS", num_args = 0..=2)]
+        days: Vec<u32>,
     },
     /// Show or switch whether a priority set by hand wins over auto priority
     ///
@@ -1346,7 +1356,7 @@ fn run() -> Result<()> {
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
         Cmd::SharedDocuments { name, clear } => cmd_shared_documents(&board, name, clear),
         Cmd::TriagePriority { priority } => cmd_triage_priority(&board, priority),
-        Cmd::AutoPriority { action } => cmd_auto_priority(&board, action.as_deref()),
+        Cmd::AutoPriority { action, days } => cmd_auto_priority(&board, action.as_deref(), &days),
         Cmd::PriorityOverride { action } => cmd_priority_override(&board, action.as_deref()),
         Cmd::Register { .. } | Cmd::Deregister { .. } => unreachable!("handled above"),
         Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
@@ -2487,10 +2497,21 @@ fn cmd_shared_documents(board: &Board, name: Option<String>, clear: bool) -> Res
 
 /// `amd auto-priority [on|off]` (ticket 215): switching commits the
 /// setting and every priority it moves, together.
-fn cmd_auto_priority(board: &Board, action: Option<&str>) -> Result<()> {
+fn cmd_auto_priority(board: &Board, action: Option<&str>, days: &[u32]) -> Result<()> {
+    if action != Some("limits") && !days.is_empty() {
+        bail!("days go with `limits`: amd auto-priority limits TODO DOING");
+    }
+    if action == Some("limits") {
+        return cmd_time_limits(board, days);
+    }
     let Some(action) = action else {
-        let on = board_settings::load(board).auto_priority();
+        let settings = board_settings::load(board);
+        let on = settings.auto_priority();
         println!("auto priority is {}", if on { "on" } else { "off" });
+        println!(
+            "due dates raise a ticket a step each quarter from its creation to its due date: medium, high, then top"
+        );
+        println!("{}", time_limits_line(settings.time_limits()));
         for task in board.tasks()? {
             if let Some(note) = agile_md::auto_priority::note(board, &task) {
                 println!("{}: {note}", task.id_display());
@@ -2507,11 +2528,60 @@ fn cmd_auto_priority(board: &Board, action: Option<&str>) -> Result<()> {
     println!(
         "{}",
         if on {
-            "auto priority is on: a ticket is at least as urgent as what requires it"
+            "auto priority is on: a ticket is at least as urgent as what requires it, and rises as its due date nears"
         } else {
             "auto priority is off: raised priorities are put back"
         }
     );
+    Ok(())
+}
+
+/// How auto priority treats time in todo and doing (ticket 252), in a line.
+fn time_limits_line(limits: board_settings::TimeLimits) -> String {
+    let one = |days: u32, column: &str| match days {
+        0 => format!("no time limit in {column}"),
+        days => format!("{days} days in {column}"),
+    };
+    format!(
+        "time limits: {}, {} (a step up for each quarter used)",
+        one(limits.todo, "todo"),
+        one(limits.doing, "doing")
+    )
+}
+
+/// `amd auto-priority limits [TODO DOING]` (ticket 252): show or set how
+/// long a ticket should take in todo and in doing. One commit, with the
+/// priorities it moves.
+fn cmd_time_limits(board: &Board, days: &[u32]) -> Result<()> {
+    let [todo, doing] = days else {
+        if days.is_empty() {
+            println!(
+                "{}",
+                time_limits_line(board_settings::load(board).time_limits())
+            );
+            return Ok(());
+        }
+        bail!("give both: amd auto-priority limits TODO DOING (e.g. 10 5; 0 is no limit)");
+    };
+    let wanted = board_settings::TimeLimits {
+        todo: *todo,
+        doing: *doing,
+    };
+    with_auto_commit(
+        board,
+        "settings",
+        "time-limits",
+        &format!("{todo} {doing}"),
+        || {
+            let mut settings = board_settings::load(board);
+            settings.set_time_limits(wanted);
+            settings.save(board)
+        },
+    )?;
+    println!("{}", time_limits_line(wanted));
+    if !board_settings::load(board).auto_priority() {
+        println!("(auto priority is off: `amd auto-priority on` to use them)");
+    }
     Ok(())
 }
 
@@ -2550,9 +2620,9 @@ fn cmd_priority_override(board: &Board, action: Option<&str>) -> Result<()> {
 /// high, so there's nothing to choose.
 fn cmd_triage_priority(_board: &Board, priority: Option<String>) -> Result<()> {
     match priority {
-        None => println!("high (every TRIAGE ticket is high; it's no longer a setting)"),
+        None => println!("top (every TRIAGE ticket is top; it's no longer a setting)"),
         Some(_) => bail!(
-            "the triage priority is no longer a setting: every TRIAGE ticket is high, and heads everyone's My work"
+            "the triage priority is no longer a setting: every TRIAGE ticket is top, and heads everyone's My work"
         ),
     }
     Ok(())
@@ -3333,7 +3403,10 @@ fn changes_board(command: &Cmd) -> bool {
             command,
             Cmd::WipLimit { .. }
                 | Cmd::TriagePriority { priority: Some(_) }
-                | Cmd::AutoPriority { action: Some(_) }
+                | Cmd::AutoPriority {
+                    action: Some(_),
+                    ..
+                }
                 | Cmd::PriorityOverride { action: Some(_) }
                 | Cmd::SharedDocuments { name: Some(_), .. }
                 | Cmd::SharedDocuments { clear: true, .. }
@@ -3381,7 +3454,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::WipLimit { .. }
         | Cmd::SharedDocuments { .. }
         | Cmd::TriagePriority { .. }
-        | Cmd::AutoPriority { action: None }
+        | Cmd::AutoPriority { action: None, .. }
         | Cmd::PriorityOverride { action: None }
         | Cmd::Group {
             command: None | Some(GroupCmd::List),

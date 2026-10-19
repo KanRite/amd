@@ -1136,6 +1136,7 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
     } = ticket;
     // Ticket 143: overdue is past its due date and not in a done column.
     let overdue = !due.is_empty() && !column.is(Kind::Done) && due.as_str() < today().as_str();
+    let due_for_priority = due.clone();
     // Someone else's lock: the card can be opened to read, but not dragged.
     let held = lock.as_ref().is_some_and(|l| !l.mine);
     // A draft (ticket 114) says so first, and its outline is dashed.
@@ -1347,6 +1348,18 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                         // which ticket it's from.
                         let (text, title) = if priority_from.is_empty() {
                             (priority.clone(), "Priority".to_string())
+                        } else if priority_from == "todo" || priority_from == "doing" {
+                            // Raised by its time in a column (ticket 252).
+                            (
+                                format!("↑ {priority}"),
+                                format!("{priority}, raised by auto priority: its time in {priority_from}"),
+                            )
+                        } else if priority_from == "due" {
+                            // Raised by its own due date (ticket 252).
+                            (
+                                format!("↑ {priority}"),
+                                format!("{priority}, raised by auto priority: due {due_for_priority}"),
+                            )
                         } else {
                             (
                                 format!("↑ {priority}"),
@@ -1513,6 +1526,7 @@ fn priority_tone(priority: &str) -> &'static str {
         "low" => "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200",
         "medium" => "bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200",
         "high" => "bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100",
+        "top" => "bg-red-600 text-white dark:bg-red-700",
         _ => "border border-red-500 text-red-700 dark:text-red-300",
     }
 }

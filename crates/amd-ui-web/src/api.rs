@@ -807,6 +807,17 @@ pub async fn set_auto_priority(on: bool) -> Result<SyncReport, String> {
     call("set_auto_priority", &OnArgs { on }).await
 }
 
+#[derive(Serialize)]
+struct TimeLimitsArgs {
+    todo: u32,
+    doing: u32,
+}
+
+/// How long a ticket should take in todo and in doing (ticket 252).
+pub async fn set_time_limits(todo: u32, doing: u32) -> Result<SyncReport, String> {
+    call("set_time_limits", &TimeLimitsArgs { todo, doing }).await
+}
+
 /// Whether a priority set by hand pins its ticket (ticket 215).
 pub async fn set_priority_override(on: bool) -> Result<SyncReport, String> {
     call("set_priority_override", &OnArgs { on }).await

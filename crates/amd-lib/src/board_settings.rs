@@ -114,6 +114,17 @@ const SHARED_DOCUMENTS: &str = "shared-documents";
 const IMPORT_ISSUES: &str = "import-issues";
 const AUTO_PRIORITY: &str = "auto-priority";
 const PRIORITY_OVERRIDE: &str = "priority-override";
+const TODO_MAX_DAYS: &str = "todo-max-days";
+const DOING_MAX_DAYS: &str = "doing-max-days";
+
+/// How long a ticket should take in todo and in doing (ticket 252), in
+/// days; 0 is no limit. Auto priority raises a ticket a step for each
+/// quarter of it used: medium from 25%, high from 50%, top from 75%.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TimeLimits {
+    pub todo: u32,
+    pub doing: u32,
+}
 /// Set once the documents `.settings/` has been carried across (ticket
 /// 182), so it's never read again.
 const MIGRATED: &str = "migrated-from-documents";
@@ -618,15 +629,16 @@ impl BoardSettings {
             .set(IMPORT_ISSUES, if on { "on" } else { "off" });
     }
 
-    /// Whether priorities follow requires links (ticket 215):
-    /// `auto-priority`, off unless set on.
+    /// Whether priorities follow requires links (ticket 215), due dates and
+    /// time limits (ticket 252): `auto-priority`, on unless set off.
     pub fn auto_priority(&self) -> bool {
-        matches!(
+        // On unless set off (ticket 252; it was off unless set on).
+        !matches!(
             self.config
                 .get(AUTO_PRIORITY)
                 .map(|v| v.trim().to_lowercase())
                 .as_deref(),
-            Some("on" | "true" | "1" | "yes")
+            Some("off" | "false" | "0" | "no")
         )
     }
 
@@ -652,6 +664,32 @@ impl BoardSettings {
     pub fn set_priority_override(&mut self, on: bool) {
         self.config
             .set(PRIORITY_OVERRIDE, if on { "on" } else { "off" });
+    }
+
+    /// How long a ticket should take in todo and in doing (ticket 252):
+    /// `todo-max-days`, `doing-max-days`; unset is no limit.
+    pub fn time_limits(&self) -> TimeLimits {
+        let read = |key: &str| {
+            self.config
+                .get(key)
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(0)
+        };
+        TimeLimits {
+            todo: read(TODO_MAX_DAYS),
+            doing: read(DOING_MAX_DAYS),
+        }
+    }
+
+    /// Sets [`time_limits`](Self::time_limits); 0 leaves no key.
+    pub fn set_time_limits(&mut self, limits: TimeLimits) {
+        for (key, days) in [(TODO_MAX_DAYS, limits.todo), (DOING_MAX_DAYS, limits.doing)] {
+            if days == 0 {
+                self.config.remove(key);
+            } else {
+                self.config.set(key, &days.to_string());
+            }
+        }
     }
 
     /// Whether the project is archived (ticket 157): `archived`, off unless

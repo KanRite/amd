@@ -742,8 +742,8 @@ gi_env="XDG_CONFIG_HOME=${gi}/config AMD_NO_INPUT=1 GH_LOG=${gi}/gh.log PATH=${g
 gib="${gi}/issues-tickets"
 assert "amd issues --dry-run lists what it would import and writes nothing" \
   bash -c "cd '${gib}' && out=\$(env ${gi_env} '${AMD}' issues --repo acme/web --dry-run) \
-    && printf '%s\\n' \"\$out\" | grep -q '#2 -> 001 \"Dark mode\" (acme/web) \[TRIAGE\] high\$' \
-    && printf '%s\\n' \"\$out\" | grep -q '#4 -> 002 \"Checkout button overlaps\" (acme/web) \[TRIAGE, BUG\] high, labels not on the tag list: needs-info' \
+    && printf '%s\\n' \"\$out\" | grep -q '#2 -> 001 \"Dark mode\" (acme/web) \[TRIAGE\] top\$' \
+    && printf '%s\\n' \"\$out\" | grep -q '#4 -> 002 \"Checkout button overlaps\" (acme/web) \[TRIAGE, BUG\] top, labels not on the tag list: needs-info' \
     && printf '%s\\n' \"\$out\" | grep -q 'would import 2 issues — nothing written' \
     && ! ls tasks/backlog/*.md 2>/dev/null | grep -v README"
 assert "...a real run makes TRIAGE tickets with their source, in one commit" \
@@ -769,11 +769,11 @@ assert "TRIAGE is built in: it can't be added to or removed from the list" \
     && env ${gi_env} '${AMD}' tags remove TRIAGE 2>&1 | grep -q 'built in'"
 assert "a TRIAGE ticket isn't a draft" \
   bash -c "cd '${gib}' && env ${gi_env} AMD_NO_BRANCH=1 '${AMD}' todo 2 >/dev/null 2>&1 && ls tasks/todo/002-* >/dev/null"
-assert "a TRIAGE ticket is always high, and its priority can't be lowered (ticket 248)" \
-  bash -c "cd '${gib}' && grep -q '^priority: \"high\"' tasks/backlog/002-checkout-button-overlaps.md 2>/dev/null \
-      || grep -q '^priority: \"high\"' tasks/todo/002-checkout-button-overlaps.md \
-    && env ${gi_env} '${AMD}' set 2 priority low 2>&1 | grep -q 'waiting to be triaged, so it.s high' \
-    && env ${gi_env} '${AMD}' triage-priority | grep -q '^high' \
+assert "a TRIAGE ticket is always top, and its priority can't be lowered (tickets 248, 252)" \
+  bash -c "cd '${gib}' && grep -q '^priority: \"top\"' tasks/backlog/002-checkout-button-overlaps.md 2>/dev/null \
+      || grep -q '^priority: \"top\"' tasks/todo/002-checkout-button-overlaps.md \
+    && env ${gi_env} '${AMD}' set 2 priority low 2>&1 | grep -q 'waiting to be triaged, so it.s top' \
+    && env ${gi_env} '${AMD}' triage-priority | grep -q '^top' \
     && ! env ${gi_env} '${AMD}' triage-priority low 2>/dev/null"
 assert "with no repository on GitHub, it asks for owner/repo" \
   bash -c "cd '${gib}' && env ${gi_env} '${AMD}' issues 2>&1 | grep -q 'amd issues --repo owner/repo'"
@@ -1409,12 +1409,15 @@ echo "auto priority (ticket 215):"
 ap="$(mktemp -d)"
 ( cd "${ap}" && git init -q && git config user.email t@t.co && git config user.name t \
   && AMD_YES=1 "${AMD}" init autop --local-only >/dev/null \
+  && "${AMD}" auto-priority > "${ap}.default" && "${AMD}" auto-priority off >/dev/null \
   && for t in Goal Middle Base Extra; do "${AMD}" new "$t" >/dev/null; done \
   && "${AMD}" set 1 priority high >/dev/null \
   && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 2 3 --type requires >/dev/null )
 in_ap() { (cd "${ap}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
-assert "auto priority is off until switched on" \
-  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap auto-priority | grep -qx 'auto priority is off' \
+assert "auto priority is on by default (ticket 252), and a board can switch it off" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; grep -qx 'auto priority is on' '${ap}.default' \
+    && grep -q 'due dates raise a ticket a step each quarter from its creation to its due date' '${ap}.default' \
+    && in_ap auto-priority | grep -qx 'auto priority is off' \
     && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/003-base.md"
 assert "amd auto-priority on raises a chain in the setting's own commit, saying why" \
   bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; out=\$(in_ap auto-priority on) \
@@ -1443,7 +1446,38 @@ assert "amd auto-priority off puts raised tickets back" \
     && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/002-middle.md \
     && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/001-goal.md \
     && ! grep -q 'priority-from' '${ap}'/tasks/backlog/00[234]-*.md"
-rm -rf "${ap}"
+ap_week="$(date -u -d '+7 days' +%F)"
+ap_day="$(date -u +%F)"
+assert "a ticket due the day it's made is top at once, in its own commit, saying why (ticket 252)" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap auto-priority on >/dev/null \
+    && in_ap new Deadline --due '${ap_day}' >/dev/null 2>&1 \
+    && grep -q '^priority: \"top\"' '${ap}'/tasks/backlog/005-deadline.md \
+    && grep -q '^priority-from: \"due\"' '${ap}'/tasks/backlog/005-deadline.md \
+    && in_ap show 5 2>&1 >/dev/null | grep -q 'raised by auto priority, due ${ap_day} (own: low)'"
+assert "a due date counts quarters from creation: a week away from a ticket made today is no raise yet" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap set 5 due '${ap_week}' >/dev/null 2>&1 \
+    && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/005-deadline.md \
+    && sed -i 's/^created: .*/created: \"2026-01-01\"/' '${ap}'/tasks/backlog/005-deadline.md \
+    && in_ap set 5 points 1 >/dev/null 2>&1 \
+    && grep -q '^priority: \"top\"' '${ap}'/tasks/backlog/005-deadline.md"
+ap_today="$(date -u +%F)"
+assert "entering todo and doing records when; back in the backlog clears it (ticket 252)" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap todo 4 >/dev/null 2>&1 \
+    && grep -q '^todo-since: \"${ap_today}\"' '${ap}'/tasks/todo/004-extra.md \
+    && in_ap doing 4 >/dev/null 2>&1 \
+    && grep -q '^todo-since: \"${ap_today}\"' '${ap}'/tasks/doing/004-extra.md \
+    && grep -q '^doing-since: \"${ap_today}\"' '${ap}'/tasks/doing/004-extra.md \
+    && in_ap todo 4 >/dev/null 2>&1 && ! grep -q '^doing-since' '${ap}'/tasks/todo/004-extra.md \
+    && in_ap backlog 4 >/dev/null 2>&1 && ! grep -q 'since' '${ap}'/tasks/backlog/004-extra.md"
+assert "amd auto-priority limits sets the time limits, and a ticket over them is raised" \
+  bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap set 4 priority auto >/dev/null 2>&1; \
+    in_ap todo 4 >/dev/null 2>&1 \
+    && sed -i 's/^todo-since: .*/todo-since: \"2026-01-01\"/' '${ap}'/tasks/todo/004-extra.md \
+    && in_ap auto-priority limits 8 4 | grep -q 'time limits: 8 days in todo, 4 days in doing' \
+    && grep -q '^priority: \"top\"' '${ap}'/tasks/todo/004-extra.md \
+    && grep -q '^priority-from: \"todo\"' '${ap}'/tasks/todo/004-extra.md \
+    && in_ap auto-priority | grep -q 'time limits: 8 days in todo'"
+rm -rf "${ap}" "${ap}.default"
 
 echo "your own columns (ticket 224):"
 cl="$(mktemp -d)"
@@ -1830,12 +1864,12 @@ assert "amd mine --hide leaves a project out, --all brings it back, --unhide res
     && in_mw mine --all | grep -q beta && in_mw mine --unhide beta >/dev/null && in_mw mine | grep -q beta"
 assert "amd mine --json gives the same list for scripts" \
   bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --json | grep -c '\"project\"' | grep -qx 6"
-assert "a TRIAGE ticket heads everyone's My work, high, and brings its hidden project back (ticket 248)" \
+assert "a TRIAGE ticket heads everyone's My work, top, and brings its hidden project back (tickets 248, 252)" \
   bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --hide gamma >/dev/null \
     && (cd '${mwh}/other/gamma-tickets' && env XDG_CONFIG_HOME='${mw}/config' AMD_COMMIT=0 '${AMD}' new 'Look at this issue' --tag TRIAGE --no-edit >/dev/null 2>&1) \
     && out=\$(in_mw mine 2>&1) \
     && printf '%s\\n' \"\$out\" | grep -q 'gamma has tickets to triage' \
-    && printf '%s\\n' \"\$out\" | grep -v 'has tickets' | head -1 | grep -q 'backlog  high .*gamma .*TRIAGE  Look at this issue' \
+    && printf '%s\\n' \"\$out\" | grep -v 'has tickets' | head -1 | grep -q 'backlog  top .*gamma .*TRIAGE  Look at this issue' \
     && in_mw mine | grep -q 'gamma doing' \
     && (cd '${mwh}/other/gamma-tickets' && env XDG_CONFIG_HOME='${mw}/config' AMD_COMMIT=0 '${AMD}' abandon 5 >/dev/null 2>&1; rm -rf tasks/archive)"
 

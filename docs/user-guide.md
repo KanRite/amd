@@ -82,7 +82,7 @@ rest:
 | `id`          | automatic | `007`, from the board's counter |
 | `title`       | required | names the file, and the branch |
 | `assignee`    | optional | who's doing it; assignable later |
-| `priority`    | default `low` | `low`, `medium` or `high` |
+| `priority`    | default `low` | `low`, `medium`, `high` or `top` (every TRIAGE ticket is top) |
 | `points`      | optional | its size: 1, 2, 3, 5, 8 or 13 |
 | `repository`  | optional | the repository it's about, where its branch is made |
 | `branch-type` | optional | `feature`, `bugfix`, `hotfix`, `release`, `chore`, or `none` for no branch |
@@ -280,10 +280,27 @@ Each card also says how many tickets it's linked to (beside the tree icon,
 or a link icon when it has no tree), and a ticket linked to nothing at all
 shows a small blue circle, so loose tickets are easy to spot.
 
-**Auto priority** (off unless switched on: `amd auto-priority on`, or
+**Auto priority** (on unless switched off: `amd auto-priority off`, or
 Admin → Auto priority) makes a ticket at least as urgent as the most urgent
 ticket that requires it, down a chain, so the priorities you set on your
-goals flow to the work they wait on. A raised ticket records why
+goals flow to the work they wait on. **It also raises a ticket as its due
+date nears**: a step for each quarter of the time from the day it was
+created to its due date, so medium from 25%, high from 50% and top from
+75%, and top once it's overdue. That passes on to what it requires.
+
+**Time limits** say how long a ticket should take in todo and in doing
+(`amd auto-priority limits 10 5`, or Admin; none unless set). Each quarter
+of a limit a ticket uses raises it a step: medium from 25%, high from 50%,
+top from 75%. The time it waited in todo keeps counting once someone picks
+it up, so a ticket that became urgent while it waited stays urgent if the
+person working on it is away; doing's own limit can raise it further.
+amd records when a ticket entered todo and doing (`todo-since`,
+`doing-since`) as it moves; back in the backlog, both are cleared.
+
+A priority is written into the ticket, and nothing runs in the background,
+so a due date or a limit coming near is picked up by the next change anyone
+makes on the board, or within the hour by an open desktop board, which
+commits it as `priority: due dates`. A raised ticket records why
 (`priority-from`, `priority-own`; `amd show` says it, and its card shows
 `↑ high`), and switching it off puts them back. With **allow override** on
 (the default, `amd priority-override`), a priority you set by hand pins that
@@ -528,7 +545,7 @@ listed. It reads each board as this machine last saw it.
 TRIAGE (an imported GitHub issue, or a dependency update that needs a
 person) heads everyone's My work on its project, marked TRIAGE, unless it's
 assigned to someone else. A hidden project with one is shown again. A
-TRIAGE ticket is always high priority: you can't set it lower until you've
+TRIAGE ticket is always top priority: you can't set it lower until you've
 looked at it and taken TRIAGE off.
 
 With nothing in todo or doing, it offers work to pick instead (never a
@@ -685,7 +702,7 @@ every five minutes per project), tagged `TRIAGE`, with a link back to the
 issue and its text, as one commit. A label becomes a tag when it's on the
 project's tag list; any other is named in the ticket's notes. An issue is
 only ever imported once, so abandoning a `TRIAGE` ticket turns its issue down
-for good. New tickets are high priority, as every TRIAGE ticket is, and
+for good. New tickets are top priority, as every TRIAGE ticket is, and
 head everyone's My work until they're triaged. Admin's "GitHub issues" switch, or `amd
 issues off`, stops the automatic pull; `amd issues` checks now (`--repo
 owner/repo` and `--label` for a one-off, `--dry-run` to preview). It reads

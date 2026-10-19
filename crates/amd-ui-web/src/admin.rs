@@ -1208,6 +1208,13 @@ fn PriorityAdmin() -> impl IntoView {
         ctx.board
             .with(|b| b.as_ref().is_none_or(|b| b.priority_override))
     };
+    // How long a ticket should take in todo and doing (ticket 252).
+    let saved_limits = move || {
+        ctx.board
+            .with(|b| b.as_ref().map_or((0, 0), |b| b.time_limits))
+    };
+    let todo_days = RwSignal::new(saved_limits().0);
+    let doing_days = RwSignal::new(saved_limits().1);
     let note = RwSignal::new(None::<String>);
     let apply = move |result: Result<amd_ui_model::SyncReport, String>| match result {
         Ok(report) => {
@@ -1221,7 +1228,7 @@ fn PriorityAdmin() -> impl IntoView {
         <section class="flex flex-col gap-2">
             <h3 class="text-sm font-semibold">"Auto priority"</h3>
             <p class="text-xs text-slate-500">
-                "A ticket becomes at least as urgent as the most urgent ticket that requires it, down a chain, so the priorities on your goals flow to the work they wait on. Raised tickets say why, and switching it off puts them back."
+                "A ticket becomes at least as urgent as the most urgent ticket that requires it, down a chain, so the priorities on your goals flow to the work they wait on, and it rises as its due date nears. Raised tickets say why, and switching it off puts them back."
             </p>
             <label class="flex items-center gap-2 text-sm font-semibold">
                 <input
@@ -1232,8 +1239,45 @@ fn PriorityAdmin() -> impl IntoView {
                         spawn_local(async move { apply(api::set_auto_priority(on).await) });
                     }
                 />
-                "Set priorities from requires links"
+                "Set priorities from requires links, due dates and time limits"
             </label>
+            <p class="text-xs text-slate-500">
+                "A ticket with a due date rises a step each quarter of the time from its creation to its due date: medium from 25%, high from 50%, top from 75%, so top once it's overdue."
+            </p>
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+                <span>"A ticket should take at most"</span>
+                <input
+                    type="number"
+                    min="0"
+                    class="w-16 rounded border border-slate-400 bg-transparent px-1"
+                    aria-label="Days in todo"
+                    prop:value=move || todo_days.get().to_string()
+                    on:input=move |ev| todo_days.set(event_target_value(&ev).parse().unwrap_or(0))
+                />
+                <span>"days in todo and"</span>
+                <input
+                    type="number"
+                    min="0"
+                    class="w-16 rounded border border-slate-400 bg-transparent px-1"
+                    aria-label="Days in doing"
+                    prop:value=move || doing_days.get().to_string()
+                    on:input=move |ev| doing_days.set(event_target_value(&ev).parse().unwrap_or(0))
+                />
+                <span>"days in doing."</span>
+                <button
+                    class="rounded border border-slate-400 px-2 py-0.5 text-xs disabled:opacity-50"
+                    disabled=move || (todo_days.get(), doing_days.get()) == saved_limits()
+                    on:click=move |_| {
+                        let (t, d) = (todo_days.get_untracked(), doing_days.get_untracked());
+                        spawn_local(async move { apply(api::set_time_limits(t, d).await) });
+                    }
+                >
+                    "Save"
+                </button>
+            </div>
+            <p class="text-xs text-slate-500">
+                "Each quarter of that a ticket uses raises it a step: medium from 25%, high from 50%, top from 75%. Its time in todo keeps counting once someone picks it up, so an urgent ticket stays urgent. 0 is no limit."
+            </p>
             <label class="flex items-center gap-2 text-sm font-semibold">
                 <input
                     type="checkbox"
@@ -1353,7 +1397,7 @@ fn IssuesAdmin() -> impl IntoView {
                         })
                 }}
             </div>
-            <p class="text-xs text-slate-500">"They come in at high priority, as every TRIAGE ticket is, and head everyone's My work until they're triaged."</p>
+            <p class="text-xs text-slate-500">"They come in at top priority, as every TRIAGE ticket is, and head everyone's My work until they're triaged."</p>
         </section>
     }
 }

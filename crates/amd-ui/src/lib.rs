@@ -40,6 +40,9 @@ struct AppState {
     /// landing page (ticket 173), by its board repository, so going back to
     /// the landing page doesn't call GitHub every time.
     issues_pulled: Arc<Mutex<std::collections::HashMap<PathBuf, std::time::Instant>>>,
+    /// When each board was last checked for due dates coming near (ticket
+    /// 252), so the 30-second sync reads every ticket at most hourly.
+    due_checked: Arc<Mutex<std::collections::HashMap<PathBuf, std::time::Instant>>>,
     /// The bottom panel's terminals (ticket 185), by id.
     terminals: Arc<Mutex<std::collections::HashMap<u32, terminal::Session>>>,
     next_terminal: Arc<std::sync::atomic::AtomicU32>,
@@ -198,6 +201,7 @@ async fn board_fingerprint() -> Result<String> {
 #[tauri::command]
 async fn sync_board(state: Tauri<'_, AppState>) -> Result<Vec<String>> {
     let writing = Arc::clone(&state.writing);
+    let due_checked = Arc::clone(&state.due_checked);
     blocking(move || {
         let _guard = writing
             .lock()
@@ -211,10 +215,48 @@ async fn sync_board(state: Tauri<'_, AppState>) -> Result<Vec<String>> {
                 })),
                 Err(e) => warnings.push(format!("{e:#}")),
             }
+            if let Err(e) = raise_for_due_dates(board, &due_checked) {
+                warnings.push(format!("{e:#}"));
+            }
         }
         Ok(warnings)
     })
     .await
+}
+
+/// How often an open board is checked for due dates coming near.
+const DUE_CHECK: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// A due date coming near changes nothing on disk, so on a board nobody
+/// touches the raise would wait for the next change (ticket 252). An open
+/// amdui commits it instead, at most hourly a board: `priority: due dates`,
+/// only when auto priority would change something.
+fn raise_for_due_dates(
+    board: &Board,
+    checked: &Mutex<std::collections::HashMap<PathBuf, std::time::Instant>>,
+) -> anyhow::Result<()> {
+    {
+        let mut checked = checked
+            .lock()
+            .map_err(|_| anyhow::anyhow!("the due-date check is in a bad state"))?;
+        if checked
+            .get(&board.root)
+            .is_some_and(|at| at.elapsed() < DUE_CHECK)
+        {
+            return Ok(());
+        }
+        checked.insert(board.root.clone(), std::time::Instant::now());
+    }
+    let settings = board_settings::load(board);
+    if !settings.auto_priority() || settings.archived() {
+        return Ok(());
+    }
+    if !agile_md::auto_priority::pending(board, agile_md::recur::today()) {
+        return Ok(());
+    }
+    transition::with_auto_commit(board, "priority", "due dates", "", || Ok(()))?;
+    agile_md::auto_priority::take_notes();
+    Ok(())
 }
 
 /// The ticket's current version on disk, as `open_ticket` reports it, or
@@ -1469,6 +1511,20 @@ async fn set_auto_priority(state: Tauri<'_, AppState>, on: bool) -> Result<SyncR
                 Ok(())
             },
         )
+    })
+    .await
+}
+
+/// How long a ticket should take in todo and in doing (ticket 252); 0 is
+/// no limit.
+#[tauri::command]
+async fn set_time_limits(state: Tauri<'_, AppState>, todo: u32, doing: u32) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        save_setting(board, &format!("time-limits {todo} {doing}"), |s| {
+            s.set_time_limits(board_settings::TimeLimits { todo, doing });
+            Ok(())
+        })
     })
     .await
 }
@@ -2816,6 +2872,7 @@ pub fn run() {
             set_import_issues,
             set_auto_priority,
             set_priority_override,
+            set_time_limits,
             list_documents,
             document_history,
             read_document_version,
