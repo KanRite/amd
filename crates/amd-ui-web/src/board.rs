@@ -1037,6 +1037,7 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
                                                                     ctx.overlay.set(Some(Overlay::Tree {
                                                                         place: place.clone(),
                                                                         file: file.clone(),
+                                                                        children: false,
                                                                     }))
                                                                 }
                                                             >
@@ -1163,6 +1164,16 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                     });
                     !started && waiting::has_family(&me, waiting::all_tickets(b))
                 })
+            })
+        })
+    };
+    // A parent or children on its board (ticket 261): the hierarchy badge.
+    let hierarchy = {
+        let me = ticket.clone();
+        Memo::new(move |_| {
+            ctx.board.with(|b| {
+                b.as_ref()
+                    .is_some_and(|b| waiting::has_hierarchy(&me, waiting::all_tickets(b)))
             })
         })
     };
@@ -1297,6 +1308,38 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                     let tree_file = file.clone();
                     move || {
                         let tree_file = tree_file.clone();
+                        hierarchy.get().then(|| {
+                            view! {
+                                <button
+                                    type="button"
+                                    class="flex shrink-0 items-center self-start rounded px-1 text-xs text-slate-500 hover:bg-slate-200 hover:text-slate-800 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+                                    title="Show its parent and children"
+                                    aria-label="Show its parent and children"
+                                    on:click=move |ev| {
+                                        ev.stop_propagation();
+                                        ctx.overlay.set(Some(Overlay::Tree {
+                                            place: place.get_value(),
+                                            file: tree_file.clone(),
+                                            children: true,
+                                        }));
+                                    }
+                                >
+                                    // A box above two smaller ones.
+                                    <svg viewBox="0 0 16 16" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                                        <rect x="5" y="1.5" width="6" height="4" rx="1" />
+                                        <rect x="1.5" y="10.5" width="5" height="4" rx="1" />
+                                        <rect x="9.5" y="10.5" width="5" height="4" rx="1" />
+                                        <path d="M8 5.5v2.5M4 10.5V8h8v2.5" />
+                                    </svg>
+                                </button>
+                            }
+                        })
+                    }
+                }
+                {
+                    let tree_file = file.clone();
+                    move || {
+                        let tree_file = tree_file.clone();
                         let count = linked.get();
                         let noun = if count == 1 { "ticket" } else { "tickets" };
                         if family.get() {
@@ -1311,6 +1354,7 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                                         ctx.overlay.set(Some(Overlay::Tree {
                                             place: place.get_value(),
                                             file: tree_file.clone(),
+                                            children: false,
                                         }));
                                     }
                                 >

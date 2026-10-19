@@ -42,6 +42,8 @@ pub enum Overlay {
     Tree {
         place: Place,
         file: String,
+        /// Parent and child instead (ticket 261).
+        children: bool,
     },
     /// New ticket; from the editor's Save and New, linked back to the
     /// ticket it came from (ticket 227).
@@ -545,8 +547,8 @@ pub fn App() -> impl IntoView {
                 Some(Overlay::NewRepo(ticket)) => {
                     view! { <crate::dialog::NewRepoDialog ticket /> }.into_any()
                 }
-                Some(Overlay::Tree { place, file }) => {
-                    view! { <crate::tree::TreePanel place file /> }.into_any()
+                Some(Overlay::Tree { place, file, children }) => {
+                    view! { <crate::tree::TreePanel place file children /> }.into_any()
                 }
                 Some(Overlay::OverLimit { file, from, to, reason }) => {
                     view! { <OverLimitDialog file from to reason /> }.into_any()

@@ -3,7 +3,8 @@
 //! to on a dashed one (long dashes, wide gaps, so the two are easy to tell
 //! apart), where each is, and what it still waits on. A click on a ticket
 //! goes to its card. Done tickets are left out until "Include done" is
-//! ticked (ticket 217).
+//! ticked (ticket 217). With `children` it's parent and child instead
+//! (ticket 261): the ticket's ancestors and everything under it.
 
 use amd_ui_model::epic::Place;
 use amd_ui_model::tree::{Edge, TreeNode};
@@ -28,7 +29,7 @@ fn line(edge: Edge, vertical: bool) -> &'static str {
 }
 
 #[component]
-pub fn TreePanel(place: Place, file: String) -> impl IntoView {
+pub fn TreePanel(place: Place, file: String, children: bool) -> impl IntoView {
     let trees = RwSignal::new(None::<Result<Vec<TreeNode>, String>>);
     let include_done = RwSignal::new(false);
     let repo = place.repo.clone();
@@ -36,7 +37,11 @@ pub fn TreePanel(place: Place, file: String) -> impl IntoView {
         let done = include_done.get();
         let (place, file) = (place.clone(), file.clone());
         spawn_local(async move {
-            let got = api::ticket_family(&place, &file, done).await;
+            let got = if children {
+                api::ticket_hierarchy(&place, &file, done).await
+            } else {
+                api::ticket_family(&place, &file, done).await
+            };
             // A later tick may have answered first: keep only the current one.
             if include_done.get_untracked() == done {
                 trees.set(Some(got));
@@ -44,13 +49,21 @@ pub fn TreePanel(place: Place, file: String) -> impl IntoView {
         });
     });
     view! {
-        <Modal title="Requires and related".to_string() width="max-w-4xl">
+        <Modal
+            title=if children { "Parent and children" } else { "Requires and related" }.to_string()
+            width="max-w-4xl"
+        >
             <p class="text-xs text-slate-500">
-                <span class="mr-1 inline-block h-0.5 w-6 align-middle text-slate-500" style=line(Edge::Requires, false)></span>
-                "requires"
-                <span class="ml-4 mr-1 inline-block h-0.5 w-6 align-middle text-slate-500" style=line(Edge::Related, false)></span>
-                "related"
-                <span class="ml-4">"Click a ticket to go to its card."</span>
+                {(!children)
+                    .then(|| {
+                        view! {
+                            <span class="mr-1 inline-block h-0.5 w-6 align-middle text-slate-500" style=line(Edge::Requires, false)></span>
+                            "requires"
+                            <span class="ml-4 mr-1 inline-block h-0.5 w-6 align-middle text-slate-500" style=line(Edge::Related, false)></span>
+                            <span class="mr-4">"related"</span>
+                        }
+                    })}
+                <span>"Click a ticket to go to its card."</span>
                 <label class="ml-4 inline-flex items-center gap-1">
                     <input
                         type="checkbox"
@@ -65,10 +78,12 @@ pub fn TreePanel(place: Place, file: String) -> impl IntoView {
                     None => view! { <p class="text-sm text-slate-500">"Reading the board…"</p> }.into_any(),
                     Some(Err(e)) => view! { <p class="text-sm text-red-700 dark:text-red-300">{e}</p> }.into_any(),
                     Some(Ok(list)) if list.is_empty() => {
-                        let says = if include_done.get_untracked() {
-                            "This ticket requires nothing and has no related tickets."
-                        } else {
-                            "Everything this ticket is linked to is done. Tick Include done to see it."
+                        let says = match (children, include_done.get_untracked()) {
+                            (true, _) => "This ticket has no parent and no children.",
+                            (false, true) => "This ticket requires nothing and has no related tickets.",
+                            (false, false) => {
+                                "Everything this ticket is linked to is done. Tick Include done to see it."
+                            }
                         };
                         view! { <p class="text-sm text-slate-500">{says}</p> }.into_any()
                     }

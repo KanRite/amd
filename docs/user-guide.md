@@ -313,6 +313,21 @@ Each card also says how many tickets it's linked to (beside the tree icon,
 or a link icon when it has no tree), and a ticket linked to nothing at all
 shows a small blue circle, so loose tickets are easy to spot.
 
+**Parent and child** have a view of their own, since each ticket has at
+most one parent: `amd tree 7 --children` draws the hierarchy from the
+topmost ancestor down through every child and theirs, the ticket marked
+(`amd tree --children` draws every hierarchy on the board):
+
+```
+001 Alpha · backlog
+└──── 006 Zeta · backlog
+      └──── 007 Eta · backlog  ◀
+```
+
+On the desktop board, a card with a parent or children has a small
+hierarchy button (a box above two) that opens the same view; click a ticket
+in it to go to its card. Done children are left out until "Include done".
+
 **Auto priority** (on unless switched off: `amd auto-priority off`, or
 Admin → Auto priority) makes a ticket at least as urgent as the most urgent
 ticket that requires it, down a chain, so the priorities you set on your

@@ -1160,6 +1160,20 @@ fn ticket_family(
     agile_md::requires::family(board, Some(&task), include_done).map_err(err)
 }
 
+/// Parent and child around a ticket (ticket 261), as `amd tree <ref>
+/// --children` prints it; done tickets only with `include_done`.
+#[tauri::command]
+fn ticket_hierarchy(
+    place: Place,
+    file: String,
+    include_done: bool,
+) -> Result<Vec<agile_md::requires::TreeNode>> {
+    let project = Project::open()?;
+    let board = project.board(&place.repo)?;
+    let task = task_at(board, &place, &file)?;
+    agile_md::hierarchy::hierarchy(board, Some(&task), include_done).map_err(err)
+}
+
 /// Takes a ticket off the board into the archive (`amd abandon`).
 #[tauri::command]
 async fn archive_ticket(
@@ -2958,6 +2972,7 @@ pub fn run() {
             link_ticket,
             retype_link,
             ticket_family,
+            ticket_hierarchy,
             repo_defaults,
             create_repository,
             add_column,
@@ -3619,11 +3634,16 @@ mod tests {
         let lib = node(
             "001",
             Edge::Root,
-            vec![node("002", Edge::Related, Vec::new())],
+            vec![
+                node("002", Edge::Related, Vec::new()),
+                // The hierarchy's edge (ticket 261).
+                node("003", Edge::Child, Vec::new()),
+            ],
         );
         let json = serde_json::to_value(&lib).unwrap();
         let page: amd_ui_model::tree::TreeNode = serde_json::from_value(json.clone()).unwrap();
         assert_eq!(page.children[0].edge, amd_ui_model::tree::Edge::Related);
+        assert_eq!(page.children[1].edge, amd_ui_model::tree::Edge::Child);
         assert_eq!(serde_json::to_value(&page).unwrap(), json);
     }
 

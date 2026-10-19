@@ -547,13 +547,17 @@ enum Cmd {
     /// related. Without, every family on the board. Tickets in a started
     /// sprint aren't expanded. Each line says where the ticket is, and
     /// "waits on" names what it requires that isn't done. Done tickets are
-    /// left out unless --done
+    /// left out unless --done. With --children, parent and child instead:
+    /// the ticket's ancestors and everything under it
     Tree {
         #[arg(value_name = "REF")]
         task: Option<String>,
         /// Include done tickets
         #[arg(long)]
         done: bool,
+        /// Parent and child (the hierarchy) instead of requires and related
+        #[arg(long)]
+        children: bool,
     },
     /// Print a task
     Show {
@@ -1875,7 +1879,27 @@ fn run() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Tree { task, done } => {
+        Cmd::Tree {
+            task,
+            done,
+            children: true,
+        } => {
+            // Parent and child (ticket 261).
+            let around = task.map(|t| board.find(&t)).transpose()?;
+            let trees = agile_md::hierarchy::hierarchy(&board, around.as_ref(), done)?;
+            match (&around, trees.is_empty()) {
+                (Some(t), true) => {
+                    println!("{} has no parent and no children", t.id_display())
+                }
+                (None, true) if done => println!("No ticket on this board has children"),
+                (None, true) => println!(
+                    "No ticket on this board has children that aren't done (amd tree --children --done shows them)"
+                ),
+                _ => render::tree(&board, &trees),
+            }
+            Ok(())
+        }
+        Cmd::Tree { task, done, .. } => {
             let around = task.map(|t| board.find(&t)).transpose()?;
             let trees = agile_md::requires::family(&board, around.as_ref(), done)?;
             // Empty only because done tickets were left out: say so.

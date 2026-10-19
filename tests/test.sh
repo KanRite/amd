@@ -1454,6 +1454,16 @@ assert "amd tree leaves done tickets out without --done" \
 assert "amd tree of a ticket linked only to done ones says they're done" \
   bash -c "cd '${tr}' && '${AMD}' new Epsilon >/dev/null && '${AMD}' link 5 3 >/dev/null \
     && '${AMD}' tree 5 | grep -qx 'Everything 005 is linked to is done (amd tree 005 --done shows it)'"
+# Ticket 261: parent and child, from the top ancestor down.
+( cd "${tr}" && "${AMD}" new Zeta --parent 1 >/dev/null && "${AMD}" new Eta --parent 6 >/dev/null )
+assert "amd tree --children draws the hierarchy from the top, the ticket marked" \
+  bash -c "cd '${tr}' && [ \"\$('${AMD}' tree 7 --children)\" = \"\$(printf '%s\\n' \\
+    '001 Alpha · backlog' \\
+    '└──── 006 Zeta · backlog' \\
+    '      └──── 007 Eta · backlog  ◀')\" ]"
+assert "...every hierarchy on the board without a ticket, and none for a ticket with no parent or children" \
+  bash -c "cd '${tr}' && '${AMD}' tree --children | head -1 | grep -qx '001 Alpha · backlog' \
+    && '${AMD}' tree 2 --children | grep -qx '002 has no parent and no children'"
 rm -rf "${tr}"
 
 echo "auto priority (ticket 215):"

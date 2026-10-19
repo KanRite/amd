@@ -297,6 +297,24 @@ struct FamilyArgs<'a> {
     include_done: bool,
 }
 
+/// Parent and child around a ticket (ticket 261), done tickets only with
+/// `include_done`.
+pub async fn ticket_hierarchy(
+    place: &Place,
+    file: &str,
+    include_done: bool,
+) -> Result<Vec<amd_ui_model::tree::TreeNode>, String> {
+    call(
+        "ticket_hierarchy",
+        &FamilyArgs {
+            place,
+            file,
+            include_done,
+        },
+    )
+    .await
+}
+
 /// The requires tree around a ticket (ticket 214), done tickets only with
 /// `include_done` (ticket 217).
 pub async fn ticket_family(

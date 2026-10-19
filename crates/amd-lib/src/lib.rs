@@ -28,6 +28,7 @@ pub mod documents_edit;
 pub mod git;
 pub mod github;
 pub mod group;
+pub mod hierarchy;
 pub mod ideas;
 pub mod import;
 pub mod import_documents;
