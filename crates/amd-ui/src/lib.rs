@@ -6,6 +6,7 @@
 
 mod boards;
 mod documents;
+mod exe_watch;
 mod speech;
 mod terminal;
 mod updates;
@@ -55,6 +56,9 @@ struct AppState {
     /// The board repository whose screen note this window last wrote
     /// (ticket 186), taken away when the window closes.
     screen: Arc<Mutex<Option<PathBuf>>>,
+    /// amdui's own program as it started, to notice it being replaced
+    /// (ticket 208); `None` when it couldn't be found.
+    exe_watch: Arc<Mutex<Option<exe_watch::Watch>>>,
 }
 
 /// The AI tab's command when Preferences doesn't name one (ticket 185).
@@ -1026,6 +1030,20 @@ async fn move_epic_tickets(
 #[tauri::command]
 async fn update_status() -> Result<Option<amd_ui_model::UpdateInfo>> {
     blocking(|| Ok(updates::status())).await
+}
+
+/// The version amdui's program on disk is now, when it was replaced while
+/// running and isn't this one (ticket 208): the page offers a Restart.
+#[tauri::command]
+async fn binary_changed(state: Tauri<'_, AppState>) -> Result<Option<String>> {
+    let watch = Arc::clone(&state.exe_watch);
+    blocking(move || {
+        let mut watch = watch
+            .lock()
+            .map_err(|_| "the program check is in a bad state".to_string())?;
+        Ok(watch.as_mut().and_then(exe_watch::Watch::check))
+    })
+    .await
 }
 
 /// The update bar's Update (ticket 191): installs the newest release; the
@@ -2879,7 +2897,16 @@ pub fn run() {
         let _ = std::env::set_current_dir(last);
     }
     tauri::Builder::default()
-        .manage(AppState::default())
+        .manage(AppState {
+            // Recorded now: once replaced, `current_exe` can name a
+            // deleted file (ticket 208).
+            exe_watch: Arc::new(Mutex::new(
+                std::env::current_exe()
+                    .ok()
+                    .map(|exe| exe_watch::Watch::new(exe, env!("CARGO_PKG_VERSION"))),
+            )),
+            ..AppState::default()
+        })
         // No shell outlives the window (ticket 185).
         .on_window_event(|window, event| {
             use tauri::Manager;
@@ -2956,6 +2983,7 @@ pub fn run() {
             update_status,
             snooze_update,
             apply_update,
+            binary_changed,
             restart_app,
             archive_ticket,
             lock_ticket,

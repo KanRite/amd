@@ -466,6 +466,13 @@ disagree.
   `amd.previous` and `amdui.previous`, and `amd update --rollback` puts
   them back. Your projects, settings and locks are never opened.
 
+  If amdui's program is replaced while it's open (`amd update` in a
+  terminal, the installer run again, a package manager), the bar says
+  "amdui was updated to X" with **Restart**: the open window keeps running
+  the old version until then. Nothing restarts without the click, and open
+  Terminal and AI sessions close when it does. A rebuild or a `touch` that
+  leaves the version the same says nothing.
+
   Only an install made by agile-md's installer from a release updates
   itself. One built from source, from a package manager, or installed
   before 4.6 says so and shows what to do instead: for the last, run the

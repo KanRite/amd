@@ -369,6 +369,12 @@ pub async fn apply_update() -> Result<amd_ui_model::UpdateResult, String> {
     call("apply_update", &NoArgs {}).await
 }
 
+/// The version amdui's program on disk is now, when it was replaced while
+/// running (ticket 208).
+pub async fn binary_changed() -> Result<Option<String>, String> {
+    call("binary_changed", &NoArgs {}).await
+}
+
 /// Starts amdui again, into the version just installed.
 pub async fn restart_app() -> Result<(), String> {
     call("restart_app", &NoArgs {}).await

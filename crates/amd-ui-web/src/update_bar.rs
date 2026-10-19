@@ -4,6 +4,10 @@
 //! closed so nothing typed is lost; an install amdui doesn't replace says
 //! why and how instead. **Later** hides that version for a day, across
 //! restarts; a still newer release shows at once.
+//!
+//! When amdui's own program is replaced while it runs (`amd update` in a
+//! terminal, the installer, a package manager: ticket 208), the bar says so
+//! instead, with **Restart**. Nothing restarts without the click.
 
 use amd_ui_model::{INSTALL_COMMAND, UpdateInfo, UpdateResult};
 use leptos::prelude::*;
@@ -31,6 +35,9 @@ enum Phase {
 
 /// How often the page asks again; amdui asks GitHub at most daily anyway.
 const RECHECK: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+
+/// How often amdui's own program is looked at: one `stat` (ticket 208).
+const BINARY_CHECK: std::time::Duration = std::time::Duration::from_secs(5);
 
 #[component]
 pub fn UpdateBar() -> impl IntoView {
@@ -73,6 +80,39 @@ pub fn UpdateBar() -> impl IntoView {
     };
     ask();
     let _ = set_interval_with_handle(ask, RECHECK);
+    // amdui's program replaced under it (ticket 208).
+    let replaced = RwSignal::new(None::<String>);
+    let restart_note = RwSignal::new(None::<String>);
+    let _ = set_interval_with_handle(
+        move || {
+            if replaced.with_untracked(Option::is_some) {
+                return;
+            }
+            spawn_local(async move {
+                if let Ok(Some(version)) = api::binary_changed().await {
+                    replaced.set(Some(version));
+                }
+            });
+        },
+        BINARY_CHECK,
+    );
+    let restart = move |_| {
+        if ctx
+            .overlay
+            .with_untracked(|o| matches!(o, Some(Overlay::Editor(_))))
+        {
+            restart_note.set(Some(
+                "Close the ticket you're editing first, so nothing you've typed is lost, then Restart.".into(),
+            ));
+            return;
+        }
+        restart_note.set(Some("Restarting…".into()));
+        spawn_local(async move {
+            if let Err(e) = api::restart_app().await {
+                restart_note.set(Some(e));
+            }
+        });
+    };
     let later = move |_| {
         let Some(version) = offer.with_untracked(|o| o.as_ref().map(|o| o.version.clone())) else {
             return;
@@ -92,7 +132,28 @@ pub fn UpdateBar() -> impl IntoView {
     };
     let button = "rounded px-2.5 py-1 text-sm font-medium focus:outline-2 focus:outline-offset-1 focus:outline-orange-700";
     view! {
-        <Show when=move || offer.with(Option::is_some)>
+        <Show when=move || replaced.with(Option::is_some)>
+            <section
+                role="status"
+                aria-live="polite"
+                aria-label="amdui was updated"
+                class="flex flex-col gap-1 border-b border-orange-300 bg-orange-100 px-4 py-2 text-orange-950 dark:border-orange-700 dark:bg-orange-900 dark:text-orange-50"
+            >
+                <div class="flex flex-wrap items-center gap-3">
+                    <p class="flex-1 text-sm">
+                        {move || format!(
+                            "amdui was updated to {}. Restart to use it; open Terminal and AI sessions close.",
+                            replaced.get().unwrap_or_default()
+                        )}
+                    </p>
+                    <button class=format!("{button} bg-orange-600 text-white hover:bg-orange-500") on:click=restart>
+                        "Restart"
+                    </button>
+                </div>
+                {move || restart_note.get().map(|note| view! { <p class="text-sm">{note}</p> })}
+            </section>
+        </Show>
+        <Show when=move || offer.with(Option::is_some) && replaced.with(Option::is_none)>
             <section
                 role="status"
                 aria-live="polite"

@@ -291,6 +291,16 @@ redundant. Their history is in git if it is ever wanted again.
   open; the modal's backdrop already covers the bar). Both read
   `AMD_UPDATE_RELEASES=file://…` and `file://` downloads, which
   `tests/test.sh` uses with a pretend 9.9.9.
+- `crates/amd-ui/src/exe_watch.rs` — **amdui's program replaced while it
+  runs** (ticket 208). `Watch::new` at start (in `run()`, `AppState.
+  exe_watch`) records the path (later `current_exe` can name a deleted
+  file) and the `Stamp` (inode, mtime, size). `step` is pure, clock and
+  `--version` passed in: a changed stamp must stay the same for `SETTLE`
+  (2 s) before `amdui --version` is asked; a different version is said
+  from then on, the same version (a touch, a rebuild) becomes the
+  baseline. Command `binary_changed`, which the update bar polls every 5
+  s; it shows "amdui was updated to X" with **Restart** (`restart_app`),
+  taking precedence over a release offer, never restarting by itself.
 - `crates/amd-lib/src/renumber.rs` — `amd renumber [--keep T] [--apply]`
   (ticket 146): tickets sharing a number (`local` numbering can clash when
   clones create apart). The first committed keeps it, judged by commit
