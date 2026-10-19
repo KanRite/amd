@@ -186,13 +186,8 @@ curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash
 
 That installs two commands, **`amd`** (the command line) and **`amdui`**
 (the desktop board), into `/usr/local/bin` when it can, otherwise `~/bin`,
-and on Linux adds the board to your application menu. To update, press
-**Update** on the desktop board's update bar, or run `amd update`: each
-release is checked against GitHub's checksum and only the two programs are
-replaced, never your projects or settings (`amd update --rollback` goes
-back). Running the installer again works too, and is how an install from
-before 4.6 starts updating itself. To choose the folder or pin a version,
-pass them after `bash -s --`:
+and on Linux adds the board to your application menu. To choose the folder
+or pin a version, pass them after `bash -s --`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash -s -- --dir ~/.local/bin --version v4.5.0
@@ -203,6 +198,33 @@ changes nothing: on Windows, install it inside
 [WSL](https://learn.microsoft.com/windows/wsl/install). On Linux the desktop
 board needs WebKitGTK 4.1; if it's missing, the installer names the package
 to add, and `amd` works without it.
+
+### Updates
+
+The desktop board looks for a newer release of agile-md on GitHub when it
+starts and every few hours while it's open, asking GitHub at most once a
+day (drafts and pre-releases are ignored). When there is one, an orange bar
+across the top says so, with **What's new**, **Update** and **Later**:
+
+- **Update** installs it and restarts the board. Each release's download
+  is checked against the checksum GitHub publishes, and only the two
+  programs are replaced, never your projects or settings. On the command
+  line, `amd update` does the same (`amd update --check` only looks, and
+  `amd update --rollback` puts the previous version back).
+- **Later** hides that version for a day, even if you restart; a newer
+  release still shows straight away.
+- If the check fails (offline, say), nothing is shown; it tries again an
+  hour later.
+
+To turn the check off, add `update-check = off` to
+`~/.config/agile-md/config`, or set `AMD_UPDATE_CHECK=0` (which wins over
+the setting). What it remembers, the releases it last saw and a Later, is
+kept in `~/.local/state/agile-md/update.json` (or under `$XDG_STATE_HOME`),
+on your machine only, never in a project's repositories.
+
+Only an install made by the installer updates itself. Running the installer
+again also updates, and is how an install from before 4.6 starts updating
+itself. More in the [user guide](docs/user-guide.md#versions-and-your-team).
 
 To uninstall, run `amd-uninstall` (the installer puts it beside `amd`). It
 removes the programs and the menu entry, then asks whether to remove your
