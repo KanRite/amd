@@ -983,6 +983,44 @@ async fn rename_epic(
     .await
 }
 
+/// Every ticket of an epic or sprint still in the backlog, moved to the
+/// loose backlog (`amd group empty`) or to todo (`--to todo`) in one commit
+/// (ticket 256); the ones the rules keep back are said in the warning.
+#[tauri::command]
+async fn move_epic_tickets(
+    state: Tauri<'_, AppState>,
+    repo: Option<String>,
+    name: String,
+    to_todo: bool,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = p.board(&repo.unwrap_or_default())?;
+        let mut skipped: Vec<(String, String)> = Vec::new();
+        let verb = if to_todo { "group-todo" } else { "group-empty" };
+        let mut report = committed(board, verb, &name, "", || {
+            if to_todo {
+                skipped = transition::group_to_todo(board, &name)?.skipped;
+            } else {
+                skipped = board.empty_group(&name)?.skipped;
+            }
+            Ok(())
+        })?;
+        if !skipped.is_empty() {
+            let left: Vec<String> = skipped
+                .iter()
+                .map(|(t, why)| format!("{t} not moved: {why}"))
+                .collect();
+            let left = left.join("; ");
+            report.warning = Some(match report.warning {
+                Some(w) => format!("{w}; {left}"),
+                None => left,
+            });
+        }
+        Ok(report)
+    })
+    .await
+}
+
 /// Deletes an epic or sprint (`amd group delete`, ticket 204): refused while
 /// any ticket in it isn't done.
 #[tauri::command]
@@ -2888,6 +2926,7 @@ pub fn run() {
             backfill_sprint,
             rename_epic,
             delete_epic,
+            move_epic_tickets,
             archive_ticket,
             lock_ticket,
             unlock_ticket,

@@ -1641,8 +1641,14 @@ changes):
   loose backlog at once, no precondition — reuses `set_epic(task, None)`
   per ticket rather than a new mechanism, so it inherits the same
   lease/hash checks that setter already has, and skips (rather than
-  aborts on) a ticket it can't move. `amd group empty <name>` in the CLI,
-  an "empty" button next to a group's "edit" button in `amdui`.
+  aborts on) a ticket it can't move. `amd group empty <name>` in the CLI.
+  **To todo** (ticket 256): `transition::group_to_todo` moves the group's
+  tickets still in its backlog folder to the first todo-kind column
+  (`move_task`, so drafts and others' leases are skipped and said),
+  writing the `epic` label if it's missing and `todo-since`; no branches.
+  `amd group empty <name> --to todo`. amdui: the open epic or sprint
+  column's **All to backlog** (hidden for a started sprint) and **All to
+  todo** (`move_epic_tickets`, one commit, skipped ones in the warning).
 - **The WIP limit** (`board_settings::wip_limit`) gates entry into
   `doing` only (ticket 083: a limit on todo as well could leave work stuck,
   so `wip-todo`/`AMD_WIP_TODO` are ignored) — `Board::move_task` checks the destination column's count

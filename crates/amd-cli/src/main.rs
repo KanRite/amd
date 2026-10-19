@@ -990,6 +990,10 @@ enum GroupCmd {
     Empty {
         #[arg(value_name = "NAME")]
         name: String,
+        /// Where its tickets go: the loose backlog (the default), or todo,
+        /// keeping their epic label; only those still in the backlog move
+        #[arg(long, value_name = "backlog|todo", default_value = "backlog", value_parser = PossibleValuesParser::new(["backlog", "todo"]))]
+        to: String,
     },
     /// Delete an epic or sprint outright. Refuses while any ticket in it,
     /// in any column, isn't done — finish them or `group empty` it first
@@ -2472,7 +2476,25 @@ fn cmd_group(board: &Board, command: GroupCmd) -> Result<()> {
                 Ok(())
             })
         }
-        GroupCmd::Empty { name } => with_auto_commit(board, "group-empty", &name, "", || {
+        GroupCmd::Empty { name, to } if to == "todo" => {
+            with_auto_commit(board, "group-todo", &name, "", || {
+                let result = transition::group_to_todo(board, &name)?;
+                println!(
+                    "{name}: {} ticket(s) moved to todo/{}",
+                    result.moved.len(),
+                    if result.moved.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", result.moved.join(", "))
+                    }
+                );
+                for (id, err) in &result.skipped {
+                    eprintln!("amd: {id} not moved: {err}");
+                }
+                Ok(())
+            })
+        }
+        GroupCmd::Empty { name, .. } => with_auto_commit(board, "group-empty", &name, "", || {
             let result = board.empty_group(&name)?;
             println!(
                 "{} emptied into backlog/ ({} ticket(s))",
