@@ -142,7 +142,7 @@ pub fn tools() -> Vec<Tool> {
             input: json!({"type": "object", "properties": {
                 "title": {"type": "string"},
                 "body": {"type": "string", "description": "Markdown after the frontmatter, e.g. `## Notes` and `## Acceptance criteria` sections; the template's when left out"},
-                "priority": {"type": "string", "enum": ["low", "medium", "high"]},
+                "priority": {"type": "string", "enum": ["low", "medium", "high", "top"]},
                 "points": {"type": "string", "enum": ["1", "2", "3", "5", "8", "13"]},
                 "tags": {"type": "array", "items": {"type": "string"}},
                 "assignee": {"type": "string", "description": "A name from the project's users, or `@me`"},
@@ -195,7 +195,7 @@ pub fn tools() -> Vec<Tool> {
                 "ticket": reference,
                 "title": {"type": "string"},
                 "body": {"type": "string", "description": "The whole body after the frontmatter"},
-                "priority": {"type": "string", "enum": ["low", "medium", "high", "auto"], "description": "Set by hand; with auto priority and override on it pins the ticket, and `auto` hands it back to auto priority"},
+                "priority": {"type": "string", "enum": ["low", "medium", "high", "top", "auto"], "description": "Set by hand; with auto priority and override on it pins the ticket, and `auto` hands it back to auto priority"},
                 "points": {"type": "string", "enum": ["", "1", "2", "3", "5", "8", "13"]},
                 "tags": {"type": "array", "items": {"type": "string"}},
                 "assignee": {"type": "string"},

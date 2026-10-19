@@ -238,9 +238,10 @@ pub fn backfill(board: &Board, name: &str, points: u32) -> Result<Vec<String>> {
         bail!("say how many points to backfill (--points N)");
     }
     let rank = |p: &str| match p {
-        "high" => 0,
-        "medium" => 1,
-        _ => 2,
+        "top" => 0,
+        "high" => 1,
+        "medium" => 2,
+        _ => 3,
     };
     let mut candidates: Vec<Task> = board
         .tasks_in(Column::Backlog)?

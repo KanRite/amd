@@ -371,7 +371,7 @@ pub fn set_include_unassigned(on: bool) -> anyhow::Result<()> {
 
 /// Every item of the highest priority there is any of, oldest first.
 fn top_tier(items: Vec<WorkItem>) -> Vec<WorkItem> {
-    for priority in ["high", "medium", "low"] {
+    for priority in ["top", "high", "medium", "low"] {
         let mut tier: Vec<WorkItem> = items
             .iter()
             .filter(|w| w.priority == priority)
@@ -459,9 +459,10 @@ fn item(project: &Project, repo: &str, task: &crate::task::Task) -> WorkItem {
 /// list never shuffles between runs.
 pub fn sort_items(items: &mut [WorkItem], sort: Sort) {
     let rank = |p: &str| match p {
-        "high" => 0,
-        "medium" => 1,
-        _ => 2,
+        "top" => 0,
+        "high" => 1,
+        "medium" => 2,
+        _ => 3,
     };
     let points = |p: &str| p.parse::<u32>().ok();
     items.sort_by(|a, b| {

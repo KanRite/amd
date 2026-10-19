@@ -690,13 +690,13 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                             .then(|| {
                                 view! { <span class="text-xs font-normal text-slate-500">{priority_note.clone()}</span> }
                             })}
-                        // Ticket 248: TRIAGE keeps it high, whatever is picked.
+                        // Ticket 248: TRIAGE keeps it top, whatever is picked.
                         {move || {
                             fields
                                 .with(|f| f.tags.iter().any(|t| t.trim().eq_ignore_ascii_case("TRIAGE")))
                                 .then(|| view! {
                                     <span class="text-xs font-normal text-amber-700 dark:text-amber-300">
-                                        "Waiting to be triaged, so it's high: take TRIAGE off to set another priority."
+                                        "Waiting to be triaged, so it's top: take TRIAGE off to set another priority."
                                     </span>
                                 })
                         }}

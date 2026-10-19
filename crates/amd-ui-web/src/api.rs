@@ -808,14 +808,14 @@ pub async fn set_auto_priority(on: bool) -> Result<SyncReport, String> {
 }
 
 #[derive(Serialize)]
-struct DueDaysArgs {
-    medium: u32,
-    high: u32,
+struct TimeLimitsArgs {
+    todo: u32,
+    doing: u32,
 }
 
-/// When a due date raises a ticket (ticket 252).
-pub async fn set_due_days(medium: u32, high: u32) -> Result<SyncReport, String> {
-    call("set_due_days", &DueDaysArgs { medium, high }).await
+/// How long a ticket should take in todo and in doing (ticket 252).
+pub async fn set_time_limits(todo: u32, doing: u32) -> Result<SyncReport, String> {
+    call("set_time_limits", &TimeLimitsArgs { todo, doing }).await
 }
 
 /// Whether a priority set by hand pins its ticket (ticket 215).

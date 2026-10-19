@@ -24,7 +24,7 @@ use time::Date;
 use anyhow::{Result, bail};
 
 use crate::board::{Board, Kind};
-use crate::board_settings::{self, DueDays};
+use crate::board_settings;
 use crate::links::{LinkType, same_id};
 use crate::task::{PRIORITIES, Task, meta_in};
 
@@ -33,6 +33,10 @@ const OWN: &str = "priority-own";
 const PINNED: &str = "priority-pinned";
 /// `priority-from` for a raise by the ticket's own due date (ticket 252).
 pub const DUE: &str = "due";
+/// `priority-from` for a raise by the time spent in todo, and in doing,
+/// against the board's limits (ticket 252).
+pub const TODO: &str = "todo";
+pub const DOING: &str = "doing";
 
 thread_local! {
     /// What reconcile changed since a front end last asked.
@@ -58,6 +62,9 @@ struct Seen {
     pinned: bool,
     done: bool,
     due: Option<String>,
+    created: Option<String>,
+    todo_since: Option<String>,
+    doing_since: Option<String>,
 }
 
 impl Seen {
@@ -75,6 +82,9 @@ impl Seen {
             pinned: get(PINNED).is_some_and(|v| v != "no" && v != "false"),
             done: task.column.is(Kind::Done),
             due: task.due(),
+            created: task.meta("created").filter(|c| !c.is_empty()),
+            todo_since: task.todo_since(),
+            doing_since: task.doing_since(),
             task,
         })
     }
@@ -89,27 +99,63 @@ impl Seen {
 }
 
 /// The priority, by rank in [`PRIORITIES`], a due date asks for on
-/// `today` (ticket 252): high with `days.high` days or fewer left (overdue
-/// included), medium with `days.medium` or fewer, else none. A step set to
-/// 0 is off; overdue with only medium on is medium.
-pub fn due_rank(due: Option<&str>, today: Date, days: DueDays) -> Option<usize> {
+/// `today` (ticket 252): a step for each quarter of the time from the
+/// ticket's creation to its due date used (medium from 25%, high from 50%,
+/// top from 75%), so top once it's overdue. One with no creation date is
+/// only raised once overdue.
+pub fn due_rank(due: Option<&str>, created: Option<&str>, today: Date) -> Option<usize> {
     let due = crate::recur::parse_date(due?).ok()?;
-    let left = (due - today).whole_days();
-    let within = |limit: u32| limit > 0 && left <= i64::from(limit);
-    if within(days.high) {
-        Some(2)
-    } else if within(days.medium) || (left < 0 && days.medium > 0) {
-        Some(1)
-    } else {
-        None
+    let Some(created) = created.and_then(|c| crate::recur::parse_date(c).ok()) else {
+        return (today > due).then_some(3);
+    };
+    let window = (due - created).whole_days();
+    let used = (today - created).whole_days();
+    if window <= 0 {
+        return (used >= 0).then_some(3);
+    }
+    time_rank(used, u32::try_from(window).unwrap_or(u32::MAX))
+}
+
+/// The priority a share of a time limit asks for (ticket 252): medium once
+/// a quarter of `limit` days is used, high from half, top from three
+/// quarters (and past it). A limit of 0 asks for nothing.
+pub fn time_rank(used: i64, limit: u32) -> Option<usize> {
+    let limit = i64::from(limit);
+    if limit == 0 || used < 0 {
+        return None;
+    }
+    match used * 4 {
+        q if q >= 3 * limit => Some(3),
+        q if q >= 2 * limit => Some(2),
+        q if q >= limit => Some(1),
+        _ => None,
     }
 }
 
-/// What raised a ticket: a ticket that requires it, or its own due date.
+/// Days a ticket has spent in todo (up to entering doing, so it keeps
+/// counting what it waited) and in doing, as of `today`, when it's in one
+/// of them (ticket 252).
+fn time_used(s: &Seen, today: Date) -> (Option<i64>, Option<i64>) {
+    let date = |d: &Option<String>| d.as_deref().and_then(|d| crate::recur::parse_date(d).ok());
+    let (todo, doing) = (date(&s.todo_since), date(&s.doing_since));
+    match s.task.column.kind() {
+        Kind::Todo => (todo.map(|t| (today - t).whole_days()), None),
+        Kind::Doing => (
+            todo.map(|t| (doing.unwrap_or(today) - t).whole_days()),
+            doing.map(|d| (today - d).whole_days()),
+        ),
+        _ => (None, None),
+    }
+}
+
+/// What raised a ticket: a ticket that requires it, its own due date, or
+/// the time it has spent in todo or doing against the board's limit.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Why {
     Requirer(usize),
     Due,
+    Todo(i64, u32),
+    Doing(i64, u32),
 }
 
 /// One write [`plan`] wants, and what to say about it.
@@ -166,7 +212,7 @@ fn plan(board: &Board, today: Date) -> Result<(Vec<Seen>, Vec<Planned>)> {
     let settings = board_settings::load(board);
     let on = settings.auto_priority();
     let override_on = settings.priority_override();
-    let days = settings.due_days();
+    let limits = settings.time_limits();
     let seen: Vec<Seen> = board.tasks()?.into_iter().filter_map(Seen::read).collect();
     let mut planned = Vec::new();
 
@@ -214,10 +260,30 @@ fn plan(board: &Board, today: Date) -> Result<(Vec<Seen>, Vec<Planned>)> {
             continue;
         }
         let own = rank(s.own());
-        match due_rank(s.due.as_deref(), today, days).filter(|r| !s.done && *r > own) {
-            Some(r) => {
+        // Its own reasons (ticket 252): the due date, and the time it has
+        // spent in todo and doing; the most urgent wins, the first on a tie.
+        let (todo, doing) = time_used(s, today);
+        let reasons = [
+            due_rank(s.due.as_deref(), s.created.as_deref(), today).map(|r| (r, Why::Due)),
+            todo.and_then(|used| {
+                time_rank(used, limits.todo).map(|r| (r, Why::Todo(used, limits.todo)))
+            }),
+            doing.and_then(|used| {
+                time_rank(used, limits.doing).map(|r| (r, Why::Doing(used, limits.doing)))
+            }),
+        ];
+        let best = reasons
+            .into_iter()
+            .flatten()
+            .filter(|(r, _)| !s.done && *r > own)
+            .fold(None, |best: Option<(usize, Why)>, (r, why)| match best {
+                Some((b, _)) if b >= r => best,
+                _ => Some((r, why)),
+            });
+        match best {
+            Some((r, why)) => {
                 effective.push(r);
-                source[j] = Some(Why::Due);
+                source[j] = Some(why);
             }
             None => effective.push(own),
         }
@@ -262,6 +328,20 @@ fn plan(board: &Board, today: Date) -> Result<(Vec<Seen>, Vec<Planned>)> {
                             "{} raised to {to}: due {}",
                             s.task.id_display(),
                             s.due.as_deref().unwrap_or_default()
+                        ),
+                    ),
+                    Why::Todo(used, limit) => (
+                        TODO.to_string(),
+                        format!(
+                            "{} raised to {to}: {used} of {limit} days in todo",
+                            s.task.id_display()
+                        ),
+                    ),
+                    Why::Doing(used, limit) => (
+                        DOING.to_string(),
+                        format!(
+                            "{} raised to {to}: {used} of {limit} days in doing",
+                            s.task.id_display()
                         ),
                     ),
                 };
@@ -332,10 +412,10 @@ pub fn set_by_hand(board: &Board, task: &Task, value: &str) -> Result<String> {
         task.write_priority(task.hash()?, &own, None, None, false)?;
         return Ok(format!("{id} priority follows auto priority again"));
     }
-    // Waiting to be triaged is high, full stop (ticket 248).
-    if value != "high" && task.has_tag(crate::task::TRIAGE_TAG) {
+    // Waiting to be triaged is top, full stop (tickets 248, 252).
+    if value != crate::task::TOP && task.has_tag(crate::task::TRIAGE_TAG) {
         bail!(
-            "{id} is waiting to be triaged, so it's high: take {} off first",
+            "{id} is waiting to be triaged, so it's top: take {} off first",
             crate::task::TRIAGE_TAG
         );
     }
@@ -353,6 +433,22 @@ pub fn set_by_hand(board: &Board, task: &Task, value: &str) -> Result<String> {
 pub fn note(board: &Board, task: &Task) -> Option<String> {
     let s = Seen::read(task.clone())?;
     let settings = board_settings::load(board);
+    if let (Some(from), Some(own)) = (&s.from, &s.own)
+        && (from == TODO || from == DOING)
+    {
+        let limits = settings.time_limits();
+        let (todo, doing) = time_used(&s, crate::recur::today());
+        let (used, limit) = if from == TODO {
+            (todo, limits.todo)
+        } else {
+            (doing, limits.doing)
+        };
+        return Some(format!(
+            "priority {}: raised by auto priority, {} of {limit} days in {from} (own: {own})",
+            s.priority,
+            used.unwrap_or_default()
+        ));
+    }
     if let (Some(from), Some(own)) = (&s.from, &s.own)
         && from == DUE
     {
@@ -468,21 +564,37 @@ mod tests {
     }
 
     #[test]
-    fn a_due_date_asks_for_medium_then_high_then_stays_high_once_overdue() {
-        let days = board_settings::DEFAULT_DUE_DAYS;
-        let today = on(2026, 10, 18);
-        let rank = |date: &str| due_rank(Some(date), today, days);
-        assert_eq!(rank("2026-11-01"), None);
-        assert_eq!(rank("2026-10-25"), Some(1));
-        assert_eq!(rank("2026-10-20"), Some(2));
-        assert_eq!(rank("2026-10-18"), Some(2));
-        assert_eq!(rank("2026-10-01"), Some(2));
-        assert_eq!(due_rank(None, today, days), None);
-        assert_eq!(due_rank(Some("not a date"), today, days), None);
-        let off = DueDays { medium: 0, high: 0 };
-        assert_eq!(due_rank(Some("2026-10-01"), today, off), None);
-        let medium_only = DueDays { medium: 7, high: 0 };
-        assert_eq!(due_rank(Some("2026-10-01"), today, medium_only), Some(1));
+    fn a_due_date_raises_a_step_for_each_quarter_from_creation() {
+        // Created on the 1st, due on the 21st: 20 days.
+        let rank = |today: Date| due_rank(Some("2026-10-21"), Some("2026-10-01"), today);
+        assert_eq!(rank(on(2026, 10, 5)), None);
+        assert_eq!(rank(on(2026, 10, 6)), Some(1));
+        assert_eq!(rank(on(2026, 10, 11)), Some(2));
+        assert_eq!(rank(on(2026, 10, 16)), Some(3));
+        assert_eq!(rank(on(2026, 10, 30)), Some(3));
+        // No creation date: only once overdue. Due the day it was made: top.
+        assert_eq!(due_rank(Some("2026-10-21"), None, on(2026, 10, 20)), None);
+        assert_eq!(
+            due_rank(Some("2026-10-21"), None, on(2026, 10, 22)),
+            Some(3)
+        );
+        assert_eq!(
+            due_rank(Some("2026-10-01"), Some("2026-10-01"), on(2026, 10, 1)),
+            Some(3)
+        );
+        assert_eq!(due_rank(None, Some("2026-10-01"), on(2026, 10, 1)), None);
+        assert_eq!(
+            due_rank(Some("soon"), Some("2026-10-01"), on(2026, 10, 1)),
+            None
+        );
+    }
+
+    /// Sets when a ticket was made, which due dates count from.
+    fn created(board: &Board, id: &str, date: &str) {
+        let t = find(board, id);
+        let text = std::fs::read_to_string(&t.path).unwrap();
+        let text = crate::task::set_meta(&text, "created", &format!("{date:?}")).unwrap();
+        std::fs::write(&t.path, text).unwrap();
     }
 
     #[test]
@@ -490,17 +602,18 @@ mod tests {
         let (_dir, board) = board_with(&["Ship", "Build"]);
         settings(&board, true, true);
         requires(&board, "1", "2");
-        due(&board, "1", "2026-10-25");
-        // Two weeks out: nothing.
-        reconcile_at(&board, on(2026, 10, 11)).unwrap();
+        // Made on the 1st, due on the 21st: 20 days, a step every 5.
+        created(&board, "1", "2026-10-01");
+        due(&board, "1", "2026-10-21");
+        reconcile_at(&board, on(2026, 10, 5)).unwrap();
         assert_eq!(priorities(&board), ["low", "low"]);
-        assert!(!pending(&board, on(2026, 10, 11)));
-        // A week out: medium, and what it requires with it.
-        assert!(pending(&board, on(2026, 10, 18)));
-        let lines = reconcile_at(&board, on(2026, 10, 18)).unwrap();
+        assert!(!pending(&board, on(2026, 10, 5)));
+        // A quarter used: medium, and what it requires with it.
+        assert!(pending(&board, on(2026, 10, 6)));
+        let lines = reconcile_at(&board, on(2026, 10, 6)).unwrap();
         assert_eq!(priorities(&board), ["medium", "medium"]);
         assert!(
-            lines.contains(&"001 raised to medium: due 2026-10-25".to_string()),
+            lines.contains(&"001 raised to medium: due 2026-10-21".to_string()),
             "{lines:?}"
         );
         assert!(
@@ -508,25 +621,91 @@ mod tests {
             "{lines:?}"
         );
         let note = note(&board, &find(&board, "1")).unwrap();
-        assert!(note.contains("due 2026-10-25 (own: low)"), "{note}");
-        // Two days out: high.
-        reconcile_at(&board, on(2026, 10, 23)).unwrap();
+        assert!(note.contains("due 2026-10-21 (own: low)"), "{note}");
+        // Half: high. Three quarters: top.
+        reconcile_at(&board, on(2026, 10, 11)).unwrap();
         assert_eq!(priorities(&board), ["high", "high"]);
-        // Moved out a month: back to its own.
-        due(&board, "1", "2026-11-30");
-        reconcile_at(&board, on(2026, 10, 23)).unwrap();
+        reconcile_at(&board, on(2026, 10, 16)).unwrap();
+        assert_eq!(priorities(&board), ["top", "top"]);
+        // Moved out to the end of the year: back to its own.
+        due(&board, "1", "2026-12-31");
+        reconcile_at(&board, on(2026, 10, 16)).unwrap();
         assert_eq!(priorities(&board), ["low", "low"]);
+    }
+
+    #[test]
+    fn each_quarter_of_a_time_limit_raises_a_step() {
+        assert_eq!(time_rank(0, 8), None);
+        assert_eq!(time_rank(1, 8), None);
+        assert_eq!(time_rank(2, 8), Some(1));
+        assert_eq!(time_rank(4, 8), Some(2));
+        assert_eq!(time_rank(6, 8), Some(3));
+        assert_eq!(time_rank(20, 8), Some(3));
+        assert_eq!(time_rank(20, 0), None);
+    }
+
+    /// Writes when a ticket entered todo and doing, as a move would.
+    fn since(board: &Board, id: &str, todo: Option<&str>, doing: Option<&str>) {
+        let t = find(board, id);
+        t.set_column_dates(t.hash().unwrap(), todo, doing).unwrap();
+    }
+
+    #[test]
+    fn time_in_todo_raises_a_ticket_and_stays_counted_in_doing() {
+        let (_dir, board) = board_with(&["Waiting", "Started"]);
+        settings(&board, true, true);
+        let mut s = board_settings::load(&board);
+        s.set_time_limits(board_settings::TimeLimits { todo: 8, doing: 4 });
+        s.save(&board).unwrap();
+        board
+            .move_task(&find(&board, "1"), Column::Todo, false)
+            .unwrap();
+        since(&board, "1", Some("2026-10-10"), None);
+        // 4 of 8 days in todo: high.
+        let lines = reconcile_at(&board, on(2026, 10, 14)).unwrap();
+        assert_eq!(priorities(&board)[0], "high");
+        assert!(
+            lines.contains(&"001 raised to high: 4 of 8 days in todo".to_string()),
+            "{lines:?}"
+        );
+        // 6 of 8: top.
+        reconcile_at(&board, on(2026, 10, 16)).unwrap();
+        assert_eq!(priorities(&board)[0], "top");
+        // Picked up on the 16th: its 6 days in todo still count, so it
+        // stays top while doing's own clock starts.
+        board
+            .move_task(&find(&board, "1"), Column::Doing, false)
+            .unwrap();
+        since(&board, "1", Some("2026-10-10"), Some("2026-10-16"));
+        reconcile_at(&board, on(2026, 10, 17)).unwrap();
+        assert_eq!(priorities(&board)[0], "top");
+        // A ticket started straight away: doing's clock alone, 2 of 4 days.
+        board
+            .move_task(&find(&board, "2"), Column::Todo, false)
+            .unwrap();
+        board
+            .move_task(&find(&board, "2"), Column::Doing, false)
+            .unwrap();
+        since(&board, "2", Some("2026-10-15"), Some("2026-10-15"));
+        let lines = reconcile_at(&board, on(2026, 10, 17)).unwrap();
+        assert_eq!(priorities(&board)[1], "high");
+        assert!(
+            lines.contains(&"002 raised to high: 2 of 4 days in doing".to_string()),
+            "{lines:?}"
+        );
     }
 
     #[test]
     fn a_pinned_or_done_ticket_is_left_alone_and_off_puts_it_back() {
         let (_dir, board) = board_with(&["Pinned", "Raised"]);
         settings(&board, true, true);
-        due(&board, "1", "2026-10-19");
-        due(&board, "2", "2026-10-19");
+        for id in ["1", "2"] {
+            created(&board, id, "2026-10-01");
+            due(&board, id, "2026-10-19");
+        }
         set_by_hand(&board, &find(&board, "1"), "low").unwrap();
         reconcile_at(&board, on(2026, 10, 18)).unwrap();
-        assert_eq!(priorities(&board), ["low", "high"]);
+        assert_eq!(priorities(&board), ["low", "top"]);
         settings(&board, false, true);
         reconcile_at(&board, on(2026, 10, 18)).unwrap();
         assert_eq!(priorities(&board), ["low", "low"]);

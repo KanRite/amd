@@ -422,6 +422,37 @@ impl Task {
         })
     }
 
+    /// When it entered todo (ticket 252), `YYYY-MM-DD`: kept through doing,
+    /// so the time it waited carries on counting for auto priority.
+    pub fn todo_since(&self) -> Option<String> {
+        self.meta(TODO_SINCE).filter(|d| !d.is_empty())
+    }
+
+    /// When it entered doing (ticket 252), `YYYY-MM-DD`.
+    pub fn doing_since(&self) -> Option<String> {
+        self.meta(DOING_SINCE).filter(|d| !d.is_empty())
+    }
+
+    /// Set (`Some`) or remove (`None`) when it entered todo and doing, in
+    /// one write.
+    pub fn set_column_dates(
+        &self,
+        expected: ContentHash,
+        todo: Option<&str>,
+        doing: Option<&str>,
+    ) -> Result<()> {
+        self.write_checked(expected, |text| {
+            let text = match todo {
+                Some(date) => set_meta(text, TODO_SINCE, &format!("{date:?}"))?,
+                None => remove_meta(text, TODO_SINCE),
+            };
+            match doing {
+                Some(date) => set_meta(&text, DOING_SINCE, &format!("{date:?}")),
+                None => Ok(remove_meta(&text, DOING_SINCE)),
+            }
+        })
+    }
+
     /// How it repeats (ticket 143), as written: `monthly`, `every 2 weeks`.
     pub fn recur(&self) -> Option<String> {
         self.meta("recur").filter(|rule| !rule.is_empty())
@@ -511,23 +542,23 @@ impl Task {
 
     /// How urgent the ticket is: one of [`PRIORITIES`], `low` when unset.
     pub fn priority(&self) -> String {
-        // A ticket waiting to be triaged is always high (ticket 248), even
-        // one written before that rule, whatever its file says.
+        // A ticket waiting to be triaged is always top (tickets 248, 252),
+        // even one written before that rule, whatever its file says.
         if self.has_tag(TRIAGE_TAG) {
-            return "high".to_string();
+            return TOP.to_string();
         }
         self.meta("priority")
             .filter(|p| !p.is_empty())
             .unwrap_or_else(|| DEFAULT_PRIORITY.to_string())
     }
 
-    /// Set the ticket's priority; anything but `low`, `medium` or `high` is
+    /// Set the ticket's priority; anything but one of [`PRIORITIES`] is
     /// refused.
     pub fn set_priority(&self, expected: ContentHash, priority: &str) -> Result<()> {
         validate_priority(priority)?;
-        if priority != "high" && self.has_tag(TRIAGE_TAG) {
+        if priority != TOP && self.has_tag(TRIAGE_TAG) {
             bail!(
-                "{} is waiting to be triaged, so it's high: take {TRIAGE_TAG} off first",
+                "{} is waiting to be triaged, so it's top: take {TRIAGE_TAG} off first",
                 self.id_display()
             );
         }
@@ -551,9 +582,10 @@ impl Task {
         if let Some(own) = own {
             validate_priority(own)?;
         }
-        // A TRIAGE ticket stays high (ticket 248), whatever is being put back.
+        // A TRIAGE ticket stays top (tickets 248, 252), whatever is being
+        // put back.
         let priority = if self.has_tag(TRIAGE_TAG) {
-            "high"
+            TOP
         } else {
             priority
         };
@@ -658,7 +690,7 @@ impl Task {
             let text = set_meta(&text, "branch-name", &format!("{branch_name:?}"))?;
             let text = set_meta(&text, "parent", &format!("{parent:?}"))?;
             let text = set_meta(&text, "related", &format!("[{}]", related.join(",")))?;
-            // Adding TRIAGE makes it high (ticket 248).
+            // Adding TRIAGE makes it top (tickets 248, 252).
             let text = ensure_priority(&text)?;
             let head = split_body(&text)
                 .map(|(head, _)| head.to_string())
@@ -1048,8 +1080,16 @@ pub fn parse_list(raw: &str) -> Vec<String> {
 pub const VALID_POINTS: [&str; 6] = ["1", "2", "3", "5", "8", "13"];
 
 /// A ticket's priority, lowest first (ticket 083). Every ticket has one;
-/// a ticket without the field reads as [`DEFAULT_PRIORITY`].
-pub const PRIORITIES: [&str; 3] = ["low", "medium", "high"];
+/// a ticket without the field reads as [`DEFAULT_PRIORITY`]. `top` (ticket
+/// 252) is above high: what a TRIAGE ticket is, and what anyone can choose.
+pub const PRIORITIES: [&str; 4] = ["low", "medium", "high", TOP];
+
+/// The most urgent priority (ticket 252): every TRIAGE ticket's.
+pub const TOP: &str = "top";
+
+/// When a ticket entered todo, and doing (ticket 252).
+pub const TODO_SINCE: &str = "todo-since";
+pub const DOING_SINCE: &str = "doing-since";
 
 /// The priority of a new ticket, and of one that doesn't say.
 pub const DEFAULT_PRIORITY: &str = "low";
@@ -1072,9 +1112,9 @@ pub fn ensure_priority(text: &str) -> Result<String> {
     if !text.starts_with("---") {
         return Ok(text.to_string());
     }
-    // A TRIAGE ticket is always high (ticket 248), whatever it was given.
+    // A TRIAGE ticket is always top (tickets 248, 252), whatever it was given.
     if text_has_triage(text) {
-        return set_meta(text, "priority", "\"high\"");
+        return set_meta(text, "priority", &format!("{TOP:?}"));
     }
     match meta_in(text, "priority").filter(|p| !p.is_empty()) {
         Some(priority) => {
@@ -1840,15 +1880,15 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("invalid priority 'urgent'"), "{err}");
-        assert!(err.contains("low, medium, high"), "{err}");
+        assert!(err.contains("low, medium, high, top"), "{err}");
         assert_eq!(task.priority(), "high", "the rejected write must not land");
     }
 
     #[test]
-    fn a_triage_ticket_is_always_high() {
+    fn a_triage_ticket_is_always_top() {
         let text = "---\nid: \"001\"\ntags: [triage]\npriority: \"low\"\n---\n\nb\n";
         let saved = ensure_priority(text).unwrap();
-        assert!(saved.contains("priority: \"high\""), "{saved}");
+        assert!(saved.contains("priority: \"top\""), "{saved}");
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("backlog")).unwrap();
         let path = dir.path().join("backlog/001-x.md");
@@ -1856,14 +1896,14 @@ mod tests {
         let task = Task::from_path(&path, crate::board::Column::Backlog).unwrap();
         assert_eq!(
             task.priority(),
-            "high",
-            "read as high even before it's rewritten"
+            "top",
+            "read as top even before it's rewritten"
         );
         let err = task
             .set_priority(task.hash().unwrap(), "medium")
             .unwrap_err();
         assert!(err.to_string().contains("take TRIAGE off first"), "{err}");
-        task.set_priority(task.hash().unwrap(), "high").unwrap();
+        task.set_priority(task.hash().unwrap(), "top").unwrap();
     }
 
     #[test]

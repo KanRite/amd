@@ -204,9 +204,9 @@ impl Project {
             shared_documents: settings.shared_documents().unwrap_or_default(),
             import_issues: settings.import_issues(),
             auto_priority: settings.auto_priority(),
-            due_days: {
-                let d = settings.due_days();
-                (d.medium, d.high)
+            time_limits: {
+                let t = settings.time_limits();
+                (t.todo, t.doing)
             },
             priority_override: settings.priority_override(),
             archived: settings.archived(),

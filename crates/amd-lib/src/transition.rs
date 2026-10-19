@@ -194,6 +194,16 @@ pub fn move_to(board: &Board, task: &Task, to: Column, force: bool) -> Result<Ou
                 "could not release the lease automatically: {err:#}"
             )));
         }
+        // When it entered todo and doing (ticket 252), for auto priority's
+        // time limits: entering todo from the backlog starts the todo clock,
+        // entering doing starts doing's and keeps todo's, so a ticket raised
+        // while it waited stays raised once someone picks it up. Back in the
+        // backlog, both go.
+        if let Some(moved) = Task::from_path(&dest, to)
+            && let Some(warning) = stamp_column_dates(&moved, from, to)
+        {
+            outcome.events.push(Event::Warn(warning));
+        }
         // A recurring ticket comes round again (ticket 143): reaching done
         // makes the next one, in this same commit.
         if to.is(Kind::Done)
@@ -213,6 +223,28 @@ pub fn move_to(board: &Board, task: &Task, to: Column, force: bool) -> Result<Ou
         outcome.events.push(Event::Warn(warning));
     }
     Ok(outcome)
+}
+
+/// Writes when a ticket entered todo and doing for a move `from` -> `to`
+/// (ticket 252). A failure is only a warning: the move happened.
+fn stamp_column_dates(task: &Task, from: Column, to: Column) -> Option<String> {
+    let today = crate::recur::today().to_string();
+    let (todo, doing) = (task.todo_since(), task.doing_since());
+    let (want_todo, want_doing) = match to.kind() {
+        Kind::Backlog => (None, None),
+        Kind::Todo if from.is(Kind::Backlog) => (Some(today), None),
+        Kind::Todo => (todo.clone().or(Some(today)), None),
+        Kind::Doing if from.is(Kind::Doing) => (todo.clone(), doing.clone().or(Some(today))),
+        Kind::Doing => (todo.clone(), Some(today)),
+        Kind::Done => return None,
+    };
+    if (&want_todo, &want_doing) == (&todo, &doing) {
+        return None;
+    }
+    task.hash()
+        .and_then(|h| task.set_column_dates(h, want_todo.as_deref(), want_doing.as_deref()))
+        .err()
+        .map(|err| format!("couldn't record when it moved: {err:#}"))
 }
 
 /// Move a task into `todo/` and put the working tree on its branch — what

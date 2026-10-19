@@ -362,6 +362,7 @@ fn work_row(w: WorkItem) -> impl IntoView {
     let root = w.project_root.clone();
     let priority = w.priority.clone();
     let tone = match priority.as_str() {
+        "top" => "bg-red-600 text-white dark:bg-red-700",
         "high" => "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
         "medium" => "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
         _ => "bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200",

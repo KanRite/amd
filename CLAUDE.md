@@ -1227,19 +1227,30 @@ off**, ticket 141) to
   section (`set_auto_priority`, `set_priority_override`), the editor's
   `auto` option (the page's `ensure_priority` accepts it) and note
   (`TicketDocument.priority_note`), and `↑ high` on a raised card
-  (`TicketSummary.priority_from`). **Due dates** (ticket 252): `due_rank`
-  gives high within `due-high-days` (2) or overdue, medium within
-  `due-medium-days` (7) (`board_settings::DueDays`, `due_days`/
-  `set_due_days`; 0 turns a step off); it's a ticket's starting point
-  before the requires chain, so it passes down, recorded as `priority-from:
-  "due"` (`auto_priority::DUE`; `note` and the card say "due DATE").
+  (`TicketSummary.priority_from`). **Due dates** (ticket 252): `due_rank(due, created, today)` is
+  `time_rank` over the window from `created` to `due` (a quarter: medium,
+  half: high, three quarters: top, so top once overdue; no `created`: top
+  only once overdue); it's a ticket's starting point before the requires
+  chain, so it passes down, recorded as `priority-from: "due"`
+  (`auto_priority::DUE`; `note` and the card say "due DATE"). No setting.
   `reconcile` is now `plan` + apply, `reconcile_at(board, today)` takes the
   clock, and `pending(board, today)` says whether it would write. Nothing
   changes on disk as days pass, so amdui's `sync_board` calls
   `raise_for_due_dates` (hourly a board, `AppState.due_checked`), which
   commits `priority: due dates` through `with_auto_commit` when `pending`.
-  CLI `amd auto-priority due [MEDIUM HIGH]`; Admin's due days and the
-  `set_due_days` command; `Board.due_days`. **Automatic sort** (ticket 230):
+  **`top`**
+  is a fourth priority (`task::TOP`, `PRIORITIES` has four, the model's
+  too): every TRIAGE ticket is top (was high), and anyone can choose it.
+  **Time limits** (`todo-max-days`, `doing-max-days`,
+  `board_settings::TimeLimits`, 0 none): `transition::move_to` stamps
+  `todo-since` (entering todo from the backlog) and `doing-since`
+  (entering doing; todo's kept), both cleared in the backlog
+  (`stamp_column_dates`, `Task::set_column_dates`); `time_rank(used,
+  limit)` is medium from a quarter, high from half, top from three
+  quarters; time in todo counts up to `doing-since`, so a raise survives
+  being picked up (`time_used`). Recorded as `priority-from: "todo"` /
+  `"doing"`. CLI `amd auto-priority limits [TODO DOING]`; Admin and
+  `set_time_limits`; `Board.time_limits`. **Automatic sort** (ticket 230):
   `SortOrder::Automatic` ("Automatic: what's needed first") is a
   dependency order, `SortOrder::sort` (a pairwise `compare` can't express
   it): the column pre-sorted by priority then age, then each ticket placed

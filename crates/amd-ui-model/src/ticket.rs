@@ -30,7 +30,7 @@ pub fn pairing_mismatch(repository: &str, branch_type: &str) -> Option<String> {
 }
 
 /// Every valid priority, lowest first — the order the editor lists them.
-pub const PRIORITIES: [&str; 3] = ["low", "medium", "high"];
+pub const PRIORITIES: [&str; 4] = ["low", "medium", "high", "top"];
 
 /// The sizes `amd` accepts for `points` (empty means unsized).
 pub const VALID_POINTS: [&str; 6] = ["1", "2", "3", "5", "8", "13"];
@@ -38,10 +38,11 @@ pub const VALID_POINTS: [&str; 6] = ["1", "2", "3", "5", "8", "13"];
 /// What a ticket without a priority gets when it is saved.
 pub const DEFAULT_PRIORITY: &str = "low";
 
-/// How urgent a priority is, for ordering: high 2 … low 0. A missing
+/// How urgent a priority is, for ordering: top 3 … low 0. A missing
 /// (or unrecognised) priority ranks as low, the value it gets on save.
 pub fn priority_rank(priority: &str) -> u8 {
     match priority.trim() {
+        "top" => 3,
         "high" => 2,
         "medium" => 1,
         _ => 0,

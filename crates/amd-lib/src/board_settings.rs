@@ -114,20 +114,16 @@ const SHARED_DOCUMENTS: &str = "shared-documents";
 const IMPORT_ISSUES: &str = "import-issues";
 const AUTO_PRIORITY: &str = "auto-priority";
 const PRIORITY_OVERRIDE: &str = "priority-override";
-const DUE_MEDIUM_DAYS: &str = "due-medium-days";
-const DUE_HIGH_DAYS: &str = "due-high-days";
+const TODO_MAX_DAYS: &str = "todo-max-days";
+const DOING_MAX_DAYS: &str = "doing-max-days";
 
-/// How near its due date a ticket is raised to medium, and to high, by
-/// auto priority (ticket 252), in days, unless the board says otherwise.
-pub const DEFAULT_DUE_DAYS: DueDays = DueDays { medium: 7, high: 2 };
-
-/// When auto priority raises a ticket for its due date (ticket 252): to
-/// medium with `medium` days or fewer left, to high with `high` or fewer, or
-/// once overdue. 0 turns that step off; both 0 turns due dates off.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DueDays {
-    pub medium: u32,
-    pub high: u32,
+/// How long a ticket should take in todo and in doing (ticket 252), in
+/// days; 0 is no limit. Auto priority raises a ticket a step for each
+/// quarter of it used: medium from 25%, high from 50%, top from 75%.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TimeLimits {
+    pub todo: u32,
+    pub doing: u32,
 }
 /// Set once the documents `.settings/` has been carried across (ticket
 /// 182), so it's never read again.
@@ -633,8 +629,8 @@ impl BoardSettings {
             .set(IMPORT_ISSUES, if on { "on" } else { "off" });
     }
 
-    /// Whether priorities follow requires links (ticket 215) and due dates
-    /// (ticket 252): `auto-priority`, on unless set off.
+    /// Whether priorities follow requires links (ticket 215), due dates and
+    /// time limits (ticket 252): `auto-priority`, on unless set off.
     pub fn auto_priority(&self) -> bool {
         // On unless set off (ticket 252; it was off unless set on).
         !matches!(
@@ -670,30 +666,29 @@ impl BoardSettings {
             .set(PRIORITY_OVERRIDE, if on { "on" } else { "off" });
     }
 
-    /// When auto priority raises a ticket for its due date (ticket 252):
-    /// `due-medium-days` and `due-high-days`, [`DEFAULT_DUE_DAYS`] when
-    /// unset or unreadable.
-    pub fn due_days(&self) -> DueDays {
-        let read = |key: &str, default: u32| {
+    /// How long a ticket should take in todo and in doing (ticket 252):
+    /// `todo-max-days`, `doing-max-days`; unset is no limit.
+    pub fn time_limits(&self) -> TimeLimits {
+        let read = |key: &str| {
             self.config
                 .get(key)
                 .and_then(|v| v.trim().parse().ok())
-                .unwrap_or(default)
+                .unwrap_or(0)
         };
-        DueDays {
-            medium: read(DUE_MEDIUM_DAYS, DEFAULT_DUE_DAYS.medium),
-            high: read(DUE_HIGH_DAYS, DEFAULT_DUE_DAYS.high),
+        TimeLimits {
+            todo: read(TODO_MAX_DAYS),
+            doing: read(DOING_MAX_DAYS),
         }
     }
 
-    /// Sets [`due_days`](Self::due_days); the defaults leave no keys.
-    pub fn set_due_days(&mut self, days: DueDays) {
-        if days == DEFAULT_DUE_DAYS {
-            self.config.remove(DUE_MEDIUM_DAYS);
-            self.config.remove(DUE_HIGH_DAYS);
-        } else {
-            self.config.set(DUE_MEDIUM_DAYS, &days.medium.to_string());
-            self.config.set(DUE_HIGH_DAYS, &days.high.to_string());
+    /// Sets [`time_limits`](Self::time_limits); 0 leaves no key.
+    pub fn set_time_limits(&mut self, limits: TimeLimits) {
+        for (key, days) in [(TODO_MAX_DAYS, limits.todo), (DOING_MAX_DAYS, limits.doing)] {
+            if days == 0 {
+                self.config.remove(key);
+            } else {
+                self.config.set(key, &days.to_string());
+            }
         }
     }
 

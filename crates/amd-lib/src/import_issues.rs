@@ -87,7 +87,7 @@ pub struct Planned {
     pub tags: Vec<String>,
     /// Labels the project doesn't list, named in the notes instead.
     pub dropped: Vec<String>,
-    /// Always high: a TRIAGE ticket is (ticket 248).
+    /// Always top: a TRIAGE ticket is (tickets 248, 252).
     pub priority: String,
 }
 
@@ -383,8 +383,8 @@ pub fn plan_with(
     let seen = imported_sources(board)?;
     let settings = board_settings::load(board);
     let listed = settings.tags();
-    // Every TRIAGE ticket is high (ticket 248).
-    let priority = "high".to_string();
+    // Every TRIAGE ticket is top (tickets 248, 252).
+    let priority = crate::task::TOP.to_string();
     let mut next = board.next_id()?;
     let mut plan = Plan::default();
     let mut first_error = None;
@@ -714,17 +714,17 @@ mod tests {
     }
 
     #[test]
-    fn tickets_start_high_as_every_triage_ticket_is() {
+    fn tickets_start_top_as_every_triage_ticket_is() {
         let (_dir, board) = board();
         let plan = plan_with(&board, &web(), None, canned).unwrap();
         assert!(
-            plan.new[0].line().ends_with("[TRIAGE] high"),
+            plan.new[0].line().ends_with("[TRIAGE] top"),
             "{}",
             plan.new[0].line()
         );
         apply(&board, &plan).unwrap();
         for task in board.tasks().unwrap() {
-            assert_eq!(task.priority(), "high");
+            assert_eq!(task.priority(), "top");
         }
     }
 

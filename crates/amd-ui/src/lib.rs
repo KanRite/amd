@@ -1515,19 +1515,14 @@ async fn set_auto_priority(state: Tauri<'_, AppState>, on: bool) -> Result<SyncR
     .await
 }
 
-/// When a due date raises a ticket (ticket 252): days left for medium,
-/// then high; 0 turns a step off.
+/// How long a ticket should take in todo and in doing (ticket 252); 0 is
+/// no limit.
 #[tauri::command]
-async fn set_due_days(state: Tauri<'_, AppState>, medium: u32, high: u32) -> Result<SyncReport> {
-    if medium > 0 && high > medium {
-        return Err(format!(
-            "high ({high} days) can't come before medium ({medium} days)"
-        ));
-    }
+async fn set_time_limits(state: Tauri<'_, AppState>, todo: u32, doing: u32) -> Result<SyncReport> {
     change(&state, move |p| {
         let board = &p.repos[0].1;
-        save_setting(board, &format!("due-days {medium} {high}"), |s| {
-            s.set_due_days(board_settings::DueDays { medium, high });
+        save_setting(board, &format!("time-limits {todo} {doing}"), |s| {
+            s.set_time_limits(board_settings::TimeLimits { todo, doing });
             Ok(())
         })
     })
@@ -2877,7 +2872,7 @@ pub fn run() {
             set_import_issues,
             set_auto_priority,
             set_priority_override,
-            set_due_days,
+            set_time_limits,
             list_documents,
             document_history,
             read_document_version,
