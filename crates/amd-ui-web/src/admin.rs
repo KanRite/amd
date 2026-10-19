@@ -1101,14 +1101,14 @@ fn DocumentsAdmin() -> impl IntoView {
     }
 }
 
-/// Archiving the project (ticket 157): read-only for everyone until it's
-/// unarchived, optionally its GitHub repositories too. Asks once more
+/// Archiving the project (tickets 157, 263): no longer maintained, its
+/// repositories archived on GitHub and the project taken off amd on this
+/// machine, so the board goes back to the landing page. Asks once more
 /// before archiving.
 #[component]
 fn ArchiveAdmin() -> impl IntoView {
     let ctx = Ctx::get();
     let archived = move || ctx.board.with(|b| b.as_ref().is_some_and(|b| b.archived));
-    let github = RwSignal::new(false);
     let confirm = RwSignal::new(false);
     let busy = RwSignal::new(false);
     let note = RwSignal::new(None::<String>);
@@ -1124,15 +1124,22 @@ fn ArchiveAdmin() -> impl IntoView {
         else {
             return;
         };
-        let github = github.get_untracked();
         busy.set(true);
         spawn_local(async move {
-            match api::set_project_archived(&root, on, github).await {
+            match api::set_project_archived(&root, on).await {
                 Ok(report) => {
                     note.set(report.warning.clone());
+                    let forgotten = on && report.warning.is_none();
                     ctx.report(report);
                     confirm.set(false);
-                    ctx.reload();
+                    if forgotten {
+                        // Off amd here now: back to the landing page.
+                        ctx.overlay.set(None);
+                        ctx.view.set(crate::app::View::Home);
+                        crate::home::load_home(ctx.home);
+                    } else {
+                        ctx.reload();
+                    }
                 }
                 Err(e) => note.set(Some(e)),
             }
@@ -1150,23 +1157,14 @@ fn ArchiveAdmin() -> impl IntoView {
             </h3>
             <p class="text-xs text-slate-500">
                 {move || if archived() {
-                    "Read-only for everyone, and off My work. Unarchive it to change it again.".to_string()
+                    "No longer maintained: read-only for everyone, and off My work and the landing page. Unarchive brings it back, its repositories on GitHub too.".to_string()
                 } else {
-                    format!("Puts {} away: read-only for everyone, and off My work, until it's unarchived. Committed for the whole team.", project())
+                    format!(
+                        "For a project that's no longer maintained. {p} becomes read-only for everyone and leaves My work and the landing page; its repositories are archived on GitHub (tickets, documents and declared code repositories), and it's taken off amd on this machine, its folders kept. Committed for the whole team. `amd init {p}` brings it back.",
+                        p = project(),
+                    )
                 }}
             </p>
-            <label class="flex items-center gap-2 text-sm">
-                <input
-                    type="checkbox"
-                    prop:checked=move || github.get()
-                    on:change=move |ev| github.set(event_target_checked(&ev))
-                />
-                {move || if archived() {
-                    "Also unarchive its repositories on GitHub"
-                } else {
-                    "Also archive its repositories on GitHub (tickets, documents and declared code repositories)"
-                }}
-            </label>
             <div class="flex items-center gap-2">
                 <button
                     class=move || if archived() || !confirm.get() {

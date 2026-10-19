@@ -248,7 +248,7 @@ pub(crate) fn slug_of_url(url: &str) -> Option<String> {
 }
 
 /// `owner/repo` when `repo`'s `origin` is on github.com.
-pub(crate) fn github_slug(repo: &Path) -> Option<String> {
+pub fn github_slug(repo: &Path) -> Option<String> {
     git::remote_identity(repo)?
         .strip_prefix("github.com/")
         .filter(|slug| is_slug(slug))

@@ -282,7 +282,8 @@ enum Cmd {
     /// List the projects in this folder, switch between them, or archive one
     ///
     /// Shows which one amd uses; `amd project use <name>` switches, and
-    /// `amd project archive|unarchive [name] [--github]` puts one away
+    /// `amd project archive [name]` puts one away for good (`amd init
+    /// <name>` brings it back)
     Project {
         #[command(subcommand)]
         action: Option<ProjectAction>,
@@ -1202,24 +1203,27 @@ enum ProjectAction {
         #[arg(value_name = "NAME")]
         name: Option<String>,
     },
-    /// Archive a project: read-only for amd, and off My work, until it's
-    /// unarchived. Committed for the whole team
+    /// Archive a project that's no longer maintained: committed for the
+    /// whole team, its repositories archived on GitHub (`gh repo archive`:
+    /// tickets, documents and every declared one), and taken off amd on
+    /// this machine, folders kept. Read-only, off My work and the landing
+    /// page everywhere. `amd init <name>` brings it back
     Archive {
         /// The project (default: the current one)
         #[arg(value_name = "NAME")]
         name: Option<String>,
-        /// Also archive its repositories on GitHub (`gh repo archive`): the
-        /// tickets and documents repositories and every declared one
-        #[arg(long)]
+        /// Always on now (ticket 263); kept so older scripts still run
+        #[arg(long, hide = true)]
         github: bool,
     },
-    /// Bring an archived project back
+    /// Bring an archived project back where it's still known, unarchiving
+    /// its repositories on GitHub first; `amd init <name>` does it anywhere
     Unarchive {
         /// The project (default: the current one)
         #[arg(value_name = "NAME")]
         name: Option<String>,
-        /// Also unarchive its repositories on GitHub (`gh repo unarchive`)
-        #[arg(long)]
+        /// Always on now (ticket 263); kept so older scripts still run
+        #[arg(long, hide = true)]
         github: bool,
     },
 }
@@ -1390,10 +1394,8 @@ fn run() -> Result<()> {
         return match action {
             None => project::list(),
             Some(ProjectAction::Use { name }) => project::use_project(name),
-            Some(ProjectAction::Archive { name, github }) => project::archive(name, true, github),
-            Some(ProjectAction::Unarchive { name, github }) => {
-                project::archive(name, false, github)
-            }
+            Some(ProjectAction::Archive { name, .. }) => project::archive(name, true),
+            Some(ProjectAction::Unarchive { name, .. }) => project::archive(name, false),
         };
     }
 
@@ -2110,18 +2112,10 @@ fn cmd_mine(
         );
     };
     items.iter().for_each(line);
-    // A hidden project with a ticket to triage is shown again (ticket 248).
-    let triage: Vec<my_work::WorkItem> = items.iter().filter(|i| i.triage).cloned().collect();
-    for shown in my_work::show_projects_of(&triage)? {
-        eprintln!("{shown} has tickets to triage, so it's back in your work");
-    }
     // Nothing to do (ticket 160): work you could take (unassigned todo and
     // doing first, when unassigned work is included, then the backlog's
-    // highest priority), and any hidden project it's in shown again.
-    let mut projects = projects;
-    if !triage.is_empty() {
-        projects = my_work::projects();
-    }
+    // highest priority). A hidden project stays hidden (ticket 263), its
+    // TRIAGE tickets and work to pick listed all the same.
     if items.is_empty() {
         let pick = my_work::to_pick(&email, name.as_deref(), my_work::include_unassigned());
         if pick.is_empty() {
@@ -2129,10 +2123,6 @@ fn cmd_mine(
         } else {
             println!("nothing in todo or doing is assigned to you — work to pick:");
             pick.iter().for_each(line);
-            for shown in my_work::show_projects_of(&pick)? {
-                eprintln!("{shown} has work to pick, so it's back in your work");
-            }
-            projects = my_work::projects();
         }
     }
     let hidden = projects.iter().filter(|p| p.hidden).count();
