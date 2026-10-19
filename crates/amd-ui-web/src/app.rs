@@ -365,6 +365,7 @@ pub fn App() -> impl IntoView {
 
     view! {
         <div class="flex h-screen flex-col bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
+            <crate::update_bar::UpdateBar />
             <header class="flex items-center gap-4 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-800">
                 // The landing page has no project of its own; a board offers
                 // the way back to it (ticket 020).

@@ -8,6 +8,7 @@ mod boards;
 mod documents;
 mod speech;
 mod terminal;
+mod updates;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -1019,6 +1020,18 @@ async fn move_epic_tickets(
         Ok(report)
     })
     .await
+}
+
+/// A newer agile-md to offer in the update bar (ticket 192), if any.
+#[tauri::command]
+async fn update_status() -> Result<Option<amd_ui_model::UpdateInfo>> {
+    blocking(|| Ok(updates::status())).await
+}
+
+/// The update bar's Later (ticket 192): this version, hidden for a day.
+#[tauri::command]
+async fn snooze_update(version: String) -> Result<()> {
+    blocking(move || updates::later(&version).map_err(err)).await
 }
 
 /// Deletes an epic or sprint (`amd group delete`, ticket 204): refused while
@@ -2927,6 +2940,8 @@ pub fn run() {
             rename_epic,
             delete_epic,
             move_epic_tickets,
+            update_status,
+            snooze_update,
             archive_ticket,
             lock_ticket,
             unlock_ticket,

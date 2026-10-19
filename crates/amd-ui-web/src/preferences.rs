@@ -45,8 +45,6 @@ fn AppearanceSection() -> impl IntoView {
     let swatch = |accent: Accent| match accent {
         Accent::Indigo => "bg-indigo-600",
         Accent::Teal => "bg-teal-600",
-        Accent::Rose => "bg-rose-600",
-        Accent::Amber => "bg-amber-600",
         Accent::Slate => "bg-slate-600",
     };
     view! {
