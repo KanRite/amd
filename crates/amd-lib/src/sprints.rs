@@ -248,7 +248,7 @@ pub fn backfill(board: &Board, name: &str, points: u32) -> Result<Vec<String>> {
         .into_iter()
         .filter(|t| t.epic.is_none())
         .filter(|t| stats::points_of(t) > 0)
-        .filter(|t| t.assignee().is_none_or(|a| a.trim().is_empty()))
+        .filter(|t| t.assignees().is_empty())
         .filter(|t| !t.is_draft())
         .filter(|t| t.ensure_not_leased().is_ok())
         .collect();

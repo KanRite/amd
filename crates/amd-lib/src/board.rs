@@ -924,10 +924,10 @@ impl Board {
     pub fn assignees(&self) -> Result<Vec<String>> {
         let mut assignees: Vec<String> = Vec::new();
         for task in self.tasks()? {
-            if let Some(who) = task.assignee()
-                && !assignees.contains(&who)
-            {
-                assignees.push(who);
+            for who in task.assignees() {
+                if !assignees.contains(&who) {
+                    assignees.push(who);
+                }
             }
         }
         assignees.sort();

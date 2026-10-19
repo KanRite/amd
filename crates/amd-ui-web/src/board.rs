@@ -1178,12 +1178,14 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
             })
         })
     };
+    // "@Alex", or "@Alex +1" for several (ticket 254), all named on hover.
+    let people = ticket.people_label();
+    let everyone = ticket.people().join(", ");
     let TicketSummary {
         file,
         column,
         id,
         title,
-        assignee,
         tags,
         priority,
         priority_from,
@@ -1471,9 +1473,13 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
                             </span>
                         }
                     })}
-                {(!assignee.is_empty())
-                    .then(|| {
-                        view! { <span class="text-slate-500">"@" {assignee}</span> }
+                {people
+                    .map(|people| {
+                        view! {
+                            <span class="text-slate-500" title=everyone.clone()>
+                                {people}
+                            </span>
+                        }
                     })}
                 {tags
                     .into_iter()

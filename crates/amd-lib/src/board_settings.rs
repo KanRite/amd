@@ -935,6 +935,14 @@ pub fn unknown_assignee(board: &Board, who: &str) -> Option<String> {
         .then(|| format!("{who} isn't one of this project's users — `amd join` adds them"))
 }
 
+/// [`unknown_assignee`] for each of several people (ticket 254).
+pub fn unknown_assignees(board: &Board, names: &[String]) -> Vec<String> {
+    names
+        .iter()
+        .filter_map(|who| unknown_assignee(board, who))
+        .collect()
+}
+
 pub fn validate_project_name(name: &str) -> Result<()> {
     if name.is_empty() {
         bail!("a project name can't be empty");

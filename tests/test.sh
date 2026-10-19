@@ -1221,6 +1221,33 @@ assert "amd assign with no name clears it" \
 assert "@me resolves to the git user" \
   bash -c "'${AMD}' assign 1 @me >/dev/null && grep -q '^assignee: \"t\"$' tasks/*/001-first-task.md"
 assert "the board shows the assignee" bash -c "'${AMD}' board --plain | grep -q '@t'"
+# Ticket 254: several people. One is written as before; two or more keep
+# `assignee` as the first and add an `assignees` list.
+assert "amd assign with two names assigns both, the first as assignee" \
+  bash -c "'${AMD}' assign 1 sam jo >/dev/null && grep -q '^assignee: \"sam\"$' tasks/*/001-first-task.md \
+    && grep -q '^assignees: \[\"sam\",\"jo\"\]$' tasks/*/001-first-task.md"
+assert "the board shows every assignee" bash -c "'${AMD}' board --plain | grep -q '@sam @jo'"
+assert "amd assign --add adds after them" \
+  bash -c "'${AMD}' assign 1 --add ann | grep -q 'assigned to sam, jo, ann' \
+    && grep -q '^assignees: \[\"sam\",\"jo\",\"ann\"\]$' tasks/*/001-first-task.md"
+assert "amd assign --remove takes the first off and the next leads" \
+  bash -c "'${AMD}' assign 1 --remove SAM >/dev/null && grep -q '^assignee: \"jo\"$' tasks/*/001-first-task.md \
+    && grep -q '^assignees: \[\"jo\",\"ann\"\]$' tasks/*/001-first-task.md"
+assert "down to one person, the list goes" \
+  bash -c "'${AMD}' assign 1 --remove ann >/dev/null && grep -q '^assignee: \"jo\"$' tasks/*/001-first-task.md \
+    && ! grep -q '^assignees:' tasks/*/001-first-task.md"
+"${AMD}" new "Shared work" -a @me -a jo --no-edit >/dev/null
+shared="$(ls tasks/backlog/*-shared-work.md)"
+assert "amd new -a twice assigns both" \
+  bash -c "grep -q '^assignee: \"t\"$' '${shared}' && grep -q '^assignees: \[\"t\",\"jo\"\]$' '${shared}'"
+# Someone else's lease: every assignee may still write the ticket.
+sed -i 's/^assignee: "t"$/assignee: "t"\nlocked-by: "jo@elsewhere.co"\nlocked-until: "2999-01-01T00:00:00Z"/' "${shared}"
+assert "an assignee can write a ticket someone else has locked" \
+  bash -c "'${AMD}' set \$(basename '${shared}' | cut -c1-3) points 3 >/dev/null 2>&1 && grep -q '^points: \"3\"$' '${shared}'"
+sed -i 's/^assignee: "t"$/assignee: "jo"/; s/^assignees: .*$/assignees: ["jo"]/' "${shared}"
+assert "...and anyone else can't" \
+  bash -c "! '${AMD}' set \$(basename '${shared}' | cut -c1-3) points 5 >/dev/null 2>&1 && grep -q '^points: \"3\"$' '${shared}'"
+sed -i '/^locked-by:/d; /^locked-until:/d' "${shared}"
 # Ticket 089: the users list is what assignees are picked from; anyone
 # else is allowed, with a warning, and a board with no list never warns.
 as_list="$(mktemp -d)"

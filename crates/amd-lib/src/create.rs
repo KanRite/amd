@@ -32,8 +32,9 @@ pub struct NewTicket {
     pub template: String,
     /// Branch type (`feature`, `bugfix`, …); empty for a ticket with no branch.
     pub branch_type: String,
-    /// Who it's assigned to; empty for nobody, and assignable later.
-    pub assignee: String,
+    /// Who it's assigned to, in order (ticket 254); empty for nobody, and
+    /// assignable later.
+    pub assignees: Vec<String>,
     /// The repository it's about; empty for none. Must be cloned here.
     pub repository: String,
     /// A ref (id or slug) for the ticket this one sits under.
@@ -69,6 +70,7 @@ pub struct Draft {
     parent: Option<Task>,
     related: Vec<String>,
     clone_of: Option<Task>,
+    assignees: Vec<String>,
 }
 
 /// What changed when a draft was written, so a front end can report it.
@@ -135,6 +137,12 @@ impl Draft {
             );
         }
 
+        let assignees: Vec<String> = ticket
+            .assignees
+            .iter()
+            .map(|who| who.trim().to_string())
+            .filter(|who| !who.is_empty())
+            .collect();
         let number = board.next_id()?;
         let id = format!("{number:03}");
         let slug = task::slugify(&ticket.title);
@@ -161,7 +169,8 @@ impl Draft {
                 .as_ref()
                 .map(|task| task.stem.clone())
                 .unwrap_or_default(),
-            assignee: ticket.assignee,
+            assignee: assignees.first().cloned().unwrap_or_default(),
+            assignees: assignees.clone(),
             repository,
             related: related.clone(),
             clone_of: clone_task
@@ -192,6 +201,7 @@ impl Draft {
             parent: parent_task,
             related,
             clone_of: clone_task,
+            assignees,
         })
     }
 
@@ -202,6 +212,13 @@ impl Draft {
         if body.trim().is_empty() {
             bail!("the ticket is empty; nothing created");
         }
+        // Several people (ticket 254): the template writes `assignee`, the
+        // first; the list goes in beside it.
+        let body = if self.assignees.len() > 1 {
+            crate::task::with_assignees(&body, &self.assignees)?
+        } else {
+            body
+        };
         // Every ticket has a priority — a custom template without the field
         // gets the default; an invalid one typed in the editor is refused.
         let body = crate::task::ensure_priority(&body)?;
