@@ -50,6 +50,8 @@ pub fn run(project: String, local_only: bool, org: Option<String>) -> Result<()>
     // included, lives in the tickets repository (ticket 111).
     let tickets = init_tickets(&base, &project, org.as_deref())?;
     let documents = init_documents(&base, &project, org.as_deref())?;
+    // An archived project comes back (ticket 263).
+    bring_back(&base, &tickets)?;
 
     println!("Initialised project '{project}':");
     println!("  tickets:    {}", tickets.display());
@@ -74,15 +76,17 @@ fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf
 
     let created_new = if target.exists() {
         warn_if_already_present(&target)?;
+        unarchive_on_github(&target)?;
         false
-    } else {
-        create_and_clone(base, &full_name, &target)?;
+    } else if clone_or_create(base, &full_name, &target)? {
         // A freshly cloned, still-empty repository has no commits yet, so
         // its branch name comes from the local git's own defaultBranch
         // config rather than anything GitHub set — force it to `main`
         // before the first commit, regardless of that config.
         git::set_head_branch(&target, "main")?;
         true
+    } else {
+        false
     };
 
     let board = Board::in_repo(&target);
@@ -117,11 +121,13 @@ fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<PathB
 
     let created_new = if target.exists() {
         warn_if_already_present(&target)?;
+        unarchive_on_github(&target)?;
         false
-    } else {
-        create_and_clone(base, &full_name, &target)?;
+    } else if clone_or_create(base, &full_name, &target)? {
         git::set_head_branch(&target, "main")?;
         true
+    } else {
+        false
     };
 
     scaffold_documents(&target, project)?;
@@ -344,6 +350,114 @@ fn set_project(board: &Board, project: &str) -> Result<()> {
 /// reason to match the project at all.
 pub(crate) fn owner_for<'a>(project: &'a str, org: Option<&'a str>) -> &'a str {
     org.unwrap_or(project)
+}
+
+/// Clones `full_name` into `target` when it's already on GitHub (ticket
+/// 263: never a second creation attempt), unarchiving it there first if
+/// it's archived, since an archived repository refuses the pushes `init`
+/// makes; otherwise creates it, cloned. Returns whether it was created.
+fn clone_or_create(base: &Path, full_name: &str, target: &Path) -> Result<bool> {
+    match github_archived(full_name) {
+        Some(archived) => {
+            if archived {
+                agile_md::archive::gh("unarchive", full_name)?;
+                println!("unarchived {full_name} on GitHub");
+            }
+            let clone = Command::new("gh")
+                .current_dir(base)
+                .args([
+                    "repo",
+                    "clone",
+                    full_name,
+                    target.to_str().unwrap_or(full_name),
+                ])
+                .status()
+                .context("running gh repo clone — is the gh CLI installed and authenticated?")?;
+            if !clone.success() {
+                bail!("gh repo clone {full_name} failed");
+            }
+            Ok(false)
+        }
+        None => {
+            create_and_clone(base, full_name, target)?;
+            Ok(true)
+        }
+    }
+}
+
+/// Whether `full_name` on GitHub is archived; `None` when it isn't there
+/// (or `gh` can't say).
+fn github_archived(full_name: &str) -> Option<bool> {
+    let out = Command::new("gh")
+        .args([
+            "repo",
+            "view",
+            full_name,
+            "--json",
+            "isArchived",
+            "--jq",
+            ".isArchived",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    match String::from_utf8_lossy(&out.stdout).trim() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+/// An existing clone whose GitHub repository is archived: unarchived there
+/// (ticket 263), so what `init` writes can be pushed. A clone that isn't on
+/// GitHub, or that `gh` can't see, is left as it is.
+fn unarchive_on_github(target: &Path) -> Result<()> {
+    let Some(slug) = agile_md::import_issues::github_slug(target) else {
+        return Ok(());
+    };
+    if github_archived(&slug) == Some(true) {
+        agile_md::archive::gh("unarchive", &slug)?;
+        println!("unarchived {slug} on GitHub");
+    }
+    Ok(())
+}
+
+/// Brings an archived project back (ticket 263): its declared repositories
+/// unarchived on GitHub, `archived` turned off and pushed, and every
+/// declared repository already cloned beside the tickets repository
+/// registered again. `amd clone --all` fetches the rest.
+fn bring_back(base: &Path, tickets: &Path) -> Result<()> {
+    let board = Board::in_repo(tickets);
+    if !agile_md::archive::is_archived(&board) {
+        return Ok(());
+    }
+    let mut keep = |_: &Board| -> Result<Vec<String>> { Ok(Vec::new()) };
+    for event in
+        agile_md::archive::set_archived(&board, false, true, &mut agile_md::archive::gh, &mut keep)?
+    {
+        match event {
+            Event::Info(text) => println!("{text}"),
+            Event::Warn(text) => eprintln!("warning: {text}"),
+        }
+    }
+    let mut missing = Vec::new();
+    for name in board_settings::load(&board).repos() {
+        let clone = base.join(&name);
+        if clone.join(".git").exists() {
+            register(&clone)?;
+        } else {
+            missing.push(name);
+        }
+    }
+    if !missing.is_empty() {
+        println!(
+            "not cloned here: {} — `amd clone --all` fetches them",
+            missing.join(", ")
+        );
+    }
+    Ok(())
 }
 
 /// Creates `full_name` and clones it as a child of `base` (the current

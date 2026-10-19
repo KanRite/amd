@@ -636,7 +636,8 @@ listed. It reads each board as this machine last saw it.
 **Tickets waiting to be triaged come first.** Every open ticket tagged
 TRIAGE (an imported GitHub issue, or a dependency update that needs a
 person) heads everyone's My work on its project, marked TRIAGE, unless it's
-assigned to someone else. A hidden project with one is shown again. A
+assigned to someone else, even from a project you've hidden (the project
+itself stays hidden: amd never undoes a Hide). A
 TRIAGE ticket is always top priority: you can't set it lower until you've
 looked at it and taken TRIAGE off.
 
@@ -647,8 +648,19 @@ by default; `amd mine --unassigned`/`--no-unassigned` set it), that's
 unassigned todo and doing tickets first; failing those, backlog tickets
 that are unassigned or yours: every high-priority one there is, else
 every medium, else every low, oldest first. Without, only backlog tickets
-assigned to you. Hidden projects are searched too, and one with work to
-pick is shown again.
+assigned to you. Hidden projects are searched too, and stay hidden.
+
+**Archiving a project** is for one that's no longer maintained: `amd
+project archive [name]`, or Admin → Archive this project. It's committed
+for the whole team, so the project becomes read-only and leaves My work
+and the landing page everywhere. Its repositories are archived on GitHub
+(tickets, documents and every declared code repository; never the shared
+documents), and it's taken off amd on your machine, with its folders left
+on disk. To bring it back, run `amd init <name>` from the folder that holds
+(or should hold) its repositories. That unarchives them on GitHub, clones
+the tickets and documents repositories if they aren't here, turns
+archiving off for everyone and puts the project back on amd. `amd init`
+never tries to create a repository that's already on GitHub: it clones it.
 
 ## Ideas
 

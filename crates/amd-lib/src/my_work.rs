@@ -21,8 +21,8 @@
 //! tickets first, then backlog tickets unassigned or yours; off, only
 //! backlog tickets assigned to you. From the backlog, all the high-priority
 //! ones, else all the medium, else the low.
-//! A hidden project with something to pick is shown again
-//! ([`show_projects_of`]), since that's where the work is.
+//! Hiding a project is never undone by amd (ticket 263): its TRIAGE
+//! tickets and work to pick are still listed, but the project stays hidden.
 
 use std::path::{Path, PathBuf};
 
@@ -208,7 +208,7 @@ pub(crate) fn names_for(board: &Board, email: &str, fallback: Option<&str>) -> V
 /// `email`/`name`. A board that can't be read is skipped, not fatal.
 pub fn my_work(email: &str, name: Option<&str>, include_hidden: bool, sort: Sort) -> Vec<WorkItem> {
     // TRIAGE tickets first (ticket 248), from every project, hidden ones
-    // too: the caller shows a hidden project again (`show_projects_of`).
+    // too, listed without un-hiding the project (ticket 263).
     let triage = triage(email, name);
     let mut items = Vec::new();
     each_board(include_hidden, email, name, |project, repo, board, mine| {
@@ -386,21 +386,6 @@ fn top_tier(items: Vec<WorkItem>) -> Vec<WorkItem> {
         }
     }
     Vec::new()
-}
-
-/// Shows again every hidden project `items` come from (ticket 160): work
-/// to pick is in it, so it's back on the landing page and in My work.
-/// Returns the names of the projects shown again.
-pub fn show_projects_of(items: &[WorkItem]) -> anyhow::Result<Vec<String>> {
-    let hidden = hidden();
-    let mut shown = Vec::new();
-    for item in items {
-        if hidden.contains(&item.project_root) && !shown.contains(&item.project) {
-            set_hidden(&item.project_root, false)?;
-            shown.push(item.project.clone());
-        }
-    }
-    Ok(shown)
 }
 
 /// Calls `f` once for every board of every project on this machine (hidden

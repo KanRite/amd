@@ -188,17 +188,28 @@ redundant. Their history is in git if it is ever wanted again.
   the settings commands given a value; `register`/`deregister` and `amd
   import documents` into its own documents check too), and amdui's
   `change()` and `doc_change` refuse (`ensure_writable`). It's off My work,
-  work to pick and the issue pull (`my_work::Project.archived`). `amd
-  project archive|unarchive [name] [--github]`, Admin's "Archive this
-  project", the landing page's "Archived (N)" fold with Unarchive, and a
-  banner on the board; `set_project_archived` doesn't go through
-  `change()`. `--github` runs `gh repo archive|unarchive --yes` on the
-  tickets repository, the project's own documents and each declared
-  repository (`github_repos`; never the shared documents). **Order
-  matters**, since GitHub refuses pushes to an archived repository:
-  archive pushes the setting first, then archives (skipped, with a
-  warning, if the push didn't land); unarchive unarchives first, then
-  pushes. A `gh` failure is a warning.
+  work to pick and the issue pull (`my_work::Project.archived`). **No
+  longer maintained** (ticket 263): always archived on GitHub too
+  (`--github` is hidden and ignored), off the landing page everywhere (the
+  "Archived (N)" fold is gone), and, once the setting is pushed, taken off
+  this machine's registry by `set_archived`'s `forget` (`archive::forget`/
+  `forget_in`: the tickets repository, its documents and each declared
+  clone; folders kept). `amd project archive|unarchive [name]` (unarchive
+  re-registers the tickets and documents clones), Admin's "Archive this
+  project" (back to Home after), and a banner on the board;
+  `set_project_archived` doesn't go through `change()`. `gh repo
+  archive|unarchive --yes` on the tickets repository, the project's own
+  documents and each declared repository (`github_repos`; never the shared
+  documents). **Order matters**, since GitHub refuses pushes to an
+  archived repository: archive pushes the setting first, then archives
+  (skipped, with a warning, if the push didn't land); unarchive
+  unarchives first, then pushes. A `gh` failure is a warning. **`amd init
+  <project>` brings it back** (`bring_back`): an existing clone's GitHub
+  repository is unarchived first (`unarchive_on_github`), a missing one is
+  cloned when `gh repo view` finds it, unarchived first if archived
+  (`clone_or_create`; created only when it isn't on GitHub), then
+  `set_archived(false)` and the declared repositories cloned beside it
+  registered again; `ensure_writable` names `amd init <project>`.
 - **`amd mcp`: the board for any AI assistant** (ticket 186, instead of a
   built-in chat tied to one provider: not every contributor uses Claude,
   and some use no AI). `crates/amd-lib/src/assistant.rs` holds the tools,
@@ -352,9 +363,10 @@ redundant. Their history is in git if it is ever wanted again.
   and doing tickets first, by priority; failing those, backlog tickets
   unassigned or yours. Off: only backlog tickets assigned to you. From
   the backlog, only the top priority tier there is (`top_tier`: all high,
-  else all medium, else all low), oldest first. TRIAGE tickets count. `show_projects_of` takes a hidden project
-  with work to pick off `ui.hidden-projects` for good; `amd mine` and
-  amdui's `home` both call it. `WorkItem.folder` carries a backlog
+  else all medium, else all low), oldest first. TRIAGE tickets count.
+  **A hidden project stays hidden** (ticket 263, removing 160/248's
+  `show_projects_of`): its work to pick and TRIAGE tickets are listed,
+  and open, without un-hiding it. `WorkItem.folder` carries a backlog
   ticket's epic folder so the page can open it. `--json` still prints
   only My work.
 - `crates/amd-lib/src/recover.rs` — `amd recover` (ticket 144): tickets
@@ -842,9 +854,8 @@ off**, ticket 141) to
   lower ("take TRIAGE off first"), and `write_priority` keeps it high.
   `my_work::triage` gathers every open TRIAGE ticket (not done-kind, not
   archived projects) from every project, hidden ones too, unassigned or
-  yours; `my_work` puts them first (`WorkItem.triage`), and `amd mine` and
-  amdui's `home` call `show_projects_of` on them so a hidden project comes
-  back. The landing page marks them TRIAGE; the editor says why the
+  yours; `my_work` puts them first (`WorkItem.triage`); a hidden project
+  stays hidden (ticket 263). The landing page marks them TRIAGE; the editor says why the
   priority is high.
 - **Tag filtering**: `amd tag <tag>` lists every ticket carrying `<tag>`,
   across every column, via `Board::tasks_tagged()`/`Task::has_tag()`. Every

@@ -2662,17 +2662,13 @@ async fn home() -> Result<amd_ui_model::Home> {
             }
             None => Vec::new(),
         };
-        // A hidden project with a ticket to triage is shown again (ticket 248).
-        let triage: Vec<my_work::WorkItem> = work.iter().filter(|w| w.triage).cloned().collect();
-        my_work::show_projects_of(&triage).map_err(err)?;
-        // Nothing to do (ticket 160): work to pick from the backlogs, and
-        // any hidden project it's in shown again before the list is read.
+        // Nothing to do (ticket 160): work to pick from the backlogs. A
+        // hidden project stays hidden (ticket 263), though its TRIAGE
+        // tickets and work to pick are listed.
         let include_unassigned = my_work::include_unassigned();
         let to_pick = match &me {
             Some((email, name)) if work.is_empty() => {
-                let pick = my_work::to_pick(email, name.as_deref(), include_unassigned);
-                my_work::show_projects_of(&pick).map_err(err)?;
-                pick
+                my_work::to_pick(email, name.as_deref(), include_unassigned)
             }
             _ => Vec::new(),
         };
@@ -2783,8 +2779,8 @@ async fn set_stats_days(days: u32) -> Result<()> {
     blocking(move || agile_md::stats::set_period(days).map_err(err)).await
 }
 
-/// Archives a project, or brings it back (ticket 157), with `github` its
-/// repositories on GitHub too. Works on any project on this machine, from
+/// Archives a project, or brings it back (tickets 157, 263), its
+/// repositories on GitHub too; archiving takes it off this machine. Works on any project on this machine, from
 /// the landing page as well as from inside it, so it doesn't go through
 /// [`change`], which refuses an archived project.
 #[tauri::command]
@@ -2792,7 +2788,6 @@ async fn set_project_archived(
     state: Tauri<'_, AppState>,
     root: String,
     on: bool,
-    github: bool,
 ) -> Result<SyncReport> {
     let writing = Arc::clone(&state.writing);
     blocking(move || {
@@ -2805,9 +2800,15 @@ async fn set_project_archived(
             _ => Board::at(PathBuf::from(&root)),
         };
         agile_md::sync::catch_up(&board, agile_md::sync::Purpose::Write).map_err(err)?;
-        let events =
-            agile_md::archive::set_archived(&board, on, github, &mut agile_md::archive::gh)
-                .map_err(err)?;
+        // Always on GitHub, and archiving forgets it here (ticket 263).
+        let events = agile_md::archive::set_archived(
+            &board,
+            on,
+            true,
+            &mut agile_md::archive::gh,
+            &mut agile_md::archive::forget,
+        )
+        .map_err(err)?;
         let mut info = Vec::new();
         let mut warnings = Vec::new();
         for event in events {

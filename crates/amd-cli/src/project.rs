@@ -78,9 +78,10 @@ pub fn use_project(name: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// `amd project archive|unarchive [name] [--github]` (ticket 157): the
-/// named project in this folder, else the one amd uses here.
-pub fn archive(name: Option<String>, on: bool, github: bool) -> Result<()> {
+/// `amd project archive|unarchive [name]` (tickets 157, 263): the named
+/// project in this folder, else the one amd uses here. Always on GitHub
+/// too; archiving also takes it off amd on this machine.
+pub fn archive(name: Option<String>, on: bool) -> Result<()> {
     let board = match name {
         Some(name) => {
             let dir = current_project::project_dir()?;
@@ -119,9 +120,22 @@ pub fn archive(name: Option<String>, on: bool, github: bool) -> Result<()> {
     report(agile_md::archive::set_archived(
         &board,
         on,
-        github,
+        true,
         &mut agile_md::archive::gh,
+        &mut agile_md::archive::forget,
     )?);
+    // Back on amd here (ticket 263): archiving took it off this machine.
+    if !on && !agile_md::archive::is_archived(&board) {
+        let root = board.repo_root().to_path_buf();
+        crate::init::register(&root)?;
+        let project = agile_md::current_project::project_name(&root);
+        if let Some(dir) = root.parent() {
+            let documents = dir.join(format!("{project}-documents"));
+            if documents.join(".git").exists() {
+                crate::init::register(&documents)?;
+            }
+        }
+    }
     Ok(())
 }
 

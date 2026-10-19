@@ -107,6 +107,45 @@ assert "amd init registered the tickets repo" \
   bash -c "'${AMD}' deregister widgets-tickets | grep -q 'deregistered widgets-tickets'"
 assert "amd init registered the documents repo" \
   bash -c "'${AMD}' deregister widgets-documents | grep -q 'deregistered widgets-documents'"
+# Ticket 263: amd init brings an archived project back. With its clones
+# here (no origin, so no GitHub): archived turned off and both registered.
+( cd "${plain_dir}/widgets-tickets" && printf 'archived = on\n' >> .settings \
+  && git add .settings && git commit -q -m 'settings: archived on' )
+assert "amd init brings back an archived project whose clones are here" \
+  bash -c "cd '${plain_dir}' && out=\$('${AMD}' init widgets 2>&1) && echo \"\$out\" | grep -q '^unarchived widgets\$' \
+    && ! grep -q archived widgets-tickets/.settings \
+    && '${AMD}' deregister widgets-tickets | grep -q deregistered \
+    && '${AMD}' deregister widgets-documents | grep -q deregistered"
+# With nothing cloned: a fake gh says both repositories exist and are
+# archived on GitHub; init unarchives them and clones, never creates.
+bb="$(mktemp -d)"
+mkdir -p "${bb}/bin" "${bb}/remote" "${bb}/here"
+for kind in tickets documents; do
+  git init -q -b main "${bb}/seed-${kind}" && ( cd "${bb}/seed-${kind}" \
+    && git config user.email t@t.co && git config user.name t && git config commit.gpgsign false \
+    && echo seed > README.md && git add -A && git commit -q -m seed \
+    && git clone -q --bare . "${bb}/remote/gizmo-${kind}.git" )
+done
+cat > "${bb}/bin/gh" <<'GH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${GH_LOG:?}"
+case "$1 $2" in
+  "repo view") echo true ;;
+  "repo clone") git clone -q "${GH_REMOTE:?}/${3#*/}.git" "$4" ;;
+  "repo create") echo "should not create" >&2; exit 1 ;;
+esac
+GH
+chmod +x "${bb}/bin/gh"
+assert "amd init clones archived repositories from GitHub, unarchiving them, and never creates" \
+  bash -c "cd '${bb}/here' && env PATH='${bb}/bin:${PATH}' GH_LOG='${bb}/gh.log' GH_REMOTE='${bb}/remote' \
+      XDG_CONFIG_HOME='${bb}/config' GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t.co GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t.co \
+      '${AMD}' init gizmo >/dev/null 2>&1; \
+    grep -qx 'repo unarchive gizmo/gizmo-tickets --yes' '${bb}/gh.log' \
+    && grep -qx 'repo unarchive gizmo/gizmo-documents --yes' '${bb}/gh.log' \
+    && ! grep -q 'repo create' '${bb}/gh.log' \
+    && test -f gizmo-tickets/README.md -a -d gizmo-tickets/tasks/backlog \
+    && grep -q gizmo-tickets '${bb}/config/agile-md/repos'"
+rm -rf "${bb}"
 
 echo "init: an existing project made before ticket 090 gets its first user:"
 # A project whose remote has no users yet, cloned locally the way its
@@ -1976,13 +2015,14 @@ assert "amd mine --hide leaves a project out, --all brings it back, --unhide res
     && in_mw mine --all | grep -q beta && in_mw mine --unhide beta >/dev/null && in_mw mine | grep -q beta"
 assert "amd mine --json gives the same list for scripts" \
   bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --json | grep -c '\"project\"' | grep -qx 6"
-assert "a TRIAGE ticket heads everyone's My work, top, and brings its hidden project back (tickets 248, 252)" \
+assert "a TRIAGE ticket heads everyone's My work, top, and its hidden project stays hidden (tickets 248, 252, 263)" \
   bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --hide gamma >/dev/null \
     && (cd '${mwh}/other/gamma-tickets' && env XDG_CONFIG_HOME='${mw}/config' AMD_COMMIT=0 '${AMD}' new 'Look at this issue' --tag TRIAGE --no-edit >/dev/null 2>&1) \
     && out=\$(in_mw mine 2>&1) \
-    && printf '%s\\n' \"\$out\" | grep -q 'gamma has tickets to triage' \
-    && printf '%s\\n' \"\$out\" | grep -v 'has tickets' | head -1 | grep -q 'backlog  top .*gamma .*TRIAGE  Look at this issue' \
-    && in_mw mine | grep -q 'gamma doing' \
+    && printf '%s\\n' \"\$out\" | head -1 | grep -q 'backlog  top .*gamma .*TRIAGE  Look at this issue' \
+    && ! printf '%s\\n' \"\$out\" | grep -q 'gamma doing' \
+    && grep '^ui.hidden-projects' '${mw}/config/agile-md/config' | grep -q gamma-tickets \
+    && in_mw mine --unhide gamma >/dev/null \
     && (cd '${mwh}/other/gamma-tickets' && env XDG_CONFIG_HOME='${mw}/config' AMD_COMMIT=0 '${AMD}' abandon 5 >/dev/null 2>&1; rm -rf tasks/archive)"
 
 echo "archiving a project (ticket 157):"
@@ -1993,16 +2033,19 @@ assert "amd project archive commits archived = on and amd project marks it" \
     && grep -qx 'archived = on' '${mwh}/work/beta-tickets/.settings' \
     && git -C '${mwh}/work/beta-tickets' log -1 --format=%s | grep -q 'settings: archived' \
     && in_mw project | grep -q 'beta .*(archived)'"
-assert "an archived project refuses changes, naming unarchive" \
+assert "...and it's off amd on this machine, its folder kept (ticket 263)" \
+  bash -c "${mw_fns}; ! grep -q beta-tickets '${mw}/config/agile-md/repos' && test -d '${mwh}/work/beta-tickets'"
+assert "an archived project refuses changes, naming amd init" \
   bash -c "${mw_fns}; for change in 'new Refused --no-edit' 'todo 3' 'set 3 priority low' 'tags add NEW' 'wip-limit 3'; do \
-      in_beta \${change} 2>&1 | grep -q 'beta is archived.*amd project unarchive' || exit 1; done \
+      in_beta \${change} 2>&1 | grep -q 'beta is archived.*amd init beta' || exit 1; done \
     && [ \"\$(ls '${mwh}/work/beta-tickets/tasks/backlog/' | grep -c refused)\" = 0 ]"
 assert "...but still reads" \
   bash -c "${mw_fns}; in_beta board | grep -q 'beta todo' && in_beta show 1 | grep -q 'beta doing' && in_beta tags >/dev/null"
 assert "...and is off My work" \
   bash -c "${mw_fns}; out=\$(in_mw mine) && ! printf '%s\\n' \"\$out\" | grep -q beta && printf '%s\\n' \"\$out\" | grep -q alpha"
-assert "amd project unarchive brings it back" \
+assert "amd project unarchive brings it back, on amd here again" \
   bash -c "${mw_fns}; in_mw project unarchive beta | grep -q '^unarchived beta\$' \
+    && grep -q beta-tickets '${mw}/config/agile-md/repos' \
     && ! grep -q archived '${mwh}/work/beta-tickets/.settings' \
     && in_beta new 'Back again' --no-edit >/dev/null 2>&1 && ls '${mwh}/work/beta-tickets/tasks/backlog/' | grep -q back-again"
 # --github: a fake gh logs what it's asked; origin looks like GitHub but
@@ -2021,13 +2064,13 @@ chmod +x "${mw}/ghbin/gh"
 )
 gh_beta() { (cd "${mwh}/work/beta-tickets" && env XDG_CONFIG_HOME="${mw}/config" TMPDIR="${mw_bin}" AMD_SYNC=0 GH_LOG="${mw}/gh.log" PATH="${mw}/ghbin:${PATH}" "${AMD}" "$@"); }
 mw_fns="${mw_fns}; $(declare -f gh_beta)"
-assert "--github pushes the setting, then archives the tickets and documents repositories" \
-  bash -c "${mw_fns}; out=\$(gh_beta project archive --github 2>&1) \
+assert "archiving pushes the setting, then archives the tickets and documents repositories on GitHub" \
+  bash -c "${mw_fns}; out=\$(gh_beta project archive 2>&1) \
     && printf '%s\\n' \"\$out\" | grep -q 'archived acme/beta-tickets on GitHub' \
     && grep -qx 'repo archive acme/beta-tickets --yes' '${mw}/gh.log' \
     && grep -qx 'repo archive acme/beta-documents --yes' '${mw}/gh.log' \
     && git -C '${mw}/beta-origin.git' show main:.settings | grep -qx 'archived = on'"
-assert "--github unarchives on GitHub, then pushes the setting" \
+assert "unarchiving unarchives on GitHub, then pushes the setting (--github still accepted)" \
   bash -c "${mw_fns}; gh_beta project unarchive --github >/dev/null 2>&1 \
     && grep -qx 'repo unarchive acme/beta-tickets --yes' '${mw}/gh.log' \
     && ! git -C '${mw}/beta-origin.git' show main:.settings | grep -q archived"
@@ -2073,10 +2116,9 @@ assert "failing that, the backlog's highest priority it can take, from a hidden 
   bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; out=\$(in_wp mine 2>&1) \
     && printf '%s\\n' \"\$out\" | grep -q 'work to pick' \
     && printf '%s\\n' \"\$out\" | grep -q 'backlog  medium .*beta .*Beta medium' \
-    && printf '%s\\n' \"\$out\" | grep -q \"beta has work to pick, so it's back in your work\" \
     && ! printf '%s\\n' \"\$out\" | grep -q 'Alpha low\\|Priya\\|draft\\|locked'"
-assert "...and the hidden project it found work in is shown again" \
-  bash -c "! grep '^ui.hidden-projects' '${wp}/config/agile-md/config' | grep -q beta-tickets"
+assert "...and the hidden project it found work in stays hidden (ticket 263)" \
+  bash -c "grep '^ui.hidden-projects' '${wp}/config/agile-md/config' | grep -q beta-tickets"
 assert "a high one it can take wins over every medium" \
   bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; (cd '${wph}/work/alpha-tickets' && env XDG_CONFIG_HOME='${wp}/config' AMD_COMMIT=0 '${AMD}' set 1 priority high >/dev/null) \
     && out=\$(in_wp mine) && printf '%s\\n' \"\$out\" | grep -q 'Alpha low' && ! printf '%s\\n' \"\$out\" | grep -q 'Beta medium'"

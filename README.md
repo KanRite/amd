@@ -126,7 +126,8 @@ a solo developer without it.
   a new repository can be made from the ticket that needs it.
 - **Admin** settings are committed for the team; **Preferences** are your
   own, on your machine.
-- **Archive a project** to make it read-only, on GitHub too if you like.
+- **Archive a project** that's no longer maintained: read-only, archived
+  on GitHub and gone from amd, until `amd init` brings it back.
 
 ### Bringing work in, and getting it back
 

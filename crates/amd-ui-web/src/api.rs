@@ -762,21 +762,12 @@ pub async fn set_project_hidden(root: &str, hidden: bool) -> Result<(), String> 
 struct ProjectArchiveArgs<'a> {
     root: &'a str,
     on: bool,
-    github: bool,
 }
 
 /// Archives a project or brings it back (ticket 157); `root` is its
 /// repository or its board, `github` its repositories on GitHub too.
-pub async fn set_project_archived(
-    root: &str,
-    on: bool,
-    github: bool,
-) -> Result<SyncReport, String> {
-    call(
-        "set_project_archived",
-        &ProjectArchiveArgs { root, on, github },
-    )
-    .await
+pub async fn set_project_archived(root: &str, on: bool) -> Result<SyncReport, String> {
+    call("set_project_archived", &ProjectArchiveArgs { root, on }).await
 }
 
 /// My work's "Include unassigned tickets" (ticket 160).
