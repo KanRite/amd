@@ -674,6 +674,31 @@ impl Board {
         self.file(task, epic, false)
     }
 
+    /// A ticket with a due date can't be in an epic (ticket 253): an epic
+    /// is open-ended, a due date isn't. A sprint may hold one (the page
+    /// warns). Refuses ticket `id` in `epic` with `due`; anything else is
+    /// fine, an epic that doesn't exist included.
+    pub fn refuse_due_in_epic(
+        &self,
+        id: &str,
+        epic: Option<&str>,
+        due: Option<&str>,
+    ) -> Result<()> {
+        let (Some(epic), Some(due)) = (
+            epic.filter(|e| !e.is_empty()),
+            due.map(str::trim).filter(|d| !d.is_empty()),
+        ) else {
+            return Ok(());
+        };
+        match self.group(epic) {
+            Ok(group) if !group.is_sprint() => bail!(
+                "{id} is due {due}, so it can't be in the epic {epic}: an epic has no end date. \
+                 Take the due date off, or keep it in the loose backlog or a sprint"
+            ),
+            _ => Ok(()),
+        }
+    }
+
     /// [`set_epic`](Self::set_epic), or with `deliberate` set, past the
     /// started-sprint rule: what closing a sprint (its unfinished tickets
     /// back to the backlog) and backfill (tickets into a running sprint) do
@@ -688,6 +713,8 @@ impl Board {
         // afterwards — that would risk a half-moved, half-refused ticket if
         // someone else holds the lease.
         task.ensure_not_leased()?;
+        // A ticket with a due date can't go into an epic (ticket 253).
+        self.refuse_due_in_epic(&task.id_display(), epic, task.due().as_deref())?;
         // A started sprint is a commitment (ticket 083, replacing ADR-0009's
         // "in and out" rule): it takes no more tickets, and gives none back —
         // its tickets only move on, to todo.

@@ -85,6 +85,9 @@ fn verdict(ctx: Ctx, file: &str, from: &Place, to: &Place) -> Result<(), String>
     let draft = ticket.as_ref().is_some_and(|t| epic::is_draft(&t.tags));
     let stem = file.trim_end_matches(".md");
     epic::draft_rule(from, to, group_state(ctx, to), draft, stem)?;
+    // No due dates in epics (ticket 253).
+    let due = ticket.as_ref().map(|t| t.due.clone()).unwrap_or_default();
+    epic::due_rule(to, group_state(ctx, to), &due, stem)?;
     // Done waits for required tickets and children (ticket 213).
     if let Some(t) = &ticket {
         ctx.board.with(|b| match b {
@@ -244,7 +247,12 @@ fn ColumnView(column: Column) -> impl IntoView {
                 .map(|b| b.tickets(column).to_vec())
                 .unwrap_or_default()
         });
-        ctx.shown(list)
+        let mut list = ctx.shown(list);
+        // Due dates first in the backlog, soonest at the top (ticket 253).
+        if column.is(Kind::Backlog) {
+            amd_ui_model::ticket::due_first(&mut list);
+        }
+        list
     };
     // What the column shows: only tickets passing the repository filter
     // and the search.
@@ -261,13 +269,21 @@ fn ColumnView(column: Column) -> impl IntoView {
             .with(|b| b.as_ref().map(|b| b.label(column)))
             .unwrap_or_else(|| column.dir_name().to_string())
     });
-    let collapsible = move || {
-        ctx.board.with(|b| {
-            b.as_ref()
-                .is_some_and(|b| b.workflow.is_collapsible(column))
-        })
+    // Admin can keep the backlog from being folded away (ticket 253).
+    let kept_open = move || {
+        column == Column::Backlog
+            && ctx
+                .board
+                .with(|b| b.as_ref().is_some_and(|b| b.backlog_always_shown))
     };
-    let collapsed = move || ctx.collapsed.with(|c| c.contains(&column));
+    let collapsible = move || {
+        !kept_open()
+            && ctx.board.with(|b| {
+                b.as_ref()
+                    .is_some_and(|b| b.workflow.is_collapsible(column))
+            })
+    };
+    let collapsed = move || !kept_open() && ctx.collapsed.with(|c| c.contains(&column));
     let set_collapsed = move |hide: bool| {
         ctx.collapsed.update(|c| {
             if hide {
@@ -863,6 +879,20 @@ fn OpenEpicColumn(repo: String, name: String) -> impl IntoView {
             </header>
             <div class="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
                 {move || summary().map(|text| view! { <p class="px-1 text-[11px] text-slate-500">{text}</p> })}
+                // A sprint holding tickets with due dates (ticket 253).
+                {move || {
+                    let dated: Vec<String> = tickets.with(|list| {
+                        list.iter()
+                            .filter(|t| !t.due.trim().is_empty())
+                            .map(|t| format!("{} (due {})", t.id, t.due))
+                            .collect()
+                    });
+                    (is_sprint() && !dated.is_empty()).then(|| view! {
+                        <p role="status" class="mx-1 rounded bg-amber-100 px-2 py-1 text-[11px] text-amber-900 dark:bg-amber-900 dark:text-amber-100">
+                            {format!("⚠ Due dates in this sprint: {}. Check they fit it.", dated.join(", "))}
+                        </p>
+                    })
+                }}
                 <form
                     class="flex items-center gap-1 px-1"
                     class:hidden=move || !renaming.get()
@@ -1171,6 +1201,7 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
             ctx.focus_scroll.set(false);
         }
     });
+    let too_big = points.trim() == "13";
     let drag_file = file.clone();
     let is_dragging = {
         let file = file.clone();
@@ -1188,10 +1219,19 @@ fn Card(ticket: TicketSummary) -> impl IntoView {
             aria-current=move || focused.get().then_some("true")
             class=move || {
                 format!(
-                    "{} rounded-md border border-slate-200 bg-white p-2.5 text-sm shadow-sm hover:border-accent-400 focus:outline-2 focus:outline-accent-500 dark:border-slate-700 dark:bg-slate-900 {} {} {}",
+                    "{} rounded-md border bg-white p-2.5 text-sm shadow-sm hover:border-accent-400 focus:outline-2 focus:outline-accent-500 dark:bg-slate-900 {} {} {}",
                     if held { "cursor-pointer" } else { "cursor-grab" },
                     if is_dragging() { "opacity-50" } else { "" },
-                    if draft { "border-dashed border-amber-400 dark:border-amber-500" } else { "" },
+                    // One border colour each, so none is overridden by the
+                    // default's.
+                    if draft {
+                        "border-dashed border-amber-400 dark:border-amber-500"
+                    } else if too_big {
+                        // 13 points (ticket 253): break it into smaller children.
+                        "border-2 border-red-500 dark:border-red-500"
+                    } else {
+                        "border-slate-200 dark:border-slate-700"
+                    },
                     if focused.get() { "ring-2 ring-accent-500" } else { "" },
                 )
             }

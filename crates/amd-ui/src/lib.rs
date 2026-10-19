@@ -1529,6 +1529,36 @@ async fn set_time_limits(state: Tauri<'_, AppState>, todo: u32, doing: u32) -> R
     .await
 }
 
+/// How near a due date sends a ticket straight to todo (ticket 253).
+#[tauri::command]
+async fn set_due_to_todo_days(state: Tauri<'_, AppState>, days: u32) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        save_setting(board, &format!("due-to-todo-days {days}"), |s| {
+            s.set_due_to_todo_days(days);
+            Ok(())
+        })
+    })
+    .await
+}
+
+/// Whether the backlog column can be folded away (ticket 253).
+#[tauri::command]
+async fn set_backlog_always_shown(state: Tauri<'_, AppState>, on: bool) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        save_setting(
+            board,
+            &format!("backlog-always-shown {}", if on { "on" } else { "off" }),
+            |s| {
+                s.set_backlog_always_shown(on);
+                Ok(())
+            },
+        )
+    })
+    .await
+}
+
 /// Whether a priority set by hand pins its ticket (ticket 215).
 #[tauri::command]
 async fn set_priority_override(state: Tauri<'_, AppState>, on: bool) -> Result<SyncReport> {
@@ -2873,6 +2903,8 @@ pub fn run() {
             set_auto_priority,
             set_priority_override,
             set_time_limits,
+            set_due_to_todo_days,
+            set_backlog_always_shown,
             list_documents,
             document_history,
             read_document_version,

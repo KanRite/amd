@@ -115,6 +115,12 @@ const IMPORT_ISSUES: &str = "import-issues";
 const AUTO_PRIORITY: &str = "auto-priority";
 const PRIORITY_OVERRIDE: &str = "priority-override";
 const TODO_MAX_DAYS: &str = "todo-max-days";
+const DUE_TO_TODO_DAYS: &str = "due-to-todo-days";
+const BACKLOG_ALWAYS_SHOWN: &str = "backlog-always-shown";
+
+/// A ticket made or given a due date this near goes straight to todo
+/// (ticket 253), unless the board says otherwise.
+pub const DEFAULT_DUE_TO_TODO_DAYS: u32 = 3;
 const DOING_MAX_DAYS: &str = "doing-max-days";
 
 /// How long a ticket should take in todo and in doing (ticket 252), in
@@ -689,6 +695,47 @@ impl BoardSettings {
             } else {
                 self.config.set(key, &days.to_string());
             }
+        }
+    }
+
+    /// A ticket made, or given a due date, with this many days left or
+    /// fewer goes straight to todo (ticket 253): `due-to-todo-days`,
+    /// [`DEFAULT_DUE_TO_TODO_DAYS`] unset, 0 never.
+    pub fn due_to_todo_days(&self) -> u32 {
+        self.config
+            .get(DUE_TO_TODO_DAYS)
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(DEFAULT_DUE_TO_TODO_DAYS)
+    }
+
+    /// Sets [`due_to_todo_days`](Self::due_to_todo_days); the default
+    /// leaves no key.
+    pub fn set_due_to_todo_days(&mut self, days: u32) {
+        if days == DEFAULT_DUE_TO_TODO_DAYS {
+            self.config.remove(DUE_TO_TODO_DAYS);
+        } else {
+            self.config.set(DUE_TO_TODO_DAYS, &days.to_string());
+        }
+    }
+
+    /// Whether the backlog column can't be folded away (ticket 253):
+    /// `backlog-always-shown`, off unless set on.
+    pub fn backlog_always_shown(&self) -> bool {
+        matches!(
+            self.config
+                .get(BACKLOG_ALWAYS_SHOWN)
+                .map(|v| v.trim().to_lowercase())
+                .as_deref(),
+            Some("on" | "true" | "1" | "yes")
+        )
+    }
+
+    /// Sets [`backlog_always_shown`](Self::backlog_always_shown).
+    pub fn set_backlog_always_shown(&mut self, on: bool) {
+        if on {
+            self.config.set(BACKLOG_ALWAYS_SHOWN, "on");
+        } else {
+            self.config.remove(BACKLOG_ALWAYS_SHOWN);
         }
     }
 

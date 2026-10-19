@@ -129,6 +129,7 @@ pub fn AdminPanel() -> impl IntoView {
                 <IssuesAdmin />
 
                 <PriorityAdmin />
+                <DueDatesAdmin />
 
                 <EpicsAdmin />
 
@@ -1292,6 +1293,75 @@ fn PriorityAdmin() -> impl IntoView {
             <p class="text-xs text-slate-500">
                 "On: choosing a priority yourself pins that ticket, and Auto in its priority hands it back. Off: a priority you choose is only a floor; auto priority can still raise it."
             </p>
+            <Show when=move || note.with(Option::is_some)>
+                <p class="text-xs text-red-700 dark:text-red-300">{move || note.get().unwrap_or_default()}</p>
+            </Show>
+        </section>
+    }
+}
+
+/// Due dates on the board (ticket 253): how near a due date sends a ticket
+/// straight to todo, and whether the backlog column can be folded away.
+#[component]
+fn DueDatesAdmin() -> impl IntoView {
+    let ctx = Ctx::get();
+    let saved = move || {
+        ctx.board
+            .with(|b| b.as_ref().map_or(3, |b| b.due_to_todo_days))
+    };
+    let days = RwSignal::new(saved());
+    let shown = move || {
+        ctx.board
+            .with(|b| b.as_ref().is_some_and(|b| b.backlog_always_shown))
+    };
+    let note = RwSignal::new(None::<String>);
+    let apply = move |result: Result<amd_ui_model::SyncReport, String>| match result {
+        Ok(report) => {
+            ctx.report(report);
+            note.set(None);
+            ctx.reload();
+        }
+        Err(e) => note.set(Some(e)),
+    };
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Due dates and the backlog"</h3>
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+                <span>"A ticket due within"</span>
+                <input
+                    type="number"
+                    min="0"
+                    class="w-16 rounded border border-slate-400 bg-transparent px-1"
+                    aria-label="Days before its due date"
+                    prop:value=move || days.get().to_string()
+                    on:input=move |ev| days.set(event_target_value(&ev).parse().unwrap_or(0))
+                />
+                <span>"days goes straight to todo."</span>
+                <button
+                    class="rounded border border-slate-400 px-2 py-0.5 text-xs disabled:opacity-50"
+                    disabled=move || days.get() == saved()
+                    on:click=move |_| {
+                        let d = days.get_untracked();
+                        spawn_local(async move { apply(api::set_due_to_todo_days(d).await) });
+                    }
+                >
+                    "Save"
+                </button>
+            </div>
+            <p class="text-xs text-slate-500">
+                "When it's made or given its due date, from the loose backlog, unless it's a draft. Other tickets with due dates sit at the top of the backlog, soonest first. A ticket with a due date can't go in an epic; a sprint holding one shows a warning. 0 never sends one straight to todo."
+            </p>
+            <label class="flex items-center gap-2 text-sm font-semibold">
+                <input
+                    type="checkbox"
+                    prop:checked=shown
+                    on:change=move |ev| {
+                        let on = event_target_checked(&ev);
+                        spawn_local(async move { apply(api::set_backlog_always_shown(on).await) });
+                    }
+                />
+                "Always show the backlog: it can't be folded away"
+            </label>
             <Show when=move || note.with(Option::is_some)>
                 <p class="text-xs text-red-700 dark:text-red-300">{move || note.get().unwrap_or_default()}</p>
             </Show>

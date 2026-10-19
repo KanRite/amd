@@ -663,6 +663,21 @@ enum Cmd {
         #[arg(value_name = "on|off", value_parser = PossibleValuesParser::new(["on", "off"]))]
         action: Option<String>,
     },
+    /// Show or set how near a due date sends a ticket straight to todo
+    ///
+    /// A ticket in the loose backlog, not a draft, made or given a due date
+    /// with this many days left or fewer (or overdue) goes straight to todo.
+    /// 3 by default; 0 never
+    DueToTodo {
+        #[arg(value_name = "DAYS")]
+        days: Option<u32>,
+    },
+    /// Show or switch whether the backlog column can be folded away on the
+    /// desktop board (off: it can)
+    BacklogAlwaysShown {
+        #[arg(value_name = "on|off", value_parser = PossibleValuesParser::new(["on", "off"]))]
+        action: Option<String>,
+    },
     /// Retired: a TRIAGE ticket, such as an imported GitHub issue, is
     /// always high (ticket 248)
     #[command(hide = true)]
@@ -1358,6 +1373,8 @@ fn run() -> Result<()> {
         Cmd::TriagePriority { priority } => cmd_triage_priority(&board, priority),
         Cmd::AutoPriority { action, days } => cmd_auto_priority(&board, action.as_deref(), &days),
         Cmd::PriorityOverride { action } => cmd_priority_override(&board, action.as_deref()),
+        Cmd::DueToTodo { days } => cmd_due_to_todo(&board, days),
+        Cmd::BacklogAlwaysShown { action } => cmd_backlog_always_shown(&board, action.as_deref()),
         Cmd::Register { .. } | Cmd::Deregister { .. } => unreachable!("handled above"),
         Cmd::Clone { name, all } => cmd_clone(&board, name.as_deref(), all),
         Cmd::New(args) => cmd_new(&board, args),
@@ -1613,8 +1630,25 @@ fn run() -> Result<()> {
                     // Ticket 143: a due date, and a repeat that makes the
                     // next one when this one is done.
                     "due" => {
+                        // Not in an epic (ticket 253).
+                        let epic = match task.column.kind() {
+                            agile_md::board::Kind::Backlog => task.epic.clone(),
+                            _ => task.epic_meta(),
+                        };
+                        board.refuse_due_in_epic(
+                            &task.id_display(),
+                            epic.as_deref(),
+                            Some(&value),
+                        )?;
                         task.set_due(task.hash()?, &value)?;
                         println!("{} due {}", task.id_display(), display(&value));
+                        // Due soon: straight to todo (ticket 253).
+                        if let Some(dated) =
+                            agile_md::task::Task::from_path(&task.path, task.column)
+                            && let Some(line) = transition::straight_to_todo(&board, &dated)
+                        {
+                            println!("{line}");
+                        }
                     }
                     "recur" => {
                         task.set_recur(task.hash()?, &value)?;
@@ -2301,6 +2335,20 @@ fn cmd_destination(
         }
         (Destination::Epic(name), None) => {
             let tasks = board.tasks_in_group(&name)?;
+            // A sprint holding tickets with due dates (ticket 253): they
+            // may not fit its days.
+            if board.group(&name).is_ok_and(|g| g.is_sprint()) {
+                let dated: Vec<String> = tasks
+                    .iter()
+                    .filter_map(|t| t.due().map(|due| format!("{} (due {due})", t.id_display())))
+                    .collect();
+                if !dated.is_empty() {
+                    eprintln!(
+                        "warning: {name} holds tickets with due dates: {}. Check they fit the sprint",
+                        dated.join(", ")
+                    );
+                }
+            }
             render::named(&name, tasks, tag)
         }
     }
@@ -2582,6 +2630,57 @@ fn cmd_time_limits(board: &Board, days: &[u32]) -> Result<()> {
     if !board_settings::load(board).auto_priority() {
         println!("(auto priority is off: `amd auto-priority on` to use them)");
     }
+    Ok(())
+}
+
+/// `amd due-to-todo [DAYS]` (ticket 253).
+fn cmd_due_to_todo(board: &Board, days: Option<u32>) -> Result<()> {
+    let say = |days: u32| match days {
+        0 => "a due date never sends a ticket straight to todo".to_string(),
+        days => format!("a ticket due within {days} days goes straight to todo"),
+    };
+    let Some(days) = days else {
+        println!("{}", say(board_settings::load(board).due_to_todo_days()));
+        return Ok(());
+    };
+    with_auto_commit(
+        board,
+        "settings",
+        "due-to-todo-days",
+        &days.to_string(),
+        || {
+            let mut settings = board_settings::load(board);
+            settings.set_due_to_todo_days(days);
+            settings.save(board)
+        },
+    )?;
+    println!("{}", say(days));
+    Ok(())
+}
+
+/// `amd backlog-always-shown [on|off]` (ticket 253).
+fn cmd_backlog_always_shown(board: &Board, action: Option<&str>) -> Result<()> {
+    let say = |on: bool| {
+        if on {
+            "the backlog column is always shown: it can't be folded away"
+        } else {
+            "the backlog column can be folded away"
+        }
+    };
+    let Some(action) = action else {
+        println!(
+            "{}",
+            say(board_settings::load(board).backlog_always_shown())
+        );
+        return Ok(());
+    };
+    let on = action == "on";
+    with_auto_commit(board, "settings", "backlog-always-shown", action, || {
+        let mut settings = board_settings::load(board);
+        settings.set_backlog_always_shown(on);
+        settings.save(board)
+    })?;
+    println!("{}", say(on));
     Ok(())
 }
 
@@ -3408,6 +3507,8 @@ fn changes_board(command: &Cmd) -> bool {
                     ..
                 }
                 | Cmd::PriorityOverride { action: Some(_) }
+                | Cmd::DueToTodo { days: Some(_) }
+                | Cmd::BacklogAlwaysShown { action: Some(_) }
                 | Cmd::SharedDocuments { name: Some(_), .. }
                 | Cmd::SharedDocuments { clear: true, .. }
                 | Cmd::Templates {
@@ -3456,6 +3557,8 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::TriagePriority { .. }
         | Cmd::AutoPriority { action: None, .. }
         | Cmd::PriorityOverride { action: None }
+        | Cmd::DueToTodo { days: None }
+        | Cmd::BacklogAlwaysShown { action: None }
         | Cmd::Group {
             command: None | Some(GroupCmd::List),
         } => Read,
@@ -3730,6 +3833,11 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
     if let Some(rule) = &args.recur {
         created.task.set_recur(created.task.hash()?, rule)?;
     }
+    // Due soon: straight to todo (ticket 253), in the same commit.
+    let moved = args.due.as_ref().and_then(|_| {
+        agile_md::task::Task::from_path(&created.task.path, created.task.column)
+            .and_then(|dated| transition::straight_to_todo(board, &dated))
+    });
     // What it requires (ticket 214), linked both ways in the same commit.
     for line in requires_links(board, &created.task, &requires)? {
         println!("{line}");
@@ -3750,6 +3858,9 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
         println!("{id} now links to {}", created.task.id_display());
     }
     println!("created {}/{name}{note}", created.task.column);
+    if let Some(moved) = &moved {
+        println!("{moved}");
+    }
     if let Some(drafted) = &created.drafted {
         eprintln!("amd: {drafted}");
     }

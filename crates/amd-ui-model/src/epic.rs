@@ -156,6 +156,25 @@ pub fn is_draft(tags: &[String]) -> bool {
 /// The draft rule (ticket 114), mirroring `amd`'s: a draft can't leave the
 /// backlog, and can't go into a sprint. Filing it into an epic, or moving
 /// it between the loose backlog and an epic, is fine.
+/// A ticket with a due date can't go into an epic (ticket 253), worded as
+/// amd-lib's `Board::refuse_due_in_epic`; a sprint may hold one.
+pub fn due_rule(
+    to: &Place,
+    to_group: Option<GroupState>,
+    due: &str,
+    ticket: &str,
+) -> Result<(), String> {
+    let due = due.trim();
+    match (to_group, &to.epic) {
+        (Some(group), Some(name)) if group.kind == GroupKind::Epic && !due.is_empty() => {
+            Err(format!(
+                "{ticket} is due {due}, so it can't be in the epic {name}: an epic has no end date."
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
 pub fn draft_rule(
     from: &Place,
     to: &Place,
@@ -251,6 +270,24 @@ mod tests {
 
     fn names(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_ticket_with_a_due_date_cant_be_dropped_into_an_epic() {
+        let epic = Some(GroupState {
+            kind: GroupKind::Epic,
+            started: false,
+        });
+        let sprint = Some(GroupState {
+            kind: GroupKind::Sprint,
+            started: false,
+        });
+        let into = Place::epic("checkout");
+        let err = due_rule(&into, epic, "2026-11-01", "001").unwrap_err();
+        assert!(err.contains("can't be in the epic checkout"), "{err}");
+        assert!(due_rule(&into, epic, "", "001").is_ok());
+        assert!(due_rule(&Place::epic("s1"), sprint, "2026-11-01", "001").is_ok());
+        assert!(due_rule(&Place::column(Column::Backlog), None, "2026-11-01", "001").is_ok());
     }
 
     #[test]
