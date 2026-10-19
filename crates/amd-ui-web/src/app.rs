@@ -63,13 +63,15 @@ pub enum Overlay {
     },
 }
 
-/// The ticket a new one is made from with Save and New (ticket 227): on
-/// its board, by id and title.
+/// The ticket a new one is made from with Save and New (ticket 227) or Add
+/// child (ticket 259): on its board, by id and title, and the link the
+/// dialog starts on.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LinkBack {
     pub repo: String,
     pub id: String,
     pub title: String,
+    pub kind: LinkKind,
 }
 
 /// The ticket a new repository is made for (ticket 228).
@@ -87,6 +89,9 @@ pub enum LinkKind {
     /// That ticket requires the new one: it was found to depend on it.
     Requires,
     Related,
+    /// The new ticket is that one's child (ticket 259): a big ticket
+    /// broken into smaller ones.
+    Child,
     None,
 }
 

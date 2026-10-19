@@ -1159,7 +1159,10 @@ off**, ticket 141) to
   none) goes to the `create_ticket` command as `required_by`/`related_to`.
   `TicketFields.required_by` links each named ticket as requiring the new
   one in the `new:` commit; the new ticket goes on the linked ticket's
-  board.
+  board. **Add child** (ticket 259) is the same flow starting on
+  `LinkKind::Child` (`LinkBack.kind` picks the dialog's starting choice),
+  sent as `parent`, which `TicketFields.parent` writes on the child with
+  the parent's `## Children` link in the one commit.
 
 - **Typed links** (ticket 207, `crates/amd-lib/src/links.rs`, `amd link
   <ref> <ref>... [--type T] [--remove] [--one-way]`, the MCP `link_tickets`,

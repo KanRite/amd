@@ -65,7 +65,8 @@ a solo developer without it.
   each written on both tickets and changeable later. A tree draws what each
   ticket requires and relates to, and cards show how many links they have.
 - **Save and New:** found a ticket depends on one that doesn't exist yet?
-  Save it and make the missing one, already linked.
+  Save it and make the missing one, already linked. **Add child** breaks a
+  big ticket into smaller ones the same way.
 - **Who created it** is recorded; **who last edited it** comes from git.
 - **Tags** are uppercase and can be limited to the project's own list; DRAFT
   and TRIAGE are built in.

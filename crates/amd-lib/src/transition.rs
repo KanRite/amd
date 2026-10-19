@@ -1258,6 +1258,51 @@ mod tests {
         }
     }
 
+    /// Ticket 259: Add child makes a ticket under the one being edited:
+    /// its `parent`, and the parent's `## Children` link, in one commit.
+    #[test]
+    fn a_new_ticket_can_be_a_child_of_an_existing_one_in_one_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        for args in [
+            vec!["init", "-q"],
+            vec!["config", "user.email", "t@t.co"],
+            vec!["config", "user.name", "t"],
+            vec!["config", "commit.gpgsign", "false"],
+        ] {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(args)
+                .status()
+                .unwrap();
+        }
+        std::fs::write(dir.path().join(".settings"), "sync = off\n").unwrap();
+        let board = empty_board(dir.path());
+        create_ticket(&board, &fields("Checkout")).unwrap();
+        create_ticket(
+            &board,
+            &TicketFields {
+                parent: "001".into(),
+                ..fields("Card form")
+            },
+        )
+        .unwrap();
+        let child = board.find("002").unwrap();
+        assert_eq!(child.parent().as_deref(), Some("001"));
+        let parent = std::fs::read_to_string(board.find("001").unwrap().path).unwrap();
+        assert!(parent.contains("## Children"), "{parent}");
+        assert!(parent.contains("[[002-card-form]]"), "{parent}");
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir.path())
+            .args(["show", "--name-only", "--format=%s", "HEAD"])
+            .output()
+            .unwrap();
+        let shown = String::from_utf8_lossy(&out.stdout);
+        assert!(shown.contains("001-checkout.md"), "{shown}");
+        assert!(shown.contains("002-card-form.md"), "{shown}");
+    }
+
     /// Ticket 227: Save and New makes the missing ticket already required
     /// by the one being edited, both ends written in the one commit.
     #[test]
