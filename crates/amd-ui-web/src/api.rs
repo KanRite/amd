@@ -364,6 +364,16 @@ pub async fn update_status() -> Result<Option<amd_ui_model::UpdateInfo>, String>
     call("update_status", &NoArgs {}).await
 }
 
+/// The update bar's Update: installs the newest release (ticket 191).
+pub async fn apply_update() -> Result<amd_ui_model::UpdateResult, String> {
+    call("apply_update", &NoArgs {}).await
+}
+
+/// Starts amdui again, into the version just installed.
+pub async fn restart_app() -> Result<(), String> {
+    call("restart_app", &NoArgs {}).await
+}
+
 #[derive(Serialize)]
 struct SnoozeArgs<'a> {
     version: &'a str,

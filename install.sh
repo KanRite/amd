@@ -201,10 +201,11 @@ check_system() {
 # one script, written beside amd as amd-uninstall, and also what
 # `install.sh --uninstall` runs.
 uninstaller() {
-  local bin="$1" data="$2"
+  local bin="$1" data="$2" method="${3:-}"
   cat <<HEAD
 #!/usr/bin/env bash
 # agile-md's uninstaller, written by its installer (ticket 242).
+# agile-md install: ${method:-unknown}
 #
 #   amd-uninstall [--all] [--yes]
 #
@@ -317,6 +318,9 @@ can_build_board() {
 }
 
 build_from_source() {
+  # How this install was made (ticket 191): `amd update` only replaces a
+  # release install, never a source build.
+  METHOD=source
   in_clone || die "building from source is done in a clone of https://github.com/${REPO} (see CONTRIBUTING.md)"
   command -v cargo >/dev/null 2>&1 || die "cargo not found — install Rust from https://rustup.rs"
   printf 'Building amd from source...\n'
@@ -342,6 +346,7 @@ build_from_source() {
 }
 
 download_release() {
+  METHOD=release
   command -v curl >/dev/null 2>&1 || die "curl not found"
   command -v unzip >/dev/null 2>&1 || die "unzip not found — install it, or use --from-source"
 
@@ -423,7 +428,7 @@ if [ -f "${DIR}/amdui" ]; then
   echo "Installed amdui -> ${DIR}/amdui   (the desktop board)"
   install_launcher
 fi
-uninstaller "${DIR}" "${XDG_DATA_HOME:-${HOME}/.local/share}" > "${DIR}/amd-uninstall"
+uninstaller "${DIR}" "${XDG_DATA_HOME:-${HOME}/.local/share}" "${METHOD:-unknown}" > "${DIR}/amd-uninstall"
 chmod +x "${DIR}/amd-uninstall"
 echo "To uninstall later:  ${DIR}/amd-uninstall"
 case ":${PATH}:" in

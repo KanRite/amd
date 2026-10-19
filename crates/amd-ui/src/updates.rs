@@ -4,12 +4,15 @@
 //!
 //! Silent about failure, as `update::check` is: offline, rate limited or a
 //! garbled answer is "nothing to report", never an error on screen.
+//! `AMD_UPDATE_RELEASES=file://…` reads the release list (and `file://`
+//! downloads) from disk instead, as `amd update` does, for testing.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agile_md::settings::Config;
 use agile_md::update::{self, Release, ReleaseSource, Version};
-use amd_ui_model::UpdateInfo;
+use agile_md::update_apply::{self, Applied, Fetch, Install};
+use amd_ui_model::{UpdateInfo, UpdateResult};
 
 /// agile-md's releases, newest first; 30 is far more than a build is behind.
 const RELEASES: &str = "https://api.github.com/repos/agile-md/amd/releases?per_page=30";
@@ -19,6 +22,12 @@ struct GitHub;
 
 impl ReleaseSource for GitHub {
     fn releases(&self) -> anyhow::Result<Vec<Release>> {
+        // As `amd update`: the tests point the list at a file.
+        if let Ok(list) = std::env::var("AMD_UPDATE_RELEASES")
+            && let Some(path) = list.strip_prefix("file://")
+        {
+            return update::parse_releases(&std::fs::read_to_string(path)?);
+        }
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(10)))
             .build()
@@ -62,4 +71,76 @@ pub fn status() -> Option<UpdateInfo> {
 pub fn later(version: &str) -> anyhow::Result<()> {
     let path = update::state_path().ok_or_else(|| anyhow::anyhow!("no home folder"))?;
     update::snooze(&path, version, now())
+}
+
+/// Downloads for an update (ticket 191): a release zip is about 9 MB.
+struct Download(ureq::Agent);
+
+impl Fetch for Download {
+    fn get(&self, url: &str) -> anyhow::Result<Vec<u8>> {
+        if let Some(path) = url.strip_prefix("file://") {
+            return Ok(std::fs::read(path)?);
+        }
+        Ok(self
+            .0
+            .get(url)
+            .header("User-Agent", concat!("amdui/", env!("CARGO_PKG_VERSION")))
+            .call()?
+            .into_body()
+            .with_config()
+            .limit(200 * 1024 * 1024)
+            .read_to_vec()?)
+    }
+}
+
+/// The update bar's Update (ticket 191): replaces amd and amdui with the
+/// newest release's, one release at a time, through
+/// `agile_md::update_apply`, which touches nothing else. An install
+/// amdui doesn't replace says why instead.
+pub fn apply() -> UpdateResult {
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    let failed = |why: String| UpdateResult::Failed {
+        why,
+        now: current.clone(),
+    };
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(err) => return failed(format!("couldn't find amdui: {err}")),
+    };
+    let dir = match update_apply::install_dir(&exe) {
+        Install::Managed(dir) => dir,
+        Install::Unmanaged { why, reinstall } => {
+            return UpdateResult::Unmanaged { why, reinstall };
+        }
+    };
+    let Some(version) = Version::parse(&current) else {
+        return failed("this build has no release version".into());
+    };
+    let releases = match GitHub.releases() {
+        Ok(releases) => releases,
+        Err(err) => return failed(format!("couldn't reach GitHub: {err:#}")),
+    };
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(300)))
+        .build()
+        .into();
+    match update_apply::apply(&dir, version, &releases, &Download(agent), &mut |_| {}) {
+        Applied {
+            reached: Some(v),
+            failed: None,
+        } => UpdateResult::Updated {
+            version: v.to_string(),
+        },
+        Applied {
+            reached,
+            failed: Some((at, why)),
+        } => UpdateResult::Failed {
+            why: format!("stopped at {at}: {why}"),
+            now: reached.map_or(current.clone(), |v| v.to_string()),
+        },
+        Applied {
+            reached: None,
+            failed: None,
+        } => failed("there's nothing newer to install".into()),
+    }
 }

@@ -449,13 +449,27 @@ disagree.
   editor.
 - **The update bar.** When a newer agile-md is out, an orange bar across
   the top of every screen says so, with **What's new** (the release notes),
-  **Update** and **Later**. Update shows the command to run (the installer,
-  run again) and that your boards, documents and settings aren't touched;
-  restart amdui afterwards. Later hides that version for a day, even across
+  **Update** and **Later**. Update installs it and restarts amdui (close a
+  ticket you're editing first). Later hides that version for a day, even across
   restarts; a newer release still shows at once. amdui asks GitHub at most
   once a day, and a failed check says nothing. Turn it off with
   `update-check = off` in `~/.config/agile-md/config`, or
   `AMD_UPDATE_CHECK=0`.
+
+  **How an update is applied** (also `amd update` on the command line,
+  `amd update --check` to only look): if you're several releases behind,
+  each one is installed in turn, oldest first. Each download is checked
+  against the SHA-256 GitHub publishes for it and run once before it
+  replaces anything, so a failure part way leaves the last good release
+  working. Only `amd` and `amdui` are written, each to a temporary file
+  beside it and then renamed over the old one; the old ones are kept as
+  `amd.previous` and `amdui.previous`, and `amd update --rollback` puts
+  them back. Your projects, settings and locks are never opened.
+
+  Only an install made by agile-md's installer from a release updates
+  itself. One built from source, from a package manager, or installed
+  before 4.6 says so and shows what to do instead: for the last, run the
+  installer once more.
 - **Admin**, the project's settings, shared with the team through the
   tickets repository: auto-commit, tags, the columns and how tickets move
   between them, WIP limits, how long a lock lasts, auto priority, GitHub

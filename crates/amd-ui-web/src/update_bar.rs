@@ -1,21 +1,68 @@
 //! The update bar (ticket 192): across the top of every screen when a newer
-//! agile-md is out, in orange, a colour no accent uses. **Update** says how
-//! (amdui applying it itself is ticket 191); **Later** hides that version
-//! for a day, across restarts; a still newer release shows at once.
+//! agile-md is out, in orange, a colour no accent uses. **Update** installs
+//! it and restarts amdui (ticket 191), after asking for an open ticket to be
+//! closed so nothing typed is lost; an install amdui doesn't replace says
+//! why and how instead. **Later** hides that version for a day, across
+//! restarts; a still newer release shows at once.
 
-use amd_ui_model::{INSTALL_COMMAND, UpdateInfo};
+use amd_ui_model::{INSTALL_COMMAND, UpdateInfo, UpdateResult};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
+use crate::app::{Ctx, Overlay};
+
+/// Where Update has got to.
+#[derive(Clone, Debug, PartialEq)]
+enum Phase {
+    Idle,
+    /// A ticket is open in the editor: close it first.
+    EditorOpen,
+    Working,
+    Updated(String),
+    /// Not an install amdui replaces: why, and whether the installer is the
+    /// way (then its command is shown).
+    Unmanaged(String, bool),
+    Failed {
+        why: String,
+        now: String,
+    },
+}
 
 /// How often the page asks again; amdui asks GitHub at most daily anyway.
 const RECHECK: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 
 #[component]
 pub fn UpdateBar() -> impl IntoView {
+    let ctx = Ctx::get();
     let offer = RwSignal::new(None::<UpdateInfo>);
-    let how = RwSignal::new(false);
+    let phase = RwSignal::new(Phase::Idle);
+    let update = move || {
+        if ctx
+            .overlay
+            .with_untracked(|o| matches!(o, Some(Overlay::Editor(_))))
+        {
+            phase.set(Phase::EditorOpen);
+            return;
+        }
+        phase.set(Phase::Working);
+        spawn_local(async move {
+            match api::apply_update().await {
+                Ok(UpdateResult::Updated { version }) => {
+                    phase.set(Phase::Updated(version));
+                    let _ = api::restart_app().await;
+                }
+                Ok(UpdateResult::Unmanaged { why, reinstall }) => {
+                    phase.set(Phase::Unmanaged(why, reinstall))
+                }
+                Ok(UpdateResult::Failed { why, now }) => phase.set(Phase::Failed { why, now }),
+                Err(why) => phase.set(Phase::Failed {
+                    why,
+                    now: String::new(),
+                }),
+            }
+        });
+    };
     let ask = move || {
         spawn_local(async move {
             // Silent on failure: no network is nothing to report.
@@ -31,7 +78,7 @@ pub fn UpdateBar() -> impl IntoView {
             return;
         };
         offer.set(None);
-        how.set(false);
+        phase.set(Phase::Idle);
         spawn_local(async move {
             let _ = api::snooze_update(&version).await;
         });
@@ -75,24 +122,53 @@ pub fn UpdateBar() -> impl IntoView {
                         <button class="underline" on:click=notes>"What's new"</button>
                     </p>
                     <button
-                        class=format!("{button} bg-orange-600 text-white hover:bg-orange-500")
-                        aria-expanded=move || how.get().to_string()
-                        on:click=move |_| how.update(|h| *h = !*h)
+                        class=format!("{button} bg-orange-600 text-white hover:bg-orange-500 disabled:opacity-60")
+                        disabled=move || phase.with(|p| matches!(p, Phase::Working | Phase::Updated(_)))
+                        title="Install it and restart amdui; your boards, documents and settings aren't touched"
+                        on:click=move |_| update()
                     >
-                        "Update"
+                        {move || match phase.get() {
+                            Phase::Working => "Updating…",
+                            Phase::Failed { .. } => "Retry",
+                            _ => "Update",
+                        }}
                     </button>
                     <button
-                        class=format!("{button} border border-orange-400 hover:bg-orange-200 dark:border-orange-500 dark:hover:bg-orange-800")
+                        class=format!("{button} border border-orange-400 hover:bg-orange-200 disabled:opacity-60 dark:border-orange-500 dark:hover:bg-orange-800")
+                        disabled=move || phase.with(|p| matches!(p, Phase::Working | Phase::Updated(_)))
                         title="Hide this version for a day"
                         on:click=later
                     >
                         "Later"
                     </button>
                 </div>
-                <Show when=move || how.get()>
+                {move || {
+                    let line = match phase.get() {
+                        Phase::Idle | Phase::Unmanaged(..) => return None,
+                        Phase::EditorOpen => {
+                            "Close the ticket you're editing first, so nothing you've typed is lost, then Update.".to_string()
+                        }
+                        Phase::Working => {
+                            "Downloading and checking the release; amdui restarts when it's in. Your boards, documents and settings aren't touched.".to_string()
+                        }
+                        Phase::Updated(v) => format!("Updated to {v}. Restarting…"),
+                        Phase::Failed { why, now } => {
+                            if now.is_empty() {
+                                format!("The update didn't finish: {why}")
+                            } else {
+                                format!("The update didn't finish: {why}. amdui is {now}, working as before.")
+                            }
+                        }
+                    };
+                    Some(view! { <p class="text-sm">{line}</p> })
+                }}
+                <Show when=move || phase.with(|p| matches!(p, Phase::Unmanaged(..)))>
+                    <p class="text-sm">{move || match phase.get() { Phase::Unmanaged(why, _) => format!("{why}."), _ => String::new() }}</p>
+                </Show>
+                <Show when=move || phase.with(|p| matches!(p, Phase::Unmanaged(_, true)))>
                     <div class="flex flex-col gap-1 text-sm">
                         <label for="update-command">
-                            "Run this in a terminal, then restart amdui. Your boards, documents and settings aren't touched."
+                            "The installer, to run in a terminal, then restart amdui. Your boards, documents and settings aren't touched."
                         </label>
                         <input
                             id="update-command"
