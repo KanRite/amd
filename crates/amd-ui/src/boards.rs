@@ -210,6 +210,7 @@ impl Project {
             },
             due_to_todo_days: settings.due_to_todo_days(),
             backlog_always_shown: settings.backlog_always_shown(),
+            needs_version: agile_md::compat::needed(own_board).map(|v| v.to_string()),
             priority_override: settings.priority_override(),
             archived: settings.archived(),
         })

@@ -1601,6 +1601,38 @@ bash install.sh [--dir DIR] [--version vX.Y.Z] [--from-source]
   skill): quote the literal `"done"` (SC1010), `set -euo pipefail`, and
   shellcheck `--severity=warning` clean.
 
+## Compatibility: breaking changes are opt-in (ticket 193, ADR 0008)
+
+Every release must read what any earlier release wrote, and an older build
+must keep working on data a newer one has touched. So:
+
+- **Additive only by default**: new optional frontmatter fields older
+  builds ignore, new files and folders they skip.
+- **Unknown fields round-trip untouched**: no write may drop or rewrite a
+  frontmatter key it doesn't know (`set_meta` replaces one line;
+  `compat`'s tests check every write path keeps foreign keys).
+- **Nothing migrates by itself**: opening amd or amdui, or updating, never
+  rewrites data. The CLI's `migrate_settings` (tickets 111, 182) runs only
+  when `changes_board`, never on a read.
+- **A breaking change is an opt-in** the user runs deliberately, with an ADR
+  in agile-md-documents and a plain statement of what older builds lose.
+- **A required update is the team's** (`crates/amd-lib/src/compat.rs`):
+  `min-version` in the tickets `.settings`, set only by `amd
+  require-version <v>` (confirmed or `--yes`, refused above the person's
+  own build, committed; `--clear`). `compat::needed` is the required
+  version when newer than this build; `ensure_version`, called from
+  `archive::ensure_writable` (so every change, in the CLI, amdui, documents
+  and the MCP tools), makes the project read-only with a message naming
+  `amd update`. amdui: `Board.needs_version`, and the update bar's
+  required form (Update, no Later; `role="alert"`). Builds before 193
+  ignore the key.
+- **Tested**: `tests/fixtures/board-4.5.0/` (written by the 4.5.0 release,
+  never regenerated; add a fixture per later release beside it) is read
+  and changed by the new build, reading must leave the clone clean, and
+  with `AMD_PREVIOUS` (CI downloads the latest release, cached by tag so
+  each counts once) the previous release reads and changes a board the new
+  build wrote.
+
 ## Versioning & releasing
 
 Cut releases by tag: `git tag -a vX.Y.Z && git push --tags` triggers

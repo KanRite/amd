@@ -152,8 +152,10 @@ a solo developer without it.
 - **A bottom panel** with a terminal and an AI tab running your own AI tool.
 - **Speech to text**, optional and entirely on your machine.
 - **An Editor button**, themes, accent colours and zoom.
-- **Update check:** an orange bar in amdui tells you when a newer release
-  is out, with its notes, how to update, and Later.
+- **Updates:** an orange bar in amdui tells you when a newer release is
+  out; Update installs it and restarts (`amd update` does the same), never
+  touching your projects. Releases stay compatible with each other, and a
+  team can require a minimum version (`amd require-version`).
 
 ### AI, if you want it
 
