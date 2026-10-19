@@ -27,7 +27,8 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use sha2::{Digest, Sha256};
@@ -272,10 +273,7 @@ fn write_executable(path: &Path, data: &[u8]) -> Result<()> {
 
 /// Runs `bin --version` and checks it names `version`.
 fn runs_as(bin: &Path, version: Version) -> Result<()> {
-    let out = Command::new(bin)
-        .arg("--version")
-        .output()
-        .with_context(|| format!("running {}", bin.display()))?;
+    let out = version_output(bin).with_context(|| format!("running {}", bin.display()))?;
     let text = String::from_utf8_lossy(&out.stdout);
     if !out.status.success() || !text.contains(&version.to_string()) {
         bail!(
@@ -289,6 +287,25 @@ fn runs_as(bin: &Path, version: Version) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// `bin --version`'s output, run as soon as it can be (ticket 265). A file
+/// just written can't be run while anything still holds it open for
+/// writing, and a process another thread forks in that moment holds the
+/// write handle until it execs: Linux says "Text file busy" (ETXTBSY). It
+/// clears within milliseconds, so the run is tried again, a few times,
+/// as Go's standard library does.
+fn version_output(bin: &Path) -> std::io::Result<Output> {
+    let mut tries = 0;
+    loop {
+        match Command::new(bin).arg("--version").output() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && tries < 20 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(10 * tries));
+            }
+            result => return result,
+        }
+    }
 }
 
 /// Puts the previous `amd` and `amdui` back (`amd update --rollback`),
@@ -401,11 +418,38 @@ mod tests {
         dir
     }
 
+    /// Ticket 265: a program still open for writing somewhere can't be
+    /// run ("Text file busy"); the run waits it out rather than failing.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_program_still_open_for_writing_is_run_once_it_is_closed() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("amd");
+        let mut file = fs::File::create(&bin).unwrap();
+        file.write_all(b"#!/bin/sh\necho amd 9.9.9\n").unwrap();
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        // Still open for writing: running it now would be refused.
+        assert_eq!(
+            Command::new(&bin)
+                .arg("--version")
+                .output()
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::ExecutableFileBusy
+        );
+        let closer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            drop(file);
+        });
+        let out = version_output(&bin).unwrap();
+        closer.join().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "amd 9.9.9");
+    }
+
     fn version_of(dir: &Path, bin: &str) -> String {
-        let out = Command::new(dir.join(bin))
-            .arg("--version")
-            .output()
-            .unwrap();
+        let out = version_output(&dir.join(bin)).unwrap();
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 

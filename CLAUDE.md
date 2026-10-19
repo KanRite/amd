@@ -281,7 +281,8 @@ redundant. Their history is in git if it is ever wanted again.
   against GitHub's `digest` (`update::Asset`, parsed by `parse_releases`;
   every release file has one), `amd` (required) and `amdui` unzipped to
   `.<bin>.new-<pid>` beside the live ones, each run with `--version`
-  (must name the version), then the live one renamed to `<bin>.previous`
+  (must name the version; `version_output` retries "Text file busy", ETXTBSY,
+  a few times, ticket 265), then the live one renamed to `<bin>.previous`
   and the new one renamed in (put back on failure). Nothing else is
   written. `rollback(dir)`. `Fetch` is the front end's (`ureq`); deps
   `zip` (deflate via zlib-rs) and `sha2`. CLI `amd update [--check]
