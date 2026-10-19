@@ -455,8 +455,11 @@ disagree.
   rich text, with a switch to the raw markdown. Lock, renew, unlock — or break someone else's lock, after
   a confirmation — from the same window. **Save and New** saves the ticket
   and opens New ticket linked back to it ("012 requires this" unless you
-  pick related or no link), for when you find it depends on a ticket that
-  doesn't exist yet.
+  pick a child, related or no link), for when you find it depends on a ticket that
+  doesn't exist yet. **Add child** does the same starting on "A child of
+  012", for breaking a big ticket into smaller ones: the new ticket gets
+  `parent`, and the parent lists it under Children, in one commit. (On the
+  command line, `amd new "Card form" --parent 12`.)
 - **Filters** across the top: repository, person, a search, the sort order,
   and Reset.
 - **New ticket**, **+ Sprint**, **+ Epic**; open one from its box to start

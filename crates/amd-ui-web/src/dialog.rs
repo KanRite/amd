@@ -12,9 +12,9 @@ use crate::app::{Ctx, LinkBack, LinkKind, Modal, NewRepoFor, Overlay};
 pub fn NewTicketDialog(link: Option<LinkBack>) -> impl IntoView {
     let ctx = Ctx::get();
     let title = RwSignal::new(String::new());
-    // From Save and New (ticket 227): how it ties back, "requires" unless
-    // changed.
-    let kind = RwSignal::new(LinkKind::Requires);
+    // From Save and New (ticket 227) or Add child (259): how it ties back,
+    // as the button chose, unless changed.
+    let kind = RwSignal::new(link.as_ref().map_or(LinkKind::Requires, |b| b.kind));
     let link = StoredValue::new(link);
     let draft = RwSignal::new(false);
     let busy = RwSignal::new(false);
@@ -101,14 +101,22 @@ pub fn NewTicketDialog(link: Option<LinkBack>) -> impl IntoView {
                                     on:change=move |ev| {
                                         kind.set(match event_target_value(&ev).as_str() {
                                             "related" => LinkKind::Related,
+                                            "child" => LinkKind::Child,
                                             "none" => LinkKind::None,
                                             _ => LinkKind::Requires,
                                         })
                                     }
                                 >
-                                    <option value="requires" selected>{format!("{name} requires this")}</option>
-                                    <option value="related">{format!("Related to {name}")}</option>
-                                    <option value="none">"No link"</option>
+                                    <option value="requires" selected=b.kind == LinkKind::Requires>
+                                        {format!("{name} requires this")}
+                                    </option>
+                                    <option value="child" selected=b.kind == LinkKind::Child>
+                                        {format!("A child of {name}")}
+                                    </option>
+                                    <option value="related" selected=b.kind == LinkKind::Related>
+                                        {format!("Related to {name}")}
+                                    </option>
+                                    <option value="none" selected=b.kind == LinkKind::None>"No link"</option>
                                 </select>
                             </label>
                         }

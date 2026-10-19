@@ -399,6 +399,8 @@ fn move_in(
 
 /// Creates a ticket in `repo`'s backlog, the way `amd new` does.
 #[tauri::command]
+// A command's arguments are the page's named fields, not a call site.
+#[allow(clippy::too_many_arguments)]
 async fn create_ticket(
     state: Tauri<'_, AppState>,
     title: String,
@@ -407,11 +409,13 @@ async fn create_ticket(
     draft: Option<bool>,
     required_by: Option<String>,
     related_to: Option<String>,
+    parent: Option<String>,
 ) -> Result<Created> {
     change(&state, move |project| {
         let repo = repo.unwrap_or_default();
         let board = project.board(&repo)?;
-        // Save and New (ticket 227): linked back to the ticket it came from.
+        // Save and New (ticket 227): linked back to the ticket it came from;
+        // Add child (ticket 259): under it.
         let required_by: Vec<String> = required_by.into_iter().collect();
         let related: Vec<String> = related_to.into_iter().collect();
         let fields = TicketFields {
@@ -428,7 +432,7 @@ async fn create_ticket(
                 Vec::new()
             },
             branch_type: String::new(),
-            parent: String::new(),
+            parent: parent.unwrap_or_default(),
             related,
             clone_of: String::new(),
             body: String::new(),

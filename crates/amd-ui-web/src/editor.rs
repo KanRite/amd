@@ -264,13 +264,15 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
     // Save and New (ticket 227): saves this ticket if it has edits, then
     // opens New ticket linked back to it, for a ticket found to depend on
     // one that's missing.
+    // Add child (ticket 259) is the same, starting on "a child of".
     let save_and_new = {
         let file = file_for_new;
-        move |_| {
+        move |kind: crate::app::LinkKind| {
             let back = crate::app::LinkBack {
                 repo: place.get_value().repo,
                 id: id.get_untracked(),
                 title: fields.with_untracked(|f| f.title.clone()),
+                kind,
             };
             let open_new = move || {
                 ctx.overlay
@@ -791,6 +793,18 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                 >
                     "Duplicate"
                 </button>
+                <button
+                    type="button"
+                    title="Save this ticket, then make a smaller one under it"
+                    class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-800"
+                    disabled=move || saving.get() || (dirty.get() && held())
+                    on:click={
+                        let save_and_new = save_and_new.clone();
+                        move |_| save_and_new(crate::app::LinkKind::Child)
+                    }
+                >
+                    "Add child"
+                </button>
                 <span class="flex-1 text-xs">
                     {move || match save_error.get() {
                         Some(e) => {
@@ -846,7 +860,10 @@ pub fn Editor(doc: TicketDocument) -> impl IntoView {
                     class="rounded border border-accent-600 px-3 py-1.5 text-sm font-medium text-accent-700 hover:bg-accent-50 disabled:opacity-50 dark:text-accent-300 dark:hover:bg-accent-950"
                     disabled=move || saving.get() || (dirty.get() && held())
                     title="Save this ticket, then make a new one linked to it"
-                    on:click=save_and_new
+                    on:click={
+                        let save_and_new = save_and_new.clone();
+                        move |_| save_and_new(crate::app::LinkKind::Requires)
+                    }
                 >
                     "Save and New"
                 </button>
