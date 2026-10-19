@@ -6,6 +6,17 @@ use crate::{Frontmatter, parse_frontmatter, slugify};
 /// The branch types `amd` accepts; empty means the ticket has no branch.
 pub const BRANCH_TYPES: [&str; 5] = ["feature", "bugfix", "hotfix", "release", "chore"];
 
+/// Puts tickets with a due date first, soonest first, keeping the rest in
+/// the order they came (ticket 253): the backlog's order.
+pub fn due_first(list: &mut [crate::TicketSummary]) {
+    list.sort_by(|a, b| match (a.due.trim(), b.due.trim()) {
+        ("", "") => std::cmp::Ordering::Equal,
+        ("", _) => std::cmp::Ordering::Greater,
+        (_, "") => std::cmp::Ordering::Less,
+        (x, y) => x.cmp(y),
+    });
+}
+
 /// The branch type that says "no branch, on purpose" (ticket 066), as
 /// `agile_md::branch::NO_BRANCH`.
 pub const NO_BRANCH: &str = "none";
@@ -415,6 +426,21 @@ mod tests {
         assert!(out.contains("locked-until: \"2026-10-03T19:24:39Z\"\n"));
         assert!(out.ends_with("---\n\n## Notes\nBody\n"));
         assert_eq!(parse_frontmatter(&out).title, "Say \"hi\"");
+    }
+
+    #[test]
+    fn due_dates_come_first_soonest_first_and_the_rest_keep_their_order() {
+        let mut list = vec![
+            card("001", "high", "2026-01-01"),
+            card("002", "low", "2026-01-02"),
+            card("003", "low", "2026-01-03"),
+            card("004", "low", "2026-01-04"),
+        ];
+        list[1].due = "2026-11-20".into();
+        list[3].due = "2026-11-01".into();
+        due_first(&mut list);
+        let ids: Vec<&str> = list.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(ids, ["004", "002", "001", "003"]);
     }
 
     #[test]

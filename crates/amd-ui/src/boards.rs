@@ -208,6 +208,8 @@ impl Project {
                 let t = settings.time_limits();
                 (t.todo, t.doing)
             },
+            due_to_todo_days: settings.due_to_todo_days(),
+            backlog_always_shown: settings.backlog_always_shown(),
             priority_override: settings.priority_override(),
             archived: settings.archived(),
         })

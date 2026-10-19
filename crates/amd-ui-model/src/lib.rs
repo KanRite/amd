@@ -674,6 +674,13 @@ pub struct Board {
     /// limit.
     #[serde(default)]
     pub time_limits: (u32, u32),
+    /// A ticket due within this many days goes straight to todo (ticket
+    /// 253); 0 never.
+    #[serde(default)]
+    pub due_to_todo_days: u32,
+    /// The backlog column can't be folded away (ticket 253).
+    #[serde(default)]
+    pub backlog_always_shown: bool,
     /// A priority set by hand pins its ticket against auto priority.
     #[serde(default)]
     pub priority_override: bool,
@@ -1637,6 +1644,8 @@ mod assigned_tests {
             import_issues: true,
             auto_priority: false,
             time_limits: (0, 0),
+            due_to_todo_days: 3,
+            backlog_always_shown: false,
             priority_override: true,
             archived: false,
         };

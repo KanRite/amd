@@ -133,6 +133,20 @@ amd set 12 recur "every 2 weeks"   # stored as fortnightly; empty stops it
 
 In the editor they're **Due** and **Repeats**.
 
+**Due dates on the board.** A ticket in the loose backlog that's made, or
+given a due date, with 3 days or fewer left (or already overdue) goes
+**straight to todo**, unless it's a draft; todo has no WIP limit, so
+nothing stops it. `amd due-to-todo 5` changes the days, `0` turns it off,
+and so does Admin → Due dates and the backlog. Other tickets with due
+dates sit at the **top of the backlog**, soonest first. A ticket with a due
+date **can't go in an epic**, since an epic has no end date: filing one
+there, or dating one that's in an epic, is refused. A sprint can hold one,
+but its column shows a warning listing them, and so does `amd s12`, so you
+can check they fit. Admin's **Always show the backlog**
+(`amd backlog-always-shown on`) stops the backlog column being folded
+away. A 13-point ticket has a **red border**: break it into a parent with
+smaller children.
+
 **Drafts.** A ticket tagged **DRAFT** is a draft: it can't leave the
 backlog, or go into a sprint, until the tag is taken off. It can still be
 edited, assigned, sized and filed into an epic, or abandoned. Make one with

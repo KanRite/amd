@@ -818,6 +818,16 @@ pub async fn set_time_limits(todo: u32, doing: u32) -> Result<SyncReport, String
     call("set_time_limits", &TimeLimitsArgs { todo, doing }).await
 }
 
+/// How near a due date sends a ticket straight to todo (ticket 253).
+pub async fn set_due_to_todo_days(days: u32) -> Result<SyncReport, String> {
+    call("set_due_to_todo_days", &DaysArgs { days }).await
+}
+
+/// Whether the backlog column can be folded away (ticket 253).
+pub async fn set_backlog_always_shown(on: bool) -> Result<SyncReport, String> {
+    call("set_backlog_always_shown", &OnArgs { on }).await
+}
+
 /// Whether a priority set by hand pins its ticket (ticket 215).
 pub async fn set_priority_override(on: bool) -> Result<SyncReport, String> {
     call("set_priority_override", &OnArgs { on }).await

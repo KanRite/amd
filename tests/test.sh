@@ -1410,6 +1410,7 @@ ap="$(mktemp -d)"
 ( cd "${ap}" && git init -q && git config user.email t@t.co && git config user.name t \
   && AMD_YES=1 "${AMD}" init autop --local-only >/dev/null \
   && "${AMD}" auto-priority > "${ap}.default" && "${AMD}" auto-priority off >/dev/null \
+  && "${AMD}" due-to-todo 0 >/dev/null \
   && for t in Goal Middle Base Extra; do "${AMD}" new "$t" >/dev/null; done \
   && "${AMD}" set 1 priority high >/dev/null \
   && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 2 3 --type requires >/dev/null )
@@ -1478,6 +1479,43 @@ assert "amd auto-priority limits sets the time limits, and a ticket over them is
     && grep -q '^priority-from: \"todo\"' '${ap}'/tasks/todo/004-extra.md \
     && in_ap auto-priority | grep -q 'time limits: 8 days in todo'"
 rm -rf "${ap}" "${ap}.default"
+
+echo "due dates on the board (ticket 253):"
+dd="$(mktemp -d)"
+( cd "${dd}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && AMD_YES=1 "${AMD}" init dated --local-only >/dev/null \
+  && "${AMD}" group epic checkout >/dev/null && "${AMD}" group sprint s1 >/dev/null )
+in_dd() { (cd "${dd}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+dd_soon="$(date -u -d '+1 day' +%F)"
+dd_later="$(date -u -d '+20 days' +%F)"
+assert "amd due-to-todo says 3 days by default" \
+  bash -c "$(declare -f in_dd); dd='${dd}'; AMD='${AMD}'; in_dd due-to-todo | grep -qx 'a ticket due within 3 days goes straight to todo'"
+assert "a ticket made due soon goes straight to todo, recording when; one due later stays" \
+  bash -c "$(declare -f in_dd); dd='${dd}'; AMD='${AMD}'; \
+    in_dd new Soon --due '${dd_soon}' 2>&1 | grep -q 'moved straight to todo' \
+    && grep -q '^todo-since: ' '${dd}'/tasks/todo/001-soon.md \
+    && in_dd new Later --due '${dd_later}' >/dev/null 2>&1 && ls '${dd}'/tasks/backlog/002-later.md >/dev/null"
+assert "giving a backlog ticket a due date soon moves it to todo; a draft stays" \
+  bash -c "$(declare -f in_dd); dd='${dd}'; AMD='${AMD}'; \
+    in_dd set 2 due '${dd_soon}' | grep -q 'moved straight to todo' && ls '${dd}'/tasks/todo/002-later.md >/dev/null \
+    && in_dd new Idea --draft --due '${dd_soon}' >/dev/null 2>&1 && ls '${dd}'/tasks/backlog/003-idea.md >/dev/null"
+assert "a ticket with a due date can't go into an epic, nor get one while in it; a sprint can hold it, with a warning" \
+  bash -c "$(declare -f in_dd); dd='${dd}'; AMD='${AMD}'; \
+    in_dd new Dated --due '${dd_later}' >/dev/null 2>&1 \
+    && in_dd set 4 epic checkout 2>&1 | grep -q \"can't be in the epic checkout\" \
+    && in_dd new Filed >/dev/null 2>&1 && in_dd set 5 epic checkout >/dev/null \
+    && in_dd set 5 due '${dd_later}' 2>&1 | grep -q \"can't be in the epic checkout\" \
+    && in_dd set 4 points 3 >/dev/null && in_dd set 4 epic s1 >/dev/null \
+    && in_dd s1 2>&1 >/dev/null | grep -q 'warning: s1 holds tickets with due dates: 004 (due ${dd_later})'"
+assert "amd due-to-todo 0 keeps every ticket in the backlog" \
+  bash -c "$(declare -f in_dd); dd='${dd}'; AMD='${AMD}'; in_dd due-to-todo 0 >/dev/null \
+    && grep -qx 'due-to-todo-days = 0' '${dd}'/.settings \
+    && in_dd new Now --due '$(date -u +%F)' >/dev/null 2>&1 && ls '${dd}'/tasks/backlog/006-now.md >/dev/null"
+assert "amd backlog-always-shown on and off" \
+  bash -c "$(declare -f in_dd); dd='${dd}'; AMD='${AMD}'; in_dd backlog-always-shown on | grep -q \"can't be folded away\" \
+    && grep -qx 'backlog-always-shown = on' '${dd}'/.settings \
+    && in_dd backlog-always-shown off >/dev/null && ! grep -q 'backlog-always-shown' '${dd}'/.settings"
+rm -rf "${dd}"
 
 echo "your own columns (ticket 224):"
 cl="$(mktemp -d)"
@@ -1706,6 +1744,7 @@ echo "recurring tickets and due dates (ticket 143):"
 recur_repo="$(mktemp -d)"
 ( cd "${recur_repo}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
   && git config commit.gpgsign false && AMD_YES=1 "${AMD}" init recurtest --local-only >/dev/null \
+  && "${AMD}" due-to-todo 0 >/dev/null \
   && git add -A && git commit -q -m "board for ticket 143" )
 assert "a recurring ticket done makes the next one, due after today, in the same commit" \
   bash -c "cd '${recur_repo}' && '${AMD}' new 'Renew the certificate' --recur Monthly --due 2026-01-01 --no-edit >/dev/null \

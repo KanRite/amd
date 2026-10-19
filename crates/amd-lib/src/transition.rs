@@ -215,6 +215,12 @@ pub fn move_to(board: &Board, task: &Task, to: Column, force: bool) -> Result<Ou
                 "{id_display} repeats: made {}, due {}",
                 next.id, next.due
             )));
+            // Due soon: straight to todo (ticket 253).
+            if let Ok(made) = board.find(&next.id)
+                && let Some(line) = straight_to_todo(board, &made)
+            {
+                outcome.events.push(Event::Info(line));
+            }
         }
         outcome.dest = Some(dest);
         Ok(outcome)
@@ -223,6 +229,39 @@ pub fn move_to(board: &Board, task: &Task, to: Column, force: bool) -> Result<Ou
         outcome.events.push(Event::Warn(warning));
     }
     Ok(outcome)
+}
+
+/// A ticket with a due date this near goes straight to todo (ticket 253):
+/// one in the loose backlog, not a draft, due within the board's
+/// `due-to-todo-days` (or overdue). Moves it there, recording when, and says
+/// so; anything that stops the move (a lease, say) is only a note, since the
+/// ticket's own change already happened. Doesn't commit: callers are inside
+/// one, or commit after.
+pub fn straight_to_todo(board: &Board, task: &Task) -> Option<String> {
+    let days = crate::board_settings::load(board).due_to_todo_days();
+    if days == 0 || !task.column.is(Kind::Backlog) || task.epic.is_some() || task.is_draft() {
+        return None;
+    }
+    let due = task.due()?;
+    let left = (crate::recur::parse_date(&due).ok()? - crate::recur::today()).whole_days();
+    if left > i64::from(days) {
+        return None;
+    }
+    let id = task.id_display();
+    let todo = board.workflow().first(Kind::Todo);
+    match board.move_task(task, todo, false) {
+        Ok(dest) => {
+            if let Some(moved) = Task::from_path(&dest, todo) {
+                stamp_column_dates(&moved, task.column, todo);
+            }
+            Some(format!(
+                "{id} is due {due}, within {days} days: moved straight to {todo}"
+            ))
+        }
+        Err(err) => Some(format!(
+            "{id} is due {due} but stays in the backlog: {err:#}"
+        )),
+    }
 }
 
 /// Writes when a ticket entered todo and doing for a move `from` -> `to`
@@ -755,12 +794,27 @@ pub fn save_text(
         Some(_) => crate::pairing::with_draft_tag(&text)?,
         None => text,
     };
-    let ((), warning) = with_auto_commit(board, "edit", &id_display, &title, || {
+    // A due date can't go on a ticket in an epic (ticket 253).
+    let due = crate::task::meta_in(&text, "due")
+        .map(|d| d.trim().trim_matches('"').to_string())
+        .filter(|d| !d.is_empty());
+    let epic = match task.column.kind() {
+        Kind::Backlog => task.epic.clone(),
+        _ => crate::task::meta_in(&text, "epic").map(|e| e.trim().trim_matches('"').to_string()),
+    };
+    board.refuse_due_in_epic(&id_display, epic.as_deref(), due.as_deref())?;
+    let due_changed = due != task.due();
+    let (moved, warning) = with_auto_commit(board, "edit", &id_display, &title, || {
         task.set_text(expected, &text)?;
         if let Some(wanted) = wanted.filter(|w| *w == "auto" || *w != before) {
             crate::auto_priority::set_by_hand(board, task, &wanted)?;
         }
-        Ok(())
+        // Given a due date that's soon: straight to todo (ticket 253).
+        Ok(if due_changed {
+            Task::from_path(&task.path, task.column).and_then(|t| straight_to_todo(board, &t))
+        } else {
+            None
+        })
     })?;
     let mut outcome = Outcome::default();
     outcome
@@ -768,6 +822,9 @@ pub fn save_text(
         .push(Event::Info(format!("saved {id_display}")));
     if let Some(drafted) = drafted {
         outcome.events.push(Event::Warn(drafted));
+    }
+    if let Some(moved) = moved {
+        outcome.events.push(Event::Info(moved));
     }
     if let Some(warning) = warning {
         outcome.events.push(Event::Warn(warning));
@@ -799,6 +856,85 @@ mod tests {
         std::fs::write(&path, body).unwrap();
         let task = Task::from_path(&path, column).unwrap();
         (board, task)
+    }
+
+    /// `days` from today, as `YYYY-MM-DD`.
+    fn in_days(days: i64) -> String {
+        (crate::recur::today() + time::Duration::days(days)).to_string()
+    }
+
+    #[test]
+    fn a_ticket_due_soon_goes_straight_to_todo_and_records_when() {
+        let dir = tempfile::tempdir().unwrap();
+        let (board, task) = board_with(dir.path(), "001-t.md", Column::Backlog);
+        task.set_due(task.hash().unwrap(), &in_days(2)).unwrap();
+        let task = Task::from_path(&task.path, Column::Backlog).unwrap();
+        let line = straight_to_todo(&board, &task).unwrap();
+        assert!(line.contains("moved straight to todo"), "{line}");
+        let moved = board.find("1").unwrap();
+        assert_eq!(moved.column, Column::Todo);
+        assert_eq!(moved.todo_since(), Some(crate::recur::today().to_string()));
+    }
+
+    #[test]
+    fn a_ticket_due_later_a_draft_or_one_in_a_sprint_stays_in_the_backlog() {
+        let dir = tempfile::tempdir().unwrap();
+        let (board, task) = board_with(dir.path(), "001-t.md", Column::Backlog);
+        task.set_due(task.hash().unwrap(), &in_days(10)).unwrap();
+        let later = Task::from_path(&task.path, Column::Backlog).unwrap();
+        assert_eq!(straight_to_todo(&board, &later), None);
+        // A draft stays, however soon.
+        later.set_due(later.hash().unwrap(), &in_days(1)).unwrap();
+        let soon = Task::from_path(&task.path, Column::Backlog).unwrap();
+        soon.set_draft(soon.hash().unwrap(), true).unwrap();
+        let draft = Task::from_path(&task.path, Column::Backlog).unwrap();
+        assert_eq!(straight_to_todo(&board, &draft), None);
+        // Nor when the board says 0.
+        draft.set_draft(draft.hash().unwrap(), false).unwrap();
+        std::fs::write(dir.path().join(".settings"), "due-to-todo-days = 0\n").unwrap();
+        let ready = Task::from_path(&task.path, Column::Backlog).unwrap();
+        assert_eq!(straight_to_todo(&board, &ready), None);
+        assert_eq!(board.find("1").unwrap().column, Column::Backlog);
+    }
+
+    #[test]
+    fn a_ticket_with_a_due_date_cant_go_into_an_epic_but_can_into_a_sprint() {
+        let dir = tempfile::tempdir().unwrap();
+        let (board, task) = board_with(dir.path(), "001-t.md", Column::Backlog);
+        for (name, kind) in [
+            ("checkout", crate::group::Kind::Epic),
+            ("s1", crate::group::Kind::Sprint),
+        ] {
+            board
+                .create_group(&crate::group::Group {
+                    dir: board.dir(Column::Backlog).join(name),
+                    name: name.to_string(),
+                    kind,
+                    description: String::new(),
+                    days: crate::group::DEFAULT_DAYS,
+                    state: crate::group::State::Pending,
+                })
+                .unwrap();
+        }
+        task.set_due(task.hash().unwrap(), &in_days(20)).unwrap();
+        task.set_points(task.hash().unwrap(), "3").unwrap();
+        let dated = Task::from_path(&task.path, Column::Backlog).unwrap();
+        let err = board.set_epic(&dated, Some("checkout")).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("can't be in the epic checkout"),
+            "{err:#}"
+        );
+        board.set_epic(&dated, Some("s1")).unwrap();
+        assert!(
+            board
+                .refuse_due_in_epic("001", Some("checkout"), Some(""))
+                .is_ok()
+        );
+        assert!(
+            board
+                .refuse_due_in_epic("001", None, Some("2026-10-30"))
+                .is_ok()
+        );
     }
 
     #[test]

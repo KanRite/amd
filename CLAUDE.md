@@ -1082,6 +1082,22 @@ off**, ticket 141) to
   and **Repeats** (select, a hand-written rule kept), `Fields.due/recur`,
   `TicketSummary.due/recur`, the card's due badge and ↻. Not in the MCP
   tools yet.
+- **Due dates on the board** (ticket 253): `transition::straight_to_todo`
+  moves a loose-backlog, non-draft ticket due within `due-to-todo-days`
+  (default 3, 0 never; `board_settings::due_to_todo_days`) to the first
+  todo-kind column, stamping `todo-since`, and says so; a refused move is
+  only a note. Called after `amd new --due`, `amd set due`, `save_text`
+  when the due date changed, and `recur::make_next` (in `move_to`).
+  `Board::refuse_due_in_epic` (from `Board::file`, so every `set_epic`, and
+  from `amd set due` and `save_text`) refuses a due-dated ticket in an
+  epic; sprints may hold them, and `amd <sprint>` warns on stderr.
+  `backlog-always-shown` (`board_settings`) stops amdui folding the
+  standard backlog. CLI `amd due-to-todo [DAYS]`, `amd backlog-always-shown
+  [on|off]`. amdui: `Board.due_to_todo_days`/`backlog_always_shown`,
+  Admin's "Due dates and the backlog" (`set_due_to_todo_days`,
+  `set_backlog_always_shown`), `amd_ui_model::ticket::due_first` orders
+  backlog-kind columns, `epic::due_rule` refuses the drag onto an epic, the
+  sprint column warns, and a 13-point card has a red border.
 - **Duplicating a ticket** (ticket 198, `amd duplicate <ref>`, the editor's
   Duplicate button, the MCP `clone_ticket`; `transition::clone_ticket`). `amd
   clone` was already taken (it clones a declared repository). The copy goes
