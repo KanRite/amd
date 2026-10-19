@@ -260,8 +260,16 @@ redundant. Their history is in git if it is ever wanted again.
   still newer release shows at once. State is `$XDG_STATE_HOME/agile-md/
   update.json`, machine-local, never in a repository; a missing or corrupt
   file is a fresh start. `update-check = off` / `AMD_UPDATE_CHECK=0` turns
-  the check off (`enabled`). The clock is passed in. The `ureq`
-  `ReleaseSource` arrives with its first caller (the banner, 192).
+  the check off (`enabled`). The clock is passed in. **The bar** (ticket
+  192): `crates/amd-ui/src/updates.rs` is the `ureq` `ReleaseSource`
+  (GitHub's releases API, 10 s timeout) and `status()`/`later()`; commands
+  `update_status` (`amd_ui_model::UpdateInfo {version, notes_url, behind,
+  current}`) and `snooze_update`. The page's `update_bar.rs` `UpdateBar`
+  sits above the header on every view, asks on start and every 6 hours,
+  and is **orange**: the accents are only indigo, teal and slate (rose and
+  amber were dropped, a saved one reads back as indigo), so nothing else
+  is orange. Update shows `amd_ui_model::INSTALL_COMMAND` until 191
+  applies updates itself; the required variant (no Later) is 193.
 - `crates/amd-lib/src/renumber.rs` — `amd renumber [--keep T] [--apply]`
   (ticket 146): tickets sharing a number (`local` numbering can clash when
   clones create apart). The first committed keeps it, judged by commit

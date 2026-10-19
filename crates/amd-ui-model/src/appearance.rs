@@ -50,34 +50,27 @@ impl Theme {
     }
 }
 
-/// The colour of buttons, filters and highlights.
+/// The colour of buttons, filters and highlights. Red and orange aren't
+/// offered (ticket 192): red reads as an error, and orange is kept for the
+/// update bar, so neither can be mistaken for the accent. A saved `rose` or
+/// `amber` reads back as the default.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Accent {
     #[default]
     Indigo,
     Teal,
-    Rose,
-    Amber,
     Slate,
 }
 
 impl Accent {
-    pub const ALL: [Accent; 5] = [
-        Accent::Indigo,
-        Accent::Teal,
-        Accent::Rose,
-        Accent::Amber,
-        Accent::Slate,
-    ];
+    pub const ALL: [Accent; 3] = [Accent::Indigo, Accent::Teal, Accent::Slate];
 
     /// The `data-accent` value the stylesheet switches on.
     pub fn key(self) -> &'static str {
         match self {
             Accent::Indigo => "indigo",
             Accent::Teal => "teal",
-            Accent::Rose => "rose",
-            Accent::Amber => "amber",
             Accent::Slate => "slate",
         }
     }
@@ -86,8 +79,6 @@ impl Accent {
         match self {
             Accent::Indigo => "Indigo",
             Accent::Teal => "Teal",
-            Accent::Rose => "Rose",
-            Accent::Amber => "Amber",
             Accent::Slate => "Slate",
         }
     }
@@ -120,6 +111,19 @@ impl Appearance {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn red_and_orange_are_gone_and_read_back_as_the_default() {
+        // Ticket 192: orange is the update bar's, red reads as an error.
+        assert_eq!(Accent::from_key("rose"), Accent::Indigo);
+        assert_eq!(Accent::from_key("amber"), Accent::Indigo);
+        assert_eq!(Accent::from_key("teal"), Accent::Teal);
+        assert!(
+            Accent::ALL
+                .iter()
+                .all(|a| !matches!(a.key(), "rose" | "amber"))
+        );
+    }
 
     #[test]
     fn defaults_follow_the_system_in_indigo() {

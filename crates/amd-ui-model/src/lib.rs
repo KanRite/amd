@@ -689,6 +689,22 @@ pub struct Board {
     pub archived: bool,
 }
 
+/// A newer agile-md release for the update bar (ticket 192): its version,
+/// its release notes, how many releases this build is behind, and the
+/// version running now.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateInfo {
+    pub version: String,
+    pub notes_url: String,
+    pub behind: usize,
+    pub current: String,
+}
+
+/// How to update until amdui applies updates itself (ticket 191): the
+/// installer, run again.
+pub const INSTALL_COMMAND: &str =
+    "curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash";
+
 /// Whether to show Admin, and the note that says why (ticket 149).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdminAccess {

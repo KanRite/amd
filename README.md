@@ -152,7 +152,8 @@ a solo developer without it.
 - **A bottom panel** with a terminal and an AI tab running your own AI tool.
 - **Speech to text**, optional and entirely on your machine.
 - **An Editor button**, themes, accent colours and zoom.
-- **Update check:** it tells you when a newer release is out.
+- **Update check:** an orange bar in amdui tells you when a newer release
+  is out, with its notes, how to update, and Later.
 
 ### AI, if you want it
 

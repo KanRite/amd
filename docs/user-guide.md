@@ -444,9 +444,18 @@ disagree.
   a sprint, rename it, or delete it once everything in it is done.
 - **Preferences**, your own settings on this machine, in
   `~/.config/agile-md/config`: the colour scheme (light, dark or the
-  system's, with an accent colour), the zoom, the board to open when amdui
+  system's, with an accent colour: indigo, teal or slate), the zoom, the board to open when amdui
   starts outside a project, the AI tab's command, speech to text, and your
   editor.
+- **The update bar.** When a newer agile-md is out, an orange bar across
+  the top of every screen says so, with **What's new** (the release notes),
+  **Update** and **Later**. Update shows the command to run (the installer,
+  run again) and that your boards, documents and settings aren't touched;
+  restart amdui afterwards. Later hides that version for a day, even across
+  restarts; a newer release still shows at once. amdui asks GitHub at most
+  once a day, and a failed check says nothing. Turn it off with
+  `update-check = off` in `~/.config/agile-md/config`, or
+  `AMD_UPDATE_CHECK=0`.
 - **Admin**, the project's settings, shared with the team through the
   tickets repository: auto-commit, tags, the columns and how tickets move
   between them, WIP limits, how long a lock lasts, auto priority, GitHub

@@ -18,6 +18,7 @@ mod rich_editor;
 mod roadmap;
 mod term_view;
 mod tree;
+mod update_bar;
 
 #[cfg(target_arch = "wasm32")]
 fn main() {

@@ -359,6 +359,21 @@ pub async fn delete_epic(repo: Option<&str>, name: &str) -> Result<SyncReport, S
     call("delete_epic", &DeleteEpicArgs { repo, name }).await
 }
 
+/// A newer agile-md to offer (ticket 192), if any.
+pub async fn update_status() -> Result<Option<amd_ui_model::UpdateInfo>, String> {
+    call("update_status", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct SnoozeArgs<'a> {
+    version: &'a str,
+}
+
+/// The update bar's Later: this version, hidden for a day.
+pub async fn snooze_update(version: &str) -> Result<(), String> {
+    call("snooze_update", &SnoozeArgs { version }).await
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MoveEpicArgs<'a> {

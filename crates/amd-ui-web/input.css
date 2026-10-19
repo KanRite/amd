@@ -53,29 +53,7 @@
   --accent-950: var(--color-teal-950);
 }
 
-[data-accent="rose"] {
-  --accent-50: var(--color-rose-50);
-  --accent-100: var(--color-rose-100);
-  --accent-200: var(--color-rose-200);
-  --accent-400: var(--color-rose-400);
-  --accent-500: var(--color-rose-500);
-  --accent-600: var(--color-rose-600);
-  --accent-800: var(--color-rose-800);
-  --accent-900: var(--color-rose-900);
-  --accent-950: var(--color-rose-950);
-}
 
-[data-accent="amber"] {
-  --accent-50: var(--color-amber-50);
-  --accent-100: var(--color-amber-100);
-  --accent-200: var(--color-amber-200);
-  --accent-400: var(--color-amber-400);
-  --accent-500: var(--color-amber-500);
-  --accent-600: var(--color-amber-600);
-  --accent-800: var(--color-amber-800);
-  --accent-900: var(--color-amber-900);
-  --accent-950: var(--color-amber-950);
-}
 
 [data-accent="slate"] {
   --accent-50: var(--color-slate-50);
