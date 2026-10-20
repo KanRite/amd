@@ -2094,8 +2094,27 @@ changes):
   (`read-aloud-done` event when it ends, from a watcher thread keyed by a
   reading count), `read_aloud_stop`, `set_read_aloud_enabled`
   (`ui.read-aloud = off`); `speech_start` and the window closing stop it.
-  Preferences → Read aloud (switch, engine found, Test). A natural
-  downloadable voice (Piper) is a later ticket.
+  Preferences → Read aloud (switch, engine found, Test).
+  **A natural voice** (ticket 287, `speech/piper.rs`, Linux only): Piper
+  behind speech-dispatcher, so read aloud still just runs `spd-say`.
+  Piper needs espeak-ng (GPL), so it's never linked into amdui: `piper-tts`
+  from PyPI goes into a venv at `$XDG_DATA_HOME/agile-md/speech/piper/venv`
+  (`uv venv` + `uv pip install` when `uv` is on the PATH, else `python3 -m
+  venv` + pip; `Installer::find`), a voice from `VOICES` (six English)
+  through `python -m piper.download_voices` into `…/piper/voices` (others
+  deleted). Then `$XDG_CONFIG_HOME/speech-dispatcher/modules/
+  agile-md-piper.conf` (sd_generic: `printf %s '$DATA' | piper --model …
+  --output-raw | aplay` or `pw-play`, the rate from the voice's
+  `.onnx.json`) and a marked `# agile-md: Piper voice (begin)…(end)` block
+  in the user's `speechd.conf` (`AddModule` + `DefaultModule`); with no
+  user file, it's a copy of the system's headed `# Made by agile-md…`, and
+  Remove deletes it again when nothing else changed. speech-dispatcher is
+  restarted with `pkill -x -u <uid> speech-dispatch` (the kernel's
+  15-character name); it starts itself on the next `spd-say`. Commands
+  `piper_status`, `piper_install(voice)` (`piper-progress` events:
+  installing, voice, configuring, done with `error`), `piper_remove`.
+  Ignored tests: `install_for_real_then_remove` (network, temp XDG dirs)
+  and `write_conf_for_a_manual_check`.
 - **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
   download path checks a downloaded amdui's libraries on Linux
   (`check_board_libraries`, via `ldd`) and names WebKitGTK when it's

@@ -57,6 +57,8 @@ struct AppState {
     /// watcher knows when another has taken its place.
     speaking: Arc<Mutex<Option<Speaking>>>,
     readings: Arc<std::sync::atomic::AtomicU64>,
+    /// A Piper set-up or removal running (ticket 287).
+    piper_busy: Arc<std::sync::atomic::AtomicBool>,
     /// The board repository whose screen note this window last wrote
     /// (ticket 186), taken away when the window closes.
     screen: Arc<Mutex<Option<PathBuf>>>,
@@ -3076,6 +3078,9 @@ pub fn run() {
             read_aloud,
             read_aloud_stop,
             set_read_aloud_enabled,
+            piper_status,
+            piper_install,
+            piper_remove,
             terminal_open,
             terminal_input,
             terminal_resize,
@@ -3426,6 +3431,82 @@ fn set_read_aloud_enabled(
         stop_reading(&app, &state.speaking);
     }
     config.save().map_err(err)
+}
+
+/// Where the Piper voice stands (ticket 287).
+#[tauri::command]
+async fn piper_status(state: Tauri<'_, AppState>) -> Result<amd_ui_model::terminal::PiperStatus> {
+    use std::sync::atomic::Ordering;
+    let busy = state.piper_busy.load(Ordering::Acquire);
+    blocking(move || {
+        use speech::piper;
+        Ok(amd_ui_model::terminal::PiperStatus {
+            supported: piper::supported(),
+            installer: piper::Installer::find().map(|i| i.name().to_string()),
+            voices: piper::VOICES
+                .iter()
+                .map(|v| amd_ui_model::terminal::PiperVoice {
+                    id: v.id.to_string(),
+                    label: v.label.to_string(),
+                })
+                .collect(),
+            installed: piper::installed(),
+            busy,
+        })
+    })
+    .await
+}
+
+/// Sets up (or switches to) a Piper voice, saying how it's going through
+/// `piper-progress` events; returns at once.
+#[tauri::command]
+fn piper_install(app: tauri::AppHandle, state: Tauri<'_, AppState>, voice: String) -> Result<()> {
+    use std::sync::atomic::Ordering;
+    use tauri::Emitter;
+    let which = speech::piper::voice(&voice).ok_or_else(|| format!("no voice called {voice}"))?;
+    if state.piper_busy.swap(true, Ordering::AcqRel) {
+        return Err("a Piper set-up is already running".to_string());
+    }
+    let busy = Arc::clone(&state.piper_busy);
+    std::thread::spawn(move || {
+        let say = |stage: &str, error: Option<String>| {
+            let _ = app.emit(
+                "piper-progress",
+                amd_ui_model::terminal::PiperProgress {
+                    stage: stage.to_string(),
+                    error,
+                },
+            );
+        };
+        let outcome = speech::piper::install(which, &mut |stage| {
+            say(
+                match stage {
+                    speech::piper::Stage::Installing => "installing",
+                    speech::piper::Stage::Voice => "voice",
+                    speech::piper::Stage::Configuring => "configuring",
+                },
+                None,
+            )
+        });
+        busy.store(false, Ordering::Release);
+        say("done", outcome.err().map(|e| format!("{e:#}")));
+    });
+    Ok(())
+}
+
+/// Takes the Piper voice away again: speech-dispatcher goes back to what it
+/// had.
+#[tauri::command]
+async fn piper_remove(app: tauri::AppHandle, state: Tauri<'_, AppState>) -> Result<()> {
+    use std::sync::atomic::Ordering;
+    if state.piper_busy.swap(true, Ordering::AcqRel) {
+        return Err("a Piper set-up is running".to_string());
+    }
+    stop_reading(&app, &state.speaking);
+    let busy = Arc::clone(&state.piper_busy);
+    let outcome = blocking(|| speech::piper::remove().map_err(|e| format!("{e:#}"))).await;
+    busy.store(false, Ordering::Release);
+    outcome
 }
 
 /// The page panicked: its message, on amdui's error output (the page has

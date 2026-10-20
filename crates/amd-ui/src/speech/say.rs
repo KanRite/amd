@@ -86,7 +86,7 @@ impl Engine {
     }
 }
 
-fn on_path(program: &str) -> bool {
+pub(crate) fn on_path(program: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|path| {
         std::env::split_paths(&path).any(|dir| is_executable(&dir.join(program)))
     })

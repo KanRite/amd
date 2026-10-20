@@ -1486,6 +1486,26 @@ pub async fn set_read_aloud_enabled(on: bool) -> Result<(), String> {
     call("set_read_aloud_enabled", &OnArgs { on }).await
 }
 
+// --- A Piper voice (ticket 287) -------------------------------------------
+
+pub async fn piper_status() -> Result<amd_ui_model::terminal::PiperStatus, String> {
+    call("piper_status", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct VoiceArgs<'a> {
+    voice: &'a str,
+}
+
+/// Starts setting up `voice`; progress comes as `piper-progress` events.
+pub async fn piper_install(voice: &str) -> Result<(), String> {
+    call("piper_install", &VoiceArgs { voice }).await
+}
+
+pub async fn piper_remove() -> Result<(), String> {
+    call("piper_remove", &NoArgs {}).await
+}
+
 #[derive(Serialize)]
 struct StatsArgs<'a> {
     root: &'a str,

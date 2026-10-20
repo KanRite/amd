@@ -948,7 +948,15 @@ You can talk to it and have it talk back, both on this machine only:
   (speech-dispatcher's `spd-say` on Linux, `say` on macOS), so there's
   nothing to download, and the voice is whatever that's set up with.
   Preferences → Read aloud has a Test button and the switch that hides the
-  🔊. Picking out the reply is a best guess from what's on the screen, so
+  🔊. On Linux, speech-dispatcher's usual voice (espeak-ng) is robotic:
+  **A natural voice (Piper)** there sets up Piper, a voice that runs on
+  this machine. Pick a voice and press Set up: amdui installs Piper (with
+  `uv`, or Python 3's `venv`; about 190 MB) into its own folder
+  (`~/.local/share/agile-md/speech/piper`), downloads the voice (about 60
+  MB), and makes it speech-dispatcher's voice, in your own
+  `~/.config/speech-dispatcher` (other programs that speak through it get
+  the voice too). Use this voice switches; Remove undoes all of it. On
+  Ubuntu without `uv`, `sudo apt install python3-venv` first. Picking out the reply is a best guess from what's on the screen, so
   select the text when it reads the wrong part.
 
 ## Shell completion
