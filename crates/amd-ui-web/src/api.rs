@@ -1150,6 +1150,27 @@ pub async fn rename_roadmap(roadmap: &str, name: &str) -> Result<SyncReport, Str
 }
 
 #[derive(Serialize)]
+struct RoadmapArgs<'a> {
+    roadmap: &'a str,
+}
+
+/// Deletes a roadmap and its milestones' empty epics and sprints (ticket 306).
+pub async fn delete_roadmap(roadmap: &str) -> Result<SyncReport, String> {
+    call("delete_roadmap", &RoadmapArgs { roadmap }).await
+}
+
+#[derive(Serialize)]
+struct MilestoneNameArgs<'a> {
+    roadmap: &'a str,
+    name: &'a str,
+}
+
+/// Takes a milestone off a roadmap, and its epic or sprint when empty (306).
+pub async fn delete_milestone(roadmap: &str, name: &str) -> Result<SyncReport, String> {
+    call("delete_milestone", &MilestoneNameArgs { roadmap, name }).await
+}
+
+#[derive(Serialize)]
 struct MilestoneArgs<'a> {
     roadmap: &'a str,
     milestone: &'a amd_ui_model::MilestoneCard,

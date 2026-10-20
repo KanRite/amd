@@ -811,6 +811,8 @@ async fn add_milestone(
         }
         let target = p.board(&found.board)?;
         let name = milestone.name.trim().to_string();
+        // A started sprint of the same name is used as it is (ticket 306).
+        let mut warnings = Vec::new();
         let add = || {
             agile_md::roadmap::add_milestone(
                 store,
@@ -826,9 +828,9 @@ async fn add_milestone(
                     duration: milestone.duration,
                 },
             )
-            .map(|_| ())
+            .map(|(_, found)| warnings = found)
         };
-        if target.repo_root() == store.repo_root() {
+        let report = if target.repo_root() == store.repo_root() {
             committed(store, "roadmap-milestone", &name, &roadmap, add)
         } else {
             // The epic is in another repository: it takes its own commit.
@@ -836,7 +838,90 @@ async fn add_milestone(
                 transition::with_auto_commit(store, "roadmap-milestone", &name, &roadmap, add)
                     .map(|_| ())
             })
+        }?;
+        Ok(with_notes(report, warnings))
+    })
+    .await
+}
+
+/// A report with notes added to its warning (ticket 306).
+fn with_notes(mut report: SyncReport, notes: Vec<String>) -> SyncReport {
+    if !notes.is_empty() {
+        let mut all: Vec<String> = report.warning.take().into_iter().collect();
+        all.extend(notes);
+        report.warning = Some(all.join("; "));
+    }
+    report
+}
+
+/// Takes a milestone off a roadmap, and its epic or sprint off the board
+/// when that's empty and not started (ticket 306). Admins only.
+#[tauri::command]
+async fn delete_milestone(
+    state: Tauri<'_, AppState>,
+    roadmap: String,
+    name: String,
+) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let store = &p.repos[0].1;
+        if !boards::admin_access(store).allowed {
+            return Err("Only the project's admins can delete milestones.".into());
         }
+        let found = agile_md::roadmap::list(store)
+            .map_err(err)?
+            .into_iter()
+            .find(|r| r.slug == roadmap)
+            .ok_or_else(|| format!("No roadmap called {roadmap}."))?;
+        let target = p.board(&found.board)?;
+        let mut notes = Vec::new();
+        let remove = || {
+            agile_md::roadmap::delete_milestone(store, target, &roadmap, &name)
+                .map(|found| notes = found)
+        };
+        let verb = "roadmap-milestone-delete";
+        let report = if target.repo_root() == store.repo_root() {
+            committed(store, verb, &name, &roadmap, remove)
+        } else {
+            committed(target, verb, &name, &roadmap, || {
+                transition::with_auto_commit(store, verb, &name, &roadmap, remove).map(|_| ())
+            })
+        }?;
+        Ok(with_notes(report, notes))
+    })
+    .await
+}
+
+/// Deletes a roadmap, and each milestone's epic or sprint that's empty and
+/// not started (ticket 306). Admins only.
+#[tauri::command]
+async fn delete_roadmap(state: Tauri<'_, AppState>, roadmap: String) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let store = &p.repos[0].1;
+        if !boards::admin_access(store).allowed {
+            return Err("Only the project's admins can delete roadmaps.".into());
+        }
+        let found = agile_md::roadmap::list(store)
+            .map_err(err)?
+            .into_iter()
+            .find(|r| r.slug == roadmap)
+            .ok_or_else(|| format!("No roadmap called {roadmap}."))?;
+        let target = if found.board.is_empty() {
+            None
+        } else {
+            p.board(&found.board).ok()
+        };
+        let name = found.name.clone();
+        let mut notes = Vec::new();
+        let remove =
+            || agile_md::roadmap::delete(store, target, &roadmap).map(|found| notes = found);
+        let verb = "roadmap-delete";
+        let report = match target {
+            Some(t) if t.repo_root() != store.repo_root() => committed(t, verb, &name, "", || {
+                transition::with_auto_commit(store, verb, &name, "", remove).map(|_| ())
+            }),
+            _ => committed(store, verb, &name, "", remove),
+        }?;
+        Ok(with_notes(report, notes))
     })
     .await
 }
@@ -3031,6 +3116,8 @@ pub fn run() {
             save_roadmap,
             rename_roadmap,
             add_milestone,
+            delete_milestone,
+            delete_roadmap,
             set_milestone_dates,
             create_sprint,
             start_sprint,

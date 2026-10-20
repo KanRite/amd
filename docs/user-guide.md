@@ -703,6 +703,16 @@ tickets need. Roadmaps are kept in the tickets repository, under
 `roadmaps/`, and are in the desktop board only, from the landing page's
 **Roadmap** button.
 
+A milestone named like an epic or sprint already on the board uses it
+rather than making a new one, whatever kind it is. A sprint that hasn't
+started takes the milestone's length and description. A started or closed
+sprint can't be updated, so it's used as it is and you're told so.
+
+The project's admins can **Delete** a milestone, or the whole roadmap with
+**Delete roadmap** (each asks once more). The milestone's epic or sprint
+goes too when it's empty and hasn't started; otherwise it stays on the
+board, and you're told why.
+
 ## Statistics
 
 The landing page shows each project's tickets raised, done and closed
