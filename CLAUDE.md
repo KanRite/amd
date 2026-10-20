@@ -1037,8 +1037,24 @@ off**, ticket 141) to
       ref = Write, a listing = Read); amdui calls it in `change()` (Write)
       and every 30s from the page (`sync_board`, Read). It fetches (a Read
       skips that if amd's last fetch was under 10s ago), then: only behind →
-      `merge --ff-only`; only ahead → push the leftovers; diverged → a
-      Write refuses with the fix, a Read warns. No remote/upstream, or
+      `merge --ff-only`; only ahead → push the leftovers; diverged →
+      **`replay`** (ticket 197), else a Write refuses with the fix and a
+      Read warns. `replay(board, any_files)`: only when every path changed
+      since `@{u}` is the board's (its folder, `.next-id`, `.settings`;
+      `only_board_files`, unless `any_files`), `rebase @{u}`, a conflict on
+      `.next-id` alone settled to the higher number (`git::conflicted`,
+      `stage_text`, `rebase_continue`), any other conflict aborts; then if
+      ids clash, `renumber::plan` (the earlier-committed keeps its number,
+      so after the rebase the local one moves) applied only when every
+      moving ticket was added locally (`added_between @{u}..HEAD`) and no
+      kept one was, committed as `renumber: 002 to 004 (taken on origin)`;
+      a renumber that fails is undone (`reset --hard HEAD`, then `reset
+      --keep` to before). Then push. **Offline:** a failed fetch leaves
+      `.git/amd-offline` (removed by the next good one; `last_fetch_failed`),
+      the warning says "N change(s) waiting to push", a failed fetch isn't
+      "recent" for `fetched_within`, and `sync::offline(board)` gives the
+      count: amdui's `sync_board` returns `SyncStatus {warnings, offline}`
+      and the page's `OfflineBar` shows it. No remote/upstream, or
       `AMD_SYNC=0`/`sync = off`, does nothing; no network only warns.
     - **amd's fetch never writes `FETCH_HEAD`** (ticket 118,
       `git::fetch`): `--no-write-fetch-head`, with `.git/amd-fetched`
@@ -1049,15 +1065,15 @@ off**, ticket 141) to
       pulls in a race loop, 0 after). This is why amd needs **git 2.29+**.
     - **`after_rejected_push`**, from `transition::commit_since` (now
       commit-locally, then push — and `cmd_new` goes through it too): a
-      push rejected because the remote moved is replayed with `rebase @{u}`
-      when that's clean **and** `Board::duplicate_ids()` is empty; otherwise
-      the written files are copied to `$XDG_STATE_HOME/agile-md/recovered/`,
+      push rejected because the remote moved goes through `replay(board,
+      true)` (ticket 197: a clashing new ticket is renumbered, not undone);
+      when that stops, the written files are copied to `$XDG_STATE_HOME/agile-md/recovered/`,
       the commit is dropped (`reset --keep`), the clone fast-forwarded, and
       `ConcurrentChange` returned — an `Err`, so a non-zero exit. Any other
       push failure keeps the old warn-and-keep-local behaviour; the next
       catch-up pushes it. **Note:** two clones bumping `next-id` to the
       *same* value rebase cleanly (identical change), which is exactly why
-      the duplicate-id check exists.
+      `replay` checks for duplicate ids after the rebase.
     - **Two warnings for a board being trashed** (ticket 145): a
       fast-forward that removes `MASS_REMOVAL` (5) tickets or more still
       happens (it's recoverable), with a warning naming the count, ids,

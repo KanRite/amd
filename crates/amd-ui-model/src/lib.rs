@@ -970,6 +970,15 @@ pub struct SyncReport {
     pub warning: Option<String>,
 }
 
+/// What a background catch-up found (tickets 102, 197).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncStatus {
+    pub warnings: Vec<String>,
+    /// Origin couldn't be reached at the last try: how many changes are
+    /// waiting to push. `None` when it could.
+    pub offline: Option<u32>,
+}
+
 /// What importing GitHub issues did, or would do (ticket 158).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IssueImport {

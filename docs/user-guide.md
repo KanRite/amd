@@ -815,9 +815,19 @@ GitHub with `gh`.
 ## Working together, and getting tickets back
 
 Every change amd makes is committed and pushed, and before each command it
-catches up with the remote: it fast-forwards when you're behind, pushes
-anything you made offline, and refuses a change on a clone that has
-diverged rather than write on stale state.
+catches up with the remote: it fast-forwards when you're behind and pushes
+anything you made offline.
+
+**When GitHub (or wherever origin is) can't be reached,** carry on: each
+change is committed on your machine and waits. amd says how many are
+waiting ("1 change waiting to push"), and the desktop board shows a bar
+across the top until origin is back. If teammates changed the board
+meanwhile, your changes go on top of theirs. A ticket you made while away
+whose number someone else had already used gets the next free number, with
+its links updated, and amd tells you ("ticket 264 is now 266"): nobody else
+had seen it under its old number. Only a real conflict, the same lines
+changed on both sides, or changes to files that aren't the board's, stops
+for you to sort out with git.
 
 Nothing a commit has seen is lost. `amd recover` lists every ticket that was
 deleted or abandoned, with who removed it and when, and brings any of them

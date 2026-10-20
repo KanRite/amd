@@ -187,8 +187,8 @@ pub async fn board_fingerprint() -> Result<String, String> {
 }
 
 /// Brings the board up to date with its remote (ticket 102); returns any
-/// warnings.
-pub async fn sync_board() -> Result<Vec<String>, String> {
+/// warnings, and whether origin was out of reach (ticket 197).
+pub async fn sync_board() -> Result<amd_ui_model::SyncStatus, String> {
     call("sync_board", &NoArgs {}).await
 }
 
