@@ -192,7 +192,7 @@ and on Linux adds the board to your application menu. To choose the folder
 or pin a version, pass them after `bash -s --`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash -s -- --dir ~/.local/bin --version v4.8.0
+curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash -s -- --dir ~/.local/bin --version v4.8.1
 ```
 
 If your system isn't one agile-md runs on, the installer says why and
