@@ -83,6 +83,47 @@ pub fn BottomPanel(project: Memo<Option<String>>) -> impl IntoView {
         }
     });
     let speech_ready = move || speech.with(|s| s.as_ref().is_some_and(|s| s.ready()));
+    // Read aloud (ticket 286): offered when it's on and the system has
+    // speech, read again with speech to text's status.
+    let reading = RwSignal::new(None::<amd_ui_model::terminal::ReadAloudStatus>);
+    Effect::new(move |_| {
+        let closed = ctx.overlay.with(Option::is_none);
+        if closed && on_project() {
+            spawn_local(async move {
+                if let Ok(status) = api::read_aloud_status().await {
+                    reading.set(Some(status));
+                }
+            });
+        }
+    });
+    let read_ready = move || reading.with(|s| s.as_ref().is_some_and(|s| s.ready()));
+    let speaking = RwSignal::new(false);
+    api::on_event::<()>("read-aloud-done", move |()| speaking.set(false));
+    // 🔊: the selection in the terminal if there is one, else the open
+    // tab's output since the last Enter. On mousedown, so the click can't
+    // clear the selection first.
+    let read_aloud = move |ev: web_sys::MouseEvent| {
+        ev.prevent_default();
+        if speaking.get_untracked() {
+            speaking.set(false);
+            spawn_local(async move {
+                let _ = api::read_aloud_stop().await;
+            });
+            return;
+        }
+        let selected = terminal_selection();
+        let id = match tab.get_untracked() {
+            TermKind::Shell => shell.id.get_untracked(),
+            TermKind::Ai => ai.id.get_untracked(),
+        };
+        speaking.set(true);
+        spawn_local(async move {
+            if let Err(e) = api::read_aloud(id, selected.as_deref()).await {
+                speaking.set(false);
+                ctx.error.set(Some(e));
+            }
+        });
+    };
     let dictation = RwSignal::new(Dictation::Idle);
     let start_dictation = move || {
         if dictation.get_untracked() != Dictation::Idle {
@@ -334,6 +375,25 @@ pub fn BottomPanel(project: Memo<Option<String>>) -> impl IntoView {
                         }}
                     </button>
                 </Show>
+                <Show when=read_ready>
+                    <button
+                        type="button"
+                        class=move || if speaking.get() {
+                            "rounded bg-accent-600 px-2 py-0.5 text-xs text-white"
+                        } else {
+                            "rounded px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-700/60"
+                        }
+                        title=move || if speaking.get() {
+                            "Stop reading"
+                        } else {
+                            "Read aloud: the text selected in the terminal, or what came out since you last pressed Enter"
+                        }
+                        aria-label=move || if speaking.get() { "Stop reading" } else { "Read aloud" }
+                        on:mousedown=read_aloud
+                    >
+                        {move || if speaking.get() { "⏹ stop" } else { "🔊" }}
+                    </button>
+                </Show>
                 <span class="flex-1 truncate px-2 text-xs text-slate-500">
                     {move || if open.get() { "" } else { "Ctrl+` opens the panel" }}
                 </span>
@@ -369,6 +429,23 @@ pub fn BottomPanel(project: Memo<Option<String>>) -> impl IntoView {
             </div>
         </section>
     }
+}
+
+/// The text selected inside a terminal, if any (ticket 286).
+fn terminal_selection() -> Option<String> {
+    let selection = window().get_selection().ok().flatten()?;
+    if selection.is_collapsed() {
+        return None;
+    }
+    use wasm_bindgen::JsCast;
+    let node = selection.anchor_node()?;
+    let element = match node.dyn_ref::<web_sys::Element>() {
+        Some(e) => e.clone(),
+        None => node.parent_element()?,
+    };
+    element.closest(".term").ok().flatten()?;
+    let text: String = selection.to_string().into();
+    (!text.trim().is_empty()).then_some(text)
 }
 
 /// Where dictation is (ticket 187).

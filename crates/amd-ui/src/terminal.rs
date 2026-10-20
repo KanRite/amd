@@ -97,6 +97,10 @@ pub struct Session {
     dirty: Arc<AtomicBool>,
     full: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
+    /// Where the input was when Enter was last typed, as a line counted
+    /// from the top of the history, so "read aloud" can find the output
+    /// since (ticket 286).
+    anchor: Mutex<Option<usize>>,
 }
 
 impl Session {
@@ -150,6 +154,7 @@ impl Session {
             dirty: Arc::clone(&listener.dirty),
             full: Arc::new(AtomicBool::new(true)),
             stop: Arc::new(AtomicBool::new(false)),
+            anchor: Mutex::new(None),
         };
         let (dirty, full, stop, exited) = (
             Arc::clone(&session.dirty),
@@ -185,6 +190,14 @@ impl Session {
                 term.scroll_display(Scroll::Bottom);
                 self.redraw();
             }
+            // Enter typed, not a paste with line ends in it.
+            if text.contains('\r')
+                && !text.starts_with("\x1b[200~")
+                && let Ok(mut anchor) = self.anchor.lock()
+            {
+                let (lines, history) = all_lines(&term);
+                *anchor = Some(input_top(&lines, history + cursor_line(&term)));
+            }
         }
         let _ = self
             .sender
@@ -208,6 +221,25 @@ impl Session {
         self.redraw();
     }
 
+    /// The output since Enter was last typed, without the line it was typed
+    /// on or the input waiting now (ticket 286). With no Enter seen, a
+    /// full-screen program running, or the Enter scrolled out of the
+    /// history, the screen as it is.
+    pub fn since_enter(&self) -> String {
+        let term = self.term.lock();
+        let (lines, history) = all_lines(&term);
+        let full_screen = term.mode().contains(TermMode::ALT_SCREEN);
+        // Once the history is full, lines fall off the top and an anchor
+        // counted from there no longer points where it did.
+        let anchor = self
+            .anchor
+            .lock()
+            .ok()
+            .and_then(|a| *a)
+            .filter(|_| !full_screen && history < SCROLLBACK);
+        reply(&lines, anchor, history + cursor_line(&term), history)
+    }
+
     fn redraw(&self) {
         self.full.store(true, Ordering::Release);
         self.dirty.store(true, Ordering::Release);
@@ -221,6 +253,117 @@ impl Drop for Session {
         self.stop.store(true, Ordering::Release);
         let _ = self.sender.send(Msg::Shutdown);
     }
+}
+
+/// The cursor's line on the screen.
+fn cursor_line(term: &Term<Listener>) -> usize {
+    term.grid().cursor.point.line.0.max(0) as usize
+}
+
+/// Every line, history first, as (text, wraps on to the next), and how many
+/// of them are history.
+fn all_lines(term: &Term<Listener>) -> (Vec<(String, bool)>, usize) {
+    let grid = term.grid();
+    let history = grid.history_size();
+    let cols = term.columns();
+    let lines = (-(history as i32)..term.screen_lines() as i32)
+        .map(|y| {
+            let row = &grid[Line(y)];
+            let mut text = String::new();
+            for x in 0..cols {
+                let cell = &row[Column(x)];
+                if cell
+                    .flags
+                    .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+                {
+                    continue;
+                }
+                text.push(cell.c);
+                if let Some(extra) = cell.zerowidth() {
+                    text.extend(extra);
+                }
+            }
+            let wraps = row[Column(cols - 1)].flags.contains(Flags::WRAPLINE);
+            if !wraps {
+                text.truncate(text.trim_end().len());
+            }
+            (text, wraps)
+        })
+        .collect();
+    (lines, history)
+}
+
+/// Where the input starts: the cursor's line, or the line above when that's
+/// a box's border (an AI tool's prompt box, Claude Code's among them).
+fn input_top(lines: &[(String, bool)], cursor: usize) -> usize {
+    match cursor.checked_sub(1) {
+        Some(above) if lines.get(above).is_some_and(|(t, _)| is_border(t)) => above,
+        _ => cursor,
+    }
+}
+
+/// A line drawn only with box-drawing characters.
+fn is_border(text: &str) -> bool {
+    let text = text.trim();
+    !text.is_empty()
+        && text
+            .chars()
+            .all(|c| matches!(c, '\u{2500}'..='\u{257F}' | ' '))
+}
+
+/// Two prompt lines alike but for their digits.
+fn same_shape(a: &str, b: &str) -> bool {
+    let shape = |s: &str| {
+        s.trim_end()
+            .chars()
+            .map(|c| if c.is_ascii_digit() { '0' } else { c })
+            .collect::<String>()
+    };
+    shape(a) == shape(b)
+}
+
+/// The text between the anchor's line (left out: what was typed there) and
+/// the input waiting now; the screen from `screen_top` without an anchor.
+/// Wrapped rows are joined back into their line.
+fn reply(
+    lines: &[(String, bool)],
+    anchor: Option<usize>,
+    cursor: usize,
+    screen_top: usize,
+) -> String {
+    let mut end = input_top(lines, cursor.min(lines.len().saturating_sub(1))).min(lines.len());
+    let anchor = anchor.filter(|a| *a < end);
+    // A prompt of several lines (a clock, the folder, then `❯`): the lines
+    // above the new input that match those above the old one are prompt
+    // too. Digits are ignored, since prompts show the time.
+    if let Some(a) = anchor {
+        let mut k = 0;
+        while k < 5
+            && k < a
+            && end > a + 1
+            && !lines[end - 1].0.trim().is_empty()
+            && same_shape(&lines[a - 1 - k].0, &lines[end - 1].0)
+        {
+            k += 1;
+            end -= 1;
+        }
+    }
+    let start = anchor.unwrap_or(screen_top.min(end));
+    let mut logical: Vec<String> = Vec::new();
+    let mut joining = false;
+    for (text, wraps) in &lines[start..end] {
+        if joining && let Some(last) = logical.last_mut() {
+            last.push_str(text);
+        } else {
+            logical.push(text.clone());
+        }
+        joining = *wraps;
+    }
+    if anchor.is_some() && !logical.is_empty() {
+        logical.remove(0);
+    }
+    let text = logical.join("\n");
+    text.trim_matches('\n').to_string()
 }
 
 /// The rows that changed (all of them with `full`), the cursor and the modes.
@@ -536,6 +679,82 @@ mod tests {
         assert_eq!(text[0], "one", "{text:?}");
         assert_eq!(text[1], "two", "{text:?}");
         assert!(!last.unwrap().alt_screen);
+    }
+
+    fn lines(rows: &[&str]) -> Vec<(String, bool)> {
+        rows.iter().map(|r| (r.to_string(), false)).collect()
+    }
+
+    #[test]
+    fn a_shell_reply_leaves_out_the_command_and_the_new_prompt() {
+        let rows = lines(&["$ old", "old out", "$ echo hello", "hello", "world", "$ "]);
+        assert_eq!(reply(&rows, Some(2), 5, 0), "hello\nworld");
+    }
+
+    #[test]
+    fn a_prompt_of_several_lines_is_left_out() {
+        let rows = lines(&[
+            "┌─ [13:54:21]",
+            "│~/demo",
+            "└─ me❯ echo hello",
+            "hello",
+            "",
+            "┌─ [13:54:36]",
+            "│~/demo",
+            "└─ me❯ ",
+        ]);
+        assert_eq!(reply(&rows, Some(2), 7, 0), "hello");
+        // Output that only looks like the line above the old prompt stays
+        // when it isn't directly above the new one.
+        let rows = lines(&["$ x", "$ echo a", "a", "$ "]);
+        assert_eq!(reply(&rows, Some(1), 3, 0), "a");
+    }
+
+    #[test]
+    fn a_prompt_box_is_left_out_at_both_ends() {
+        let rows = lines(&[
+            "> what is 6 x 7",
+            "",
+            "● It's 42.",
+            "",
+            "╭──────────╮",
+            "│ >        │",
+            "╰──────────╯",
+            "  ? for shortcuts",
+        ]);
+        // Enter was typed in a box whose top border was line 0; the cursor
+        // is now in the new box's text line.
+        assert_eq!(reply(&rows, Some(0), 5, 0), "● It's 42.");
+        let rule = lines(&["───", "> hi", "───"]);
+        assert_eq!(input_top(&rule, 1), 0);
+    }
+
+    #[test]
+    fn wrapped_rows_join_back_into_one_line() {
+        let rows = vec![
+            ("$ cmd".to_string(), false),
+            ("a long li".to_string(), true),
+            ("ne of text".to_string(), false),
+            ("$ ".to_string(), false),
+        ];
+        assert_eq!(reply(&rows, Some(0), 3, 0), "a long line of text");
+    }
+
+    #[test]
+    fn without_an_anchor_the_screen_is_read() {
+        let rows = lines(&["history", "on screen", "more", "$ "]);
+        assert_eq!(reply(&rows, None, 3, 1), "on screen\nmore");
+        // An anchor past the input (a cleared screen) is no anchor.
+        assert_eq!(reply(&rows, Some(9), 3, 1), "on screen\nmore");
+    }
+
+    #[test]
+    fn since_enter_reads_what_a_command_printed() {
+        let (session, rx) = start("read line; printf 'first\\nsecond\\n'; sleep 2", 40, 6);
+        std::thread::sleep(Duration::from_millis(200));
+        session.input("go\r");
+        let _ = screen(&rx, "second");
+        assert_eq!(session.since_enter(), "first\nsecond");
     }
 
     #[test]

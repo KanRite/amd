@@ -2074,6 +2074,28 @@ changes):
   Ignored tests transcribe ALSA's voice clips
   (`AMD_SPEECH_WAV=/usr/share/sounds/alsa/Front_Center.wav
   AMD_SPEECH_EXPECT="front center"`) and record speaker playback.
+- **Read aloud** (ticket 286, `crates/amd-ui/src/speech/say.rs`): a 🔊
+  in the panel bar beside the 🎤 reads the selection inside a `.term`
+  (taken on mousedown so the click can't clear it), else the open tab's
+  output since the last Enter; ⏹ stop while reading. The **system's
+  speech**, nothing downloaded: `spd-say --wait -- <text>` (one message;
+  stop is `spd-say -S`, which works across processes, never `-C`, which
+  cancels a screen reader's too), or macOS `say`. `speakable` drops box
+  drawing, spinners, list/quote marks, `**`/backticks and an AI tool's
+  `● Name(…)` calls with their `⎿` output, capped at 4000 characters at a
+  sentence end. **Since Enter** (`terminal::Session`): `input()` with a
+  `\r` that isn't a bracketed paste records `anchor` = the input's top
+  line counted from the history's top (`input_top`: the cursor's line, or
+  the line above when it's a box border, Claude Code's prompt box);
+  `since_enter` reads from there (dropping that first line, what was
+  typed) to the input now, joining `WRAPLINE` rows; no anchor, the
+  alternate screen, or a full history (lines fall off the top) reads the
+  screen. Commands `read_aloud_status`, `read_aloud(id, text)`
+  (`read-aloud-done` event when it ends, from a watcher thread keyed by a
+  reading count), `read_aloud_stop`, `set_read_aloud_enabled`
+  (`ui.read-aloud = off`); `speech_start` and the window closing stop it.
+  Preferences → Read aloud (switch, engine found, Test). A natural
+  downloadable voice (Piper) is a later ticket.
 - **Releases** build `amdui` too (ticket 085, `release.yml`). `install.sh`'s
   download path checks a downloaded amdui's libraries on Linux
   (`check_board_libraries`, via `ldd`) and names WebKitGTK when it's

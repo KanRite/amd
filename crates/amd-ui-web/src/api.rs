@@ -1460,6 +1460,32 @@ pub async fn speech_cancel() -> Result<(), String> {
     call("speech_cancel", &NoArgs {}).await
 }
 
+// --- Read aloud (ticket 286) ----------------------------------------------
+
+pub async fn read_aloud_status() -> Result<amd_ui_model::terminal::ReadAloudStatus, String> {
+    call("read_aloud_status", &NoArgs {}).await
+}
+
+#[derive(Serialize)]
+struct ReadAloudArgs<'a> {
+    id: Option<u32>,
+    text: Option<&'a str>,
+}
+
+/// Reads `text`, else terminal `id`'s output since the last Enter; the end
+/// comes as a `read-aloud-done` event.
+pub async fn read_aloud(id: Option<u32>, text: Option<&str>) -> Result<(), String> {
+    call("read_aloud", &ReadAloudArgs { id, text }).await
+}
+
+pub async fn read_aloud_stop() -> Result<(), String> {
+    call("read_aloud_stop", &NoArgs {}).await
+}
+
+pub async fn set_read_aloud_enabled(on: bool) -> Result<(), String> {
+    call("set_read_aloud_enabled", &OnArgs { on }).await
+}
+
 #[derive(Serialize)]
 struct StatsArgs<'a> {
     root: &'a str,
