@@ -276,10 +276,22 @@ redundant. Their history is in git if it is ever wanted again.
   (GitHub's releases API, 10 s timeout) and `status()`/`later()`; commands
   `update_status` (`amd_ui_model::UpdateInfo {version, notes_url, behind,
   current}`) and `snooze_update`. The page's `update_bar.rs` `UpdateBar`
-  sits above the header on every view, asks on start and every 30 minutes,
+  sits above the header on every view, asks on start and every 30 minutes
+  (its offer is `Ctx.update_offer`, so a check by hand can raise it),
   and is **orange**: the accents are only indigo, teal and slate (rose and
   amber were dropped, a saved one reads back as indigo), so nothing else
   is orange. The required variant (no Later) is 193.
+- **Checking by hand** (ticket 304): `update::check_now(source, current,
+  now, state)` → `Manual::{Newer, Current, Failed}` asks at once whatever
+  `CHECK_EVERY` and `update-check` say (asking is consent), at most once
+  every `MANUAL_EVERY` (60 s; quicker clicks answer from memory), clears a
+  Later, and records `checked` (when GitHub last answered, also set by
+  `check`; `last_checked`). amd-ui's `updates::check_now`, commands
+  `check_for_update` (`amd_ui_model::ManualCheck`) and `update_checked`.
+  The page: the top bar's version is `update_bar::VersionCheck` (a click
+  checks; the answer shows beside it for 8 s), Preferences → Updates shows
+  the version, `amd_ui_model::ago` since the last check and Check now; both
+  use `check_by_hand`, which puts a newer release in `Ctx.update_offer`.
 - `crates/amd-lib/src/update_apply.rs` — **applying an update** (ticket
   191). `install_dir(exe)`: only a folder whose `amd-uninstall` says
   `# agile-md install: release` (install.sh now writes `release` or

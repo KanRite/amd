@@ -104,6 +104,9 @@ pub struct Ctx {
     pub board: RwSignal<Option<Board>>,
     /// Origin out of reach at the last catch-up: changes waiting (197).
     pub offline: RwSignal<Option<u32>>,
+    /// The newer release the update bar offers (ticket 192), set by its own
+    /// checks and by a check asked for by hand (ticket 304).
+    pub update_offer: RwSignal<Option<amd_ui_model::UpdateInfo>>,
     /// Landing page or board (ticket 020).
     pub view: RwSignal<View>,
     /// The landing page's data, loaded on arrival there.
@@ -300,6 +303,7 @@ pub fn App() -> impl IntoView {
         board: RwSignal::new(None),
         view: RwSignal::new(View::Home),
         offline: RwSignal::new(None),
+        update_offer: RwSignal::new(None),
         home: RwSignal::new(None),
         error: RwSignal::new(None),
         overlay: RwSignal::new(None),
@@ -401,9 +405,7 @@ pub fn App() -> impl IntoView {
                     // so its own is amdui's.
                     <span class="flex items-baseline gap-1.5 whitespace-nowrap">
                         <span class="text-lg font-semibold">"agile-md"</span>
-                        <span class="text-xs text-slate-500" title="The version of agile-md running">
-                            {concat!("v", env!("CARGO_PKG_VERSION"))}
-                        </span>
+                        <crate::update_bar::VersionCheck />
                     </span>
                 </Show>
                 <span class="min-w-0 flex-1 truncate text-xs text-slate-500" title=tasks_dir>

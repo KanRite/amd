@@ -732,6 +732,30 @@ pub struct UpdateInfo {
     pub current: String,
 }
 
+/// How long ago something was, from seconds: "just now", "5 minutes ago",
+/// "2 hours ago", "3 days ago" (Preferences' last update check, ticket 304).
+pub fn ago(seconds: i64) -> String {
+    let (n, unit) = match seconds.max(0) {
+        s if s < 60 => return "just now".to_string(),
+        s if s < 3_600 => (s / 60, "minute"),
+        s if s < 86_400 => (s / 3_600, "hour"),
+        s => (s / 86_400, "day"),
+    };
+    format!("{n} {unit}{} ago", if n == 1 { "" } else { "s" })
+}
+
+/// What a check for updates asked for by hand found (ticket 304).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "result", rename_all = "lowercase")]
+pub enum ManualCheck {
+    /// A newer release: the update bar offers it.
+    Newer { info: UpdateInfo },
+    /// This build is the newest.
+    Current { current: String },
+    /// GitHub couldn't be asked.
+    Failed { why: String },
+}
+
 /// What the update bar's Update did (ticket 191).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "lowercase")]
@@ -1575,6 +1599,17 @@ pub fn slugify(title: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ago_says_how_long_in_plain_words() {
+        use super::ago;
+        assert_eq!(ago(-5), "just now", "a clock set back");
+        assert_eq!(ago(59), "just now");
+        assert_eq!(ago(60), "1 minute ago");
+        assert_eq!(ago(150), "2 minutes ago");
+        assert_eq!(ago(3_600), "1 hour ago");
+        assert_eq!(ago(3 * 86_400 + 5), "3 days ago");
+    }
+
     use super::*;
 
     #[test]

@@ -33,6 +33,9 @@ pub const SNOOZE_FOR: i64 = 24 * 60 * 60;
 /// How soon to try again after a failed check, so an offline laptop doesn't
 /// ask on every call but doesn't wait a whole day either.
 pub const RETRY_AFTER_FAILURE: i64 = 60 * 60;
+/// A check asked for by hand (ticket 304) goes to GitHub at most this often;
+/// clicks within it answer from what the last one found.
+pub const MANUAL_EVERY: i64 = 60;
 
 /// `major.minor.patch`. A pre-release (`4.1.0-rc1`) does not parse, which is
 /// how pre-releases are kept out of the offer.
@@ -167,6 +170,10 @@ struct State {
     releases: Vec<(String, String)>,
     #[serde(default)]
     snoozed: Option<Snooze>,
+    /// When GitHub last answered (unix seconds; 0 unknown, as a file from
+    /// before ticket 304 has).
+    #[serde(default)]
+    checked: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -259,6 +266,7 @@ pub fn check(
                     .map(|r| (r.version.to_string(), r.notes_url.clone()))
                     .collect();
                 state.next_check = now + CHECK_EVERY;
+                state.checked = now;
             }
             Err(_) => state.next_check = now + RETRY_AFTER_FAILURE,
         }
@@ -280,6 +288,59 @@ pub fn check(
 /// "Later": hides `version` for a day. A newer release than this one is still
 /// shown straight away, because the snooze is for the version, not for the
 /// banner.
+/// What a check asked for by hand found (ticket 304).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Manual {
+    /// A newer release.
+    Newer(UpdateAvailable),
+    /// This build is the newest.
+    Current,
+    /// GitHub couldn't be asked; why.
+    Failed(String),
+}
+
+/// A check asked for by hand (ticket 304): asks `source` now, whatever
+/// `CHECK_EVERY` says and whether or not automatic checks are on (asking is
+/// consent), but at most once every [`MANUAL_EVERY`]; a quicker click answers
+/// from that last answer. It clears a Later, and what it finds is remembered
+/// as an automatic check's would be.
+pub fn check_now(
+    source: &dyn ReleaseSource,
+    current: Version,
+    now: i64,
+    state_file: &Path,
+) -> Manual {
+    let mut state = State::load(state_file);
+    state.snoozed = None;
+    let recent = state.checked > 0 && (0..MANUAL_EVERY).contains(&(now - state.checked));
+    if !recent {
+        match source.releases() {
+            Ok(releases) => {
+                state.releases = releases
+                    .iter()
+                    .map(|r| (r.version.to_string(), r.notes_url.clone()))
+                    .collect();
+                state.next_check = now + CHECK_EVERY;
+                state.checked = now;
+            }
+            Err(err) => {
+                let _ = state.save(state_file);
+                return Manual::Failed(format!("{err:#}"));
+            }
+        }
+    }
+    let _ = state.save(state_file);
+    match newest_above(current, &state.known()) {
+        Some(found) => Manual::Newer(found),
+        None => Manual::Current,
+    }
+}
+
+/// When GitHub last answered a check, if it's known.
+pub fn last_checked(state_file: &Path) -> Option<i64> {
+    Some(State::load(state_file).checked).filter(|c| *c > 0)
+}
+
 pub fn snooze(state_file: &Path, version: &str, now: i64) -> Result<()> {
     let mut state = State::load(state_file);
     state.snoozed = Some(Snooze {
@@ -558,5 +619,77 @@ mod tests {
         }
         config.set("update-check", "on");
         assert!(enabled(&config));
+    }
+
+    #[test]
+    fn a_check_by_hand_asks_now_whatever_the_interval_says() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let mut fake = Fake::with(&["4.1.0"]);
+        // An automatic check an hour ago: not due again for two more.
+        check(&fake, v("4.0.0"), 0, &file);
+        fake.releases.push(release("4.2.0"));
+        let found = check_now(&fake, v("4.0.0"), 3_600, &file);
+        assert_eq!(fake.asked.get(), 2);
+        match found {
+            Manual::Newer(found) => assert_eq!(found.version, "4.2.0"),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(last_checked(&file), Some(3_600));
+        // What it found is what the automatic check now answers with.
+        assert_eq!(
+            check(&fake, v("4.0.0"), 3_700, &file).unwrap().version,
+            "4.2.0"
+        );
+        assert_eq!(fake.asked.get(), 2);
+    }
+
+    #[test]
+    fn checks_by_hand_reach_github_at_most_once_a_minute() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let fake = Fake::with(&["4.0.0"]);
+        assert_eq!(check_now(&fake, v("4.0.0"), 1_000, &file), Manual::Current);
+        assert_eq!(check_now(&fake, v("4.0.0"), 1_030, &file), Manual::Current);
+        assert_eq!(fake.asked.get(), 1, "the second click answers from memory");
+        check_now(&fake, v("4.0.0"), 1_000 + MANUAL_EVERY, &file);
+        assert_eq!(fake.asked.get(), 2);
+    }
+
+    #[test]
+    fn a_check_by_hand_says_when_github_cant_be_reached() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let fake = Fake::with(&["4.1.0"]);
+        fake.fail.set(true);
+        assert!(matches!(
+            check_now(&fake, v("4.0.0"), 0, &file),
+            Manual::Failed(why) if why.contains("offline")
+        ));
+        assert_eq!(last_checked(&file), None);
+        // Nothing found, so the next click asks again at once.
+        fake.fail.set(false);
+        assert!(matches!(
+            check_now(&fake, v("4.0.0"), 5, &file),
+            Manual::Newer(_)
+        ));
+    }
+
+    #[test]
+    fn a_check_by_hand_clears_later() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let fake = Fake::with(&["4.1.0"]);
+        check(&fake, v("4.0.0"), 0, &file);
+        snooze(&file, "4.1.0", 10).unwrap();
+        assert_eq!(check(&fake, v("4.0.0"), 20, &file), None, "snoozed");
+        assert!(matches!(
+            check_now(&fake, v("4.0.0"), 30, &file),
+            Manual::Newer(_)
+        ));
+        assert!(
+            check(&fake, v("4.0.0"), 40, &file).is_some(),
+            "Later is gone"
+        );
     }
 }
