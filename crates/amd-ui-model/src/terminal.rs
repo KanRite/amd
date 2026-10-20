@@ -118,6 +118,35 @@ impl ReadAloudStatus {
     }
 }
 
+/// A Piper voice on offer (ticket 287).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PiperVoice {
+    pub id: String,
+    pub label: String,
+}
+
+/// Where the Piper voice stands (ticket 287).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PiperStatus {
+    /// Linux with speech-dispatcher.
+    pub supported: bool,
+    /// How Piper would be installed (`uv`, `Python's venv`), if it can be.
+    pub installer: Option<String>,
+    pub voices: Vec<PiperVoice>,
+    /// The voice set up now.
+    pub installed: Option<String>,
+    /// A set-up running now.
+    pub busy: bool,
+}
+
+/// How a Piper set-up is going: `installing`, `voice`, `configuring`,
+/// then `done` (with `error` when it failed).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PiperProgress {
+    pub stage: String,
+    pub error: Option<String>,
+}
+
 /// How a model's download is going.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpeechProgress {

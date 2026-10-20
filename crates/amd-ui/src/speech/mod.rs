@@ -7,5 +7,6 @@
 pub mod audio;
 pub mod dsp;
 pub mod model;
+pub mod piper;
 pub mod say;
 pub mod whisper;

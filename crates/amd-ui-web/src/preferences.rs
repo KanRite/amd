@@ -604,6 +604,154 @@ fn ReadAloudSection() -> impl IntoView {
                     })
             }}
             {move || note.get().map(|n| view! { <p class="text-xs">{n}</p> })}
+            <PiperSection />
         </section>
+    }
+}
+
+/// A natural voice (ticket 287): Piper set up behind speech-dispatcher, on
+/// Linux only (macOS's own voices are already natural).
+#[component]
+fn PiperSection() -> impl IntoView {
+    use amd_ui_model::terminal::{PiperProgress, PiperStatus};
+    let status = RwSignal::new(None::<PiperStatus>);
+    let stage = RwSignal::new(None::<String>);
+    let note = RwSignal::new(None::<String>);
+    let chosen = RwSignal::new(String::new());
+    let reload = move || {
+        spawn_local(async move {
+            match api::piper_status().await {
+                Ok(s) => {
+                    if chosen.get_untracked().is_empty() {
+                        let first = s
+                            .installed
+                            .clone()
+                            .or_else(|| s.voices.first().map(|v| v.id.clone()))
+                            .unwrap_or_default();
+                        chosen.set(first);
+                    }
+                    if s.busy {
+                        stage.set(Some("working…".to_string()));
+                    }
+                    status.set(Some(s));
+                }
+                Err(e) => note.set(Some(e)),
+            }
+        });
+    };
+    reload();
+    api::on_event::<PiperProgress>("piper-progress", move |p| {
+        if p.stage == "done" {
+            stage.set(None);
+            note.set(Some(match p.error {
+                Some(e) => e,
+                None => "Set up: read aloud now uses Piper.".to_string(),
+            }));
+            reload();
+        } else {
+            stage.set(Some(
+                match p.stage.as_str() {
+                    "installing" => "Installing Piper (about 190 MB, a minute or two)…",
+                    "voice" => "Downloading the voice (about 60 MB)…",
+                    _ => "Setting up speech-dispatcher…",
+                }
+                .to_string(),
+            ));
+        }
+    });
+    let install = move |_| {
+        let voice = chosen.get_untracked();
+        note.set(None);
+        stage.set(Some("Starting…".to_string()));
+        spawn_local(async move {
+            if let Err(e) = api::piper_install(&voice).await {
+                stage.set(None);
+                note.set(Some(e));
+            }
+        });
+    };
+    let remove = move |_| {
+        note.set(None);
+        stage.set(Some("Removing…".to_string()));
+        spawn_local(async move {
+            let outcome = api::piper_remove().await;
+            stage.set(None);
+            note.set(Some(match outcome {
+                Ok(()) => "Removed: read aloud is back to the system voice.".to_string(),
+                Err(e) => e,
+            }));
+            reload();
+        });
+    };
+    let busy = move || stage.with(Option::is_some);
+    let small = "rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700";
+    view! {
+        {move || {
+            status
+                .get()
+                .filter(|st| st.supported)
+                .map(|st| {
+                    let installed = st.installed.clone();
+                    let has = installed.is_some();
+                    let can_install = st.installer.is_some() || has;
+                    let label_of = {
+                        let voices = st.voices.clone();
+                        move |id: &str| {
+                            voices
+                                .iter()
+                                .find(|v| v.id == id)
+                                .map_or_else(|| id.to_string(), |v| v.label.clone())
+                        }
+                    };
+                    let state_line = match &installed {
+                        Some(id) => format!("Using Piper: {}.", label_of(id)),
+                        None => match &st.installer {
+                            Some(how) => format!(
+                                "Not set up. Set up installs Piper with {how} into amdui's own folder, downloads the voice, and makes it speech-dispatcher's voice (for other programs too). Remove undoes all of it."
+                            ),
+                            None => "Setting up Piper needs uv or Python 3 with venv (on Ubuntu: sudo apt install python3-venv).".to_string(),
+                        },
+                    };
+                    let unchanged = {
+                        let installed = installed.clone();
+                        move || installed.as_deref() == Some(chosen.get().as_str())
+                    };
+                    view! {
+                        <div class="flex flex-col gap-2 rounded border border-slate-200 p-2 dark:border-slate-700">
+                            <h4 class="text-xs font-semibold">"A natural voice (Piper)"</h4>
+                            <p class="text-xs text-slate-500">{state_line}</p>
+                            <div class="flex flex-wrap items-center gap-2">
+                                <select
+                                    class="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-600 dark:bg-slate-800"
+                                    prop:value=move || chosen.get()
+                                    disabled=busy
+                                    on:change=move |ev| chosen.set(event_target_value(&ev))
+                                >
+                                    {st
+                                        .voices
+                                        .iter()
+                                        .map(|v| view! { <option value=v.id.clone()>{v.label.clone()}</option> })
+                                        .collect_view()}
+                                </select>
+                                <button
+                                    type="button"
+                                    class=small
+                                    disabled=move || busy() || !can_install || unchanged()
+                                    on:click=install
+                                >
+                                    {if has { "Use this voice" } else { "Set up" }}
+                                </button>
+                                <Show when=move || has>
+                                    <button type="button" class=small disabled=busy on:click=remove>
+                                        "Remove"
+                                    </button>
+                                </Show>
+                            </div>
+                        </div>
+                    }
+                })
+        }}
+        {move || stage.get().map(|s| view! { <p class="text-xs text-slate-500">{s}</p> })}
+        {move || note.get().map(|n| view! { <p class="text-xs">{n}</p> })}
     }
 }

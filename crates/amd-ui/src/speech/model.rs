@@ -166,7 +166,7 @@ impl Model {
     }
 }
 
-fn speech_dir() -> PathBuf {
+pub(crate) fn speech_dir() -> PathBuf {
     let base = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
