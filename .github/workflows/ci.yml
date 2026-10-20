@@ -80,6 +80,49 @@ jobs:
       - name: CLI tests
         run: bash tests/test.sh
 
+  # Windows (ticket 276): building and testing each crate on its own, every
+  # step running even when one before failed, to find what breaks. Not a
+  # required check, and allowed to fail, until it passes; the failures are
+  # listed on ticket 276 with the ticket that fixes each.
+  windows:
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Rust (stable + wasm32)
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
+      - name: Build the desktop board's front end
+        working-directory: crates/amd-ui-web
+        run: trunk build --release
+      - name: Library tests (amd-lib)
+        if: ${{ !cancelled() }}
+        run: cargo test --locked -p agile-md --no-fail-fast
+      - name: Shared model tests (amd-ui-model)
+        if: ${{ !cancelled() }}
+        run: cargo test --locked -p amd-ui-model --no-fail-fast
+      - name: Build amd
+        if: ${{ !cancelled() }}
+        run: cargo build --locked -p amd-cli
+      - name: CLI unit tests
+        if: ${{ !cancelled() }}
+        run: cargo test --locked -p amd-cli --no-fail-fast
+      - name: Build amdui
+        if: ${{ !cancelled() }}
+        run: cargo build --locked -p amd-ui
+      - name: amdui unit tests
+        if: ${{ !cancelled() }}
+        run: cargo test --locked -p amd-ui --no-fail-fast
+
   shell:
     runs-on: ubuntu-latest
     steps:
