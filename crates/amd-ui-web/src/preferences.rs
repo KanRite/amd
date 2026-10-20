@@ -22,6 +22,7 @@ pub fn PreferencesPanel() -> impl IntoView {
                 <SpeechSection />
                 <ReadAloudSection />
                 <EditorSection />
+                <UpdatesSection />
             </div>
             <ModalClose />
         </Modal>
@@ -753,5 +754,58 @@ fn PiperSection() -> impl IntoView {
         }}
         {move || stage.get().map(|s| view! { <p class="text-xs text-slate-500">{s}</p> })}
         {move || note.get().map(|n| view! { <p class="text-xs">{n}</p> })}
+    }
+}
+
+/// Updates (ticket 304): the version running, when GitHub last answered a
+/// check, and Check now.
+#[component]
+fn UpdatesSection() -> impl IntoView {
+    let checked = RwSignal::new(None::<i64>);
+    let note = RwSignal::new(None::<String>);
+    let reload = move || {
+        spawn_local(async move {
+            if let Ok(at) = api::update_checked().await {
+                checked.set(at);
+            }
+        });
+    };
+    reload();
+    // Read again once a check has said what it found.
+    Effect::new(move |_| {
+        if note.with(|n| n.as_deref().is_some_and(|n| !n.starts_with("Checking"))) {
+            reload();
+        }
+    });
+    let last = move || match checked.get() {
+        Some(at) => {
+            let now = (js_sys::Date::now() / 1000.0) as i64;
+            format!("Last checked {}.", amd_ui_model::ago(now - at))
+        }
+        None => "Not checked yet.".to_string(),
+    };
+    let small = "rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700";
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Updates"</h3>
+            <div class="flex items-center gap-2">
+                <p class="flex-1 text-sm">
+                    {concat!("agile-md ", env!("CARGO_PKG_VERSION"), ". ")}
+                    <span class="text-xs text-slate-500">{last}</span>
+                </p>
+                <button
+                    type="button"
+                    class=small
+                    disabled=move || note.with(|n| n.as_deref().is_some_and(|n| n.starts_with("Checking")))
+                    on:click=move |_| crate::update_bar::check_by_hand(note)
+                >
+                    "Check now"
+                </button>
+            </div>
+            <p class="text-xs text-slate-500">
+                "amdui also checks by itself every three hours (unless update-check = off in your config). Clicking the version in the top bar checks too."
+            </p>
+            {move || note.get().map(|n| view! { <p role="status" class="text-xs">{n}</p> })}
+        </section>
     }
 }

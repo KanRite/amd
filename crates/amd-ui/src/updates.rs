@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use agile_md::settings::Config;
 use agile_md::update::{self, Release, ReleaseSource, Version};
 use agile_md::update_apply::{self, Applied, Fetch, Install};
-use amd_ui_model::{UpdateInfo, UpdateResult};
+use amd_ui_model::{ManualCheck, UpdateInfo, UpdateResult};
 
 /// agile-md's releases, newest first; 30 is far more than a build is behind.
 const RELEASES: &str = "https://api.github.com/repos/agile-md/amd/releases?per_page=30";
@@ -64,6 +64,42 @@ pub fn status() -> Option<UpdateInfo> {
         behind: found.behind,
         current: current.to_string(),
     })
+}
+
+/// A check asked for by hand (ticket 304): GitHub now (at most once a
+/// minute), even with automatic checks off, clearing a Later.
+pub fn check_now() -> ManualCheck {
+    let Some(current) = Version::parse(env!("CARGO_PKG_VERSION")) else {
+        return ManualCheck::Failed {
+            why: "this build has no release version".into(),
+        };
+    };
+    let Some(path) = update::state_path() else {
+        return ManualCheck::Failed {
+            why: "no home folder to remember updates in".into(),
+        };
+    };
+    match update::check_now(&GitHub, current, now(), &path) {
+        update::Manual::Newer(found) => ManualCheck::Newer {
+            info: UpdateInfo {
+                version: found.version,
+                notes_url: found.notes_url,
+                behind: found.behind,
+                current: current.to_string(),
+            },
+        },
+        update::Manual::Current => ManualCheck::Current {
+            current: current.to_string(),
+        },
+        update::Manual::Failed(why) => ManualCheck::Failed {
+            why: format!("couldn't reach GitHub: {why}"),
+        },
+    }
+}
+
+/// When GitHub last answered a check (unix seconds), if it's known.
+pub fn last_checked() -> Option<i64> {
+    update::last_checked(&update::state_path()?)
 }
 
 /// "Later": hides `version` for a day, across restarts. A newer release

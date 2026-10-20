@@ -411,6 +411,16 @@ pub async fn snooze_update(version: &str) -> Result<(), String> {
     call("snooze_update", &SnoozeArgs { version }).await
 }
 
+/// Check for updates now (ticket 304).
+pub async fn check_for_update() -> Result<amd_ui_model::ManualCheck, String> {
+    call("check_for_update", &NoArgs {}).await
+}
+
+/// When GitHub last answered a check for updates (unix seconds).
+pub async fn update_checked() -> Result<Option<i64>, String> {
+    call("update_checked", &NoArgs {}).await
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MoveEpicArgs<'a> {
