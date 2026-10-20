@@ -37,8 +37,10 @@ enum Phase {
     },
 }
 
-/// How often the page asks again; amdui asks GitHub at most daily anyway.
-const RECHECK: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+/// How often the page asks again. Asking amdui is local; it asks GitHub only
+/// every `update::CHECK_EVERY` (three hours), so this just keeps the bar from
+/// lagging that by hours more (ticket 285).
+const RECHECK: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 /// How often amdui's own program is looked at: one `stat` (ticket 208).
 const BINARY_CHECK: std::time::Duration = std::time::Duration::from_secs(5);

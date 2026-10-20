@@ -23,8 +23,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::settings::{self, Config};
 
-/// How long a result is trusted before GitHub is asked again.
-pub const CHECK_EVERY: i64 = 24 * 60 * 60;
+/// How long a result is trusted before GitHub is asked again. Three hours,
+/// so a release shows the same day (ticket 285: a day, with the bar's own six
+/// hours on top, let 4.8.0 go unseen for over a day); still a handful of
+/// requests a day against the releases API's 60 an hour.
+pub const CHECK_EVERY: i64 = 3 * 60 * 60;
 /// How long "Later" hides a release.
 pub const SNOOZE_FOR: i64 = 24 * 60 * 60;
 /// How soon to try again after a failed check, so an offline laptop doesn't
@@ -234,8 +237,8 @@ pub fn enabled(config: &Config) -> bool {
 
 /// What, if anything, to tell the user about.
 ///
-/// Asks `source` only when the last answer is a day old (or an hour old after
-/// a failure); otherwise answers from the remembered list. `None` when this
+/// Asks `source` only when the last answer is `CHECK_EVERY` old (or an hour
+/// old after a failure); otherwise answers from the remembered list. `None` when this
 /// build is current, when the release was snoozed and the day isn't up, or
 /// when nothing is known (offline on first run).
 pub fn check(
@@ -391,11 +394,11 @@ mod tests {
         let found = check(&fake, v("4.0.0"), 1_000, &file).unwrap();
         assert_eq!(found.version, "4.1.0");
 
-        // Within a day, the answer comes from memory: GitHub isn't asked.
-        assert!(check(&fake, v("4.0.0"), 1_000 + 3_600, &file).is_some());
+        // Within the interval, the answer comes from memory: GitHub isn't asked.
+        assert!(check(&fake, v("4.0.0"), 1_000 + CHECK_EVERY - 1, &file).is_some());
         assert_eq!(fake.asked.get(), 1);
 
-        // After a day it is.
+        // Once it's up, it is.
         check(&fake, v("4.0.0"), 1_000 + CHECK_EVERY, &file);
         assert_eq!(fake.asked.get(), 2);
     }
@@ -453,7 +456,7 @@ mod tests {
         // A new process has only the file.
         let again = Fake::with(&["4.1.0"]);
         assert_eq!(check(&again, v("4.0.0"), 50, &file), None);
-        assert_eq!(again.asked.get(), 0, "not asked: the day isn't up");
+        assert_eq!(again.asked.get(), 0, "not asked: the interval isn't up");
     }
 
     #[test]
@@ -492,6 +495,26 @@ mod tests {
         check(&fake, v("4.0.0"), 10 * CHECK_EVERY, &file);
         check(&fake, v("4.0.0"), 0, &file);
         assert_eq!(fake.asked.get(), 2);
+    }
+
+    #[test]
+    fn a_next_check_from_the_old_daily_interval_is_asked_at_once() {
+        // A build before ticket 285 wrote `next_check` a day ahead; the new
+        // build mustn't wait that day out.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("update.json");
+        let now = 1_000_000;
+        fs::write(
+            &file,
+            format!(
+                r#"{{"next_check":{},"releases":[]}}"#,
+                now + 24 * 60 * 60 - 60
+            ),
+        )
+        .unwrap();
+        let fake = Fake::with(&["4.1.0"]);
+        assert!(check(&fake, v("4.0.0"), now, &file).is_some());
+        assert_eq!(fake.asked.get(), 1);
     }
 
     #[test]

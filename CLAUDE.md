@@ -265,7 +265,7 @@ redundant. Their history is in git if it is ever wanted again.
   `major.minor.patch`; `newest_above` gives `UpdateAvailable {version,
   notes_url, behind}`, `behind` being how many releases the build is
   missing so an update can catch up one at a time. `check(source, current,
-  now, state_file)` asks GitHub at most once a day (an hour after a
+  now, state_file)` asks GitHub at most every three hours (ticket 285; an hour after a
   failure), otherwise answers from the remembered list; a failed check is
   silent. `snooze` is "Later": it hides *that version* for 24 hours, so a
   still newer release shows at once. State is `$XDG_STATE_HOME/agile-md/
@@ -276,7 +276,7 @@ redundant. Their history is in git if it is ever wanted again.
   (GitHub's releases API, 10 s timeout) and `status()`/`later()`; commands
   `update_status` (`amd_ui_model::UpdateInfo {version, notes_url, behind,
   current}`) and `snooze_update`. The page's `update_bar.rs` `UpdateBar`
-  sits above the header on every view, asks on start and every 6 hours,
+  sits above the header on every view, asks on start and every 30 minutes,
   and is **orange**: the accents are only indigo, teal and slate (rose and
   amber were dropped, a saved one reads back as indigo), so nothing else
   is orange. The required variant (no Later) is 193.

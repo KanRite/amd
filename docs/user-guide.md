@@ -489,11 +489,11 @@ disagree.
   **Update** and **Later**. Update installs it and restarts amdui (close a
   ticket you're editing first). Later hides that version for a day, even across
   restarts; a newer release still shows at once. amdui looks when it starts
-  and every few hours while open, but asks GitHub at most once a day, and
-  ignores drafts and pre-releases. A failed check says nothing and tries
-  again an hour later. Turn it off with `update-check = off` in
-  `~/.config/agile-md/config`, or `AMD_UPDATE_CHECK=0`, which wins over the
-  setting. What it remembers (the releases it last saw, and a Later) is in
+  and every half hour while open, but asks GitHub at most every three
+  hours, so a release shows the same day. It ignores drafts and
+  pre-releases. A failed check says nothing and tries again an hour later.
+  Turn it off with `update-check = off` in `~/.config/agile-md/config`, or
+  `AMD_UPDATE_CHECK=0`, which wins over the setting. What it remembers (the releases it last saw, and a Later) is in
   `~/.local/state/agile-md/update.json`, or under `$XDG_STATE_HOME`: on
   this machine only, never in a project's repositories.
 
