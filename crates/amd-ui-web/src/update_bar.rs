@@ -13,12 +13,81 @@
 //! terminal, the installer, a package manager: ticket 208), the bar says so
 //! instead, with **Restart**. Nothing restarts without the click.
 
-use amd_ui_model::{INSTALL_COMMAND, UpdateInfo, UpdateResult};
+use amd_ui_model::{INSTALL_COMMAND, ManualCheck, UpdateResult};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api;
 use crate::app::{Ctx, Overlay};
+
+/// A check for updates asked for by hand (ticket 304), shared by the top
+/// bar's version and Preferences: what it found goes in `note`, and a newer
+/// release goes to the update bar.
+pub fn check_by_hand(note: RwSignal<Option<String>>) {
+    let ctx = Ctx::get();
+    note.set(Some("Checking for updates…".to_string()));
+    spawn_local(async move {
+        let said = match api::check_for_update().await {
+            Ok(ManualCheck::Newer { info }) => {
+                let said = format!(
+                    "agile-md {} is out: Update is in the bar above.",
+                    info.version
+                );
+                ctx.update_offer.set(Some(info));
+                said
+            }
+            Ok(ManualCheck::Current { current }) => {
+                format!("You're up to date (agile-md {current}).")
+            }
+            Ok(ManualCheck::Failed { why }) => why,
+            Err(why) => why,
+        };
+        note.set(Some(said));
+    });
+}
+
+/// The version in the top bar (ticket 240), which checks for updates when
+/// clicked (ticket 304); what it found shows beside it for a few seconds.
+#[component]
+pub fn VersionCheck() -> impl IntoView {
+    let note = RwSignal::new(None::<String>);
+    // Each check's note clears itself, unless a newer click replaced it.
+    let shown = StoredValue::new(0_u32);
+    let click = move |_| {
+        shown.update_value(|n| *n = n.wrapping_add(1));
+        let this = shown.get_value();
+        check_by_hand(note);
+        set_timeout(
+            move || {
+                if shown.get_value() == this {
+                    note.set(None);
+                }
+            },
+            std::time::Duration::from_secs(8),
+        );
+    };
+    // The answer floats under the version, so the header doesn't move.
+    view! {
+        <span class="relative">
+            <button
+                type="button"
+                class="rounded text-xs text-slate-500 hover:text-slate-300 hover:underline"
+                title="The version of agile-md running. Click to check for updates."
+                on:click=click
+            >
+                {concat!("v", env!("CARGO_PKG_VERSION"))}
+            </button>
+            {move || note.get().map(|n| view! {
+                <span
+                    role="status"
+                    class="absolute left-0 top-full z-50 mt-1 whitespace-nowrap rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 shadow dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                >
+                    {n}
+                </span>
+            })}
+        </span>
+    }
+}
 
 /// Where Update has got to.
 #[derive(Clone, Debug, PartialEq)]
@@ -48,7 +117,7 @@ const BINARY_CHECK: std::time::Duration = std::time::Duration::from_secs(5);
 #[component]
 pub fn UpdateBar() -> impl IntoView {
     let ctx = Ctx::get();
-    let offer = RwSignal::new(None::<UpdateInfo>);
+    let offer = ctx.update_offer;
     let phase = RwSignal::new(Phase::Idle);
     let update = move || {
         if ctx

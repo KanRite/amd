@@ -1080,6 +1080,18 @@ async fn snooze_update(version: String) -> Result<()> {
     blocking(move || updates::later(&version).map_err(err)).await
 }
 
+/// Check for updates, asked for by hand (ticket 304).
+#[tauri::command]
+async fn check_for_update() -> Result<amd_ui_model::ManualCheck> {
+    blocking(|| Ok(updates::check_now())).await
+}
+
+/// When GitHub last answered a check for updates (unix seconds).
+#[tauri::command]
+async fn update_checked() -> Result<Option<i64>> {
+    blocking(|| Ok(updates::last_checked())).await
+}
+
 /// Deletes an epic or sprint (`amd group delete`, ticket 204): refused while
 /// any ticket in it isn't done.
 #[tauri::command]
@@ -3018,6 +3030,8 @@ pub fn run() {
             move_epic_tickets,
             update_status,
             snooze_update,
+            check_for_update,
+            update_checked,
             apply_update,
             binary_changed,
             restart_app,

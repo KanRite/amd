@@ -492,6 +492,11 @@ disagree.
   and every half hour while open, but asks GitHub at most every three
   hours, so a release shows the same day. It ignores drafts and
   pre-releases. A failed check says nothing and tries again an hour later.
+  To check now, click the version beside "agile-md" in the top bar, or
+  Preferences → Updates → Check now (which also says when it last
+  checked): it asks GitHub straight away, says "You're up to date" or
+  brings up the bar, and says so when GitHub can't be reached. It works
+  even with automatic checks off, and undoes a Later.
   Turn it off with `update-check = off` in `~/.config/agile-md/config`, or
   `AMD_UPDATE_CHECK=0`, which wins over the setting. What it remembers (the releases it last saw, and a Later) is in
   `~/.local/state/agile-md/update.json`, or under `$XDG_STATE_HOME`: on
