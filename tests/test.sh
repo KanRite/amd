@@ -502,16 +502,28 @@ assert "...and both changes are on the remote" \
   bash -c "git -C '${two}/origin.git' show main:tasks/backlog/003-third.md | grep -q '^priority: \"high\"' \
     && git -C '${two}/origin.git' ls-tree -r --name-only main | grep -q 'backlog/001-from-a.md'"
 race new "A at the same time" --no-edit
-assert "a push that clashed (both numbered a new ticket) is undone, with a non-zero exit" \
-  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; ! in_b new 'B at the same time' --no-edit >/dev/null 2>&1"
-assert "...saying why, and where what was written is kept" \
-  bash -c "ls '${two}'/state/agile-md/recovered/*/*b-at-the-same-time.md >/dev/null 2>&1"
-assert "...leaving B up to date with A's ticket, and not its own" \
+assert "a push that clashed (both numbered a new ticket) is replayed, the new ticket renumbered (ticket 197)" \
+  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; in_b new 'B at the same time' --no-edit 2>&1 \
+    | grep -q 'is now .*origin had already given out its number'"
+assert "...leaving B with A's ticket and its own, both on the remote" \
   bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; out=\"\$(in_b board --plain 2>/dev/null)\" \
-    && grep -q 'A at the same time' <<<\"\${out}\" && ! grep -q 'B at the same time' <<<\"\${out}\""
+    && grep -q 'A at the same time' <<<\"\${out}\" && grep -q 'B at the same time' <<<\"\${out}\" \
+    && git -C '${two}/origin.git' ls-tree -r --name-only main | grep -q 'b-at-the-same-time.md'"
 assert "...and no ticket id is on the remote twice" \
   bash -c "[ -z \"\$(git -C '${two}/origin.git' ls-tree -r --name-only main | sed -n 's|.*/\([0-9]\{3\}\)-.*|\1|p' | sort | uniq -d)\" ]"
 rm -f "${two}/b/.git/hooks/pre-push"
+# Ticket 197: origin out of reach. The change waits, amd says so, and once
+# origin is back (A having made a ticket meanwhile) B's goes on top.
+git -C "${two}/b" remote set-url origin "${two}/nowhere.git"
+assert "with origin out of reach a change waits, and listing says how many" \
+  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; in_b new 'Made offline' --no-edit >/dev/null 2>&1; \
+    in_b board --plain 2>&1 >/dev/null | grep -q '1 change waiting to push'"
+in_a new "Made while B was away" --no-edit >/dev/null 2>&1
+git -C "${two}/b" remote set-url origin "${two}/origin.git"
+assert "...and when origin is back it goes on top of what origin got meanwhile" \
+  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; in_b board --plain >/dev/null 2>&1; \
+    git -C '${two}/origin.git' ls-tree -r --name-only main | grep -q 'made-offline.md' \
+    && [ -z \"\$(git -C '${two}/origin.git' ls-tree -r --name-only main | sed -n 's|.*/\([0-9]\{3\}\)-.*|\1|p' | sort | uniq -d)\" ]"
 in_a new "Unseen" --no-edit >/dev/null 2>&1
 assert "AMD_SYNC=0 leaves the clone alone" \
   bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; ! AMD_SYNC=0 in_b board --plain 2>/dev/null | grep -q 'Unseen'"

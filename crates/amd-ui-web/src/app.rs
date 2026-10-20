@@ -102,6 +102,8 @@ pub enum LinkKind {
 #[derive(Clone, Copy)]
 pub struct Ctx {
     pub board: RwSignal<Option<Board>>,
+    /// Origin out of reach at the last catch-up: changes waiting (197).
+    pub offline: RwSignal<Option<u32>>,
     /// Landing page or board (ticket 020).
     pub view: RwSignal<View>,
     /// The landing page's data, loaded on arrival there.
@@ -297,6 +299,7 @@ pub fn App() -> impl IntoView {
     let ctx = Ctx {
         board: RwSignal::new(None),
         view: RwSignal::new(View::Home),
+        offline: RwSignal::new(None),
         home: RwSignal::new(None),
         error: RwSignal::new(None),
         overlay: RwSignal::new(None),
@@ -373,6 +376,7 @@ pub fn App() -> impl IntoView {
     view! {
         <div class="flex h-screen flex-col bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
             <crate::update_bar::UpdateBar />
+            <OfflineBar />
             <header class="flex items-center gap-4 border-b border-slate-200 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-800">
                 // The landing page has no project of its own; a board offers
                 // the way back to it (ticket 020).
@@ -735,11 +739,14 @@ fn watch_disk(ctx: Ctx) {
             .set(Some(format!("can't watch the board for changes: {e:?}")));
     }
     // Teammates' work (ticket 102): fetch and fast-forward every 30s; the
-    // fingerprint poll above then sees the files change. Warnings (offline)
-    // are left out of the way — every 30s would only nag.
+    // fingerprint poll above then sees the files change. Warnings are
+    // left out of the way — every 30s would only nag — but origin being out
+    // of reach shows as a bar (ticket 197).
     let sync = move || {
         spawn_local(async move {
-            let _ = api::sync_board().await;
+            if let Ok(status) = api::sync_board().await {
+                ctx.offline.set(status.offline);
+            }
         });
     };
     let _ = set_interval_with_handle(sync, std::time::Duration::from_secs(30));
@@ -1321,5 +1328,33 @@ fn ProjectSwitcher(project: impl Fn() -> String + Send + Sync + Copy + 'static) 
                 </span>
             </label>
         </Show>
+    }
+}
+
+/// Origin couldn't be reached at the last catch-up (ticket 197): changes
+/// are committed here and go when it's back. Slate, not orange: nothing to
+/// click, only to know.
+#[component]
+fn OfflineBar() -> impl IntoView {
+    let ctx = Ctx::get();
+    move || {
+        ctx.offline.get().map(|waiting| {
+            let text = match waiting {
+                0 => "Can't reach origin: working from your copy of the board".to_string(),
+                1 => "Can't reach origin: 1 change waiting to push, sent as soon as it's back"
+                    .to_string(),
+                n => format!(
+                    "Can't reach origin: {n} changes waiting to push, sent as soon as it's back"
+                ),
+            };
+            view! {
+                <div
+                    role="status"
+                    class="bg-slate-700 px-4 py-1.5 text-sm text-white dark:bg-slate-600"
+                >
+                    {text}
+                </div>
+            }
+        })
     }
 }

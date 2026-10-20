@@ -590,6 +590,78 @@ pub fn rebase_upstream(repo: &Path) -> Result<bool> {
     Ok(ok)
 }
 
+/// Whether a rebase has stopped part way, waiting on conflicts.
+pub fn rebase_in_progress(repo: &Path) -> bool {
+    ["rebase-merge", "rebase-apply"]
+        .iter()
+        .any(|name| git_dir_file(repo, name).is_some_and(|dir| dir.exists()))
+}
+
+/// The paths a stopped rebase or merge left in conflict.
+pub fn conflicted(repo: &Path) -> Vec<String> {
+    ask(repo, &["diff", "--name-only", "--diff-filter=U"])
+        .map(|out| out.lines().map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// One side of a conflicted path: stage 2 is ours, 3 theirs.
+pub fn stage_text(repo: &Path, stage: u8, path: &str) -> Option<String> {
+    ask(repo, &["show", &format!(":{stage}:{path}")])
+}
+
+/// `git add -- <path>`.
+pub fn add(repo: &Path, path: &str) -> Result<()> {
+    let (ok, detail) = run(Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["add", "--", path]))
+    .context("running git add")?;
+    if !ok {
+        bail!(failed("git add", &detail));
+    }
+    Ok(())
+}
+
+/// `git rebase --continue`, with no editor for the message. Whether it
+/// finished (false: it stopped again).
+pub fn rebase_continue(repo: &Path) -> Result<bool> {
+    let (ok, _) = run(Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .env("GIT_EDITOR", "true")
+        .args(["rebase", "--continue"]))
+    .context("running git rebase --continue")?;
+    Ok(ok)
+}
+
+/// The paths this branch changed since it left its upstream (`@{u}...HEAD`).
+pub fn changed_since_upstream(repo: &Path) -> Vec<String> {
+    ask(repo, &["diff", "--name-only", "@{u}...HEAD"])
+        .map(|out| out.lines().map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// Files added under `path` between `from` and `to`, repo-relative.
+pub fn added_between(repo: &Path, from: &str, to: &str, path: &Path) -> Vec<String> {
+    let Some(path) = path.to_str() else {
+        return Vec::new();
+    };
+    ask(
+        repo,
+        &[
+            "diff",
+            "--name-only",
+            "--diff-filter=A",
+            from,
+            to,
+            "--",
+            path,
+        ],
+    )
+    .map(|out| out.lines().map(str::to_string).collect())
+    .unwrap_or_default()
+}
+
 /// `git rebase --abort`, after `rebase_upstream` stopped.
 pub fn rebase_abort(repo: &Path) -> Result<()> {
     let (ok, detail) = run(Command::new("git")
@@ -631,14 +703,33 @@ pub fn fetch(repo: &Path) -> Result<()> {
         "origin",
     ]))
     .context("running git fetch")?;
+    let offline = git_dir_file(repo, "amd-offline");
     if !ok {
+        // Remembered (ticket 197), so a front end can say changes are
+        // waiting until a fetch gets through again.
+        if let Some(marker) = &offline {
+            let _ = std::fs::write(marker, b"");
+        }
         bail!(failed("git fetch", &detail));
+    }
+    if let Some(marker) = &offline {
+        let _ = std::fs::remove_file(marker);
     }
     // Only a timestamp: if it can't be written, the next read fetches again.
     if let Some(marker) = fetch_marker(repo) {
         let _ = std::fs::write(marker, b"");
     }
     Ok(())
+}
+
+/// Whether amd's last fetch in `repo` failed (ticket 197): origin couldn't
+/// be reached, and hasn't been since.
+pub fn last_fetch_failed(repo: &Path) -> bool {
+    git_dir_file(repo, "amd-offline").is_some_and(|marker| marker.exists())
+}
+
+fn git_dir_file(repo: &Path, name: &str) -> Option<PathBuf> {
+    ask(repo, &["rev-parse", "--absolute-git-dir"]).map(|dir| Path::new(&dir).join(name))
 }
 
 /// `<git dir>/amd-fetched`, touched after each [`fetch`].

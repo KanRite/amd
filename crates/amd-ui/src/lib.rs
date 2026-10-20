@@ -204,7 +204,7 @@ async fn board_fingerprint() -> Result<String> {
 /// whatever it pulls in changes the fingerprint, and the board refreshes.
 /// Warnings (offline, a diverged clone) are returned, not raised.
 #[tauri::command]
-async fn sync_board(state: Tauri<'_, AppState>) -> Result<Vec<String>> {
+async fn sync_board(state: Tauri<'_, AppState>) -> Result<amd_ui_model::SyncStatus> {
     let writing = Arc::clone(&state.writing);
     let due_checked = Arc::clone(&state.due_checked);
     blocking(move || {
@@ -212,6 +212,7 @@ async fn sync_board(state: Tauri<'_, AppState>) -> Result<Vec<String>> {
             .lock()
             .map_err(|_| "the board is in a bad state — restart amdui".to_string())?;
         let mut warnings = Vec::new();
+        let mut offline: Option<u32> = None;
         for (_, board) in &Project::open()?.repos {
             match agile_md::sync::catch_up(board, agile_md::sync::Purpose::Read) {
                 Ok(events) => warnings.extend(events.into_iter().filter_map(|event| match event {
@@ -220,11 +221,15 @@ async fn sync_board(state: Tauri<'_, AppState>) -> Result<Vec<String>> {
                 })),
                 Err(e) => warnings.push(format!("{e:#}")),
             }
+            // Origin out of reach (ticket 197): the page's bar says so.
+            if let Some(waiting) = agile_md::sync::offline(board) {
+                offline = Some(offline.unwrap_or(0) + waiting);
+            }
             if let Err(e) = raise_for_due_dates(board, &due_checked) {
                 warnings.push(format!("{e:#}"));
             }
         }
-        Ok(warnings)
+        Ok(amd_ui_model::SyncStatus { warnings, offline })
     })
     .await
 }

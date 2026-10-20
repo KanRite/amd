@@ -17,6 +17,14 @@
 //!   written, undo it, bring the board up to date, and fail with
 //!   [`ConcurrentChange`] — never exit 0 with a change stranded locally.
 //!
+//! **Working while origin can't be reached** (ticket 197): changes are
+//! committed locally as always, and wait. When origin is back and has moved
+//! on too, [`catch_up`] puts this clone's commits on top of origin's
+//! ([`replay`]) instead of stopping, as long as they only touch the board:
+//! the ticket counter is settled to the higher number, and a ticket made
+//! here whose number origin had already given out is renumbered (nobody
+//! else has seen it). [`offline`] says how many changes are waiting.
+//!
 //! A repository with no remote, or `sync = off` / `AMD_SYNC=0`, is left
 //! exactly as before. No network is a warning, not a failure. This is the
 //! free tier's answer to concurrent ticket numbers; a cloud allocator
@@ -89,11 +97,20 @@ pub fn catch_up(board: &Board, purpose: Purpose) -> Result<Vec<Event>> {
         return Ok(Vec::new());
     }
     let repo = board.repo_root();
-    let fresh = purpose == Purpose::Read && git::fetched_within(repo, READ_FETCH_SECS);
+    // A failed fetch isn't a recent one (ticket 197): try again.
+    let fresh = purpose == Purpose::Read
+        && git::fetched_within(repo, READ_FETCH_SECS)
+        && !git::last_fetch_failed(repo);
     if !fresh && git::fetch(repo).is_err() {
-        return Ok(vec![Event::Warn(
-            "couldn't reach origin — working from your local copy".to_string(),
-        )]);
+        let waiting = git::ahead_behind(repo).map_or(0, |(ahead, _)| ahead);
+        let detail = if waiting > 0 {
+            format!("; {waiting} change{} waiting to push", plural(waiting))
+        } else {
+            String::new()
+        };
+        return Ok(vec![Event::Warn(format!(
+            "couldn't reach origin — working from your local copy{detail}"
+        ))]);
     }
     let Some((ahead, behind)) = git::ahead_behind(repo) else {
         return Ok(Vec::new());
@@ -154,14 +171,159 @@ pub fn catch_up(board: &Board, purpose: Purpose) -> Result<Vec<Event>> {
                 plural(ahead)
             ))]),
         },
-        (ahead, behind) => stale(format!(
-            "{} has {ahead} commit{} origin doesn't, and origin has {behind} commit{} it doesn't — \
-             run `git pull --rebase` there to combine them",
-            repo.display(),
-            plural(ahead),
-            plural(behind)
-        )),
+        // Both moved on (ticket 197): ours on top of theirs when that's
+        // safe, else stop for a person.
+        (ahead, behind) => match replay(board, false)? {
+            Replayed::Done(events) => Ok(events),
+            Replayed::Stopped => stale(format!(
+                "{} has {ahead} commit{} origin doesn't, and origin has {behind} commit{} it doesn't — \
+                 run `git pull --rebase` there to combine them",
+                repo.display(),
+                plural(ahead),
+                plural(behind)
+            )),
+        },
     }
+}
+
+/// How many changes are waiting to push because origin couldn't be reached
+/// at amd's last try (ticket 197); `None` when it could, or the board
+/// doesn't sync. Reads only: no fetch.
+pub fn offline(board: &Board) -> Option<u32> {
+    let repo = board.repo_root();
+    (syncing(board) && git::last_fetch_failed(repo))
+        .then(|| git::ahead_behind(repo).map_or(0, |(ahead, _)| ahead))
+}
+
+/// What [`replay`] did.
+enum Replayed {
+    /// Ours are on top of origin's (and pushed, unless a warning says not).
+    Done(Vec<Event>),
+    /// Left exactly as it was, for a person.
+    Stopped,
+}
+
+/// Puts this clone's own commits on top of origin's (ticket 197): `git
+/// rebase @{u}`, settling a conflict on the ticket counter alone by taking
+/// the higher number, then renumbering any ticket made here whose number
+/// origin had already given out, then pushing. Any other conflict, a clash
+/// involving a ticket origin already has, or (unless `any_files`) a local
+/// commit touching anything but the board leaves the clone as it was.
+fn replay(board: &Board, any_files: bool) -> Result<Replayed> {
+    let repo = board.repo_root();
+    let Some(before) = git::head(repo) else {
+        return Ok(Replayed::Stopped);
+    };
+    // A board inside a code repository: the other commits are someone's
+    // code, not amd's to move.
+    if !any_files && !only_board_files(board) {
+        return Ok(Replayed::Stopped);
+    }
+    let ours = git::ahead_behind(repo).map_or(0, |(ahead, _)| ahead);
+    let mut finished = git::rebase_upstream(repo)?;
+    while !finished && git::rebase_in_progress(repo) {
+        let conflicts = git::conflicted(repo);
+        let counter = match conflicts.as_slice() {
+            [only] if is_counter(only) => [2, 3]
+                .into_iter()
+                .filter_map(|stage| git::stage_text(repo, stage, only))
+                .filter_map(|text| text.trim().parse::<u32>().ok())
+                .max()
+                .map(|higher| (only.clone(), higher)),
+            _ => None,
+        };
+        let Some((path, higher)) = counter else {
+            git::rebase_abort(repo)?;
+            return Ok(Replayed::Stopped);
+        };
+        std::fs::write(repo.join(&path), format!("{higher}\n"))?;
+        git::add(repo, &path)?;
+        finished = git::rebase_continue(repo)?;
+    }
+    if !finished {
+        // It never started (local edits in the way): nothing changed.
+        return Ok(Replayed::Stopped);
+    }
+    let mut events = vec![Event::Info(format!(
+        "your {ours} local change{} went on top of what origin had meanwhile",
+        plural(ours)
+    ))];
+    if !board.duplicate_ids()?.is_empty() {
+        let made_here = git::added_between(repo, "@{u}", "HEAD", &board.root);
+        let here =
+            |task: &crate::task::Task| made_here.iter().any(|path| task.path.ends_with(path));
+        let clashes = crate::renumber::plan(board, None)?;
+        let movable = clashes
+            .iter()
+            .all(|c| !here(&c.keep) && c.moves.iter().all(|(t, _)| here(t)));
+        if !movable {
+            git::reset_keep(repo, &before)?;
+            return Ok(Replayed::Stopped);
+        }
+        let snapshot = git::dirty_paths(repo)?;
+        let report = match crate::renumber::apply(board, &clashes) {
+            Ok(report) => report,
+            Err(_) => {
+                // Back as it was. The rebase needed a clean tree, so any
+                // edit now is the renumbering's own.
+                git::reset_hard(repo, "HEAD")?;
+                git::reset_keep(repo, &before)?;
+                return Ok(Replayed::Stopped);
+            }
+        };
+        let changed = git::changed_paths(&snapshot, &git::dirty_paths(repo)?);
+        let names: Vec<String> = report
+            .renamed
+            .iter()
+            .map(|(old, new)| format!("{} to {}", number(old), number(new)))
+            .collect();
+        git::commit_paths_locally(
+            repo,
+            &format!("renumber: {} (taken on origin)", names.join(", ")),
+            &changed,
+        )?;
+        for (old, new) in &report.renamed {
+            events.push(Event::Info(format!(
+                "ticket {} is now {}: origin had already given out its number",
+                number(old),
+                number(new)
+            )));
+        }
+        for (ticket, what) in &report.ambiguous {
+            events.push(Event::Warn(format!("{ticket}: check {what}")));
+        }
+    }
+    if let Err(err) = git::push(repo) {
+        events.push(Event::Warn(format!("not pushed yet: {err:#}")));
+    }
+    Ok(Replayed::Done(events))
+}
+
+/// Whether every path this branch changed since its upstream is the board's
+/// own: under its folder, or the counter and settings beside it.
+fn only_board_files(board: &Board) -> bool {
+    let repo = board.repo_root();
+    let folder = board
+        .root
+        .strip_prefix(repo)
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    git::changed_since_upstream(repo)
+        .iter()
+        .all(|path| Path::new(path).starts_with(&folder) || is_counter(path) || path == ".settings")
+}
+
+/// The ticket counter's file (ticket 150), at the repository root or, on
+/// an older board, in the board folder.
+fn is_counter(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .is_some_and(|name| name == ".next-id")
+}
+
+/// `263` from a ticket stem like `263-some-title`.
+fn number(stem: &str) -> &str {
+    stem.split_once('-').map_or(stem, |(id, _)| id)
 }
 
 /// How many commits this clone had from origin that origin's history no
@@ -250,25 +412,24 @@ pub fn after_rejected_push(
         return not_pushed();
     }
 
-    // Replay: clean, and no ticket number taken twice, and the push lands.
-    let rebased = git::rebase_upstream(repo)?;
-    if rebased && board.duplicate_ids()?.is_empty() && git::push(repo).is_ok() {
-        return Ok(Some(
+    // Replay (ticket 197): on top of theirs, the counter settled and a
+    // ticket number taken meanwhile given the next free one.
+    if let Replayed::Done(events) = replay(board, true)? {
+        let mut note = vec![
             "someone else changed the board at the same time; your change was replayed on top \
              of theirs"
                 .to_string(),
-        ));
+        ];
+        note.extend(events.into_iter().skip(1).map(|event| match event {
+            Event::Info(text) | Event::Warn(text) => text,
+        }));
+        return Ok(Some(note.join("; ")));
     }
 
     // Undo: keep a copy of what was written, drop the commit, catch up.
     let recovered = save_recovered(repo, changed);
-    if rebased {
-        git::reset_keep(repo, "@{u}")?;
-    } else {
-        git::rebase_abort(repo)?;
-        git::reset_keep(repo, pre)?;
-        git::merge_ff_only(repo)?;
-    }
+    git::reset_keep(repo, pre)?;
+    git::merge_ff_only(repo)?;
     Err(ConcurrentChange { recovered }.into())
 }
 
@@ -472,6 +633,97 @@ mod tests {
             .output()
             .unwrap();
         assert!(String::from_utf8_lossy(&listed.stdout).contains("002-two.md"));
+    }
+
+    /// A real ticket, and the counter moved on past it, committed.
+    fn new_ticket(repo: &Path, id: u32, title: &str, push: bool) {
+        let slug = title.to_lowercase().replace(' ', "-");
+        std::fs::write(
+            repo.join(format!("tasks/backlog/{id:03}-{slug}.md")),
+            format!("---\nid: \"{id:03}\"\ntitle: \"{title}\"\n---\n\nbody\n"),
+        )
+        .unwrap();
+        std::fs::write(repo.join(".next-id"), format!("{}\n", id + 1)).unwrap();
+        git(repo, &["add", "-A"]);
+        git(repo, &["commit", "-q", "-m", title]);
+        if push {
+            git(repo, &["push", "-q"]);
+        }
+    }
+
+    fn on_origin(origin: &Path) -> String {
+        let out = Command::new("git")
+            .args(["ls-tree", "-r", "--name-only", "main"])
+            .current_dir(origin)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// Ticket 197: two clones made tickets while apart (offline, say). The
+    /// one catching up second goes on top, its clashing ticket renumbered
+    /// (nobody else had seen it), the counter settled, and all pushed.
+    #[test]
+    fn a_diverged_clone_replays_its_tickets_and_renumbers_a_clash() {
+        let (_root, origin, a, b) = two_clones();
+        new_ticket(&a, 2, "From a", true);
+        new_ticket(&b, 2, "From b", false);
+        new_ticket(&b, 3, "Also b", false);
+        let events = catch_up(&board(&b), Purpose::Write).unwrap();
+        let said: Vec<String> = events
+            .iter()
+            .map(|e| match e {
+                Event::Info(t) | Event::Warn(t) => t.clone(),
+            })
+            .collect();
+        assert!(
+            said.iter().any(|t| t.contains("ticket 002 is now 004")),
+            "{said:?}"
+        );
+        assert_eq!(git::ahead_behind(&b), Some((0, 0)), "pushed: {said:?}");
+        let tree = on_origin(&origin);
+        for file in ["002-from-a.md", "003-also-b.md", "004-from-b.md"] {
+            assert!(tree.contains(file), "{file} on origin:\n{tree}");
+        }
+        assert!(!tree.contains("002-from-b.md"), "{tree}");
+        let moved = std::fs::read_to_string(b.join("tasks/backlog/004-from-b.md")).unwrap();
+        assert!(moved.contains("id: \"004\""), "{moved}");
+        let counter = std::fs::read_to_string(b.join(".next-id")).unwrap();
+        assert_eq!(counter.trim(), "5");
+    }
+
+    /// A local commit outside the board (a board inside a code
+    /// repository): someone's code, so nothing is moved.
+    #[test]
+    fn a_diverged_clone_with_other_files_still_stops() {
+        let (_root, _origin, a, b) = two_clones();
+        new_ticket(&a, 2, "From a", true);
+        std::fs::write(b.join("main.rs"), "fn main() {}\n").unwrap();
+        git(&b, &["add", "-A"]);
+        git(&b, &["commit", "-q", "-m", "code"]);
+        let err = catch_up(&board(&b), Purpose::Write)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("git pull --rebase"), "{err}");
+    }
+
+    /// Origin out of reach: the change waits, and amd says how many are
+    /// waiting, until a fetch gets through.
+    #[test]
+    fn unreachable_origin_says_how_many_changes_are_waiting() {
+        let (root, origin, _a, b) = two_clones();
+        new_ticket(&b, 2, "Offline", false);
+        let gone = root.path().join("gone.git");
+        std::fs::rename(&origin, &gone).unwrap();
+        let events = catch_up(&board(&b), Purpose::Read).unwrap();
+        assert!(
+            matches!(&events[..], [Event::Warn(t)] if t.contains("1 change waiting to push")),
+            "{events:?}"
+        );
+        assert_eq!(offline(&board(&b)), Some(1));
+        std::fs::rename(&gone, &origin).unwrap();
+        catch_up(&board(&b), Purpose::Write).unwrap();
+        assert_eq!(offline(&board(&b)), None);
     }
 
     #[test]
