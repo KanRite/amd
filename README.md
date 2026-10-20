@@ -48,7 +48,7 @@ a solo developer without it.
 - **A desktop app** with rich text editing, and a **command line** for those
   who prefer it.
 - **A built-in terminal**, and optional AI integration.
-- **Optional speech to text**, run entirely on your machine.
+- **Optional speech to text and read aloud**, run entirely on your machine.
 - **Free to use:** no servers, no hidden costs. Your data is where you need
   it, and in your control.
 
@@ -152,7 +152,7 @@ a solo developer without it.
 - **Live:** changes made anywhere (the command line, an editor, a pull) show
   within a second.
 - **A bottom panel** with a terminal and an AI tab running your own AI tool.
-- **Speech to text**, optional and entirely on your machine.
+- **Speech to text and read aloud**, optional and entirely on your machine.
 - **An Editor button**, themes, accent colours and zoom.
 - **Updates:** an orange bar in amdui tells you when a newer release is
   out; Update installs it and restarts (`amd update` does the same), never

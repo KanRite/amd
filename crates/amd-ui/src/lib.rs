@@ -53,6 +53,10 @@ struct AppState {
     speech: Arc<Mutex<Option<speech::whisper::Engine>>>,
     recording: Arc<Mutex<Option<speech::audio::Recorder>>>,
     downloading: Arc<std::sync::atomic::AtomicBool>,
+    /// Text being read aloud (ticket 286), and a count so a reading's
+    /// watcher knows when another has taken its place.
+    speaking: Arc<Mutex<Option<Speaking>>>,
+    readings: Arc<std::sync::atomic::AtomicU64>,
     /// The board repository whose screen note this window last wrote
     /// (ticket 186), taken away when the window closes.
     screen: Arc<Mutex<Option<PathBuf>>>,
@@ -2942,6 +2946,11 @@ pub fn run() {
             }
             if let tauri::WindowEvent::Destroyed = event
                 && let Some(state) = window.try_state::<AppState>()
+            {
+                stop_reading(window.app_handle(), &state.speaking);
+            }
+            if let tauri::WindowEvent::Destroyed = event
+                && let Some(state) = window.try_state::<AppState>()
                 && let Ok(screen) = state.screen.lock()
                 && let Some(repo) = screen.as_ref()
             {
@@ -3063,6 +3072,10 @@ pub fn run() {
             speech_start,
             speech_stop,
             speech_cancel,
+            read_aloud_status,
+            read_aloud,
+            read_aloud_stop,
+            set_read_aloud_enabled,
             terminal_open,
             terminal_input,
             terminal_resize,
@@ -3239,7 +3252,9 @@ async fn set_speech_enabled(state: Tauri<'_, AppState>, on: bool) -> Result<()> 
 
 /// Starts recording from the microphone.
 #[tauri::command]
-async fn speech_start(state: Tauri<'_, AppState>) -> Result<()> {
+async fn speech_start(app: tauri::AppHandle, state: Tauri<'_, AppState>) -> Result<()> {
+    // Never read aloud into the microphone (ticket 286).
+    stop_reading(&app, &state.speaking);
     let recording = Arc::clone(&state.recording);
     blocking(move || {
         if !speech_enabled() || speech_model().is_none() {
@@ -3294,6 +3309,123 @@ fn speech_cancel(state: Tauri<'_, AppState>) -> Result<()> {
         .take();
     drop(recorder);
     Ok(())
+}
+
+/// A reading aloud in progress (ticket 286).
+struct Speaking {
+    engine: speech::say::Engine,
+    child: std::process::Child,
+    n: u64,
+}
+
+/// Read aloud's switch: `ui.read-aloud` (off hides it).
+fn read_aloud_enabled() -> bool {
+    Config::load().get("ui.read-aloud").map(str::trim) != Some("off")
+}
+
+/// Stops any reading, saying so to the page.
+fn stop_reading(app: &tauri::AppHandle, speaking: &Mutex<Option<Speaking>>) {
+    use tauri::Emitter;
+    let taken = speaking.lock().ok().and_then(|mut s| s.take());
+    if let Some(mut reading) = taken {
+        reading.engine.stop(&mut reading.child);
+        let _ = app.emit("read-aloud-done", ());
+    }
+}
+
+/// Where read aloud stands (ticket 286).
+#[tauri::command]
+fn read_aloud_status(
+    state: Tauri<'_, AppState>,
+) -> Result<amd_ui_model::terminal::ReadAloudStatus> {
+    Ok(amd_ui_model::terminal::ReadAloudStatus {
+        enabled: read_aloud_enabled(),
+        engine: speech::say::Engine::find().map(|e| e.name().to_string()),
+        speaking: state.speaking.lock().is_ok_and(|s| s.is_some()),
+    })
+}
+
+/// Reads aloud `text` if given (the selection, or Preferences' test), else
+/// terminal `id`'s output since Enter was last typed. Anything already being
+/// read stops first; `read-aloud-done` says when it's over.
+#[tauri::command]
+fn read_aloud(
+    app: tauri::AppHandle,
+    state: Tauri<'_, AppState>,
+    id: Option<u32>,
+    text: Option<String>,
+) -> Result<()> {
+    use std::sync::atomic::Ordering;
+    use tauri::Emitter;
+    if !read_aloud_enabled() {
+        return Err("read aloud is off: switch it on in Preferences".to_string());
+    }
+    let engine = speech::say::Engine::find()
+        .ok_or_else(|| "no system speech found: install speech-dispatcher (spd-say)".to_string())?;
+    let mut raw = text.filter(|t| !t.trim().is_empty()).unwrap_or_default();
+    if raw.is_empty()
+        && let Some(id) = id
+    {
+        with_terminal(&state, id, |s| raw = s.since_enter())?;
+    }
+    let words = speech::say::speakable(&raw);
+    if words.is_empty() {
+        return Err("nothing to read aloud".to_string());
+    }
+    stop_reading(&app, &state.speaking);
+    let child = engine
+        .speak(&words)
+        .map_err(|e| format!("reading aloud: {e}"))?;
+    let n = state.readings.fetch_add(1, Ordering::AcqRel) + 1;
+    *state
+        .speaking
+        .lock()
+        .map_err(|_| "restart amdui".to_string())? = Some(Speaking { engine, child, n });
+    let speaking = Arc::clone(&state.speaking);
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let Ok(mut slot) = speaking.lock() else {
+                return;
+            };
+            match slot.as_mut() {
+                Some(reading) if reading.n == n => {
+                    if !matches!(reading.child.try_wait(), Ok(None)) {
+                        *slot = None;
+                        let _ = app.emit("read-aloud-done", ());
+                        return;
+                    }
+                }
+                // Stopped, or another reading took over: it says so.
+                _ => return,
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Stops reading aloud.
+#[tauri::command]
+fn read_aloud_stop(app: tauri::AppHandle, state: Tauri<'_, AppState>) -> Result<()> {
+    stop_reading(&app, &state.speaking);
+    Ok(())
+}
+
+/// Read aloud's switch in Preferences.
+#[tauri::command]
+fn set_read_aloud_enabled(
+    app: tauri::AppHandle,
+    state: Tauri<'_, AppState>,
+    on: bool,
+) -> Result<()> {
+    let mut config = Config::load();
+    if on {
+        config.remove("ui.read-aloud");
+    } else {
+        config.set("ui.read-aloud", "off");
+        stop_reading(&app, &state.speaking);
+    }
+    config.save().map_err(err)
 }
 
 /// The page panicked: its message, on amdui's error output (the page has

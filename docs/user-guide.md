@@ -482,8 +482,8 @@ disagree.
 - **Preferences**, your own settings on this machine, in
   `~/.config/agile-md/config`: the colour scheme (light, dark or the
   system's, with an accent colour: indigo, teal or slate), the zoom, the board to open when amdui
-  starts outside a project, the AI tab's command, speech to text, and your
-  editor.
+  starts outside a project, the AI tab's command, speech to text, read aloud,
+  and your editor.
 - **The update bar.** When a newer agile-md is out, an orange bar across
   the top of every screen says so, with **What's new** (the release notes),
   **Update** and **Later**. Update installs it and restarts amdui (close a
@@ -934,6 +934,22 @@ which your AI tool lists as it goes.
 amdui's **AI tab** runs your AI tool's command line (Preferences → AI
 command, `claude` by default) in the project folder, so with `amd mcp`
 connected it can see what's on the board beside it.
+
+You can talk to it and have it talk back, both on this machine only:
+
+- **🎤 Speech to text** types what you say into the open tab (hold the 🎤,
+  or Ctrl+Shift+Space). It needs a Whisper model, downloaded from
+  Preferences → Speech to text.
+- **🔊 Read aloud** reads the text you've selected in the terminal or, with
+  nothing selected, what came out since you last pressed Enter: the AI's
+  reply, with its tool calls and their output left out, and without the
+  line you typed or the input box. Click it again (**⏹ stop**) to stop;
+  starting to dictate stops it too. It uses the computer's own speech
+  (speech-dispatcher's `spd-say` on Linux, `say` on macOS), so there's
+  nothing to download, and the voice is whatever that's set up with.
+  Preferences → Read aloud has a Test button and the switch that hides the
+  🔊. Picking out the reply is a best guess from what's on the screen, so
+  select the text when it reads the wrong part.
 
 ## Shell completion
 

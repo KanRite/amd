@@ -20,6 +20,7 @@ pub fn PreferencesPanel() -> impl IntoView {
                 <BoardSection />
                 <AiSection />
                 <SpeechSection />
+                <ReadAloudSection />
                 <EditorSection />
             </div>
             <ModalClose />
@@ -526,6 +527,79 @@ fn SpeechSection() -> impl IntoView {
                                 {mic}
                                 ". tiny.en is quick; base.en is more accurate. Both are English only."
                             </p>
+                        }
+                    })
+            }}
+            {move || note.get().map(|n| view! { <p class="text-xs">{n}</p> })}
+        </section>
+    }
+}
+
+/// Read aloud (ticket 286): the system's own speech, so there's nothing to
+/// download; the switch hides the 🔊.
+#[component]
+fn ReadAloudSection() -> impl IntoView {
+    use amd_ui_model::terminal::ReadAloudStatus;
+    let status = RwSignal::new(None::<ReadAloudStatus>);
+    let note = RwSignal::new(None::<String>);
+    let reload = move || {
+        spawn_local(async move {
+            match api::read_aloud_status().await {
+                Ok(s) => status.set(Some(s)),
+                Err(e) => note.set(Some(e)),
+            }
+        });
+    };
+    reload();
+    let switch = move |on: bool| {
+        spawn_local(async move {
+            if let Err(e) = api::set_read_aloud_enabled(on).await {
+                note.set(Some(e));
+            }
+            reload();
+        });
+    };
+    let test = move |_| {
+        note.set(None);
+        spawn_local(async move {
+            if let Err(e) = api::read_aloud(None, Some("Read aloud is working.")).await {
+                note.set(Some(e));
+            }
+        });
+    };
+    let small = "rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-50 dark:border-slate-600 dark:hover:bg-slate-700";
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Read aloud"</h3>
+            <p class="text-xs text-slate-500">
+                "The 🔊 in the panel reads the text you've selected in the terminal, or what came out since you last pressed Enter (an AI tool's reply, without its tool calls). It uses this computer's own speech; nothing is downloaded or sent anywhere."
+            </p>
+            {move || {
+                status
+                    .get()
+                    .map(|st| {
+                        let enabled = st.enabled;
+                        let found = st.engine.is_some();
+                        let engine = match st.engine {
+                            Some(name) => format!("Speech: {name}."),
+                            None => "No system speech found. On Linux, install speech-dispatcher (it provides spd-say).".to_string(),
+                        };
+                        view! {
+                            <label class="flex items-center gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    prop:checked=enabled
+                                    on:change=move |ev| switch(event_target_checked(&ev))
+                                />
+                                "Use read aloud"
+                                <span class="text-xs text-slate-500">"(off hides the 🔊)"</span>
+                            </label>
+                            <div class="flex items-center gap-2">
+                                <p class="flex-1 text-xs text-slate-500">{engine}</p>
+                                <button type="button" class=small disabled=move || !(enabled && found) on:click=test>
+                                    "Test"
+                                </button>
+                            </div>
                         }
                     })
             }}

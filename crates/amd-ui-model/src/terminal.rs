@@ -100,6 +100,24 @@ impl SpeechStatus {
     }
 }
 
+/// Where read aloud stands (ticket 286).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadAloudStatus {
+    /// The "Read aloud" switch.
+    pub enabled: bool,
+    /// The system speech found (`speech-dispatcher`, `macOS speech`), if any.
+    pub engine: Option<String>,
+    /// Something is being read now.
+    pub speaking: bool,
+}
+
+impl ReadAloudStatus {
+    /// The 🔊 button can be offered.
+    pub fn ready(&self) -> bool {
+        self.enabled && self.engine.is_some()
+    }
+}
+
 /// How a model's download is going.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpeechProgress {
