@@ -36,6 +36,9 @@ use crate::settings::Config;
 
 /// Where the hidden projects are kept, in agile-md's own per-machine config.
 const HIDDEN: &str = "ui.hidden-projects";
+/// Projects whose sprint graphs you've folded on the landing page (ticket
+/// 305), by board folder, in the same per-machine config.
+const FOLDED: &str = "ui.folded-graphs";
 /// Whether work to pick includes unassigned tickets (ticket 160).
 const UNASSIGNED: &str = "ui.include-unassigned";
 
@@ -133,8 +136,31 @@ fn is_scratch(root: &Path, temp: &Path) -> bool {
 
 /// The project folders you've hidden from My work.
 pub fn hidden() -> Vec<PathBuf> {
+    paths(HIDDEN)
+}
+
+/// Hides `root`'s project from My work, or shows it again. Saved in your
+/// own config on this machine; nothing is committed.
+pub fn set_hidden(root: &Path, hide: bool) -> anyhow::Result<()> {
+    set_path(HIDDEN, root, hide)
+}
+
+/// The projects whose sprint graphs are folded on the landing page (ticket
+/// 305).
+pub fn folded_graphs() -> Vec<PathBuf> {
+    paths(FOLDED)
+}
+
+/// Folds `root`'s sprint graphs on the landing page, or opens them again.
+/// Saved in your own config on this machine; nothing is committed.
+pub fn set_graphs_folded(root: &Path, fold: bool) -> anyhow::Result<()> {
+    set_path(FOLDED, root, fold)
+}
+
+/// A comma-separated list of folders in your config.
+fn paths(key: &str) -> Vec<PathBuf> {
     Config::load()
-        .get(HIDDEN)
+        .get(key)
         .map(|v| {
             v.split(',')
                 .map(str::trim)
@@ -145,17 +171,15 @@ pub fn hidden() -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// Hides `root`'s project from My work, or shows it again. Saved in your
-/// own config on this machine; nothing is committed.
-pub fn set_hidden(root: &Path, hide: bool) -> anyhow::Result<()> {
-    let mut list = hidden();
+fn set_path(key: &str, root: &Path, on: bool) -> anyhow::Result<()> {
+    let mut list = paths(key);
     list.retain(|p| p != root);
-    if hide {
+    if on {
         list.push(root.to_path_buf());
     }
     let mut config = Config::load();
     let joined: Vec<String> = list.iter().map(|p| p.display().to_string()).collect();
-    config.set(HIDDEN, &joined.join(","));
+    config.set(key, &joined.join(","));
     config.save()
 }
 

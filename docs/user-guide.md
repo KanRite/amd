@@ -431,7 +431,8 @@ disagree.
   this machine). Each project shows its tickets raised, done and closed
   (abandoned or deleted) over the last 7, 30 or 90 days, with a bar a week,
   and each running sprint's burn-up and burn-down in points, all read from
-  git history when the page opens. **⌂ Home** in a board's header comes back. "You" is git's
+  git history when the page opens. **▾ Sprint graphs** folds a project's
+  graphs away (▸ opens them), remembered on this machine. **⌂ Home** in a board's header comes back. "You" is git's
   identity in each project's own repository, so a different email per
   organisation works.
 - **Documents**: a project's documents, from the landing page's top bar
@@ -703,7 +704,10 @@ The landing page shows each project's tickets raised, done and closed
 (abandoned or deleted) over the last 7, 30 or 90 days, with a bar a week,
 and for each running sprint a burn-up (points done against its scope) and a
 burn-down (points left against the ideal line). They're read from the
-boards' git history when the page opens; nothing is stored.
+boards' git history when the page opens; nothing is stored. **▾ Sprint
+graphs** beside a project's numbers folds its graphs away and ▸ brings them
+back; amdui remembers which are folded on this machine
+(`ui.folded-graphs` in `~/.config/agile-md/config`).
 
 ```bash
 amd stats             # the same, over the landing page's period

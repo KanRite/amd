@@ -759,6 +759,17 @@ pub async fn set_project_hidden(root: &str, hidden: bool) -> Result<(), String> 
 }
 
 #[derive(Serialize)]
+struct FoldArgs<'a> {
+    root: &'a str,
+    folded: bool,
+}
+
+/// Folds or opens a project's sprint graphs on the landing page (ticket 305).
+pub async fn set_project_graphs_folded(root: &str, folded: bool) -> Result<(), String> {
+    call("set_project_graphs_folded", &FoldArgs { root, folded }).await
+}
+
+#[derive(Serialize)]
 struct ProjectArchiveArgs<'a> {
     root: &'a str,
     on: bool,
