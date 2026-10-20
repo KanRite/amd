@@ -1350,6 +1350,9 @@ pub struct HomeProject {
     /// Archived for everyone (ticket 157): listed apart, with Unarchive.
     #[serde(default)]
     pub archived: bool,
+    /// Its sprint graphs folded on the landing page, by you (ticket 305).
+    #[serde(default)]
+    pub graphs_folded: bool,
 }
 
 /// Which documents the Documents view shows (ticket 168): the project's

@@ -2712,6 +2712,7 @@ async fn home() -> Result<amd_ui_model::Home> {
             folder: w.folder,
             triage: w.triage,
         };
+        let folded = my_work::folded_graphs();
         Ok(amd_ui_model::Home {
             work: work.into_iter().map(convert).collect(),
             to_pick: to_pick.into_iter().map(convert).collect(),
@@ -2733,6 +2734,7 @@ async fn home() -> Result<amd_ui_model::Home> {
                         shared: shared.map(|d| d.name.clone()),
                         shared_cloned: shared.is_some_and(|d| d.root.is_some()),
                         archived: p.archived,
+                        graphs_folded: folded.contains(&p.root),
                     }
                 })
                 .collect(),
@@ -2856,6 +2858,14 @@ async fn set_project_hidden(root: String, hidden: bool) -> Result<()> {
     blocking(move || agile_md::my_work::set_hidden(Path::new(&root), hidden).map_err(err)).await
 }
 
+/// Folds a project's sprint graphs on the landing page, or opens them
+/// (ticket 305), remembered in your own config on this machine.
+#[tauri::command]
+async fn set_project_graphs_folded(root: String, folded: bool) -> Result<()> {
+    blocking(move || agile_md::my_work::set_graphs_folded(Path::new(&root), folded).map_err(err))
+        .await
+}
+
 /// My work's "Include unassigned tickets" (ticket 160), remembered in your
 /// own config on this machine.
 #[tauri::command]
@@ -2975,6 +2985,7 @@ pub fn run() {
             load_board,
             home,
             set_project_hidden,
+            set_project_graphs_folded,
             set_project_archived,
             project_stats,
             set_stats_days,

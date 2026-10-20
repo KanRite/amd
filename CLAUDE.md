@@ -355,6 +355,11 @@ redundant. Their history is in git if it is ever wanted again.
   `my_work::boards_of`) and shows the counts, a bar pair a week, and per
   running sprint an SVG burn-up (dashed scope) and burn-down (dashed
   ideal) (`ProjectStatsView`, `WeekBars`, `BurnCharts` in `home.rs`).
+  **Folding them** (ticket 305): a project with running sprints has
+  "▾ Sprint graphs" beside its numbers; folded projects are
+  `ui.folded-graphs` in your own config, by board folder, like
+  `ui.hidden-projects` (`my_work::{folded_graphs, set_graphs_folded}`,
+  `HomeProject.graphs_folded`, command `set_project_graphs_folded`).
 - `crates/amd-lib/src/my_work.rs` — My work (ticket 020): every project
   registered on this machine (`Registry` entries with a board, scratch
   boards under `std::env::temp_dir()` skipped, named by

@@ -436,6 +436,7 @@ fn Projects(
         let flip = p.root.clone();
         let hide = !p.hidden;
         let stats_root = p.root.clone();
+        let folded = p.graphs_folded;
         view! {
             <li class="flex flex-col gap-1 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
                 <div class="flex items-center gap-3">
@@ -457,7 +458,7 @@ fn Projects(
                     {if hide { "Hide" } else { "Show" }}
                 </button>
                 </div>
-                <ProjectStatsView root=stats_root days />
+                <ProjectStatsView root=stats_root days folded />
             </li>
         }
     };
@@ -512,9 +513,19 @@ fn Projects(
 /// closed over the period with a bar a week, and each running sprint's
 /// burn-up and burn-down. Read from git history when shown.
 #[component]
-fn ProjectStatsView(root: String, days: RwSignal<u32>) -> impl IntoView {
+fn ProjectStatsView(root: String, days: RwSignal<u32>, folded: bool) -> impl IntoView {
     let stats = RwSignal::new(None::<Result<ProjectStats, String>>);
     let root = StoredValue::new(root);
+    // The sprint graphs, folded or open (ticket 305), remembered on this
+    // machine.
+    let folded = RwSignal::new(folded);
+    let fold = move |_| {
+        let now = !folded.get_untracked();
+        folded.set(now);
+        spawn_local(async move {
+            let _ = api::set_project_graphs_folded(&root.get_value(), now).await;
+        });
+    };
     Effect::new(move |_| {
         let d = days.get();
         spawn_local(async move {
@@ -538,8 +549,30 @@ fn ProjectStatsView(root: String, days: RwSignal<u32>) -> impl IntoView {
                         {format!(" · {} closed in the last {} days", s.closed, s.days)}
                     </span>
                     <WeekBars stats=s.clone() />
+                    {(!s.sprints.is_empty()).then(|| {
+                        let n = s.sprints.len();
+                        view! {
+                            <button
+                                type="button"
+                                class="ml-auto rounded px-1.5 py-0.5 hover:bg-slate-100 hover:underline dark:hover:bg-slate-700"
+                                aria-expanded=move || (!folded.get()).to_string()
+                                title=move || if folded.get() { "Show the sprint graphs" } else { "Fold the sprint graphs away" }
+                                on:click=fold
+                            >
+                                {move || {
+                                    let graphs = if n == 1 { "Sprint graphs".to_string() } else { format!("Sprint graphs ({n} sprints)") };
+                                    format!("{} {graphs}", if folded.get() { "▸" } else { "▾" })
+                                }}
+                            </button>
+                        }
+                    })}
                 </div>
-                {s.sprints.iter().map(|b| view! { <BurnCharts burn=b.clone() /> }).collect_view()}
+                {
+                    let sprints = s.sprints.clone();
+                    move || (!folded.get()).then(|| {
+                        sprints.iter().map(|b| view! { <BurnCharts burn=b.clone() /> }).collect_view()
+                    })
+                }
             </div>
         }.into_any(),
     }
