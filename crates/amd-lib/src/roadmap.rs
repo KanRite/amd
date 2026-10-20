@@ -534,12 +534,18 @@ fn write(store: &Board, roadmap: &Roadmap) -> Result<()> {
 /// epic — or sprint, if the roadmap uses sprints — on `target`, the roadmap's
 /// board. All the checks run before anything is written, so a refused
 /// milestone leaves no epic behind and no half-written roadmap.
+///
+/// An epic or sprint already called the milestone's name is used instead
+/// (ticket 306), whatever kind it is: a sprint that hasn't started takes the
+/// milestone's length and description, as a new one would; a started or
+/// closed sprint is left as it is, with a warning, since it can't be
+/// updated. The warnings come back beside the roadmap.
 pub fn add_milestone(
     store: &Board,
     target: &Board,
     slug: &str,
     milestone: Milestone,
-) -> Result<Roadmap> {
+) -> Result<(Roadmap, Vec<String>)> {
     let mut roadmap = find(store, slug)?;
     if roadmap.board.is_empty() {
         bail!("give {} a board before adding milestones", roadmap.name);
@@ -582,6 +588,40 @@ pub fn add_milestone(
     } else {
         dates
     };
+    // `_group.md` keeps a description on one line.
+    let one_line = milestone
+        .description
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut warnings = Vec::new();
+    if let Ok(mut existing) = target.group(&milestone.name) {
+        // Use what's there, as what it is.
+        let milestone = Milestone {
+            kind: existing.kind,
+            ..milestone
+        };
+        if existing.is_sprint() {
+            if existing.accepts_changes() {
+                existing.days = days;
+                existing.description = one_line;
+                existing.save()?;
+            } else {
+                warnings.push(format!(
+                    "{} is a {} sprint, which can't be updated: the milestone uses it as it is",
+                    existing.name,
+                    if existing.state == State::Closed {
+                        "closed"
+                    } else {
+                        "started"
+                    },
+                ));
+            }
+        }
+        roadmap.milestones.push(milestone);
+        write(store, &roadmap)?;
+        return Ok((roadmap, warnings));
+    }
     // The epic's name is the milestone's name; its description and dates stay
     // here. A sprint takes the description and the length.
     target.create_group(&Group {
@@ -590,22 +630,72 @@ pub fn add_milestone(
             .join(&milestone.name),
         name: milestone.name.clone(),
         kind,
-        // `_group.md` keeps a description on one line.
-        description: if sprint {
-            milestone
-                .description
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-        } else {
-            String::new()
-        },
+        description: if sprint { one_line } else { String::new() },
         days,
         state: State::Pending,
     })?;
     roadmap.milestones.push(milestone);
     write(store, &roadmap)?;
-    Ok(roadmap)
+    Ok((roadmap, warnings))
+}
+
+/// Take the milestone `name` off the roadmap `slug` (ticket 306). Its epic or
+/// sprint on `target` goes too when it's empty (no tickets at all) and not
+/// started; otherwise it stays, and the note says why.
+pub fn delete_milestone(
+    store: &Board,
+    target: &Board,
+    slug: &str,
+    name: &str,
+) -> Result<Vec<String>> {
+    let mut roadmap = find(store, slug)?;
+    let before = roadmap.milestones.len();
+    roadmap.milestones.retain(|m| m.name != name);
+    if roadmap.milestones.len() == before {
+        bail!("{} has no milestone {name}", roadmap.name);
+    }
+    write(store, &roadmap)?;
+    Ok(remove_container(target, name)?.into_iter().collect())
+}
+
+/// Delete the roadmap `slug` (ticket 306): each milestone's epic or sprint
+/// on `target` goes when it's empty and not started (as
+/// [`delete_milestone`]), then the roadmap's file.
+pub fn delete(store: &Board, target: Option<&Board>, slug: &str) -> Result<Vec<String>> {
+    let roadmap = find(store, slug)?;
+    let mut notes = Vec::new();
+    if let Some(target) = target {
+        for m in &roadmap.milestones {
+            notes.extend(remove_container(target, &m.name)?);
+        }
+    }
+    let path = roadmap.path(store);
+    fs::remove_file(&path).with_context(|| format!("removing {}", path.display()))?;
+    Ok(notes)
+}
+
+/// Removes the epic or sprint `name` when it's empty and not started; else a
+/// note saying why it was kept. Nothing when there's none.
+fn remove_container(target: &Board, name: &str) -> Result<Option<String>> {
+    let Ok(group) = target.group(name) else {
+        return Ok(None);
+    };
+    let what = if group.is_sprint() { "sprint" } else { "epic" };
+    if !group.accepts_changes() {
+        return Ok(Some(format!(
+            "kept the {what} {name}: it {}",
+            group.locked_word()
+        )));
+    }
+    let tickets = target.tasks_in_group(name)?.len();
+    if tickets > 0 {
+        return Ok(Some(format!(
+            "kept the {what} {name}: it has {tickets} ticket{}",
+            if tickets == 1 { "" } else { "s" }
+        )));
+    }
+    target.delete_group(name)?;
+    Ok(None)
 }
 
 /// Change the start and due dates of the milestone `name` on the roadmap
@@ -791,6 +881,140 @@ mod tests {
         )
         .unwrap();
         assert_eq!(board.group("S2").unwrap().days, 10);
+    }
+
+    fn group(board: &Board, name: &str, kind: Kind, days: u32) -> Group {
+        let group = Group {
+            dir: board.dir(Column::Backlog).join(name),
+            name: name.to_string(),
+            kind,
+            description: "Its own words".to_string(),
+            days,
+            state: State::Pending,
+        };
+        board.create_group(&group).unwrap();
+        group
+    }
+
+    fn ticket_in(board: &Board, group: &str) {
+        let dir = board.dir(Column::Backlog).join(group);
+        fs::write(
+            dir.join("001-a-ticket.md"),
+            "---\nid: \"001\"\ntitle: \"A ticket\"\n---\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_milestone_uses_an_epic_already_of_its_name_as_an_epic() {
+        let (_dir, board) = board();
+        create(&board, "acme-api", "").unwrap();
+        set_details(&board, "acme-api", "", true).unwrap();
+        group(&board, "Launch", Kind::Epic, 14);
+        let (roadmap, warnings) =
+            add_milestone(&board, &board, "acme-api", milestone("Launch", "", "")).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(
+            roadmap.milestones[0].kind,
+            Kind::Epic,
+            "the epic's kind, not the roadmap's"
+        );
+        let kept = board.group("Launch").unwrap();
+        assert_eq!(
+            (kept.kind, kept.description.as_str()),
+            (Kind::Epic, "Its own words")
+        );
+    }
+
+    #[test]
+    fn a_milestone_updates_a_sprint_of_its_name_that_hasnt_started() {
+        let (_dir, board) = board();
+        create(&board, "acme-api", "").unwrap();
+        group(&board, "S3", Kind::Sprint, 14);
+        let mut s3 = milestone("S3", "", "");
+        s3.duration = 5;
+        // An epics roadmap still takes the sprint as a sprint.
+        let (roadmap, warnings) = add_milestone(&board, &board, "acme-api", s3).unwrap();
+        assert!(warnings.is_empty());
+        assert_eq!(roadmap.milestones[0].kind, Kind::Sprint);
+        let updated = board.group("S3").unwrap();
+        assert_eq!(updated.days, 5);
+        assert_eq!(updated.description, "What it has to do. And more.");
+    }
+
+    #[test]
+    fn a_started_or_closed_sprint_is_used_as_it_is_with_a_warning() {
+        let (_dir, board) = board();
+        create(&board, "acme-api", "").unwrap();
+        group(&board, "S4", Kind::Sprint, 14).start().unwrap();
+        let mut closed = group(&board, "S5", Kind::Sprint, 14);
+        closed.start().unwrap();
+        closed.close().unwrap();
+        for (name, word) in [("S4", "started"), ("S5", "closed")] {
+            let mut m = milestone(name, "", "");
+            m.duration = 3;
+            let (_, warnings) = add_milestone(&board, &board, "acme-api", m).unwrap();
+            assert_eq!(
+                warnings,
+                [format!(
+                    "{name} is a {word} sprint, which can't be updated: the milestone uses it as it is"
+                )]
+            );
+            let kept = board.group(name).unwrap();
+            assert_eq!(
+                (kept.days, kept.description.as_str()),
+                (14, "Its own words")
+            );
+        }
+    }
+
+    #[test]
+    fn deleting_a_milestone_removes_its_epic_only_when_empty_and_not_started() {
+        let (_dir, board) = board();
+        create(&board, "acme-api", "").unwrap();
+        for name in ["Empty", "Busy"] {
+            add_milestone(&board, &board, "acme-api", milestone(name, "", "")).unwrap();
+        }
+        ticket_in(&board, "Busy");
+        group(&board, "Run", Kind::Sprint, 14).start().unwrap();
+        add_milestone(&board, &board, "acme-api", milestone("Run", "", "")).unwrap();
+
+        assert!(
+            delete_milestone(&board, &board, "acme-api", "Empty")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(board.group("Empty").is_err(), "an empty epic goes with it");
+        assert_eq!(
+            delete_milestone(&board, &board, "acme-api", "Busy").unwrap(),
+            ["kept the epic Busy: it has 1 ticket"]
+        );
+        assert!(board.group("Busy").is_ok());
+        assert_eq!(
+            delete_milestone(&board, &board, "acme-api", "Run").unwrap(),
+            ["kept the sprint Run: it has started"]
+        );
+        assert!(list(&board).unwrap()[0].milestones.is_empty());
+        assert!(delete_milestone(&board, &board, "acme-api", "Nope").is_err());
+    }
+
+    #[test]
+    fn deleting_a_roadmap_removes_its_file_and_its_empty_epics() {
+        let (_dir, board) = board();
+        create(&board, "acme-api", "").unwrap();
+        for name in ["One", "Two"] {
+            add_milestone(&board, &board, "acme-api", milestone(name, "", "")).unwrap();
+        }
+        ticket_in(&board, "Two");
+        let notes = delete(&board, Some(&board), "acme-api").unwrap();
+        assert_eq!(notes, ["kept the epic Two: it has 1 ticket"]);
+        assert!(list(&board).unwrap().is_empty());
+        assert!(board.group("One").is_err());
+        assert!(board.group("Two").is_ok());
+        assert!(
+            delete(&board, Some(&board), "acme-api").is_err(),
+            "already gone"
+        );
     }
 
     #[test]

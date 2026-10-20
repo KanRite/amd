@@ -180,7 +180,20 @@ redundant. Their history is in git if it is ever wanted again.
   its sprint on the target to start-to-due while it's pending, never once
   started. amdui: each milestone's **Change dates** (`MilestoneRow`, command
   `set_milestone_dates`, `roadmap-dates:` commits, a second one when the
-  sprint is on another repository's board). No CLI or MCP tool yet.
+  sprint is on another repository's board). **Existing containers and
+  deleting** (ticket 306): `add_milestone` returns `(Roadmap, warnings)`;
+  an epic or sprint already of the milestone's name is used, its kind
+  becoming the milestone's; a pending sprint takes the length and the
+  one-line description; a started or closed one is left alone with "X is a
+  started sprint, which can't be updated: the milestone uses it as it is".
+  `delete_milestone(store, target, slug, name)` and `delete(store,
+  Option<target>, slug)` remove the milestone or the roadmap file, and each
+  milestone's container when it's empty (no tickets at all) and not started
+  (`remove_container`), else a "kept the epic X: it has N tickets" note.
+  amdui: admins only (`boards::admin_access`, buttons hidden otherwise),
+  commands `delete_milestone`/`delete_roadmap` (`roadmap-milestone-delete`,
+  `roadmap-delete` commits), notes and warnings in `SyncReport.warning`
+  (`with_notes`). No CLI or MCP tool yet.
 - `crates/amd-lib/src/archive.rs` — archiving a project (ticket 157):
   `archived = on` in the tickets `.settings`, auto-committed like any
   setting. An archived project only reads: the CLI's `run()` refuses a

@@ -279,6 +279,14 @@ fn Unassigned(
     }
 }
 
+/// Whether the person may delete roadmaps and milestones (ticket 306): the
+/// project's admins, as Admin itself decides.
+fn is_admin() -> bool {
+    Ctx::get()
+        .board
+        .with(|b| b.as_ref().is_some_and(|b| b.admin.allowed))
+}
+
 #[component]
 fn RoadmapView(
     roadmap: RoadmapCard,
@@ -346,6 +354,28 @@ fn RoadmapView(
         });
     };
 
+    // Delete asks once more (ticket 306).
+    let confirm_delete = RwSignal::new(false);
+    let delete_roadmap = move || {
+        if !confirm_delete.get_untracked() {
+            confirm_delete.set(true);
+            return;
+        }
+        busy.set(true);
+        spawn_local(async move {
+            match api::delete_roadmap(&slug.get_value()).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    ctx.reload();
+                    open.set(None);
+                    reload();
+                }
+                Err(e) => problem.set(Some(e)),
+            }
+            confirm_delete.set(false);
+            busy.set(false);
+        });
+    };
     let add = move || {
         if busy.get_untracked() {
             return;
@@ -424,6 +454,16 @@ fn RoadmapView(
             >
                 "Rename"
             </button>
+            <button
+                type="button"
+                class:hidden=move || !is_admin()
+                class=SECONDARY
+                disabled=move || busy.get()
+                title="Delete this roadmap. Each milestone's epic or sprint goes too if it's empty and hasn't started."
+                on:click=move |_| delete_roadmap()
+            >
+                {move || if confirm_delete.get() { "Confirm: delete roadmap" } else { "Delete roadmap" }}
+            </button>
         </section>
         <section class="flex flex-col gap-3 rounded border border-slate-200 p-3 dark:border-slate-700">
             <label class="flex flex-col gap-1 text-sm">
@@ -481,7 +521,12 @@ fn RoadmapView(
         >
             <h3 class="text-sm font-medium">"New milestone"</h3>
             <label class="flex flex-col gap-1 text-sm">
-                "Short name"
+                <span>
+                    "Short name"
+                    <span class="ml-2 text-xs text-slate-500">
+                        "An existing epic or sprint of this name is used instead of a new one."
+                    </span>
+                </span>
                 <input
                     type="text"
                     required
@@ -623,6 +668,27 @@ fn MilestoneRow(
         });
     };
     let unchanged = move || old.with_value(|(s, d)| start.get() == *s && due.get() == *d);
+    // Delete asks once more (ticket 306).
+    let confirm_delete = RwSignal::new(false);
+    let remove = move || {
+        if !confirm_delete.get_untracked() {
+            confirm_delete.set(true);
+            return;
+        }
+        busy.set(true);
+        spawn_local(async move {
+            match api::delete_milestone(&slug.get_value(), &name.get_value()).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    ctx.reload();
+                    reload();
+                }
+                Err(e) => problem.set(Some(e)),
+            }
+            confirm_delete.set(false);
+            busy.set(false);
+        });
+    };
     view! {
         <li class=class>
             <div class="flex items-start gap-2">
@@ -646,6 +712,16 @@ fn MilestoneRow(
                     on:click=move |_| editing.set(true)
                 >
                     "Change dates"
+                </button>
+                <button
+                    type="button"
+                    class:hidden=move || !is_admin()
+                    class=SECONDARY
+                    disabled=move || busy.get()
+                    title="Take this milestone off the roadmap. Its epic or sprint goes too if it's empty and hasn't started."
+                    on:click=move |_| remove()
+                >
+                    {move || if confirm_delete.get() { "Confirm: delete" } else { "Delete" }}
                 </button>
             </div>
             <div class:hidden=move || !editing.get()>
