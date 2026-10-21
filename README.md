@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="pages/logo/agile-md-dark.svg">
-    <img src="pages/logo/agile-md-light.svg" alt="Agile-MD: ideate, plan, write, deliver" width="560">
+    <source media="(prefers-color-scheme: dark)" srcset="pages/logo/agilerite-dark.svg">
+    <img src="pages/logo/agilerite-light.svg" alt="AgileRite: ideate, plan, write, deliver" width="560">
   </picture>
 </p>
 
