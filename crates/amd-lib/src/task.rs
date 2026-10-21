@@ -156,7 +156,7 @@ impl Task {
     /// from user-editable templates, so this reads the first `key: value` line
     /// rather than pretending to be a YAML parser.
     pub fn meta(&self, key: &str) -> Option<String> {
-        let text = fs::read_to_string(&self.path).ok()?;
+        let text = crate::eol::read(&self.path).ok()?;
         meta_in(&text, key).map(str::to_string)
     }
 
@@ -165,7 +165,7 @@ impl Task {
     /// if the file changed in between, the write is refused rather than
     /// silently discarding whatever changed it.
     pub fn hash(&self) -> Result<ContentHash> {
-        let text = fs::read_to_string(&self.path)
+        let text = crate::eol::read(&self.path)
             .with_context(|| format!("reading {}", self.path.display()))?;
         Ok(hash_of(&text))
     }
@@ -204,7 +204,7 @@ impl Task {
         expected: ContentHash,
         modify: impl FnOnce(&str) -> Result<String>,
     ) -> Result<()> {
-        let text = fs::read_to_string(&self.path)
+        let text = crate::eol::read(&self.path)
             .with_context(|| format!("reading {}", self.path.display()))?;
         self.check_lease(&text)?;
         if hash_of(&text) != expected {
@@ -268,7 +268,7 @@ impl Task {
     /// `set_epic_meta`'s own `write_checked`, say) would risk a half-moved,
     /// half-refused ticket.
     pub(crate) fn ensure_not_leased(&self) -> Result<()> {
-        let text = fs::read_to_string(&self.path)
+        let text = crate::eol::read(&self.path)
             .with_context(|| format!("reading {}", self.path.display()))?;
         self.check_lease(&text)
     }
@@ -343,7 +343,7 @@ impl Task {
     /// bypass of `write_checked`'s generic lease gate — used only by `amd
     /// unlock --force`, never as a side effect of an ordinary write.
     pub fn break_lease(&self, expected: ContentHash) -> Result<()> {
-        let text = fs::read_to_string(&self.path)
+        let text = crate::eol::read(&self.path)
             .with_context(|| format!("reading {}", self.path.display()))?;
         if hash_of(&text) != expected {
             return Err(Conflict {
@@ -383,7 +383,7 @@ impl Task {
     /// Everything below the closing frontmatter fence — the part a human
     /// actually writes.
     pub fn body(&self) -> Result<String> {
-        let text = fs::read_to_string(&self.path)
+        let text = crate::eol::read(&self.path)
             .with_context(|| format!("reading {}", self.path.display()))?;
         Ok(split_body(&text)
             .map(|(_, body)| body.to_string())
@@ -423,7 +423,7 @@ impl Task {
     /// while its first name matches `assignee`: one that doesn't was left
     /// behind by an older build reassigning the ticket, and `assignee` wins.
     pub fn assignees(&self) -> Vec<String> {
-        fs::read_to_string(&self.path)
+        crate::eol::read(&self.path)
             .map(|text| assignees_in(&text))
             .unwrap_or_default()
     }
@@ -998,7 +998,7 @@ impl Task {
     /// Take a child's wikilink out of the `## Children` list. Returns
     /// whether the file changed.
     pub fn remove_child_link(&self, expected: ContentHash, stem: &str) -> Result<bool> {
-        let text = fs::read_to_string(&self.path)
+        let text = crate::eol::read(&self.path)
             .with_context(|| format!("reading {}", self.path.display()))?;
         let link = format!("- [[{stem}]]");
         if !text.lines().any(|line| line.trim() == link) {
@@ -1021,7 +1021,7 @@ impl Task {
     /// Record a child under a `## Children` heading, as a wikilink an editor
     /// can follow. The heading is added when it isn't there yet.
     pub fn add_child_link(&self, expected: ContentHash, stem: &str) -> Result<bool> {
-        let text = fs::read_to_string(&self.path)
+        let text = crate::eol::read(&self.path)
             .with_context(|| format!("reading {}", self.path.display()))?;
         let link = format!("- [[{stem}]]");
         if text.lines().any(|line| line.trim() == link) {
@@ -1595,6 +1595,41 @@ mod tests {
         assert_eq!(meta_in(text, "missing"), None);
     }
 
+    /// A ticket as Git for Windows checks it out, or Notepad saves it
+    /// (ticket 277).
+    const CRLF_TICKET: &str = "---\r\nid: \"001\"\r\ntitle: \"Windows ticket\"\r\n\
+        priority: \"low\"\r\ntags: [UI]\r\n---\r\n\r\n## Notes\r\n\r\nWritten on Windows.\r\n";
+
+    #[test]
+    fn a_crlf_ticket_reads_like_any_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("001-windows-ticket.md");
+        fs::write(&path, CRLF_TICKET).unwrap();
+        let task = Task::from_path(&path, Column::Backlog).unwrap();
+        assert_eq!(task.meta("title").as_deref(), Some("Windows ticket"));
+        assert_eq!(task.meta("priority").as_deref(), Some("low"));
+        assert_eq!(task.title(), "Windows ticket");
+        assert!(task.has_tag("UI"));
+        let body = task.body().unwrap();
+        assert!(
+            body.contains("Written on Windows.") && !body.contains('\r'),
+            "{body:?}"
+        );
+    }
+
+    #[test]
+    fn editing_a_crlf_ticket_writes_lf_and_changes_only_that_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("001-windows-ticket.md");
+        fs::write(&path, CRLF_TICKET).unwrap();
+        let task = Task::from_path(&path, Column::Backlog).unwrap();
+        task.set_priority(task.hash().unwrap(), "high").unwrap();
+        let expected = CRLF_TICKET
+            .replace("\r\n", "\n")
+            .replace("priority: \"low\"", "priority: \"high\"");
+        assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+    }
+
     #[test]
     fn meta_falls_back_to_the_whole_file_without_frontmatter() {
         assert_eq!(meta_in("# Heading\ntitle: Bare\n", "title"), Some("Bare"));
@@ -1689,7 +1724,7 @@ mod tests {
         );
         let edited = "---\nid: \"001\"\ntitle: \"A\"\npriority: \"low\"\ntags: [cli,future,Cli]\n---\n\nbody\n";
         task.set_text(task.hash().unwrap(), edited).unwrap();
-        let saved = fs::read_to_string(&task.path).unwrap();
+        let saved = crate::eol::read(&task.path).unwrap();
         assert!(saved.contains("tags: [CLI,FUTURE]"), "{saved}");
         assert!(
             saved.ends_with("\n\nbody\n"),
@@ -1709,7 +1744,7 @@ mod tests {
 
         task.set_body(task.hash().unwrap(), "\n## Notes\n\nrewritten\n")
             .unwrap();
-        let text = fs::read_to_string(&task.path).unwrap();
+        let text = crate::eol::read(&task.path).unwrap();
         assert!(
             text.starts_with("---\nid: \"001\"\ntitle: \"A\"\n---\n"),
             "{text}"
@@ -1946,7 +1981,7 @@ mod tests {
 
         task.set_order(task.hash().unwrap(), 0.75).unwrap();
         assert_eq!(task.order(), Some(0.75));
-        let text = fs::read_to_string(&task.path).unwrap();
+        let text = crate::eol::read(&task.path).unwrap();
         assert!(text.ends_with("## Notes\n"), "{text}");
         assert_eq!(text.matches("order").count(), 1, "{text}");
     }
@@ -1973,7 +2008,7 @@ mod tests {
         task.set_order(task.hash().unwrap(), -1.0).unwrap();
         assert_eq!(task.order(), Some(-1.0));
         assert!(
-            fs::read_to_string(&task.path).unwrap().ends_with("body\n"),
+            crate::eol::read(&task.path).unwrap().ends_with("body\n"),
             "the body must survive"
         );
     }

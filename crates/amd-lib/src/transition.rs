@@ -1289,7 +1289,7 @@ mod tests {
         .unwrap();
         let child = board.find("002").unwrap();
         assert_eq!(child.parent().as_deref(), Some("001"));
-        let parent = std::fs::read_to_string(board.find("001").unwrap().path).unwrap();
+        let parent = crate::eol::read(board.find("001").unwrap().path).unwrap();
         assert!(parent.contains("## Children"), "{parent}");
         assert!(parent.contains("[[002-card-form]]"), "{parent}");
         let out = std::process::Command::new("git")

@@ -299,7 +299,7 @@ pub fn imported_sources(board: &Board) -> Result<HashSet<String>> {
     let mut files = Vec::new();
     collect_markdown(&board.root, &mut files);
     for path in files {
-        if let Ok(text) = fs::read_to_string(&path)
+        if let Ok(text) = crate::eol::read(&path)
             && let Some(value) = task::meta_in(&text, SOURCE_KEY)
         {
             sources.insert(value.to_string());
@@ -677,14 +677,14 @@ mod tests {
             .unwrap();
         assert!(basket.has_tag("TRIAGE"));
         assert_eq!(basket.meta("source").as_deref(), Some("github:acme/web#7"));
-        let text = fs::read_to_string(&basket.path).unwrap();
+        let text = crate::eol::read(&basket.path).unwrap();
         assert!(text.contains("[#7](https://github.com/acme/web/issues/7), opened by @sam"));
         assert!(text.contains("Labels not on the project's tag list: bug, needs-info"));
         assert!(text.contains("Off by a penny.\nEvery time."));
         assert!(text.contains("## Acceptance criteria"));
         let party = tasks.iter().find(|t| t.title() == "Issue 3").unwrap();
         assert!(
-            fs::read_to_string(&party.path)
+            crate::eol::read(&party.path)
                 .unwrap()
                 .contains("Issue title: 🎉🎉")
         );

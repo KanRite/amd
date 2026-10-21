@@ -407,7 +407,7 @@ pub fn list(store: &Board) -> Result<Vec<Roadmap>> {
 }
 
 fn read(path: &Path) -> Result<String> {
-    fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
+    crate::eol::read(path).with_context(|| format!("reading {}", path.display()))
 }
 
 fn find(store: &Board, slug: &str) -> Result<Roadmap> {

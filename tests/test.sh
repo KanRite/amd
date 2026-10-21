@@ -147,6 +147,35 @@ assert "amd init clones archived repositories from GitHub, unarchiving them, and
     && grep -q gizmo-tickets '${bb}/config/agile-md/repos'"
 rm -rf "${bb}"
 
+# Ticket 277: repositories init creates say LF for every text file, so a
+# Windows clone has the same bytes as anyone's. A fake gh that finds nothing,
+# creates a bare repository beside us, and refuses protection as the free
+# plan does.
+nw="$(mktemp -d)"
+mkdir -p "${nw}/bin" "${nw}/remote" "${nw}/here"
+cat > "${nw}/bin/gh" <<'GH'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "repo view") exit 1 ;;
+  "repo create") name="${3#*/}"
+    git init -q --bare -b main "${GH_REMOTE:?}/${name}.git" \
+      && git clone -q "${GH_REMOTE}/${name}.git" "${name}" 2>/dev/null ;;
+  "api "*) cat >/dev/null; echo "HTTP 403: Upgrade to GitHub Pro" >&2; exit 1 ;;
+esac
+GH
+chmod +x "${nw}/bin/gh"
+assert "amd init gives the repositories it creates a .gitattributes keeping text LF" \
+  bash -c "cd '${nw}/here' && env PATH='${nw}/bin:${PATH}' GH_REMOTE='${nw}/remote' \
+      XDG_CONFIG_HOME='${nw}/config' GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t.co GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t.co \
+      '${AMD}' init sprocket >/dev/null 2>&1; \
+    for kind in tickets documents; do \
+      git -C sprocket-\${kind} ls-files --error-unmatch .gitattributes >/dev/null 2>&1 \
+        && grep -qx '\* text=auto eol=lf' sprocket-\${kind}/.gitattributes || exit 1; \
+    done"
+assert "...and leaves a repository that was already there without one" \
+  bash -c "test ! -e '${plain_dir}/widgets-tickets/.gitattributes' -a ! -e '${plain_dir}/widgets-documents/.gitattributes'"
+rm -rf "${nw}"
+
 echo "init: an existing project made before ticket 090 gets its first user:"
 # A project whose remote has no users yet, cloned locally the way its
 # creator already has it; re-running init adds them and pushes.

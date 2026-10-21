@@ -271,7 +271,7 @@ mod tests {
 
         // Sam edits 001; Alex only moves it.
         as_person(dir.path(), "sam", "sam@example.com");
-        fs::write(&new, fs::read_to_string(&new).unwrap() + "more\n").unwrap();
+        fs::write(&new, crate::eol::read(&new).unwrap() + "more\n").unwrap();
         git(dir.path(), &["commit", "-qam", "edit"]);
         as_person(dir.path(), "alex", "alex@example.com");
         fs::create_dir_all(board.dir(Column::Todo)).unwrap();

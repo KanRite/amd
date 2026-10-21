@@ -331,7 +331,7 @@ mod tests {
         );
         // A real title, so the report shows it and not the file name.
         let left = board.root.join("backlog/s1/001-left.md");
-        let text = fs::read_to_string(&left)
+        let text = crate::eol::read(&left)
             .unwrap()
             .replace("title: \"001-left\"", "title: \"Left behind\"");
         fs::write(&left, text).unwrap();

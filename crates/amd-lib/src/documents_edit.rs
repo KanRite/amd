@@ -90,7 +90,7 @@ pub fn with_archived(text: &str, on: bool) -> String {
 pub fn set_archived(root: &Path, path: &str, on: bool) -> Result<Restored> {
     let full = resolve(root, path)?;
     ensure_clean(root, &[path])?;
-    let text = fs::read_to_string(&full).with_context(|| format!("reading {path}"))?;
+    let text = crate::eol::read(&full).with_context(|| format!("reading {path}"))?;
     if is_archived(&text) == on {
         bail!("{path} is {}archived already", if on { "" } else { "not " });
     }
@@ -106,7 +106,7 @@ pub fn set_archived(root: &Path, path: &str, on: bool) -> Result<Restored> {
 pub fn save(root: &Path, path: &str, text: &str, opened: &str) -> Result<Restored> {
     let full = resolve(root, path)?;
     ensure_clean(root, &[path])?;
-    let now = fs::read_to_string(&full).with_context(|| format!("reading {path}"))?;
+    let now = crate::eol::read(&full).with_context(|| format!("reading {path}"))?;
     if version(&now) != opened {
         bail!("{path} changed since you opened it; reload it and make your change again");
     }
@@ -359,7 +359,7 @@ pub fn move_document(root: &Path, from: &str, to_folder: &str) -> Result<(String
         .collect();
     let mut changes: Vec<(String, String)> = Vec::new();
     for doc in &documents {
-        let text = fs::read_to_string(root.join(doc)).unwrap_or_default();
+        let text = crate::eol::read(root.join(doc)).unwrap_or_default();
         let new = if doc == from {
             // Its own links: resolve from where it was, point from where
             // it goes.
@@ -505,7 +505,7 @@ pub fn link_tree(root: &Path, start: &str) -> Result<Vec<Page>> {
             return;
         }
         seen.push(path.to_string());
-        let Ok(text) = fs::read_to_string(root.join(path)) else {
+        let Ok(text) = crate::eol::read(root.join(path)) else {
             return;
         };
         let title = crate::documents::title_of(&text)
@@ -557,7 +557,7 @@ pub fn search(root: &Path, query: &str, per_document: usize) -> Result<Vec<Hit>>
     let mut titled = Vec::new();
     let mut rest = Vec::new();
     for doc in crate::documents::list(root)? {
-        let text = fs::read_to_string(root.join(&doc.path)).unwrap_or_default();
+        let text = crate::eol::read(root.join(&doc.path)).unwrap_or_default();
         let (front, body) = split_frontmatter(&text);
         let skip = front.map_or(0, |f| f.lines().count());
         let mut hits: Vec<Hit> = body
@@ -906,9 +906,9 @@ mod tests {
         let (to, done) = move_document(&root, "adr/adr/0001-x.md", "adr/adr/old").unwrap();
         assert_eq!(to, "adr/adr/old/0001-x.md");
         assert!(done.pushed);
-        let readme = fs::read_to_string(root.join("README.md")).unwrap();
+        let readme = crate::eol::read(root.join("README.md")).unwrap();
         assert!(readme.contains("(adr/adr/old/0001-x.md#why)"), "{readme}");
-        let moved = fs::read_to_string(root.join(&to)).unwrap();
+        let moved = crate::eol::read(root.join(&to)).unwrap();
         assert!(moved.contains("(../../img/p.png)"), "{moved}");
         assert!(moved.contains("(../../../README.md)"), "{moved}");
         let subjects: Vec<String> = crate::documents::history(&root, &to, 20)
@@ -940,11 +940,11 @@ mod tests {
     #[test]
     fn saving_refuses_a_stale_version() {
         let (_dir, root) = repo();
-        let text = fs::read_to_string(root.join("README.md")).unwrap();
+        let text = crate::eol::read(root.join("README.md")).unwrap();
         let opened = version(&text);
         save(&root, "README.md", "# P\n\nNew.\n", &opened).unwrap();
         assert_eq!(
-            fs::read_to_string(root.join("README.md")).unwrap(),
+            crate::eol::read(root.join("README.md")).unwrap(),
             "# P\n\nNew.\n"
         );
         let err = save(&root, "README.md", "# P\n\nAgain.\n", &opened).unwrap_err();
@@ -976,7 +976,7 @@ mod tests {
         let (path, _) = create_document(&root, "adr/adr", "Keep the cache").unwrap();
         assert_eq!(path, "adr/adr/0002-keep-the-cache.md");
         assert_eq!(
-            fs::read_to_string(root.join(&path)).unwrap(),
+            crate::eol::read(root.join(&path)).unwrap(),
             "# ADR 0002: Keep the cache\n\n"
         );
         fs::create_dir_all(root.join("adr/rfc")).unwrap();

@@ -510,7 +510,7 @@ mod tests {
         .unwrap();
         assert!(made.created && made.forge == Forge::Local);
         assert!(origins.join("acme-payments.git").exists());
-        let readme = fs::read_to_string(made.path.join("README.md")).unwrap();
+        let readme = crate::eol::read(made.path.join("README.md")).unwrap();
         assert!(
             readme.contains("# acme-payments") && readme.contains("ticket 012"),
             "{readme}"

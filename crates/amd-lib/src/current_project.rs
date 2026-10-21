@@ -46,7 +46,7 @@ pub fn project_dir() -> Result<PathBuf> {
 
 /// What `dir/.current-project` names, if it exists and says anything.
 pub fn read(dir: &Path) -> Option<String> {
-    let text = fs::read_to_string(dir.join(FILE)).ok()?;
+    let text = crate::eol::read(dir.join(FILE)).ok()?;
     let name = text.trim();
     (!name.is_empty()).then(|| name.to_string())
 }

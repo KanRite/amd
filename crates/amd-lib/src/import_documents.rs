@@ -93,7 +93,7 @@ pub fn plan(source: &Path, repo: &Path, into: Option<&str>) -> Result<Plan> {
     walk(&source, &source, &mut markdown)?;
     let mut files: BTreeSet<String> = markdown.iter().cloned().collect();
     for document in &markdown {
-        let Ok(text) = fs::read_to_string(source.join(document)) else {
+        let Ok(text) = crate::eol::read(source.join(document)) else {
             continue;
         };
         for target in links(&text) {

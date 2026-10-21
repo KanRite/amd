@@ -69,7 +69,7 @@ struct Seen {
 
 impl Seen {
     fn read(task: Task) -> Option<Seen> {
-        let text = std::fs::read_to_string(&task.path).ok()?;
+        let text = crate::eol::read(&task.path).ok()?;
         let get = |key: &str| {
             meta_in(&text, key)
                 .map(|v| v.trim().trim_matches('"').to_string())
@@ -592,7 +592,7 @@ mod tests {
     /// Sets when a ticket was made, which due dates count from.
     fn created(board: &Board, id: &str, date: &str) {
         let t = find(board, id);
-        let text = std::fs::read_to_string(&t.path).unwrap();
+        let text = crate::eol::read(&t.path).unwrap();
         let text = crate::task::set_meta(&text, "created", &format!("{date:?}")).unwrap();
         std::fs::write(&t.path, text).unwrap();
     }
@@ -841,7 +841,7 @@ mod tests {
         let until = (time::OffsetDateTime::now_utc() + time::Duration::hours(2))
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap();
-        let text = std::fs::read_to_string(&t.path).unwrap();
+        let text = crate::eol::read(&t.path).unwrap();
         let text = crate::task::set_meta(&text, "locked-by", "\"someone@else.example\"").unwrap();
         let text = crate::task::set_meta(&text, "locked-until", &format!("{until:?}")).unwrap();
         std::fs::write(&t.path, text).unwrap();

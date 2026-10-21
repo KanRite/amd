@@ -476,7 +476,7 @@ mod tests {
         );
         commit(&board, "sprint", day0 - DAY);
         let group = board.root.join("backlog/s1/_group.md");
-        let text = fs::read_to_string(&group)
+        let text = crate::eol::read(&group)
             .unwrap()
             .replace("pending", "started");
         fs::write(&group, text).unwrap();

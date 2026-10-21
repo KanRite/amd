@@ -77,7 +77,7 @@ impl Registry {
 
     /// The half that takes a path, so tests need no environment fiddling.
     pub fn load_from(path: &Path) -> Registry {
-        let Ok(text) = fs::read_to_string(path) else {
+        let Ok(text) = crate::eol::read(path) else {
             return Registry::default();
         };
         let entries = text
@@ -350,7 +350,7 @@ mod tests {
         let registry = Registry::load_from(&path);
         assert_eq!(registry.entries.len(), 1);
         registry.save_to(&path).unwrap();
-        assert!(!fs::read_to_string(&path).unwrap().contains("gone"));
+        assert!(!crate::eol::read(&path).unwrap().contains("gone"));
     }
 
     #[test]

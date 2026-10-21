@@ -269,6 +269,22 @@ redundant. Their history is in git if it is ever wanted again.
 - `crates/amd-lib/src/project_trust.rs` — a per-machine, trust-on-first-use
   check that a board's declared `project` hasn't changed unexpectedly since
   `amd` last saw it.
+- `crates/amd-lib/src/eol.rs` — **line endings** (ticket 277): amd reads
+  CRLF and writes LF, dos2unix's rule. Git for Windows checks text out
+  CRLF (`core.autocrlf`) and Windows editors save it, and every reader
+  here splits on `\n` and looks for `---\n`, so a CRLF ticket lost its
+  frontmatter. `eol::read` (instead of `fs::read_to_string`, everywhere in
+  amd-lib, amdui's ticket reads and the CLI's `$EDITOR` file) and
+  `eol::lf` (on `documents::read`/`read_version` and `recover`'s `git
+  show`) make each `\r\n` a `\n`; writes are then LF. **Read new board or
+  document files through `eol::read`.** `templates::builtin_source`
+  returns the compiled-in templates with LF too (a `Cow`), for a Windows
+  clone made before `.gitattributes` (`* text=auto eol=lf`, binaries
+  marked) existed. `amd init` writes the same `.gitattributes` into the
+  tickets and documents repositories it **creates** (never an existing
+  one: that would need a commit, ADR 0008). Tested on Linux by running
+  the tests with `core.autocrlf = true` in a `GIT_CONFIG_GLOBAL`, which
+  reproduces the Windows clone failures.
 - `crates/amd-lib/src/update.rs` — is there a newer release (ticket 190,
   the detecting half of in-app updates; applying is 191, the Update / Later
   banner 192, compatibility and `min_version` 193). amd-lib has no HTTP

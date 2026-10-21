@@ -52,7 +52,7 @@ fn exclude(dir: &Path) {
     } else {
         dir.join(rel)
     };
-    let current = fs::read_to_string(&exclude).unwrap_or_default();
+    let current = crate::eol::read(&exclude).unwrap_or_default();
     if current.lines().any(|l| l.trim() == FILE) {
         return;
     }
@@ -111,13 +111,13 @@ mod tests {
             &["b.md: already here".into()],
         )
         .unwrap();
-        let log = fs::read_to_string(sub.join(FILE)).unwrap();
+        let log = crate::eol::read(sub.join(FILE)).unwrap();
         assert!(
             log.contains("amd import documents a\n\n- a.md: already here\n"),
             "{log}"
         );
         assert!(log.contains("- b.md: already here"), "{log}");
-        let exclude = fs::read_to_string(dir.path().join(".git/info/exclude")).unwrap();
+        let exclude = crate::eol::read(dir.path().join(".git/info/exclude")).unwrap();
         assert_eq!(
             exclude.lines().filter(|l| *l == FILE).count(),
             1,

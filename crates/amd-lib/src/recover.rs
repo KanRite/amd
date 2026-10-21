@@ -193,7 +193,7 @@ fn file_at(repo: &Path, rev: &str, path: &str) -> Option<String> {
         .ok()?;
     out.status
         .success()
-        .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        .then(|| crate::eol::lf(String::from_utf8_lossy(&out.stdout).into_owned()))
 }
 
 #[cfg(test)]
@@ -239,7 +239,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let board = board_with_history(dir.path());
         let first = board.dir(Column::Backlog).join("001-first.md");
-        let before = fs::read_to_string(&first).unwrap();
+        let before = crate::eol::read(&first).unwrap();
 
         git(dir.path(), &["rm", "-q", "tasks/backlog/001-first.md"]);
         git(
@@ -257,7 +257,7 @@ mod tests {
         assert!(list[0].by("sam") && list[0].by("EXAMPLE"));
 
         let back = restore(&board, &list[0]).unwrap();
-        assert_eq!(fs::read_to_string(back).unwrap(), before);
+        assert_eq!(crate::eol::read(back).unwrap(), before);
         // Back on the board, it drops out of the list.
         let list = removed(&board).unwrap();
         assert_eq!(list.iter().map(|r| r.id).collect::<Vec<_>>(), [2]);

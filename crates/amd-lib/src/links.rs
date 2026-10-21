@@ -392,7 +392,7 @@ fn holds(task: &Task, kind: LinkType, other: &Task) -> bool {
 
 /// The `## Children` wikilinks a parent lists.
 pub(crate) fn children_stems(task: &Task) -> Vec<String> {
-    let Ok(text) = std::fs::read_to_string(&task.path) else {
+    let Ok(text) = crate::eol::read(&task.path) else {
         return Vec::new();
     };
     let mut inside = false;
@@ -784,7 +784,7 @@ mod tests {
         let t = |id: &str| find(&board, id);
         apply(&t("002"), LinkType::ChildOf, &t("001"), false, false).unwrap();
         assert_eq!(t("002").parent().as_deref(), Some("001"));
-        let parent = std::fs::read_to_string(&t("001").path).unwrap();
+        let parent = crate::eol::read(&t("001").path).unwrap();
         assert!(parent.contains("- [[002-child]]"), "{parent}");
 
         apply(&t("001"), LinkType::RelatesTo, &t("003"), false, false).unwrap();
@@ -811,7 +811,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(find(&board, "002").parent().as_deref(), Some("001"));
-        let parent = std::fs::read_to_string(&find(&board, "001").path).unwrap();
+        let parent = crate::eol::read(&find(&board, "001").path).unwrap();
         assert!(parent.contains("- [[002-child]]"), "{parent}");
     }
 
@@ -820,12 +820,12 @@ mod tests {
         let (_dir, board) = board_with(&["One", "Two", "Child"]);
         let t = |id: &str| find(&board, id);
         apply(&t("003"), LinkType::ChildOf, &t("001"), false, false).unwrap();
-        let before = std::fs::read_to_string(&t("002").path).unwrap();
+        let before = crate::eol::read(&t("002").path).unwrap();
         let err = apply(&t("002"), LinkType::ParentOf, &t("003"), false, false)
             .unwrap_err()
             .to_string();
         assert!(err.contains("already has parent 001"), "{err}");
-        assert_eq!(std::fs::read_to_string(&t("002").path).unwrap(), before);
+        assert_eq!(crate::eol::read(&t("002").path).unwrap(), before);
         assert_eq!(t("003").parent().as_deref(), Some("001"));
     }
 
@@ -856,7 +856,7 @@ mod tests {
             assert!(all(&t("001")).is_empty(), "{kind}");
             assert!(all(&t("002")).is_empty(), "{kind}");
         }
-        let a = std::fs::read_to_string(&t("001").path).unwrap();
+        let a = crate::eol::read(&t("001").path).unwrap();
         assert!(!a.contains("[["), "{a}");
     }
 

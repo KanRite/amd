@@ -122,7 +122,7 @@ mod tests {
         .unwrap();
         let kept = |board: &Board| {
             let task = board.find("1").unwrap();
-            let text = std::fs::read_to_string(&task.path).unwrap();
+            let text = crate::eol::read(&task.path).unwrap();
             for line in FUTURE {
                 assert!(text.lines().any(|l| l == line), "lost {line:?}:\n{text}");
             }
@@ -152,7 +152,7 @@ mod tests {
         )
         .unwrap();
         let task = kept(&board);
-        let text = std::fs::read_to_string(&task.path).unwrap();
+        let text = crate::eol::read(&task.path).unwrap();
         crate::transition::save_text(&board, &task, task.hash().unwrap(), &text).unwrap();
         let task = kept(&board);
         crate::transition::move_to(&board, &task, Column::Todo, false).unwrap();

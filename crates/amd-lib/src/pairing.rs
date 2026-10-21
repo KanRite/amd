@@ -223,15 +223,11 @@ mod tests {
     fn saving_a_backlog_ticket_keeps_it_a_draft_and_past_it_refuses() {
         let (_dir, board) = board_in("acme-tickets");
         let task = by_hand(&board, Column::Backlog, "acme-api", "");
-        let text = fs::read_to_string(&task.path).unwrap();
+        let text = crate::eol::read(&task.path).unwrap();
         let outcome =
             crate::transition::save_text(&board, &task, task.hash().unwrap(), &text).unwrap();
         let task = Task::from_path(&task.path, Column::Backlog).unwrap();
-        assert!(
-            task.is_draft(),
-            "{}",
-            fs::read_to_string(&task.path).unwrap()
-        );
+        assert!(task.is_draft(), "{}", crate::eol::read(&task.path).unwrap());
         assert!(outcome.events.iter().any(|e| matches!(
             e,
             crate::transition::Event::Warn(w) if w.contains("no branch type")
@@ -244,7 +240,7 @@ mod tests {
         );
 
         let doing = by_hand(&board, Column::Doing, "acme-api", "");
-        let text = fs::read_to_string(&doing.path).unwrap();
+        let text = crate::eol::read(&doing.path).unwrap();
         let err =
             crate::transition::save_text(&board, &doing, doing.hash().unwrap(), &text).unwrap_err();
         assert!(format!("{err:#}").contains("past the backlog"), "{err:#}");
@@ -254,11 +250,11 @@ mod tests {
     fn tickets_already_mismatched_are_listed_and_left_alone() {
         let (_dir, board) = board_in("acme-tickets");
         let task = by_hand(&board, Column::Doing, "acme-api", "");
-        let before = fs::read_to_string(&task.path).unwrap();
+        let before = crate::eol::read(&task.path).unwrap();
         let found = mismatched(&board).unwrap();
         assert_eq!(found.len(), 1);
         assert!(found[0].1.contains("acme-api"));
-        assert_eq!(fs::read_to_string(&task.path).unwrap(), before);
+        assert_eq!(crate::eol::read(&task.path).unwrap(), before);
     }
 
     #[test]

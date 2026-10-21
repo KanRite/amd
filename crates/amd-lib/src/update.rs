@@ -185,7 +185,7 @@ struct Snooze {
 impl State {
     /// A missing or unreadable file is a fresh state, never an error.
     fn load(path: &Path) -> State {
-        fs::read_to_string(path)
+        crate::eol::read(path)
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default()

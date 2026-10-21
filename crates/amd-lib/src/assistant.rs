@@ -698,8 +698,8 @@ fn ticket_tool(args: &Value) -> Result<Reply> {
     let project = Project::open(Purpose::Lookup)?;
     let (i, task) = project.find(&required(args, "ticket")?)?;
     let (repo, board) = (&project.boards[i].0, &project.boards[i].2);
-    let content = std::fs::read_to_string(&task.path)
-        .with_context(|| format!("reading {}", task.path.display()))?;
+    let content =
+        crate::eol::read(&task.path).with_context(|| format!("reading {}", task.path.display()))?;
     let version = task.hash()?.to_string();
     let mut text = format!("{repo}#{} is in {}.", task.id_display(), place(&task));
     if let Some(by) = task.locked_by() {
@@ -754,7 +754,7 @@ fn search_tickets(args: &Value) -> Result<Reply> {
     let mut text = String::new();
     'boards: for (name, _, board) in &project.boards {
         for task in board.tasks()? {
-            let body = std::fs::read_to_string(&task.path).unwrap_or_default();
+            let body = crate::eol::read(&task.path).unwrap_or_default();
             let in_title = task.title().to_lowercase().contains(&needle);
             let matched = body
                 .lines()
