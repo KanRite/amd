@@ -6,13 +6,13 @@ Fixes go into the latest 4.x release. Older releases aren't patched: the way
 to a fix is to update, which the installer does when run again:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/agilerite/amd/v4/install.sh | bash
 ```
 
 ## Reporting a vulnerability
 
 Please report it **privately**, not in a public issue: use
-[Report a vulnerability](https://github.com/agile-md/amd/security/advisories/new)
+[Report a vulnerability](https://github.com/agilerite/amd/security/advisories/new)
 on the repository's Security tab. Say what you found, how to reproduce it,
 and which version (`amd --version`) and system you saw it on.
 
