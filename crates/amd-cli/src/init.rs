@@ -103,6 +103,7 @@ fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf
     }
 
     if created_new {
+        write_gitattributes(&target)?;
         git::commit_all(&target, &format!("Initialise {project} tickets board"))?;
         git::push(&target)?;
         warn_if_protection_unavailable(&full_name, github::protect_main(&full_name)?);
@@ -133,6 +134,7 @@ fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<PathB
     scaffold_documents(&target, project)?;
 
     if created_new {
+        write_gitattributes(&target)?;
         git::commit_all(&target, &format!("Initialise {project} documents"))?;
         git::push(&target)?;
         warn_if_protection_unavailable(&full_name, github::protect_main(&full_name)?);
@@ -140,6 +142,26 @@ fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<PathB
 
     register(&target)?;
     Ok(target)
+}
+
+/// A new tickets or documents repository's `.gitattributes` (ticket 277):
+/// every text file LF in every checkout. Git for Windows checks text out
+/// CRLF by default; amd reads that anyway (`agile_md::eol`), but with this
+/// a Windows clone holds the same bytes as anyone else's, and an editor
+/// there keeps to LF. Only for a repository `init` creates: an existing one
+/// would need a commit of its own, and nothing changes a repository by
+/// itself (ADR 0008).
+const GITATTRIBUTES: &str = "# Text files are LF on every system, Windows included (written by amd init).\n\
+                             * text=auto eol=lf\n";
+
+/// Writes [`GITATTRIBUTES`] into `target`, leaving one that's there alone.
+fn write_gitattributes(target: &Path) -> Result<()> {
+    let path = target.join(".gitattributes");
+    if !path.exists() {
+        std::fs::write(&path, GITATTRIBUTES)
+            .with_context(|| format!("writing {}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// Registers `target` on this machine, so `amd`/`amdui` can find it.
@@ -529,6 +551,24 @@ mod tests {
         assert!(
             !target.join(".settings").exists(),
             "settings live in the tickets repository now (ticket 111)"
+        );
+    }
+
+    #[test]
+    fn a_new_repository_gets_lf_line_endings_and_an_existing_file_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        write_gitattributes(dir.path()).unwrap();
+        let written = std::fs::read_to_string(dir.path().join(".gitattributes")).unwrap();
+        assert!(
+            written.lines().any(|line| line == "* text=auto eol=lf"),
+            "{written}"
+        );
+
+        std::fs::write(dir.path().join(".gitattributes"), "*.md text\n").unwrap();
+        write_gitattributes(dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(".gitattributes")).unwrap(),
+            "*.md text\n"
         );
     }
 

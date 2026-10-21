@@ -9,6 +9,7 @@
 //! in a template fails loudly instead of rendering a blank line, and
 //! auto-escaping is off because the output is markdown, not HTML.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::error::Error as _;
 use std::fs;
@@ -139,8 +140,9 @@ impl Templates {
         env.add_filter("yaml", yaml_filter);
 
         let mut sources = BTreeMap::new();
-        for (name, source) in BUILTINS {
-            env.add_template(name, source)
+        for (name, _) in BUILTINS {
+            let source = builtin_source(name).expect("listed in BUILTINS");
+            env.add_template_owned(*name, source)
                 .with_context(|| format!("built-in template '{name}'"))?;
             sources.insert((*name).to_string(), Source::Builtin);
         }
@@ -166,7 +168,7 @@ impl Templates {
                 continue;
             };
             let source =
-                fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+                crate::eol::read(&path).with_context(|| format!("reading {}", path.display()))?;
             templates
                 .env
                 .add_template_owned(name.clone(), source)
@@ -203,11 +205,11 @@ impl Templates {
     pub fn source_text(&self, name: &str) -> Result<String> {
         match self.sources.get(name) {
             Some(Source::Board(path)) => {
-                fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
+                crate::eol::read(path).with_context(|| format!("reading {}", path.display()))
             }
             Some(Source::Builtin) => Ok(builtin_source(name)
                 .expect("built-in registered without source")
-                .to_string()),
+                .into_owned()),
             None => bail!(unknown_template(name)),
         }
     }
@@ -328,12 +330,16 @@ pub fn field_label(key: &str) -> String {
     }
 }
 
-/// The source of a built-in template, if `name` is one.
-pub fn builtin_source(name: &str) -> Option<&'static str> {
-    BUILTINS
-        .iter()
-        .find(|(builtin, _)| *builtin == name)
-        .map(|(_, source)| *source)
+/// The source of a built-in template, if `name` is one. With LF endings
+/// even when this source tree was checked out with CRLF (`eol`), so a
+/// Windows build renders the same tickets as any other.
+pub fn builtin_source(name: &str) -> Option<Cow<'static, str>> {
+    let (_, source) = BUILTINS.iter().find(|(builtin, _)| *builtin == name)?;
+    Some(if source.contains("\r\n") {
+        Cow::Owned(crate::eol::lf((*source).to_string()))
+    } else {
+        Cow::Borrowed(*source)
+    })
 }
 
 /// `<name>.md.jinja` (also `.jinja` / `.j2`) -> `name`; anything else is

@@ -216,7 +216,7 @@ pub fn list(source: &Source) -> Vec<Idea> {
                 continue;
             }
             let path = format!("{FOLDER}/{name}");
-            let Ok(text) = fs::read_to_string(entry.path()) else {
+            let Ok(text) = crate::eol::read(entry.path()) else {
                 continue;
             };
             ideas.push(parse(&source.name, &path, &text));
@@ -314,7 +314,7 @@ pub fn vote(root: &Path, path: &str, delta: i32, who: &Person) -> Result<(i32, R
     documents::ensure_clean(root, &[path])?;
     let mut now = 0;
     let done = commit_reapplied(root, || {
-        let text = fs::read_to_string(&full).with_context(|| format!("reading {path}"))?;
+        let text = crate::eol::read(&full).with_context(|| format!("reading {path}"))?;
         let idea = parse("", path, &text);
         let before = idea.vote_of(&who.email);
         now = (before + delta).clamp(-MAX_VOTE, MAX_VOTE);
@@ -364,7 +364,7 @@ pub fn note(root: &Path, path: &str, text: &str, who: &Person) -> Result<Restore
     documents::ensure_clean(root, &[path])?;
     let (today, _) = crate::templates::today();
     commit_reapplied(root, || {
-        let current = fs::read_to_string(&full).with_context(|| format!("reading {path}"))?;
+        let current = crate::eol::read(&full).with_context(|| format!("reading {path}"))?;
         let title = parse("", path, &current).title;
         fs::write(&full, with_note(&current, &who.name, &today, note))
             .with_context(|| format!("writing {path}"))?;
@@ -437,7 +437,7 @@ pub fn to_ticket(
 fn record(root: &Path, path: &str, key: &str, reference: &str, title: &str) -> Result<Restored> {
     let full = documents::resolve(root, path)?;
     commit_reapplied(root, || {
-        let current = fs::read_to_string(&full).with_context(|| format!("reading {path}"))?;
+        let current = crate::eol::read(&full).with_context(|| format!("reading {path}"))?;
         let idea = parse("", path, &current);
         let mut list = match key {
             "epics" => idea.epics,
@@ -743,6 +743,25 @@ epics: [\"acme-tickets#Dark mode\"]\nsprints: [\"acme-tickets#s1\"]\n---\n\
     }
 
     #[test]
+    fn an_idea_saved_with_crlf_keeps_its_votes_and_notes() {
+        // Ticket 277: read as it is, `---\r\n` isn't frontmatter, and every
+        // vote was lost.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("ideas")).unwrap();
+        std::fs::write(
+            dir.path().join("ideas/dark-mode.md"),
+            "---\r\ntitle: \"Dark mode\"\r\nvotes: [\"Sam Lee <sam@acme.io> +3\"]\r\n---\r\n\
+             # Dark mode\r\n\r\n## Notes\r\n\r\n- **Sam Lee**, 2026-10-12: Agreed.\r\n",
+        )
+        .unwrap();
+        let idea = read(dir.path(), "acme-documents", "ideas/dark-mode.md").unwrap();
+        assert_eq!(idea.title, "Dark mode");
+        assert_eq!(idea.score(), 3);
+        assert_eq!(idea.notes.len(), 1);
+        assert_eq!(idea.notes[0].text, "Agreed.");
+    }
+
+    #[test]
     fn the_write_up_leaves_out_title_and_notes() {
         let text = "---\ntitle: \"X\"\n---\n# X\n\nBody here.\n\n## Detail\n\nMore.\n\n## Notes\n\n- **A**, d: n\n";
         assert_eq!(write_up(text), "Body here.\n\n## Detail\n\nMore.");
@@ -910,7 +929,7 @@ epics: [\"acme-tickets#Dark mode\"]\nsprints: [\"acme-tickets#s1\"]\n---\n\
         vote(dir, "ideas/replay.md", -1, &me).unwrap();
         vote(dir, "ideas/replay.md", -1, &me).unwrap();
         assert_eq!(vote(dir, "ideas/replay.md", -1, &me).unwrap().0, 0);
-        let text = std::fs::read_to_string(dir.join("ideas/replay.md")).unwrap();
+        let text = crate::eol::read(dir.join("ideas/replay.md")).unwrap();
         assert_eq!(text, "# Replay\n", "no vote left, no frontmatter left");
     }
 
@@ -928,7 +947,7 @@ epics: [\"acme-tickets#Dark mode\"]\nsprints: [\"acme-tickets#s1\"]\n---\n\
         let idea = parse(
             "",
             "ideas/replay.md",
-            &std::fs::read_to_string(b.join("ideas/replay.md")).unwrap(),
+            &crate::eol::read(b.join("ideas/replay.md")).unwrap(),
         );
         assert_eq!(idea.vote_of("p0@x"), 2);
         assert_eq!(idea.vote_of("p1@x"), -1);
@@ -969,7 +988,7 @@ epics: [\"acme-tickets#Dark mode\"]\nsprints: [\"acme-tickets#s1\"]\n---\n\
         let idea = parse(
             "",
             "ideas/replay.md",
-            &std::fs::read_to_string(b.join("ideas/replay.md")).unwrap(),
+            &crate::eol::read(b.join("ideas/replay.md")).unwrap(),
         );
         assert_eq!(idea.vote_of("p0@x"), 1, "a's vote kept");
         assert_eq!(idea.vote_of("p1@x"), -1, "b's vote made again on top");

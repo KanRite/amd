@@ -360,7 +360,7 @@ mod tests {
                 Some("---\nid: \"001\"\n---\n\nedited\n".to_string()),
             )
             .unwrap();
-        let body = std::fs::read_to_string(&created.task.path).unwrap();
+        let body = crate::eol::read(&created.task.path).unwrap();
         assert!(body.contains("edited"), "{body}");
     }
 
@@ -407,7 +407,7 @@ mod tests {
         assert_eq!(created.task.parent().as_deref(), Some("001"));
         let parent = board.find("001").unwrap();
         assert!(parent.related().contains(&"002".to_string()));
-        let parent_body = std::fs::read_to_string(&parent.path).unwrap();
+        let parent_body = crate::eol::read(&parent.path).unwrap();
         assert!(parent_body.contains("- [[002-child]]"), "{parent_body}");
     }
 

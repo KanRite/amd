@@ -112,7 +112,7 @@ pub fn import(dest: &Board, source_root: &Path, dry_run: bool) -> Result<ImportS
             let Some(old_number) = task.id else {
                 continue;
             };
-            let text = match fs::read_to_string(&task.path) {
+            let text = match crate::eol::read(&task.path) {
                 Ok(text) => text,
                 Err(err) => {
                     skipped.push((task.path.clone(), err.to_string()));
@@ -481,8 +481,7 @@ mod tests {
         let dest = board_at(dst_dir.path());
         import(&dest, &source.root, false).unwrap();
 
-        let child_text =
-            fs::read_to_string(dest.dir(Column::Backlog).join("002-child.md")).unwrap();
+        let child_text = crate::eol::read(dest.dir(Column::Backlog).join("002-child.md")).unwrap();
         assert!(child_text.contains("parent: \"001\""), "{child_text}");
         assert!(child_text.contains("related: [001]"), "{child_text}");
     }
@@ -505,7 +504,7 @@ mod tests {
         let dest = board_at(dst_dir.path());
         import(&dest, &source.root, false).unwrap();
 
-        let text = fs::read_to_string(dest.dir(Column::Backlog).join("001-orphan.md")).unwrap();
+        let text = crate::eol::read(dest.dir(Column::Backlog).join("001-orphan.md")).unwrap();
         assert!(text.contains("parent: \"099\""), "{text}");
         assert!(text.contains("related: [099]"), "{text}");
     }
@@ -550,7 +549,7 @@ mod tests {
         assert!(summary.imported[0].duplicate);
         assert!(summary.imported[1].duplicate);
         assert!(!summary.imported[2].duplicate);
-        let text = fs::read_to_string(dest.dir(Column::Backlog).join("001-one.md")).unwrap();
+        let text = crate::eol::read(dest.dir(Column::Backlog).join("001-one.md")).unwrap();
         assert!(text.contains("tags: [DUPLICATE]"), "{text}");
     }
 
@@ -594,7 +593,7 @@ mod tests {
         assert_eq!(dest.next_id().unwrap(), 2, "no number spent on it");
         // The pre-existing destination ticket must not have been touched.
         let existing_text =
-            fs::read_to_string(dest.dir(Column::Backlog).join("001-existing.md")).unwrap();
+            crate::eol::read(dest.dir(Column::Backlog).join("001-existing.md")).unwrap();
         assert!(!existing_text.contains("DUPLICATE"), "{existing_text}");
     }
 
@@ -620,13 +619,13 @@ mod tests {
         let src_dir = tempfile::tempdir().unwrap();
         let source = board_at(src_dir.path());
         let source_path = write_ticket(&source, Column::Backlog, "001", "one", "One", "", "[]");
-        let before = fs::read_to_string(&source_path).unwrap();
+        let before = crate::eol::read(&source_path).unwrap();
 
         let dst_dir = tempfile::tempdir().unwrap();
         let dest = board_at(dst_dir.path());
         import(&dest, &source.root, false).unwrap();
 
-        let after = fs::read_to_string(&source_path).unwrap();
+        let after = crate::eol::read(&source_path).unwrap();
         assert_eq!(
             before, after,
             "the source ticket must be byte-for-byte unchanged"

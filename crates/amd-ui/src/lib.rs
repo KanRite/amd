@@ -297,7 +297,7 @@ async fn open_ticket(place: Place, file: String) -> Result<TicketDocument> {
         let project = Project::open()?;
         let board = project.board(&place.repo)?;
         let task = task_at(board, &place, &file)?;
-        let content = std::fs::read_to_string(&task.path).map_err(|e| e.to_string())?;
+        let content = agile_md::eol::read(&task.path).map_err(|e| e.to_string())?;
         Ok(TicketDocument {
             repo: place.repo.clone(),
             file,
@@ -588,7 +588,7 @@ fn created_from(board: &Board, repo: String, outcome: &transition::Outcome) -> R
             version: task.hash().map_err(err)?.to_string(),
             authorship: agile_md::authorship::summary(board, &task).unwrap_or_default(),
             priority_note: agile_md::auto_priority::note(board, &task).unwrap_or_default(),
-            content: std::fs::read_to_string(&task.path).map_err(|e| e.to_string())?,
+            content: agile_md::eol::read(&task.path).map_err(|e| e.to_string())?,
         },
         sync,
     })
@@ -4030,7 +4030,7 @@ mod tests {
         settings.save(board).unwrap();
         let file = new_ticket(&project, "Tagged");
         let path = board.root.join("backlog").join(&file);
-        let text = std::fs::read_to_string(&path).unwrap();
+        let text = agile_md::eol::read(&path).unwrap();
         std::fs::write(&path, text.replace("tags: []", "tags: [future,misc]")).unwrap();
 
         let summary = project.summary().unwrap();
@@ -4079,7 +4079,7 @@ mod tests {
 
         let file = new_ticket(&project, "About the old site");
         let path = project.repos[0].1.root.join("backlog").join(&file);
-        let text = std::fs::read_to_string(&path).unwrap();
+        let text = agile_md::eol::read(&path).unwrap();
         assert!(text.contains("repository: \"\""), "{text}");
         std::fs::write(
             &path,
@@ -4214,7 +4214,7 @@ mod tests {
         let (_dir, project) = project();
         let file = new_ticket(&project, "Lapsed");
         let path = project.board("").unwrap().root.join("backlog").join(&file);
-        let text = std::fs::read_to_string(&path).unwrap();
+        let text = agile_md::eol::read(&path).unwrap();
         let text = text
             .replace("locked-by: \"\"", "locked-by: \"t@t.co\"")
             .replace(
@@ -4312,7 +4312,7 @@ mod tests {
         let place = column(UiColumn::Backlog);
         let task = task_at(board, &place, &file).unwrap();
         let opened = task.hash().unwrap();
-        let text = std::fs::read_to_string(&task.path).unwrap();
+        let text = agile_md::eol::read(&task.path).unwrap();
 
         // Locked after the editor opened: the save keeps the lock, but is
         // refused as a conflict because the file changed underneath it.
@@ -4324,7 +4324,7 @@ mod tests {
         // Reopened, the save lands and the lock stays.
         let task = task_at(board, &place, &file).unwrap();
         transition::save_text(board, &task, task.hash().unwrap(), &edited).unwrap();
-        let saved = std::fs::read_to_string(&task.path).unwrap();
+        let saved = agile_md::eol::read(&task.path).unwrap();
         assert!(
             saved.contains("More") && saved.contains("locked-by: \"t@t.co\""),
             "{saved}"

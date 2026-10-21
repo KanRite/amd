@@ -98,7 +98,7 @@ impl Group {
             .ok_or_else(|| anyhow::anyhow!("{} has no name", dir.display()))?
             .to_string();
 
-        let text = fs::read_to_string(dir.join(GROUP_FILE)).unwrap_or_default();
+        let text = crate::eol::read(dir.join(GROUP_FILE)).unwrap_or_default();
         Ok(Group {
             dir: dir.to_path_buf(),
             name,

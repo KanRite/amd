@@ -686,9 +686,9 @@ mod tests {
             assert!(tree.contains(file), "{file} on origin:\n{tree}");
         }
         assert!(!tree.contains("002-from-b.md"), "{tree}");
-        let moved = std::fs::read_to_string(b.join("tasks/backlog/004-from-b.md")).unwrap();
+        let moved = crate::eol::read(b.join("tasks/backlog/004-from-b.md")).unwrap();
         assert!(moved.contains("id: \"004\""), "{moved}");
-        let counter = std::fs::read_to_string(b.join(".next-id")).unwrap();
+        let counter = crate::eol::read(b.join(".next-id")).unwrap();
         assert_eq!(counter.trim(), "5");
     }
 

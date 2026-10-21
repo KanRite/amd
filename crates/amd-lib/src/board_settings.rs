@@ -279,7 +279,7 @@ fn documents_root(board: &Board) -> Option<std::path::PathBuf> {
 /// reusing `Config`'s `key = value` parser for a file that only ever holds
 /// one key, and it reviews as an even smaller diff.
 fn read_documents_key(documents_root: &std::path::Path, key: &str) -> Option<String> {
-    let text = std::fs::read_to_string(documents_root.join(".settings").join(key)).ok()?;
+    let text = crate::eol::read(documents_root.join(".settings").join(key)).ok()?;
     let value = text.trim();
     (!value.is_empty()).then(|| value.to_string())
 }
@@ -1026,6 +1026,24 @@ mod tests {
     }
 
     #[test]
+    fn a_crlf_settings_file_reads_and_is_written_back_lf() {
+        // Ticket 277: a `.settings` from a Windows checkout or editor.
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let path = board.repo_root().join(".settings");
+        std::fs::write(&path, "project = demo\r\nwip-limit = 3\r\ntags = UI\r\n").unwrap();
+        let mut settings = load(&board);
+        assert_eq!(settings.project(), Some("demo"));
+        assert_eq!(settings.wip_limit(Column::Doing), Some(3));
+        assert_eq!(settings.tags(), ["UI"]);
+        settings.add_tag("api").unwrap();
+        settings.save(&board).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains('\r'), "{written:?}");
+        assert!(written.contains("project = demo\n"), "{written:?}");
+    }
+
+    #[test]
     fn tags_are_listed_in_uppercase_without_duplicates() {
         let dir = tempfile::tempdir().unwrap();
         let board = board(dir.path());
@@ -1061,7 +1079,7 @@ mod tests {
         assert!(!settings.only_listed_tags(), "the old name still counts");
         settings.set_only_listed_tags(true);
         settings.save(&board).unwrap();
-        let text = std::fs::read_to_string(board.repo_root().join(".settings")).unwrap();
+        let text = crate::eol::read(board.repo_root().join(".settings")).unwrap();
         assert_eq!(text, "tags = FUTURE\nprevent-arbitrary-tags = on\n");
         assert!(load(&board).only_listed_tags());
     }

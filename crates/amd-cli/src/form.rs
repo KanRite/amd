@@ -8,7 +8,6 @@
 use std::env;
 use std::ffi::OsStr;
 use std::fmt;
-use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -101,7 +100,7 @@ pub fn body(rendered: &str, editor: &OsStr) -> Result<String> {
         bail!("{spec} exited with {status}; no task created");
     }
 
-    let edited = fs::read_to_string(file.path()).context("reading the edited ticket")?;
+    let edited = agile_md::eol::read(file.path()).context("reading the edited ticket")?;
     if edited.trim().is_empty() {
         bail!("the ticket was left empty; no task created");
     }

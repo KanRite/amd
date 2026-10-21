@@ -259,7 +259,7 @@ mod tests {
         // Forgotten once, when it was archived and pushed (ticket 263).
         assert_eq!(forgotten, 1);
         assert!(!is_archived(&board));
-        let settings = std::fs::read_to_string(board.repo_root().join(".settings")).unwrap();
+        let settings = crate::eol::read(board.repo_root().join(".settings")).unwrap();
         assert!(!settings.contains("archived"), "{settings}");
     }
 

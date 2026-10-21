@@ -4582,7 +4582,8 @@ fn cmd_templates(board: &Board, command: TemplateCmd) -> Result<()> {
                     path.display()
                 );
             }
-            fs::write(&path, source).with_context(|| format!("writing {}", path.display()))?;
+            fs::write(&path, source.as_bytes())
+                .with_context(|| format!("writing {}", path.display()))?;
             println!("wrote {}", path.display());
             Ok(())
         }

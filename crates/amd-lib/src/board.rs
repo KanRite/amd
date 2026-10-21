@@ -39,7 +39,7 @@ const COUNTER: &str = ".next-id";
 
 /// A counter file's number, if it has one.
 fn read_counter(path: &Path) -> Option<u32> {
-    fs::read_to_string(path).ok()?.trim().parse().ok()
+    crate::eol::read(path).ok()?.trim().parse().ok()
 }
 
 /// What a column is for (ticket 223): the behaviour every rule keys on.
@@ -1788,7 +1788,7 @@ mod tests {
         let filed = board.find("001").unwrap();
         assert_eq!(filed.epic_meta().as_deref(), Some("checkout"));
         assert!(
-            fs::read_to_string(&filed.path).unwrap().ends_with("body\n"),
+            crate::eol::read(&filed.path).unwrap().ends_with("body\n"),
             "the body must survive the move"
         );
 
@@ -2187,10 +2187,7 @@ mod tests {
     fn a_new_board_keeps_its_counter_in_its_own_file() {
         let dir = tempfile::tempdir().unwrap();
         let board = board_at(dir.path());
-        assert_eq!(
-            fs::read_to_string(board.counter_path()).unwrap().trim(),
-            "1"
-        );
+        assert_eq!(crate::eol::read(board.counter_path()).unwrap().trim(), "1");
         assert_eq!(crate::board_settings::load(&board).next_id(), None);
         assert!(!board.legacy_counter_path().exists());
     }
@@ -2214,10 +2211,7 @@ mod tests {
 
         touch(&board, "012-twelve.md");
         board.record_id(12).unwrap();
-        assert_eq!(
-            fs::read_to_string(board.counter_path()).unwrap().trim(),
-            "13"
-        );
+        assert_eq!(crate::eol::read(board.counter_path()).unwrap().trim(), "13");
         assert_eq!(
             crate::board_settings::load(&board).next_id(),
             None,
@@ -2261,10 +2255,7 @@ mod tests {
         );
         touch(&board, "009-nine.md");
         board.record_id(9).unwrap();
-        assert_eq!(
-            fs::read_to_string(board.counter_path()).unwrap().trim(),
-            "10"
-        );
+        assert_eq!(crate::eol::read(board.counter_path()).unwrap().trim(), "10");
         assert!(
             !board.legacy_counter_path().exists(),
             "the legacy file should be gone once migrated, not kept around forever"

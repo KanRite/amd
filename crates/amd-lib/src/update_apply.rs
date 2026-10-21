@@ -90,7 +90,7 @@ pub fn install_dir(exe: &Path) -> Install {
         };
     };
     let shown = dir.display();
-    match fs::read_to_string(dir.join(MARKER)) {
+    match crate::eol::read(dir.join(MARKER)) {
         Err(_) => Install::Unmanaged {
             why: format!(
                 "amd in {shown} wasn't put there by agile-md's installer, so it isn't replaced: \

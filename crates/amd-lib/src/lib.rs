@@ -25,6 +25,7 @@ pub mod current_project;
 pub mod doc_pins;
 pub mod documents;
 pub mod documents_edit;
+pub mod eol;
 pub mod git;
 pub mod github;
 pub mod group;

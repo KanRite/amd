@@ -416,7 +416,7 @@ mod tests {
             ]
         );
         assert_eq!(board.workflow().label(review), "Code review");
-        let settings = fs::read_to_string(board_settings::path(&board)).unwrap();
+        let settings = crate::eol::read(board_settings::path(&board)).unwrap();
         assert!(
             settings.contains("Code review=code-review:doing"),
             "{settings}"
@@ -482,7 +482,7 @@ mod tests {
         assert_eq!(moved, [board.dir(Column::Doing).join("001-t.md")]);
         assert!(board.workflow().is_standard());
         assert!(!board.dir(review).exists());
-        let settings = fs::read_to_string(board_settings::path(&board)).unwrap();
+        let settings = crate::eol::read(board_settings::path(&board)).unwrap();
         assert!(!settings.contains("wip-limit-review"), "{settings}");
         assert!(!settings.contains("columns"), "{settings}");
     }
@@ -540,7 +540,7 @@ mod tests {
         assert!(!board.workflow().allows(triage, Column::Todo));
         allow_move(&board, triage, Column::Todo, true).unwrap();
         remove(&board, triage, None).unwrap();
-        let settings = fs::read_to_string(board_settings::path(&board)).unwrap();
+        let settings = crate::eol::read(board_settings::path(&board)).unwrap();
         assert!(!settings.contains("moves"), "{settings}");
         assert!(!settings.contains("new-tickets"), "{settings}");
     }
@@ -581,7 +581,7 @@ mod tests {
         let w = board.workflow();
         assert!(w.is_standard() && w.flow() == Flow::Next && w.landing() == Column::Backlog);
         assert!(!board.dir(review).exists());
-        let settings = fs::read_to_string(board_settings::path(&board)).unwrap();
+        let settings = crate::eol::read(board_settings::path(&board)).unwrap();
         for key in [
             "columns",
             "flow",

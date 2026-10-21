@@ -396,7 +396,7 @@ fn number(value: &str) -> Option<u32> {
 }
 
 fn read(path: &Path) -> Result<String> {
-    fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
+    crate::eol::read(path).with_context(|| format!("reading {}", path.display()))
 }
 
 /// How early `path` was first committed: the number of commits up to and
@@ -455,7 +455,7 @@ mod tests {
     }
 
     fn text(board: &Board, file: &str) -> String {
-        fs::read_to_string(board.dir(Column::Backlog).join(file)).unwrap()
+        crate::eol::read(board.dir(Column::Backlog).join(file)).unwrap()
     }
 
     #[test]

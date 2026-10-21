@@ -28,7 +28,7 @@ impl Config {
     /// A missing or unreadable file is an empty config, never an error: a
     /// broken config should not stop you seeing the board.
     pub fn load_from(path: &Path) -> Config {
-        let Ok(text) = fs::read_to_string(path) else {
+        let Ok(text) = crate::eol::read(path) else {
             return Config::default();
         };
         let mut entries = Vec::new();

@@ -68,7 +68,7 @@ fn file_of(email: &str) -> String {
 }
 
 fn read_file(path: &Path) -> Vec<Pin> {
-    fs::read_to_string(path)
+    crate::eol::read(path)
         .unwrap_or_default()
         .lines()
         .filter_map(Pin::parse)

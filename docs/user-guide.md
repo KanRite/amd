@@ -36,6 +36,12 @@ amd join acme                     # …or join a project someone else made
 amd init acme --local-only        # …or keep the board in the repository you're in (tasks/)
 ```
 
+A team can mix Windows, macOS and Linux. Windows tools often save files
+with Windows line endings (CRLF); amd reads those like any other and
+always writes plain LF, so a ticket edited on one system reads the same on
+every other. The repositories `amd init` creates also get a
+`.gitattributes` asking git to keep text files LF in every clone.
+
 Then, from any of its repositories (or the folder holding them):
 
 ```bash

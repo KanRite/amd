@@ -1,0 +1,10 @@
+# Every text file is LF in every checkout, Windows included (ticket 277).
+# Git for Windows would otherwise check them out CRLF, and the built-in
+# templates are compiled in from those files and the tests compare text.
+* text=auto eol=lf
+
+# Binary, whatever git would guess.
+*.png binary
+*.ico binary
+*.icns binary
+*.zip binary

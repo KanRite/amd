@@ -123,7 +123,7 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<Document>) -> Result<()> {
                 continue;
             };
             let relative = slashed(relative);
-            let text = fs::read_to_string(&path).unwrap_or_default();
+            let text = crate::eol::read(&path).unwrap_or_default();
             out.push(Document {
                 title: title_in(&text).unwrap_or_else(|| stem(&name)),
                 archived: crate::documents_edit::is_archived(&text),
@@ -236,7 +236,9 @@ pub fn read(root: &Path, relative: &str) -> Result<String> {
         bail!("{relative} isn't a markdown document");
     }
     let bytes = read_bytes(root, relative)?;
-    String::from_utf8(bytes).with_context(|| format!("{relative} isn't UTF-8 text"))
+    String::from_utf8(bytes)
+        .map(crate::eol::lf)
+        .with_context(|| format!("{relative} isn't UTF-8 text"))
 }
 
 /// Where a link in the document `from` points, inside the repository:
@@ -352,8 +354,9 @@ pub fn read_version(root: &Path, path: &str, commit: &str) -> Result<String> {
     if size.trim().parse::<u64>().unwrap_or(u64::MAX) > MAX_FILE {
         bail!("{path} at {commit} is too big to show");
     }
-    // Exactly as stored: `git::checked` trims, which would lose trailing
-    // newlines and make an unchanged document look changed.
+    // As stored, CRLF read as LF like any other read (`eol`): `git::checked`
+    // trims, which would lose trailing newlines and make an unchanged
+    // document look changed.
     let out = std::process::Command::new("git")
         .arg("-C")
         .arg(root)
@@ -367,7 +370,9 @@ pub fn read_version(root: &Path, path: &str, commit: &str) -> Result<String> {
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }
-    String::from_utf8(out.stdout).with_context(|| format!("{path} at {commit} isn't UTF-8 text"))
+    String::from_utf8(out.stdout)
+        .map(crate::eol::lf)
+        .with_context(|| format!("{path} at {commit} isn't UTF-8 text"))
 }
 
 /// Puts the document `relative` back as it was at `commit`: its text then,
@@ -390,7 +395,7 @@ pub fn restore(root: &Path, relative: &str, commit: &str) -> Result<Restored> {
         .find(|v| v.commit.starts_with(commit) || commit.starts_with(&v.short))
         .with_context(|| format!("{commit} isn't a version of {relative}"))?;
     let old = read_version(root, &version.path, &version.commit)?;
-    let now = fs::read_to_string(&full).unwrap_or_default();
+    let now = crate::eol::read(&full).unwrap_or_default();
     if old == now {
         bail!("{relative} is already as it was at {}", version.short);
     }
@@ -569,6 +574,23 @@ mod tests {
     }
 
     #[test]
+    fn a_crlf_document_reads_as_lf_and_keeps_its_title() {
+        // Ticket 277: frontmatter and headings found as in any other file.
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("note.md"),
+            "---\r\nstatus: archived\r\n---\r\n\r\n# Windows note\r\n\r\nText.\r\n",
+        )
+        .unwrap();
+        let text = read(dir.path(), "note.md").unwrap();
+        assert_eq!(
+            text,
+            "---\nstatus: archived\n---\n\n# Windows note\n\nText.\n"
+        );
+        assert_eq!(title_in(&text).as_deref(), Some("Windows note"));
+    }
+
+    #[test]
     fn links_resolve_inside_the_repository() {
         assert_eq!(
             join_link("rfc/0002.md", "../adr/0001.md#why").as_deref(),
@@ -699,7 +721,7 @@ mod tests {
         assert!(done.pushed, "no remote: nothing left to push");
         assert_eq!(done.warning, None);
         assert_eq!(
-            fs::read_to_string(root.join("adr/adr/0001-x.md")).unwrap(),
+            crate::eol::read(root.join("adr/adr/0001-x.md")).unwrap(),
             "# X\n\nfirst\n"
         );
         let after = history(&root, "adr/adr/0001-x.md", 20).unwrap();
@@ -754,7 +776,7 @@ mod tests {
         assert!(done.pushed, "{:?}", done.warning);
         git_in(&other, &["pull", "-q"]);
         assert_eq!(
-            fs::read_to_string(other.join("adr/adr/0001-x.md")).unwrap(),
+            crate::eol::read(other.join("adr/adr/0001-x.md")).unwrap(),
             "# X\n\nsecond\n"
         );
         assert!(root.join("README.md").exists(), "caught up first");
