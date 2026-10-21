@@ -3649,6 +3649,28 @@ impl terminal::Sink for TauriSink {
     }
 }
 
+/// What a bottom-panel tab runs: the user's login shell, or with `ai` that
+/// command through it, interactive so PATH is a terminal's. Windows has no
+/// `$SHELL` or login shell (ticket 280): Windows PowerShell, which every
+/// Windows 10 and 11 has, without its banner.
+fn tab_program(ai: Option<String>, shell: Option<&str>, windows: bool) -> (String, Vec<String>) {
+    if windows {
+        let mut args = vec!["-NoLogo".to_string()];
+        if let Some(command) = ai {
+            args.extend(["-Command".to_string(), command]);
+        }
+        return ("powershell.exe".to_string(), args);
+    }
+    let shell = shell
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or("/bin/bash")
+        .to_string();
+    match ai {
+        None => (shell, vec!["-l".to_string()]),
+        Some(command) => (shell, vec!["-lic".to_string(), command]),
+    }
+}
+
 /// Starts a terminal for the bottom panel (ticket 185): the user's shell,
 /// or the AI command from Preferences, in the project folder (the folder
 /// holding its repositories), on a `cols` × `rows` screen. Returns its id.
@@ -3667,14 +3689,12 @@ async fn terminal_open(
         let cwd = Project::open()
             .ok()
             .map(|p| agile_md::registry::project_dir_of(p.repos[0].1.repo_root()));
-        let shell = std::env::var("SHELL")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| "/bin/bash".to_string());
-        let (program, args) = match kind {
-            TermKind::Shell => (shell, vec!["-l".to_string()]),
-            TermKind::Ai => (shell, vec!["-lic".to_string(), ai_command_now()]),
+        let ai = match kind {
+            TermKind::Shell => None,
+            TermKind::Ai => Some(ai_command_now()),
         };
+        let shell = std::env::var("SHELL").ok();
+        let (program, args) = tab_program(ai, shell.as_deref(), cfg!(windows));
         let id = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         let session = terminal::Session::open(
             id,
@@ -3937,6 +3957,30 @@ fn clone_into(project: &Project, name: &str) -> Result<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_tabs_run_the_login_shell_or_powershell_on_windows() {
+        let s = |v: &[&str]| v.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            super::tab_program(None, Some("/bin/zsh"), false),
+            ("/bin/zsh".to_string(), s(&["-l"]))
+        );
+        assert_eq!(
+            super::tab_program(Some("claude".into()), None, false),
+            ("/bin/bash".to_string(), s(&["-lic", "claude"]))
+        );
+        assert_eq!(
+            super::tab_program(None, Some("/bin/zsh"), true),
+            ("powershell.exe".to_string(), s(&["-NoLogo"]))
+        );
+        assert_eq!(
+            super::tab_program(Some("claude".into()), None, true),
+            (
+                "powershell.exe".to_string(),
+                s(&["-NoLogo", "-Command", "claude"])
+            )
+        );
+    }
+
     #[test]
     fn the_pages_link_kinds_are_amd_libs() {
         let lib: Vec<(&str, &str)> = agile_md::links::LinkType::ALL
