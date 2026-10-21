@@ -133,6 +133,10 @@ impl Session {
             shell: Some(tty::Shell::new(program, args)),
             working_directory: cwd,
             drain_on_exit: true,
+            // Windows only (ticket 280): quote the arguments by the C
+            // runtime's rules, as any program there expects to read them.
+            #[cfg(windows)]
+            escape_args: true,
             env: [
                 ("TERM".to_string(), "xterm-256color".to_string()),
                 ("COLORTERM".to_string(), "truecolor".to_string()),
