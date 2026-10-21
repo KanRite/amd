@@ -14,6 +14,7 @@ version = "4.9.0"
 dependencies = [
  "anyhow",
  "deunicode",
+ "dunce",
  "minijinja",
  "serde",
  "serde_json",
@@ -122,6 +123,7 @@ dependencies = [
  "anyhow",
  "clap",
  "clap_complete",
+ "dunce",
  "inquire",
  "libc",
  "richrs",
@@ -129,6 +131,7 @@ dependencies = [
  "tempfile",
  "time",
  "ureq",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -286,7 +286,7 @@ fn link(task: &Task) -> String {
     if !hyperlinks() {
         return id;
     }
-    match task.path.canonicalize() {
+    match dunce::canonicalize(&task.path) {
         Ok(path) => format!("\x1b]8;;file://{}\x1b\\{id}\x1b]8;;\x1b\\", path.display()),
         Err(_) => id,
     }

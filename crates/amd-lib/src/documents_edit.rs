@@ -208,7 +208,7 @@ pub fn delete_folder(root: &Path, folder: &str) -> Result<Restored> {
     let tracked: Vec<PathBuf> = keeps
         .iter()
         .filter_map(|k| {
-            k.strip_prefix(root.canonicalize().ok()?)
+            k.strip_prefix(dunce::canonicalize(root).ok()?)
                 .ok()
                 .map(Path::to_path_buf)
         })

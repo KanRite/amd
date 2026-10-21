@@ -330,6 +330,7 @@ fn convert<T>(result: Result<T, InquireError>) -> Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::ffi::OsString;
 
     fn autocomplete() -> Completer {

@@ -30,6 +30,8 @@ anyhow = "1"
 clap = { version = "4", features = ["derive", "string"] }
 clap_complete = "4"
 deunicode = "1.6.2"
+# canonicalize without Windows' `\\?\` prefix (ticket 279); plain canonicalize elsewhere
+dunce = "1"
 inquire = "0.9"
 libc = "0.2.189"
 # serde is a feature since MiniJinja 3; templates render serde contexts.

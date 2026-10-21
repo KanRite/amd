@@ -2958,9 +2958,8 @@ fn cmd_register(board: &Board, path: Option<&str>) -> Result<()> {
         Some(path) => PathBuf::from(path),
         None => git::repo_root().ok_or_else(|| anyhow::anyhow!("not inside a git repository"))?,
     };
-    let canonical = path
-        .canonicalize()
-        .with_context(|| format!("{} doesn't exist", path.display()))?;
+    let canonical =
+        dunce::canonicalize(&path).with_context(|| format!("{} doesn't exist", path.display()))?;
     let name = canonical
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -3541,7 +3540,7 @@ fn register_board(
                 None => git::repo_root()
                     .ok_or_else(|| anyhow::anyhow!("not inside a git repository"))?,
             };
-            repo.canonicalize()
+            dunce::canonicalize(&repo)
                 .unwrap_or(repo)
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -4126,7 +4125,7 @@ fn cmd_new(board: &Board, args: NewArgs) -> Result<()> {
 /// and appended to `import.log` here. One auto-commit.
 fn cmd_import(board: &Board, path: &Path, dry_run: bool) -> Result<()> {
     let here = env::current_dir().context("reading the current directory")?;
-    let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
+    let same = |a: &Path, b: &Path| match (dunce::canonicalize(a), dunce::canonicalize(b)) {
         (Ok(a), Ok(b)) => a == b,
         _ => false,
     };
@@ -4343,8 +4342,8 @@ fn cmd_import_documents(path: Option<&Path>, dry_run: bool) -> Result<()> {
     {
         agile_md::archive::ensure_writable(&board)?;
     }
-    let here = here.canonicalize().unwrap_or(here);
-    let root = repo.canonicalize().unwrap_or(repo);
+    let here = dunce::canonicalize(&here).unwrap_or(here);
+    let root = dunce::canonicalize(&repo).unwrap_or(repo);
     let into = here
         .strip_prefix(&root)
         .map(|rel| rel.to_string_lossy().replace('\\', "/"))

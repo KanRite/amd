@@ -129,8 +129,8 @@ fn projects_in(registry: &Registry, hidden: &[PathBuf]) -> Vec<Project> {
 /// A board left behind by a test run or a scratch experiment: anything
 /// under the system's temporary directory (`TMPDIR`, else `/tmp`).
 fn is_scratch(root: &Path, temp: &Path) -> bool {
-    let temp = temp.canonicalize().unwrap_or_else(|_| temp.to_path_buf());
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let temp = dunce::canonicalize(temp).unwrap_or_else(|_| temp.to_path_buf());
+    let root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     root.starts_with(&temp)
 }
 

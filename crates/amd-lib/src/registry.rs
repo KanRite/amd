@@ -109,8 +109,7 @@ impl Registry {
 
     /// Register a repository. Returns false if it was already on the list.
     pub fn add(&mut self, root: &Path) -> Result<bool> {
-        let root = root
-            .canonicalize()
+        let root = dunce::canonicalize(root)
             .with_context(|| format!("{} doesn't exist", root.display()))?;
         if !root.join(".git").exists() {
             bail!("{} is not a git repository", root.display());
@@ -125,7 +124,7 @@ impl Registry {
 
     /// Unregister a repository by path or by name.
     pub fn remove(&mut self, reference: &str) -> bool {
-        let canonical = Path::new(reference).canonicalize().ok();
+        let canonical = dunce::canonicalize(Path::new(reference)).ok();
         let before = self.entries.len();
         self.entries.retain(|entry| {
             let by_path = canonical.as_ref().is_some_and(|path| entry.root == *path);
@@ -154,9 +153,8 @@ impl Registry {
     /// project directories — so it's `None` rather than a guess.
     pub fn find_near(&self, name: &str, project_dir: &Path) -> Option<&Entry> {
         let named: Vec<&Entry> = self.entries.iter().filter(|e| e.name == name).collect();
-        let project_dir = project_dir
-            .canonicalize()
-            .unwrap_or_else(|_| project_dir.to_path_buf());
+        let project_dir =
+            dunce::canonicalize(project_dir).unwrap_or_else(|_| project_dir.to_path_buf());
         let here = named
             .iter()
             .find(|entry| entry.root.parent() == Some(project_dir.as_path()));
@@ -172,7 +170,7 @@ impl Registry {
     /// `origin` — the same first commit as another clone without one (forks
     /// share first commits, so that's no use when there's a remote).
     pub fn same_remote(&self, root: &Path) -> Vec<PathBuf> {
-        let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let others = self.entries.iter().filter(|entry| entry.root != root);
         match git::remote_identity(&root) {
             Some(remote) => others
@@ -208,7 +206,7 @@ pub fn clone_of(from: &Path, name: &str) -> Option<PathBuf> {
 /// holding it, found by walking up to the `.git` — no git call. `from`
 /// itself when it isn't in a repository.
 pub fn project_dir_of(from: &Path) -> PathBuf {
-    let from = from.canonicalize().unwrap_or_else(|_| from.to_path_buf());
+    let from = dunce::canonicalize(from).unwrap_or_else(|_| from.to_path_buf());
     from.ancestors()
         .find(|dir| dir.join(".git").exists())
         .and_then(Path::parent)
@@ -310,7 +308,12 @@ mod tests {
         let mut registry = Registry::default();
         registry.add(&alpha).unwrap();
 
-        assert_eq!(registry.find("alpha").unwrap().root, alpha);
+        // Stored canonical: on Windows the temp folder's short name
+        // (RUNNER~1) comes back long, so compare with the canonical form.
+        assert_eq!(
+            registry.find("alpha").unwrap().root,
+            dunce::canonicalize(&alpha).unwrap()
+        );
         assert!(registry.find("nope").is_none());
     }
 
@@ -356,7 +359,7 @@ mod tests {
     #[test]
     fn a_name_resolves_to_the_clone_in_the_project_directory() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
         let (a, b, c) = (root.join("a"), root.join("b"), root.join("c"));
         let code_a = repo(&a, "p-code");
         let code_b = repo(&b, "p-code");
@@ -389,7 +392,7 @@ mod tests {
     #[test]
     fn clones_of_one_remote_are_found_however_its_url_is_written() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
         let one = repo(&root, "one");
         let two = repo(&root.join("elsewhere"), "one");
         let other = repo(&root, "other");
@@ -431,7 +434,7 @@ mod tests {
     #[test]
     fn without_an_origin_clones_are_matched_by_their_first_commit() {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
         let first = repo(&root, "first");
         git(&first, &["commit", "-q", "--allow-empty", "-m", "seed"]);
         let copy = root.join("copy");
