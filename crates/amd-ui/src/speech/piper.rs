@@ -487,7 +487,9 @@ fn restart_speech_dispatcher() {
     std::thread::sleep(std::time::Duration::from_millis(300));
 }
 
-#[cfg(test)]
+// Piper is offered on Linux only (`available`), and its paths are a Linux
+// virtual environment's (`venv/bin/python`); not run elsewhere (ticket 280).
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
 
