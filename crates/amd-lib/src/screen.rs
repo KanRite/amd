@@ -135,6 +135,7 @@ fn read_file(path: &Path) -> Option<Note> {
 
 /// Whether a process is running: `kill -0` asks without sending anything,
 /// on Linux and macOS alike.
+#[cfg(unix)]
 fn running(pid: u32) -> bool {
     if pid == std::process::id() {
         return true;
@@ -147,9 +148,43 @@ fn running(pid: u32) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// The same on Windows (ticket 279), which has no `kill`: `tasklist`
+/// filtered to the one id lists it, quoted, only while it runs (otherwise
+/// it says there are no tasks, and still succeeds).
+#[cfg(windows)]
+fn running(pid: u32) -> bool {
+    if pid == std::process::id() {
+        return true;
+    }
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .is_ok_and(|out| listed(&String::from_utf8_lossy(&out.stdout), pid))
+}
+
+/// Whether `tasklist /FO CSV` output lists `pid`: its second field.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn listed(csv: &str, pid: u32) -> bool {
+    let quoted = format!("\"{pid}\"");
+    csv.lines()
+        .any(|line| line.split(',').nth(1) == Some(quoted.as_str()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tasklist_output_lists_a_process_only_by_its_own_id() {
+        let out = "\"amdui.exe\",\"4242\",\"Console\",\"1\",\"80,512 K\"\r\n";
+        assert!(listed(out, 4242));
+        assert!(!listed(out, 424), "not a prefix match");
+        assert!(!listed(
+            "INFO: No tasks are running which match the specified criteria.\r\n",
+            4242
+        ));
+    }
 
     #[test]
     fn a_note_round_trips_and_is_keyed_by_the_repository() {

@@ -10,11 +10,10 @@
 //! **stdout carries nothing but protocol.** amd-lib prints nothing, but the
 //! `git` it runs inherits stdout and stdin, so the server keeps private
 //! copies of both and points the process's own at stderr and `/dev/null`
-//! before anything else runs.
+//! (`NUL` on Windows) before anything else runs.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
-use std::os::fd::FromRawFd;
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
@@ -58,7 +57,9 @@ pub fn run() -> Result<()> {
 
 /// Private copies of stdin and stdout for the protocol; the process's own
 /// become `/dev/null` and stderr, for everything it runs.
+#[cfg(unix)]
 fn take_stdio() -> Result<(File, File)> {
+    use std::os::fd::FromRawFd;
     // Safety: plain descriptor calls on 0, 1 and 2, checked; the new
     // descriptors are owned by the returned files from here on.
     unsafe {
@@ -72,6 +73,39 @@ fn take_stdio() -> Result<(File, File)> {
             bail!("couldn't redirect stdin and stdout");
         }
         Ok((File::from_raw_fd(input), File::from_raw_fd(output)))
+    }
+}
+
+/// The same on Windows (ticket 279): a child process inherits the standard
+/// *handles*, not the C runtime's descriptors, so those are swapped. The
+/// protocol keeps the handles stdin and stdout were; the process's become
+/// `NUL` and stderr, which `std::process::Command` and `println!` pick up,
+/// since both ask for the standard handle each time.
+#[cfg(windows)]
+fn take_stdio() -> Result<(File, File)> {
+    use std::os::windows::io::{FromRawHandle, IntoRawHandle};
+    use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
+    };
+    // Safety: the standard handles are checked before use; once replaced,
+    // the old input and output are owned by the returned files and nothing
+    // else refers to them. `NUL` is leaked on purpose: it is stdin from here
+    // on, for as long as the process runs.
+    unsafe {
+        let input = GetStdHandle(STD_INPUT_HANDLE);
+        let output = GetStdHandle(STD_OUTPUT_HANDLE);
+        let error = GetStdHandle(STD_ERROR_HANDLE);
+        let usable = |h: HANDLE| !h.is_null() && h != INVALID_HANDLE_VALUE;
+        if !usable(input) || !usable(output) {
+            bail!("couldn't take over stdin and stdout");
+        }
+        let null = File::open("NUL").context("opening NUL")?.into_raw_handle();
+        if SetStdHandle(STD_INPUT_HANDLE, null) == 0 || SetStdHandle(STD_OUTPUT_HANDLE, error) == 0
+        {
+            bail!("couldn't redirect stdin and stdout");
+        }
+        Ok((File::from_raw_handle(input), File::from_raw_handle(output)))
     }
 }
 
