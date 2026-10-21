@@ -2539,12 +2539,19 @@ async fn open_external(url: String) -> Result<()> {
     {
         return Err(format!("amd only opens web and mail links, not {url}"));
     }
-    let opener = if cfg!(target_os = "macos") {
-        "open"
+    // Windows (ticket 279): `rundll32 url.dll,FileProtocolHandler` hands the
+    // link to the default browser or mail program; `cmd /c start` would
+    // split it at every `&`.
+    let mut opener = if cfg!(windows) {
+        let mut cmd = std::process::Command::new("rundll32");
+        cmd.arg("url.dll,FileProtocolHandler");
+        cmd
+    } else if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
     } else {
-        "xdg-open"
+        std::process::Command::new("xdg-open")
     };
-    std::process::Command::new(opener)
+    opener
         .arg(&url)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -3840,6 +3847,7 @@ async fn open_in_editor() -> Result<()> {
 
 /// Runs `command dir` through the user's login shell, detached from this
 /// process: its own session, no stdin, stdout or stderr.
+#[cfg(unix)]
 fn spawn_detached(command: &str, dir: &std::path::Path) -> std::io::Result<()> {
     let shell = std::env::var("SHELL")
         .ok()
@@ -3866,6 +3874,30 @@ fn spawn_detached(command: &str, dir: &std::path::Path) -> std::io::Result<()> {
     }
     let mut child = cmd.spawn()?;
     // Reaped on a thread so it doesn't linger as a zombie while amdui runs.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
+/// The same on Windows (ticket 279), which has no login shell: `cmd /C`,
+/// so an editor installed as a `.cmd` launcher (VS Code's `code`) runs, with
+/// no console window and in a process group of its own. The line is given
+/// to `cmd` as written, since it parses quotes its own way; a Windows path
+/// can't hold a `"`.
+#[cfg(windows)]
+fn spawn_detached(command: &str, dir: &std::path::Path) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut child = std::process::Command::new("cmd")
+        .raw_arg(format!("/C {command} \"{}\"", dir.display()))
+        .current_dir(dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
+        .spawn()?;
     std::thread::spawn(move || {
         let _ = child.wait();
     });

@@ -54,15 +54,12 @@ pub struct Outcome {
 /// (under `into`, when given) would copy and what it would skip. Touches
 /// nothing.
 pub fn plan(source: &Path, repo: &Path, into: Option<&str>) -> Result<Plan> {
-    let source = source
-        .canonicalize()
-        .with_context(|| format!("reading {}", source.display()))?;
+    let source =
+        dunce::canonicalize(source).with_context(|| format!("reading {}", source.display()))?;
     if !source.is_dir() {
         bail!("{} isn't a directory", source.display());
     }
-    let repo = repo
-        .canonicalize()
-        .with_context(|| format!("reading {}", repo.display()))?;
+    let repo = dunce::canonicalize(repo).with_context(|| format!("reading {}", repo.display()))?;
     if source == repo || source.starts_with(&repo) {
         bail!(
             "{} is already in the documents repository {}",

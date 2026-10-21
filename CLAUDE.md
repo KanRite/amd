@@ -285,6 +285,24 @@ redundant. Their history is in git if it is ever wanted again.
   one: that would need a commit, ADR 0008). Tested on Linux by running
   the tests with `core.autocrlf = true` in a `GIT_CONFIG_GLOBAL`, which
   reproduces the Windows clone failures.
+- **Unix-only calls, and their Windows twins** (ticket 279). `amd mcp`'s
+  `take_stdio` swaps the standard *handles* on Windows (`windows-sys`
+  `GetStdHandle`/`SetStdHandle`, stdin to `NUL`), since a child inherits
+  those, not C descriptors. `screen::running` asks `tasklist /FI "PID eq
+  N" /FO CSV` there (`listed` parses it) instead of `kill -0`. Paths are
+  canonicalised with **`dunce::canonicalize`**, never `Path::canonicalize`,
+  which on Windows gives `\\?\C:\…` paths no plain path equals (a
+  temp folder's short `RUNNER~1` comes back long, so tests compare with
+  the canonical form). `git::is_local_path` reads a drive (`C:\…`,
+  `C:/…`) as a path on Windows, as git does, not a host `C`. amdui opens
+  links with `rundll32 url.dll,FileProtocolHandler` (not `cmd /c start`,
+  which splits at `&`) and runs the editor command through `cmd /C`
+  (`raw_arg`, no console window, own process group). `exe_watch`'s inode
+  is 0 off Unix; modified time and size still show a replaced program.
+  **Checking a Windows build here:** `rustup target add
+  x86_64-pc-windows-gnu`, the `gcc-mingw-w64-x86-64` package (ring's C),
+  then `cargo check --target x86_64-pc-windows-gnu -p agile-md -p amd-cli
+  -p amd-ui --all-targets`.
 - `crates/amd-lib/src/update.rs` — is there a newer release (ticket 190,
   the detecting half of in-app updates; applying is 191, the Update / Later
   banner 192, compatibility and `min_version` 193). amd-lib has no HTTP

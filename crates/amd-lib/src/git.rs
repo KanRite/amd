@@ -246,7 +246,12 @@ pub fn remote_identity(repo: &Path) -> Option<String> {
     let local = url.strip_prefix("file://").unwrap_or(&url);
     if is_local_path(local) {
         let path = repo.join(local);
-        return Some(path.canonicalize().unwrap_or(path).display().to_string());
+        return Some(
+            dunce::canonicalize(&path)
+                .unwrap_or(path)
+                .display()
+                .to_string(),
+        );
     }
     Some(normalise_remote(&url, ssh_hostname))
 }
@@ -301,16 +306,30 @@ pub fn normalise_remote(url: &str, resolve: impl Fn(&str) -> Option<String>) -> 
 
 /// A remote that's a path on this machine rather than a URL: anything
 /// without a `scheme://`, and without an scp-style `host:` before its first
-/// `/`.
+/// `/`. On Windows a drive (`C:\…`, `C:/…`) is a path, as git reads it
+/// there, not a host called `C` (ticket 279).
 pub(crate) fn is_local_path(url: &str) -> bool {
     if url.contains("://") {
         return false;
+    }
+    if cfg!(windows) && has_drive_prefix(url) {
+        return true;
     }
     match (url.find(':'), url.find('/')) {
         (Some(colon), Some(slash)) => slash < colon,
         (Some(_), None) => false,
         (None, _) => true,
     }
+}
+
+/// Whether `path` starts with a Windows drive: one letter, `:`, then a
+/// slash either way.
+fn has_drive_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'\\' | b'/')
 }
 
 /// The real host behind an SSH host alias: `ssh -G <alias>`'s `hostname`
@@ -1403,5 +1422,15 @@ mod tests {
         assert!(is_local_path("./a:b/c"));
         assert!(!is_local_path("git@github.com:o/r.git"));
         assert!(!is_local_path("https://github.com/o/r"));
+    }
+
+    #[test]
+    fn a_windows_drive_is_a_path_there() {
+        assert!(has_drive_prefix(r"C:\Users\me\origin.git"));
+        assert!(has_drive_prefix("d:/srv/board.git"));
+        assert!(!has_drive_prefix("git@github.com:o/r.git"));
+        assert!(!has_drive_prefix("C:"));
+        assert!(!has_drive_prefix("host:repo"));
+        assert_eq!(is_local_path(r"C:\Users\me\origin.git"), cfg!(windows));
     }
 }

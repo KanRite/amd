@@ -198,12 +198,8 @@ pub fn resolve(root: &Path, relative: &str) -> Result<PathBuf> {
     {
         bail!("{relative:?} isn't a path inside the documents repository");
     }
-    let root = root
-        .canonicalize()
-        .with_context(|| format!("reading {}", root.display()))?;
-    let full = root
-        .join(path)
-        .canonicalize()
+    let root = dunce::canonicalize(root).with_context(|| format!("reading {}", root.display()))?;
+    let full = dunce::canonicalize(root.join(path))
         .with_context(|| format!("{relative} isn't in {}", root.display()))?;
     if !full.starts_with(&root) {
         bail!("{relative} leads outside the documents repository");

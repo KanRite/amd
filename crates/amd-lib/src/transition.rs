@@ -1388,7 +1388,10 @@ mod tests {
             path.exists(),
             "dest must be where the file is now: {path:?}"
         );
-        assert!(path.to_string_lossy().contains("/Ep/"), "{path:?}");
+        assert!(
+            path.parent().and_then(|dir| dir.file_name()) == Some("Ep".as_ref()),
+            "{path:?}"
+        );
     }
 
     #[test]

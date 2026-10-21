@@ -83,9 +83,16 @@ pub fn clone_repo(board: &Board, name: &str) -> Result<Cloned> {
 /// `origin` with its last path part — the tickets repository's name —
 /// replaced by `name`, keeping a `.git` suffix if it had one.
 /// `git@github.com-me:org/p-tickets.git` → `git@github.com-me:org/code.git`.
+/// On Windows a local origin's folders are split by `\` too (ticket 279),
+/// or `C:\…\p-tickets.git` would be cut at the drive's colon.
 pub fn sibling_url(origin: &str, name: &str) -> String {
-    let origin = origin.trim().trim_end_matches('/');
-    let cut = origin.rfind(['/', ':']).map_or(0, |at| at + 1);
+    let (trailing, separators): (&[char], &[char]) = if cfg!(windows) {
+        (&['/', '\\'], &['/', ':', '\\'])
+    } else {
+        (&['/'], &['/', ':'])
+    };
+    let origin = origin.trim().trim_end_matches(trailing);
+    let cut = origin.rfind(separators).map_or(0, |at| at + 1);
     let (base, last) = origin.split_at(cut);
     let suffix = if last.ends_with(".git") { ".git" } else { "" };
     format!("{base}{name}{suffix}")
@@ -116,6 +123,15 @@ mod tests {
         ] {
             assert_eq!(sibling_url(origin, "amd"), want, "{origin}");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_origin_keeps_its_folder_and_drive() {
+        assert_eq!(
+            sibling_url(r"C:\Users\me\origins\p-tickets.git", "amd"),
+            r"C:\Users\me\origins\amd.git"
+        );
     }
 
     /// A tickets repository with a board declaring `code`, and no origin.
