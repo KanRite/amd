@@ -711,16 +711,27 @@ redundant. Their history is in git if it is ever wanted again.
   by hand; the repository's Pages source must be "GitHub Actions"). Plain
   HTML and CSS, no build: `index.html`, `style.css`, `screenshots/` (from
   the demo board, built at `/tmp/acme` so no home path shows in amdui's
-  header, at 1600 px wide) and `logo/`. **The logo** (ticket 194) is
-  `pages/logo/agile-md-light.svg` and `-dark.svg` (the dark one's "Agile-",
-  "MD", tagline and bulb base lightened for dark themes), from the
-  designer's source vector with the text turned into outlines (`inkscape
-  --export-text-to-path`), so it doesn't depend on DejaVu Sans; the README
-  and the site pick one with `<picture>`. `crates/amd-ui/app-icon.svg` is
-  the logo's mark (board and git diamond, no words), copied to
-  `pages/logo/icon.svg` as the favicon; after changing it, `cargo tauri
-  icon app-icon.svg` in `crates/amd-ui` regenerates `icons/` (delete the
-  `android/`, `ios/` and `64x64.png` it also makes: nothing uses them). The
+  header, at 1600 px wide) and `logo/`. **The logo** (ticket 194; KanRite since ticket 314) is
+  `pages/logo/kanrite-light.svg` and `-dark.svg` (the dark one's "Kan",
+  "Rite", tagline and bulb base lightened for dark themes): the desktop
+  icon's artwork with "KanRite" and the tagline in Montserrat ExtraBold
+  and Bold, turned into outlines (`inkscape --export-text-to-path`), so no
+  font is needed to show it; the README and the site pick one with
+  `<picture>`. `pages/social.png` (1280×640, under GitHub's 1 MB) is the
+  site's `og:image` and the repository's social preview. The older
+  `agile-md-*`/`agilerite-*` logos stay for anything still linking them.
+  `crates/amd-ui/app-icon.svg` is the desktop icon (board in blue, yellow
+  and green for todo, doing, done; documents, git diamond, bulb; no
+  words); after changing it, `cargo tauri icon app-icon.svg` in
+  `crates/amd-ui` regenerates `icons/` (delete the `android/`, `ios/` and
+  `64x64.png` it also makes: nothing uses them). That much detail is mush
+  at 16-32 px, so `crates/amd-ui/icon-small.svg` (board, columns, diamond
+  only) then replaces the small sizes: `icons/32x32.png`,
+  `Square30x30Logo.png`, `Square44x44Logo.png` and the 16, 24 and 32 px
+  images in `icon.ico` (48, 64 and 256 from app-icon.svg; every image
+  stored as PNG, as Tauri writes it: ImageMagick stores them
+  uncompressed, 300 KB instead of 24). It is also the favicon,
+  `pages/logo/icon.svg`. The
   feature list is in three places that should agree: the README's
   Features, the site, and agile-md-documents' `docs/FEATURES.md`.
 - `Board::locate()` resolves the board as `$(git rev-parse --show-toplevel)/${AMD_DIR:-tasks}`,
