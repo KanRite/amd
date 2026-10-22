@@ -1,13 +1,32 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-<title>agile-md</title>
-<!-- amdui's icon: the logo's mark (ticket 194), its Kanban board and git
-     diamond without the words, scaled to fill the square with a margin.
-     From the logo's source vector (docs/logo/). -->
-<defs>
+<?xml version='1.0' encoding='UTF-8'?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+<title>KanRite</title>
+<desc>The KanRite desktop icon: a Kanban board (blue, yellow, green for todo, doing, done), markdown documents, the git diamond and an idea bulb. The source for every size in icons/ (cargo tauri icon app-icon.svg); icon-small.svg replaces the 16-32 px ones.</desc>
+<rect x="0" y="0" width="1024" height="1024" rx="176" fill="#f3f8fd"/><defs>
  <linearGradient id="board" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#12365d"/><stop offset="1" stop-color="#168a72"/></linearGradient>
+ <linearGradient id="swoosh" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#0d4b83"/><stop offset=".53" stop-color="#0874b5"/><stop offset="1" stop-color="#1e9c7a"/></linearGradient>
+ <linearGradient id="brand" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#0952b0"/><stop offset="1" stop-color="#086ac9"/></linearGradient>
 </defs>
-<g transform="translate(-368.5 -119.5) scale(1.5)">
+<!-- Document stack -->
 <!-- Main board -->
+<!-- Kanban tickets -->
+<!-- Flow arrow behind bulb, careful intentional open arc -->
+<!-- Git branching diamond -->
+<!-- Idea lightbulb: silhouette and rays -->
+<!-- Brand typography -->
+<g transform="translate(-62 108) scale(0.90)"><g transform="translate(115 324) rotate(-12 150 170)">
+ <rect width="238" height="300" rx="18" fill="#e8eef4" stroke="#bacbda" stroke-width="3"/>
+ <path d="M30 63h130" stroke="#2b8ccf" stroke-width="13" stroke-linecap="round"/>
+ <path d="M30 103h170M30 137h148M30 171h165M30 205h125" stroke="#a7bbcf" stroke-width="11" stroke-linecap="round"/>
+</g>
+<g transform="translate(204 357) rotate(5 150 170)">
+ <path d="M19 0H217L260 43V296Q260 315 241 315H19Q0 315 0 296V19Q0 0 19 0Z" fill="#f7f9fc" stroke="#bbcad8" stroke-width="3"/>
+ <path d="M217 0V43H260" fill="#d8e1eb"/>
+ <!-- MD lettering as outlined vector paths to ensure both letters display -->
+ <path d="M188 1493H678L1018 694L1360 1493H1849V0H1485V1092L1141 287H897L553 1092V0H188Z" transform="translate(15.00 106) scale(0.015625 -0.015625)" fill="#142d47"/>
+ <path d="M573 1202V291H711Q947 291 1071.5 408.0Q1196 525 1196 748Q1196 970 1072.0 1086.0Q948 1202 711 1202ZM188 1493H594Q934 1493 1100.5 1444.5Q1267 1396 1386 1280Q1491 1179 1542.0 1047.0Q1593 915 1593 748Q1593 579 1542.0 446.5Q1491 314 1386 213Q1266 97 1098.0 48.5Q930 0 594 0H188Z" transform="translate(47.84 106) scale(0.015625 -0.015625)" fill="#142d47"/>
+ <path d="M34 145h177M34 178h159M34 211h177M34 244h125" stroke="#c6d1dd" stroke-width="12" stroke-linecap="round"/>
+</g>
 <rect x="304" y="153" width="566" height="469" rx="25" fill="url(#board)"/>
 <rect x="324" y="173" width="526" height="429" rx="17" fill="#fff"/>
 <g>
@@ -15,10 +34,9 @@
  <rect x="507" y="187" width="160" height="398" rx="12" fill="#f1f5f9"/>
  <rect x="676" y="187" width="160" height="398" rx="12" fill="#f1f5f9"/>
  <rect x="352" y="202" width="132" height="42" rx="8" fill="#2078d4"/>
- <rect x="521" y="202" width="132" height="42" rx="8" fill="#24a67a"/>
- <rect x="690" y="202" width="132" height="42" rx="8" fill="#e6a125"/>
+ <rect x="521" y="202" width="132" height="42" rx="8" fill="#e6a125"/>
+ <rect x="690" y="202" width="132" height="42" rx="8" fill="#24a67a"/>
 </g>
-<!-- Kanban tickets -->
 <g fill="white" stroke="#e4eaf0" stroke-width="2">
  <rect x="350" y="265" width="136" height="107" rx="11"/><rect x="350" y="387" width="136" height="107" rx="11"/>
  <rect x="519" y="265" width="136" height="107" rx="11"/><rect x="519" y="387" width="136" height="107" rx="11"/>
@@ -27,17 +45,18 @@
 <g>
  <rect x="364" y="280" width="23" height="26" rx="5" fill="#2078d4"/>
  <rect x="364" y="402" width="23" height="26" rx="5" fill="#2078d4"/>
- <rect x="533" y="280" width="23" height="26" rx="5" fill="#24a67a"/>
- <rect x="533" y="402" width="23" height="26" rx="5" fill="#24a67a"/>
- <rect x="702" y="280" width="23" height="26" rx="5" fill="#e6a125"/>
- <rect x="702" y="402" width="23" height="26" rx="5" fill="#e6a125"/>
+ <rect x="533" y="280" width="23" height="26" rx="5" fill="#e6a125"/>
+ <rect x="533" y="402" width="23" height="26" rx="5" fill="#e6a125"/>
+ <rect x="702" y="280" width="23" height="26" rx="5" fill="#24a67a"/>
+ <rect x="702" y="402" width="23" height="26" rx="5" fill="#24a67a"/>
 </g>
 <g stroke="#b7c5d3" stroke-width="9" stroke-linecap="round">
  <path d="M400 291h72M400 315h58M400 339h45 M400 413h72M400 437h58M400 461h45"/>
  <path d="M569 291h72M569 315h58M569 339h45 M569 413h72M569 437h58M569 461h45"/>
  <path d="M738 291h72M738 315h58M738 339h45 M738 413h72M738 437h58M738 461h45"/>
 </g>
-<!-- Git branching diamond -->
+<path d="M181 589C275 660 472 684 677 654C837 630 947 573 1022 485" fill="none" stroke="url(#swoosh)" stroke-width="27" stroke-linecap="round"/>
+<path d="M996 484l39-19-5 43" fill="none" stroke="#1e9c7a" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
 <g transform="translate(487 589) rotate(45)">
  <rect x="-71" y="-71" width="142" height="142" rx="18" fill="#ed563c" stroke="white" stroke-width="10"/>
 </g>
@@ -45,5 +64,10 @@
  <path d="M487 541v84M487 563l37 33"/>
 </g>
 <g fill="white"><circle cx="487" cy="541" r="12"/><circle cx="487" cy="625" r="12"/><circle cx="524" cy="596" r="12"/></g>
+<g transform="translate(964 273)">
+ <path d="M49 0c-47 0-83 37-83 83 0 32 18 51 37 72 9 10 14 23 14 37h64c0-14 5-27 14-37 19-21 37-40 37-72C132 37 96 0 49 0Z" fill="#f1b92d"/>
+ <path d="M17 202h64M29 219h40" stroke="#1a344b" stroke-width="17" stroke-linecap="round"/>
+ <path d="M49-28v-25M-53 83h-24M175 83h24M-24 8l-19-19M123 8l19-19" stroke="#e9b12a" stroke-width="13" stroke-linecap="round"/>
+ <path d="M29 114q20 22 40 0" fill="none" stroke="white" stroke-width="8" stroke-linecap="round"/>
 </g>
-</svg>
+</g></svg>
