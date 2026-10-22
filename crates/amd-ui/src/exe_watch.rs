@@ -204,16 +204,16 @@ mod tests {
         assert_eq!(w.step(stamp(4, 10), t + SETTLE, || None), None);
     }
 
+    /// A shell script stands in for amdui, so Unix only: Windows can't run
+    /// one, and there the real check runs `amdui.exe` (ticket 280).
+    #[cfg(unix)]
     #[test]
     fn it_reads_the_version_a_real_program_reports() {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("amdui");
         std::fs::write(&bin, "#!/bin/sh\necho \"amdui 4.6.0\"\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(version_of(&bin).as_deref(), Some("4.6.0"));
         assert_eq!(version_of(&dir.path().join("gone")), None);
     }
