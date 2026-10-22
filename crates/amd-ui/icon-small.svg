@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<title>KanRite</title>
+<defs>
+ <linearGradient id="board" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#12365d"/><stop offset="1" stop-color="#168a72"/></linearGradient>
+</defs>
+<rect width="1024" height="1024" rx="176" fill="#f3f8fd"/>
+<rect x="112" y="186" width="800" height="600" rx="60" fill="url(#board)"/>
+<rect x="148" y="222" width="728" height="528" rx="34" fill="#ffffff"/>
+<rect x="176" y="262" width="200" height="470" rx="22" fill="#e6edf4"/>
+<rect x="192" y="280" width="168" height="74" rx="14" fill="#2078d4"/>
+<rect x="192" y="378" width="168" height="130" rx="16" fill="#ffffff" stroke="#d3dde7" stroke-width="4"/>
+<rect x="412" y="262" width="200" height="470" rx="22" fill="#e6edf4"/>
+<rect x="428" y="280" width="168" height="74" rx="14" fill="#e6a125"/>
+<rect x="428" y="378" width="168" height="130" rx="16" fill="#ffffff" stroke="#d3dde7" stroke-width="4"/>
+<rect x="648" y="262" width="200" height="470" rx="22" fill="#e6edf4"/>
+<rect x="664" y="280" width="168" height="74" rx="14" fill="#24a67a"/>
+<rect x="664" y="378" width="168" height="130" rx="16" fill="#ffffff" stroke="#d3dde7" stroke-width="4"/>
+<g transform="translate(512 790) rotate(45)">
+ <rect x="-118" y="-118" width="236" height="236" rx="30" fill="#ed563c" stroke="#ffffff" stroke-width="18"/>
+</g>
+<g stroke="#ffffff" stroke-width="16" fill="none" stroke-linecap="round" stroke-linejoin="round">
+ <path d="M512 720v140M512 756l60 55"/>
+</g>
+<g fill="#ffffff"><circle cx="512" cy="720" r="20"/><circle cx="512" cy="860" r="20"/><circle cx="572" cy="811" r="20"/></g>
+</svg>
