@@ -1,0 +1,13 @@
+# The project's build tasks (ticket 318), run as `cargo xtask <task>` through
+# the alias in .cargo/config.toml. Rust rather than make or a shell script so
+# that the same commands work on Linux, macOS and Windows with nothing to
+# install beyond Rust itself. Standard library only, so it builds in seconds.
+[package]
+name = "xtask"
+description = "Build, check and install agile-md from a clone"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false

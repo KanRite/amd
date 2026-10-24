@@ -651,6 +651,16 @@ redundant. Their history is in git if it is ever wanted again.
   which would also make GTK route a second `amdui` to the first process.
   The icons come from the clone, or for a release install from the
   repository at the installed version's tag (`fetch_icons`).
+- `crates/xtask` — `cargo xtask build|check|install` (ticket 318, the
+  alias in `.cargo/config.toml`): building, CI's checks and a source
+  install as one set of commands on Linux, macOS and Windows, in Rust with
+  the standard library only, so there's no make or bash to need. The
+  commands it runs mirror ci.yml; change both together. `install` hands
+  over to `install.sh --from-source` off Windows, and install.sh builds
+  through `cargo xtask build`, so the build commands live in one place. On
+  Windows `install` copies the `.exe`s into Cargo's bin folder, moving a
+  running one aside to `<name>.old` first. The Windows CI job runs
+  `cargo xtask build` to keep it working there.
 - `tests/test.sh` — assert-based end-to-end suite; builds with cargo and spins
   up temp git repos. Unit tests live next to the code in `#[cfg(test)] mod tests`.
 - `.github/workflows/ci.yml` — fmt + clippy + cargo test + tests/test.sh, and
@@ -1710,6 +1720,9 @@ project, into one `amdui` window:
 ## Commands
 
 ```bash
+cargo xtask check                   # everything CI checks, in order (crates/xtask)
+cargo xtask build [--release] [amd] [amdui]
+cargo xtask install [--dir DIR]     # install.sh --from-source; on Windows, a copy into ~/.cargo/bin
 (cd crates/amd-ui-web && trunk build --release)   # the board's page, before anything builds amd-ui
 cargo test                          # the whole workspace
 cargo build -p amd-cli              # the CLI alone: no window or web stack

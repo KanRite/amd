@@ -122,6 +122,11 @@ jobs:
       - name: amdui unit tests
         if: ${{ !cancelled() }}
         run: cargo test --locked -p amd-ui --no-fail-fast
+      # The build tasks (ticket 318), so `cargo xtask` keeps working on
+      # Windows; both binaries are built already, so this is quick.
+      - name: cargo xtask build
+        if: ${{ !cancelled() }}
+        run: cargo xtask build
 
   shell:
     runs-on: ubuntu-latest
