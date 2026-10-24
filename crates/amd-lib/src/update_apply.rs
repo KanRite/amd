@@ -192,7 +192,7 @@ fn apply_one(
     let bytes = fetch
         .get(&asset.url)
         .with_context(|| format!("downloading {version}"))?;
-    let got = format!("{:x}", Sha256::digest(&bytes));
+    let got = sha256_hex(&bytes);
     if got != asset.sha256 {
         bail!(
             "{version}'s download doesn't match its checksum (damaged, or not what was published); nothing was replaced"
@@ -243,6 +243,15 @@ fn apply_one(
     }
     progress(Step::Installed(version));
     Ok(())
+}
+
+/// BYTES' SHA-256 as lowercase hex, the form GitHub's `digest` gives. sha2
+/// 0.11's digest no longer formats with `{:x}` (ticket 319).
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// The binaries in a release zip, by name, `amd` first.
@@ -380,7 +389,7 @@ mod tests {
             let sha256 = if Some(*version) == bad {
                 "0".repeat(64)
             } else {
-                format!("{:x}", Sha256::digest(&bytes))
+                sha256_hex(&bytes)
             };
             files.insert(url.clone(), bytes);
             releases.push(Release {
@@ -416,6 +425,16 @@ mod tests {
         )
         .unwrap();
         dir
+    }
+
+    /// Ticket 319: the checksum is the lowercase hex GitHub gives, checked
+    /// against SHA-256's published answer for "abc".
+    #[test]
+    fn the_checksum_is_lowercase_hex() {
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
     }
 
     /// Ticket 265: a program still open for writing somewhere can't be
@@ -579,7 +598,7 @@ mod tests {
         let url = releases[0].assets[0].url.clone();
         let wrong = release_zip("1.0.0");
         let mut releases = releases;
-        releases[0].assets[0].sha256 = format!("{:x}", Sha256::digest(&wrong));
+        releases[0].assets[0].sha256 = sha256_hex(&wrong);
         fake.files.insert(url, wrong);
         let applied = apply(dir.path(), Version(4, 5, 0), &releases, &fake, &mut |_| {});
         assert!(applied.failed.unwrap().1.contains("doesn't run here"));
