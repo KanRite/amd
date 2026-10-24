@@ -323,8 +323,10 @@ build_from_source() {
   METHOD=source
   in_clone || die "building from source is done in a clone of https://github.com/${REPO} (see CONTRIBUTING.md)"
   command -v cargo >/dev/null 2>&1 || die "cargo not found — install Rust from https://rustup.rs"
+  # The builds themselves are `cargo xtask build` (crates/xtask, ticket
+  # 318), the same commands on every system, Windows included.
   printf 'Building amd from source...\n'
-  ( cd "${SELF}" && cargo build --release --locked -p amd-cli )
+  ( cd "${SELF}" && cargo xtask build --release amd )
   mkdir -p "${DIR}"
   replace_bin "${SELF}/target/release/amd" amd
   # The desktop board is optional: without its build tools, or without
@@ -336,8 +338,7 @@ build_from_source() {
     return 0
   fi
   printf 'Building the desktop board (amdui)...\n'
-  if ( cd "${SELF}/crates/amd-ui-web" && trunk build --release ) \
-    && ( cd "${SELF}" && cargo build --release --locked -p amd-ui ); then
+  if ( cd "${SELF}" && cargo xtask build --release amdui ); then
     replace_bin "${SELF}/target/release/amdui" amdui
   else
     printf 'The desktop board did not build (on Linux it needs libwebkit2gtk-4.1-dev and libasound2-dev);\n' >&2

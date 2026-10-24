@@ -20,16 +20,17 @@ For a security problem, don't open a public issue; see "Security" below.
    type: `feature/`, `bugfix/`, `hotfix/`, `release/` or `chore/`
    (for example `bugfix/drag-onto-a-full-column`).
 2. Make the change. "Building from source" below has the build; CI runs
-   all of these checks, so run them first:
+   the same checks, so run them first:
 
    ```bash
-   (cd crates/amd-ui-web && trunk build --release)   # before anything builds amdui
-   cargo test --workspace --all-features
-   bash tests/test.sh
-   cargo clippy --all-targets --all-features -- -D warnings
-   cargo clippy -p amd-ui-web -p amd-ui-model --target wasm32-unknown-unknown -- -D warnings
-   cargo fmt --all --check
+   cargo xtask check
    ```
+
+   That builds the board's page, then runs `cargo fmt --all --check`,
+   clippy (also for the page as WebAssembly), `cargo test --workspace
+   --all-features` and `bash tests/test.sh`, stopping at the first failure.
+   It prints each command as it runs it, so a failing one can be run on
+   its own. On Windows the CLI tests (a bash script) are skipped for now.
 
 3. Commit with a conventional type: `feat`, `fix`, `docs`, `style`,
    `refactor`, `perf`, `test`, `build`, `ci`, `chore` or `revert`
@@ -65,18 +66,25 @@ rustup target add wasm32-unknown-unknown
 sudo apt install libwebkit2gtk-4.1-dev libasound2-dev   # Debian/Ubuntu
 ```
 
-Then, in a clone:
+Then, in a clone, on Linux, macOS or Windows:
 
 ```bash
-(cd crates/amd-ui-web && trunk build --release)   # the board's page, before anything builds amdui
-cargo build --release                             # target/release/{amd,amdui}
-./install.sh                                      # builds and installs both, and the Linux launcher
+cargo xtask build --release   # the board's page, then target/release/{amd,amdui}
+cargo xtask install           # builds and installs both
 ```
 
-`./install.sh` in a clone builds from source (`--from-source` forces it);
-without Trunk it installs `amd` alone and says what's missing.
-`cargo build --release -p amd-cli` builds the command line on its own, with
-no window or web stack and none of the board's tools.
+The tasks live in `crates/xtask`, written in Rust so the same commands work
+everywhere with nothing to install beyond Rust (`cargo xtask` lists them).
+`cargo xtask build amd` builds the command line on its own, with no window
+or web stack and none of the board's tools; without Trunk, a plain
+`cargo xtask build` does the same and says what's missing.
+
+`cargo xtask install` runs `./install.sh --from-source` on Linux and macOS,
+which also installs amdui's launcher and `amd-uninstall` (`--dir DIR` picks
+the folder). On Windows it copies `amd.exe` and `amdui.exe` into Cargo's
+bin folder (`%USERPROFILE%\.cargo\bin`, already on the PATH where rustup
+is installed), or `--dir DIR`; there's no uninstaller or Start menu entry
+there yet.
 
 The workspace is one library and two front ends: `crates/amd-lib` (all the
 board logic), `crates/amd-cli` (`amd`), and the desktop board in
