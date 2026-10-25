@@ -37,6 +37,10 @@ jobs:
           - { target: aarch64-apple-darwin, runner: macos-latest }
           # Built on the Apple-silicon runner, cross-compiled to Intel.
           - { target: x86_64-apple-darwin, runner: macos-latest, cross: true }
+          # Windows (ticket 281): WebView2 ships with Windows 10 and 11, so
+          # no system libraries; the binaries are amd.exe and amdui.exe.
+          - { target: x86_64-pc-windows-msvc, runner: windows-latest, exe: .exe }
+          - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, exe: .exe }
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
@@ -74,11 +78,13 @@ jobs:
       # window). Skipped where the runner can't run the target.
       - name: Smoke test
         if: ${{ !matrix.cross }}
+        shell: bash
         run: |
-          target/${{ matrix.target }}/release/amd --version
-          target/${{ matrix.target }}/release/amdui --version
+          target/${{ matrix.target }}/release/amd${{ matrix.exe }} --version
+          target/${{ matrix.target }}/release/amdui${{ matrix.exe }} --version
 
       - name: Package amd-${{ matrix.target }}.zip
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
@@ -86,6 +92,20 @@ jobs:
           cp "target/${{ matrix.target }}/release/amd" "target/${{ matrix.target }}/release/amdui" "${stage}/"
           (cd "${stage}" && zip -q "${GITHUB_WORKSPACE}/amd-${{ matrix.target }}.zip" amd amdui)
           unzip -l "amd-${{ matrix.target }}.zip"
+
+      # The Windows runners have no zip in their bash.
+      - name: Package amd-${{ matrix.target }}.zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = "target/${{ matrix.target }}/release"
+          $zip = "amd-${{ matrix.target }}.zip"
+          Compress-Archive -Path "$release/amd.exe", "$release/amdui.exe" -DestinationPath $zip
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
+          $archive.Entries | ForEach-Object { "{0,10}  {1}" -f $_.Length, $_.FullName }
+          $archive.Dispose()
 
       - uses: actions/upload-artifact@v7
         with:
@@ -116,7 +136,8 @@ jobs:
         run: |
           set -euo pipefail
           ls dist/*.zip >/dev/null 2>&1 || { echo "::error::No zips were built"; exit 1; }
-          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin; do
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu aarch64-apple-darwin x86_64-apple-darwin \
+            x86_64-pc-windows-msvc aarch64-pc-windows-msvc; do
             [ -f "dist/amd-${target}.zip" ] || echo "::warning::No zip for ${target}: its build failed"
           done
           if ! gh release view "${TAG}" >/dev/null 2>&1; then
