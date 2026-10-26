@@ -16,14 +16,14 @@
 # The library both binaries share (ADR-0004: "one library, two interfaces").
 # A change here reaches the CLI and the desktop board at once — the whole
 # point of the split, and the whole reason a mistake here is expensive.
-/crates/amd-lib/           @mrdoodles @MrDClaudeBot
+/crates/rite-lib/           @mrdoodles @MrDClaudeBot
 
 # The ticket file format: frontmatter shape, the yaml filter, the strict
-# MiniJinja environment. amd-ui (the companion app, a separate repository)
+# MiniJinja environment. rite-ui (the companion app, a separate repository)
 # is a format consumer bound by whatever this produces.
-/crates/amd-lib/templates/ @mrdoodles @MrDClaudeBot
-/crates/amd-lib/src/task.rs        @mrdoodles @MrDClaudeBot
-/crates/amd-lib/src/templates.rs   @mrdoodles @MrDClaudeBot
+/crates/rite-lib/templates/ @mrdoodles @MrDClaudeBot
+/crates/rite-lib/src/task.rs        @mrdoodles @MrDClaudeBot
+/crates/rite-lib/src/templates.rs   @mrdoodles @MrDClaudeBot
 
 # tests/test.sh is the compatibility contract with v3 boards, per CLAUDE.md.
 # A change here can silently narrow what the spec actually guarantees.

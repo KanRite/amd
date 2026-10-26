@@ -205,7 +205,7 @@ On **Windows 10 or 11**, in PowerShell (no administrator needed):
 irm https://raw.githubusercontent.com/kanrite/amd/v4/install.ps1 | iex
 ```
 
-That installs `amd.exe` and `amdui.exe` for you alone, into
+That installs `rite.exe` and `riteui.exe` (and `amd.exe`, the old name) for you alone, into
 `%LOCALAPPDATA%\Programs\KanRite\bin`, adds that folder to your PATH (open a
 new terminal to use it), puts **KanRite** in the Start menu and lists it in
 **Settings > Apps**. Git for Windows provides the git it needs. To pin a

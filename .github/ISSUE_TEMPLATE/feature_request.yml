@@ -1,5 +1,5 @@
 name: Idea or request
-description: Something amd or amdui could do, or do better.
+description: Something rite or riteui could do, or do better.
 labels: [enhancement]
 body:
   - type: textarea
@@ -19,7 +19,7 @@ body:
     attributes:
       label: Where
       options:
-        - amd (the command line)
-        - amdui (the desktop board)
+        - rite (the command line)
+        - riteui (the desktop board)
         - Both
         - Not sure

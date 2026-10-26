@@ -43,7 +43,7 @@ Some things worth knowing first:
 - **`tests/test.sh` is the specification.** A change the command line can
   see gets an assertion there, not only a Rust unit test, and the
   command's `--help` text should still be true.
-- **Ticket logic lives in `amd-lib`.** The command line and the desktop
+- **Ticket logic lives in `rite-lib`.** The command line and the desktop
   board both call it; neither has rules of its own.
 - **The ticket file format is a public contract.** Templates and the
   `TaskContext` variables are used by other people's boards, so adding is
@@ -56,7 +56,7 @@ People installing agile-md use the release (the curl line in the README),
 which needs none of this. To build it yourself you need
 [Rust](https://rustup.rs) and git 2.29 or later. The desktop board's page is
 Rust compiled to WebAssembly by [Trunk](https://trunkrs.dev) and built into
-`amdui` at compile time, so it also needs Trunk and the wasm target, and on
+`riteui` at compile time, so it also needs Trunk and the wasm target, and on
 Linux WebKitGTK and ALSA's headers (ALSA is for speech to text's
 microphone):
 
@@ -69,30 +69,30 @@ sudo apt install libwebkit2gtk-4.1-dev libasound2-dev   # Debian/Ubuntu
 Then, in a clone, on Linux, macOS or Windows:
 
 ```bash
-cargo xtask build --release   # the board's page, then target/release/{amd,amdui}
+cargo xtask build --release   # the board's page, then target/release/{rite,riteui}
 cargo xtask install           # builds and installs both
 ```
 
 The tasks live in `crates/xtask`, written in Rust so the same commands work
 everywhere with nothing to install beyond Rust (`cargo xtask` lists them).
-`cargo xtask build amd` builds the command line on its own, with no window
+`cargo xtask build rite` builds the command line on its own, with no window
 or web stack and none of the board's tools; without Trunk, a plain
 `cargo xtask build` does the same and says what's missing.
 
 `cargo xtask install` runs `./install.sh --from-source` on Linux and macOS,
-which also installs amdui's launcher and `amd-uninstall` (`--dir DIR` picks
-the folder). On Windows it copies `amd.exe` and `amdui.exe` into Cargo's
+which also installs riteui's launcher and `amd-uninstall` (`--dir DIR` picks
+the folder). On Windows it copies `rite.exe` and `riteui.exe` into Cargo's
 bin folder (`%USERPROFILE%\.cargo\bin`, already on the PATH where rustup
 is installed), or `--dir DIR`; there's no uninstaller or Start menu entry
 there yet.
 
-The workspace is one library and two front ends: `crates/amd-lib` (all the
-board logic), `crates/amd-cli` (`amd`), and the desktop board in
-`crates/amd-ui` (Tauri), `crates/amd-ui-web` (the Leptos page) and
-`crates/amd-ui-model` (types both share).
+The workspace is one library and two front ends: `crates/rite-lib` (all the
+board logic), `crates/rite-cli` (`rite`), and the desktop board in
+`crates/rite-ui` (Tauri), `crates/rite-ui-web` (the Leptos page) and
+`crates/rite-ui-model` (types both share).
 
 To work on the board with live reload, run
-`cargo tauri dev -- --no-default-features` in `crates/amd-ui`: it runs
+`cargo tauri dev -- --no-default-features` in `crates/rite-ui`: it runs
 `trunk serve` for you, and `--no-default-features` serves the page live
 instead of the copy built into the binary.
 
@@ -108,7 +108,7 @@ The maintainers' tickets (`agile-md-tickets`) and design documents
 (`agile-md-documents`) are private repositories in the
 [agile-md](https://github.com/agile-md) organisation. To work from them,
 become a maintainer: you're added to the organisation, and then
-`amd join agile-md` clones both and adds you to the project's users.
+`rite join agile-md` clones both and adds you to the project's users.
 Everyone else works from issues and pull requests here.
 
 ## Security

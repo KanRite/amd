@@ -5,15 +5,17 @@
 #   ... -Uninstall [-All] [-Yes]          (or Settings > Apps > KanRite > Uninstall)
 #
 # Downloads the release zip for this machine (x64 or Arm64) and installs
-# amd.exe, the command line interface, and amdui.exe, the desktop board, for
+# rite.exe, the command line interface, and riteui.exe, the desktop board, for
 # this user only, with no administrator rights:
 #
 # - into %LOCALAPPDATA%\Programs\KanRite\bin (-Dir to choose another folder),
 #   which is added to your PATH;
-# - a Start menu shortcut, KanRite, for amdui;
+# - amd.exe and amdui.exe, copies under the 4.x names that keep working
+#   through 5.x;
+# - a Start menu shortcut, KanRite, for riteui;
 # - an entry in Settings > Apps that runs the uninstaller;
 # - amd-uninstall.ps1 beside the programs. It records that this is a release
-#   install, which is what lets `amd update` and amdui's update bar replace
+#   install, which is what lets `rite update` and riteui's update bar replace
 #   it with newer releases.
 #
 # Running it again updates an install in place. Building from source on
@@ -48,9 +50,9 @@ if ($Dir -eq "") {
     $Dir = Join-Path $env:LOCALAPPDATA "Programs\$AppName\bin"
 }
 
-# The uninstaller for an install into BIN. One script, written beside amd.exe
+# The uninstaller for an install into BIN. One script, written beside rite.exe
 # as amd-uninstall.ps1, and also what `install.ps1 -Uninstall` runs. Its
-# second line is the marker `amd update` looks for (update_apply::MARKER).
+# second line is the marker `rite update` looks for (update_apply::MARKER).
 function Uninstaller([string]$bin, [string]$method) {
     $quoted = $bin.Replace("'", "''")
     $head = @"
@@ -59,7 +61,7 @@ function Uninstaller([string]$bin, [string]$method) {
 #
 #   amd-uninstall.ps1 [-All] [-Yes]
 #
-# Removes amd.exe, amdui.exe, this script, the Start menu shortcut, the
+# Removes rite.exe, riteui.exe, this script, the Start menu shortcut, the
 # Settings > Apps entry and the folder on your PATH. Then asks whether to
 # remove your agile-md settings and data too (-All: yes without asking;
 # -Yes: never asks, so with no -All they stay). Your projects (the tickets,
@@ -73,13 +75,14 @@ $ErrorActionPreference = 'Continue'
 $removed = @()
 $running = @()
 
-foreach ($name in 'amd', 'amdui') {
+# amd.exe and amdui.exe are the 4.x names, copies kept through 5.x (ticket 309).
+foreach ($name in 'rite', 'riteui', 'amd', 'amdui') {
     $exe = Join-Path $Bin "$name.exe"
     if (Test-Path -LiteralPath $exe) {
         Remove-Item -LiteralPath $exe -Force -ErrorAction SilentlyContinue
         if (Test-Path -LiteralPath $exe) { $running += "$name.exe" } else { $removed += $exe }
     }
-    # Kept by `amd update` for rollback, and by the installer while replacing.
+    # Kept by `rite update` for rollback, and by the installer while replacing.
     foreach ($extra in "$name.exe.previous", "$name.exe.old") {
         $path = Join-Path $Bin $extra
         if (Test-Path -LiteralPath $path) {
@@ -88,7 +91,7 @@ foreach ($name in 'amd', 'amdui') {
     }
 }
 if ($running.Count -gt 0) {
-    Write-Host "Couldn't remove $($running -join ' and '): close amdui (and any amd running), then uninstall again." -ForegroundColor Yellow
+    Write-Host "Couldn't remove $($running -join ' and '): close riteui (and any rite running), then uninstall again." -ForegroundColor Yellow
     return
 }
 
@@ -117,7 +120,7 @@ if ($removed.Count -gt 0) {
     Write-Host "agile-md's programs were not in $Bin."
 }
 
-# Your own settings and data: kept unless you say. These are where amd keeps
+# Your own settings and data: kept unless you say. These are where rite keeps
 # them on Windows today ($HOME, else your user folder; XDG_* when set).
 $homeDir = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
 function Place([string]$xdg, [string]$fallback) {
@@ -213,27 +216,36 @@ New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 try {
     if ($Zip -ne "") {
         $url = $Zip
-        Copy-Item -LiteralPath $Zip -Destination (Join-Path $tmp 'amd.zip')
+        Copy-Item -LiteralPath $Zip -Destination (Join-Path $tmp 'rite.zip')
     } else {
         Write-Host "Downloading $url"
         try {
-            Invoke-WebRequest -Uri $url -OutFile (Join-Path $tmp 'amd.zip') -UseBasicParsing
+            Invoke-WebRequest -Uri $url -OutFile (Join-Path $tmp 'rite.zip') -UseBasicParsing
         } catch {
             Fail "couldn't download agile-md $Version for $target from https://github.com/$Repo/releases: check your connection, or that the version exists. ($($_.Exception.Message))"
         }
     }
-    Expand-Archive -LiteralPath (Join-Path $tmp 'amd.zip') -DestinationPath $tmp -Force
-    if (-not (Test-Path -LiteralPath (Join-Path $tmp 'amd.exe'))) {
-        Fail "the download has no amd.exe in it: $url"
+    Expand-Archive -LiteralPath (Join-Path $tmp 'rite.zip') -DestinationPath $tmp -Force
+    if (-not (Test-Path -LiteralPath (Join-Path $tmp 'rite.exe'))) {
+        Fail "the download has no rite.exe in it: $url"
     }
 
     New-Item -ItemType Directory -Force -Path $Dir | Out-Null
     $restart = @()
-    foreach ($name in 'amd', 'amdui') {
-        $new = Join-Path $tmp "$name.exe"
+    # Each program, and a copy under its 4.x name, which keeps working
+    # through 5.x and says once a day that it's now rite (ticket 309).
+    # Windows has no symlinks without developer mode, so it's a copy.
+    $installs = @()
+    foreach ($pair in @(@('rite', 'amd'), @('riteui', 'amdui'))) {
+        $new = Join-Path $tmp "$($pair[0]).exe"
         if (-not (Test-Path -LiteralPath $new)) { continue }
         # Downloaded files are marked as from the internet; these are trusted now.
         Unblock-File -LiteralPath $new
+        Copy-Item -LiteralPath $new -Destination (Join-Path $tmp "$($pair[1]).exe")
+        $installs += $pair[0], $pair[1]
+    }
+    foreach ($name in $installs) {
+        $new = Join-Path $tmp "$name.exe"
         $dest = Join-Path $Dir "$name.exe"
         $old = "$dest.old"
         # Windows won't overwrite a running .exe but will rename it: the old
@@ -253,23 +265,23 @@ try {
     Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$amd = Join-Path $Dir 'amd.exe'
-$amdui = Join-Path $Dir 'amdui.exe'
-$versionOut = & $amd --version 2>&1
+$rite = Join-Path $Dir 'rite.exe'
+$riteui = Join-Path $Dir 'riteui.exe'
+$versionOut = & $rite --version 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Fail "amd.exe was copied to $Dir but does not run on this machine: $versionOut"
+    Fail "rite.exe was copied to $Dir but does not run on this machine: $versionOut"
 }
-Write-Host "Installed amd -> $amd"
+Write-Host "Installed rite -> $rite"
 Write-Host $versionOut
 
-if (Test-Path -LiteralPath $amdui) {
-    Write-Host "Installed amdui -> $amdui   (the desktop board)"
+if (Test-Path -LiteralPath $riteui) {
+    Write-Host "Installed riteui -> $riteui   (the desktop board)"
     $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) "$AppName.lnk"
     $shell = New-Object -ComObject WScript.Shell
     $link = $shell.CreateShortcut($shortcut)
-    $link.TargetPath = $amdui
+    $link.TargetPath = $riteui
     $link.WorkingDirectory = [Environment]::GetFolderPath('UserProfile')
-    $link.IconLocation = "$amdui,0"
+    $link.IconLocation = "$riteui,0"
     $link.Description = 'KanRite: the agile-md desktop board'
     $link.Save()
     Write-Host "Added $AppName to the Start menu"
@@ -278,7 +290,7 @@ if (Test-Path -LiteralPath $amdui) {
 $uninstallScript = Join-Path $Dir 'amd-uninstall.ps1'
 Set-Content -LiteralPath $uninstallScript -Value (Uninstaller $Dir 'release') -Encoding UTF8
 
-# Settings > Apps. No DisplayVersion: `amd update` changes the version later,
+# Settings > Apps. No DisplayVersion: `rite update` changes the version later,
 # and a stale one there would be wrong.
 New-Item -Path $UninstallKey -Force | Out-Null
 $uninstallCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$uninstallScript`""
@@ -291,7 +303,7 @@ $entry = @{
     QuietUninstallString = "$uninstallCommand -Yes"
     URLInfoAbout = "https://github.com/$Repo"
 }
-if (Test-Path -LiteralPath $amdui) { $entry.DisplayIcon = "$amdui,0" }
+if (Test-Path -LiteralPath $riteui) { $entry.DisplayIcon = "$riteui,0" }
 foreach ($name in $entry.Keys) {
     New-ItemProperty -Path $UninstallKey -Name $name -Value $entry[$name] -PropertyType String -Force | Out-Null
 }
@@ -310,16 +322,16 @@ if (-not ($entries | Where-Object { $_.TrimEnd('\') -eq $Dir.TrimEnd('\') })) {
     # Tells Explorer, so new terminals see the change.
     [Environment]::SetEnvironmentVariable('AMD_INSTALL_REFRESH', 'x', 'User')
     [Environment]::SetEnvironmentVariable('AMD_INSTALL_REFRESH', $null, 'User')
-    Write-Host "Added $Dir to your PATH: open a new terminal to use amd."
+    Write-Host "Added $Dir to your PATH: open a new terminal to use rite."
 }
 if (-not (($env:Path -split ';') | Where-Object { $_.TrimEnd('\') -eq $Dir.TrimEnd('\') })) {
     $env:Path = "$env:Path;$Dir"
 }
 
 Write-Host 'Then start a project, from the folder you keep projects in:'
-Write-Host '  amd init my-project      (or amd join my-project for a team''s)'
-if (Test-Path -LiteralPath $amdui) {
-    Write-Host "For the desktop board: $AppName in the Start menu, or amdui (or amd gui)"
+Write-Host '  rite init my-project      (or rite join my-project for a team''s)'
+if (Test-Path -LiteralPath $riteui) {
+    Write-Host "For the desktop board: $AppName in the Start menu, or riteui (or rite gui)"
 }
 foreach ($name in $restart) {
     Write-Host "Note: $name was running while it was replaced; restart it to use the new version."

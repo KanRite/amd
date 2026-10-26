@@ -2,7 +2,7 @@
 //! Linux, macOS and Windows (ticket 318).
 //!
 //! ```text
-//! cargo xtask build [--release] [amd] [amdui]
+//! cargo xtask build [--release] [rite] [riteui]
 //! cargo xtask check
 //! cargo xtask install [--dir DIR]
 //! ```
@@ -21,22 +21,23 @@ const USAGE: &str = "\
 Usage: cargo xtask <task>
 
 Tasks:
-  build [--release] [amd] [amdui]
-          Build amd and amdui (both when neither is named). The desktop
+  build [--release] [rite] [riteui]
+          Build rite and riteui (both when neither is named). The desktop
           board's page is built with Trunk first; without Trunk and the
-          wasm target, amdui is skipped with a note unless it was named.
+          wasm target, riteui is skipped with a note unless it was named.
   check   Everything CI checks: the board's page, cargo fmt, clippy (also
           as WebAssembly), the unit tests and, except on Windows, the CLI
           tests (tests/test.sh).
   install [--dir DIR]
           Build a release and install it. On Linux and macOS this is
-          `install.sh --from-source`, which adds amdui's launcher and the
-          uninstaller. On Windows it copies amd.exe and amdui.exe into DIR,
-          by default Cargo's bin folder (on the PATH wherever rustup is).
+          `install.sh --from-source`, which adds riteui's launcher and the
+          uninstaller. On Windows it copies rite.exe and riteui.exe, and
+          amd.exe and amdui.exe (the old names), into DIR, by default
+          Cargo's bin folder (on the PATH wherever rustup is).
 ";
 
 const BOARD_TOOLS: &str = "\
-amdui needs Trunk and the wasm target to build its page:
+riteui needs Trunk and the wasm target to build its page:
   cargo install --locked trunk
   rustup target add wasm32-unknown-unknown
 and on Linux WebKitGTK and ALSA (libwebkit2gtk-4.1-dev libasound2-dev).";
@@ -69,21 +70,21 @@ fn main() -> ExitCode {
 }
 
 fn build(args: &[String]) -> Result {
-    let args = words(args, &["--release", "amd", "amdui"])?;
+    let args = words(args, &["--release", "rite", "riteui"])?;
     let release = args.contains("--release");
-    let amd = args.contains("amd");
-    let amdui = args.contains("amdui");
-    match (amd, amdui) {
-        (true, false) => build_amd(release),
-        (false, true) => build_amdui(release),
+    let rite = args.contains("rite");
+    let riteui = args.contains("riteui");
+    match (rite, riteui) {
+        (true, false) => build_rite(release),
+        (false, true) => build_riteui(release),
         _ => {
-            build_amd(release)?;
-            // Named, amdui's tools are required; left to the default, a
-            // machine without them still gets amd.
-            if amdui || board_tools() {
-                build_amdui(release)
+            build_rite(release)?;
+            // Named, riteui's tools are required; left to the default, a
+            // machine without them still gets rite.
+            if riteui || board_tools() {
+                build_riteui(release)
             } else {
-                eprintln!("Skipped amdui. {BOARD_TOOLS}");
+                eprintln!("Skipped riteui. {BOARD_TOOLS}");
                 Ok(())
             }
         }
@@ -105,9 +106,9 @@ fn check(args: &[String]) -> Result {
     run(cargo([
         "clippy",
         "-p",
-        "amd-ui-web",
+        "rite-ui-web",
         "-p",
-        "amd-ui-model",
+        "rite-ui-model",
         "--target",
         "wasm32-unknown-unknown",
         "--",
@@ -129,8 +130,8 @@ fn check(args: &[String]) -> Result {
 fn install(args: &[String]) -> Result {
     if !cfg!(windows) {
         // install.sh already does the rest for Linux and macOS (the
-        // replace-while-running rename, amdui's launcher, amd-uninstall and
-        // the install marker `amd update` reads), and builds through
+        // replace-while-running rename, riteui's launcher, amd-uninstall and
+        // the install marker `rite update` reads), and builds through
         // `cargo xtask build`.
         let mut sh = command("bash", ["install.sh", "--from-source"]);
         sh.args(args);
@@ -149,21 +150,29 @@ fn install(args: &[String]) -> Result {
         None => cargo_bin()?,
     };
 
-    build_amd(true)?;
+    build_rite(true)?;
     let board = board_tools();
     if board {
-        build_amdui(true)?;
+        build_riteui(true)?;
     } else {
-        eprintln!("Installing amd without amdui. {BOARD_TOOLS}");
+        eprintln!("Installing rite without riteui. {BOARD_TOOLS}");
     }
 
     fs::create_dir_all(&dir).map_err(|e| format!("couldn't create {}: {e}", dir.display()))?;
     let release = root().join("target").join("release");
-    let names: &[&str] = if board { &["amd", "amdui"] } else { &["amd"] };
+    let names: &[&str] = if board {
+        &["rite", "riteui"]
+    } else {
+        &["rite"]
+    };
     for name in names {
         let file = format!("{name}{}", env::consts::EXE_SUFFIX);
         replace(&release.join(&file), &dir.join(&file))?;
         println!("Installed {name} -> {}", dir.join(&file).display());
+        // The old name, amd.exe or amdui.exe, as a copy: Windows has no
+        // symlinks without developer mode (ticket 309).
+        let old = format!("{}{}", old_name(name), env::consts::EXE_SUFFIX);
+        replace(&release.join(&file), &dir.join(&old))?;
     }
     let on_path =
         env::var_os("PATH").is_some_and(|path| env::split_paths(&path).any(|p| same_dir(&p, &dir)));
@@ -173,16 +182,21 @@ fn install(args: &[String]) -> Result {
     Ok(())
 }
 
-fn build_amd(release: bool) -> Result {
-    run(cargo_build("amd-cli", release))
+/// The 4.x name a program keeps as a shim through 5.x (ticket 309).
+fn old_name(name: &str) -> &'static str {
+    if name == "riteui" { "amdui" } else { "amd" }
 }
 
-fn build_amdui(release: bool) -> Result {
+fn build_rite(release: bool) -> Result {
+    run(cargo_build("rite-cli", release))
+}
+
+fn build_riteui(release: bool) -> Result {
     if !board_tools() {
         return Err(BOARD_TOOLS.to_string());
     }
     board_page()?;
-    run(cargo_build("amd-ui", release))
+    run(cargo_build("rite-ui", release))
 }
 
 fn cargo_build(package: &str, release: bool) -> Command {
@@ -193,15 +207,15 @@ fn cargo_build(package: &str, release: bool) -> Command {
     cmd
 }
 
-/// The desktop board's page, compiled to WebAssembly by Trunk. amdui embeds
-/// it at compile time, so it comes before anything builds amd-ui. Always a
+/// The desktop board's page, compiled to WebAssembly by Trunk. riteui embeds
+/// it at compile time, so it comes before anything builds rite-ui. Always a
 /// release build, as in CI and the release workflow.
 fn board_page() -> Result {
     if !board_tools() {
         return Err(BOARD_TOOLS.to_string());
     }
     let mut trunk = command("trunk", ["build", "--release"]);
-    trunk.current_dir(root().join("crates").join("amd-ui-web"));
+    trunk.current_dir(root().join("crates").join("rite-ui-web"));
     run(trunk)
 }
 

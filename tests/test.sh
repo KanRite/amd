@@ -1,33 +1,33 @@
 #!/usr/bin/env bash
 #
-# End-to-end spec for the amd CLI. Run: bash tests/test.sh
+# End-to-end spec for the rite CLI. Run: bash tests/test.sh
 #
 # Builds the binary with cargo, then drives it against throwaway git repos.
 # Unit tests for the pure logic (slugify, frontmatter, templates) live in the
 # Rust sources and run under `cargo test`.
 #
-# AMD_NO_INPUT=1 keeps the run hermetic: the suite covers the non-interactive
+# RITE_NO_INPUT=1 keeps the run hermetic: the suite covers the non-interactive
 # paths, and without it a prompt would block when the suite is run from a
 # terminal.
 #
 set -uo pipefail
 
-export AMD_NO_INPUT=1
-# Keep the suite away from the real registry and theme: `amd register` writes
+export RITE_NO_INPUT=1
+# Keep the suite away from the real registry and theme: `rite register` writes
 # to the config directory, and a test must never touch the user's.
 XDG_CONFIG_HOME="$(mktemp -d)/config"
 export XDG_CONFIG_HOME
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [ -n "${AMD_BIN:-}" ]; then
-  AMD="${AMD_BIN}"
+if [ -n "${RITE_BIN:-}" ]; then
+  AMD="${RITE_BIN}"
 else
-  echo "building amd..."
+  echo "building rite..."
   (cd "${ROOT}" && cargo build --quiet) || exit 1
-  AMD="${ROOT}/target/debug/amd"
+  AMD="${ROOT}/target/debug/rite"
 fi
-[ -x "${AMD}" ] || { echo "no amd binary at ${AMD}"; exit 1; }
+[ -x "${AMD}" ] || { echo "no rite binary at ${AMD}"; exit 1; }
 
 pass=0
 fail=0
@@ -70,7 +70,7 @@ assert "periods and underscores are valid in a project name" \
 "${AMD}" deregister "$(basename "${periods_and_underscores}")" >/dev/null 2>&1
 
 echo "init: a dedicated tickets repository, found locally:"
-# Deliberately a plain, non-git directory: `amd init <project>` must not
+# Deliberately a plain, non-git directory: `rite init <project>` must not
 # require being run from inside an existing git repository — it creates or
 # finds `<project>-tickets`/`<project>-documents` as children of wherever
 # it's run from. Both pre-created here (empty, local-only git repos, no
@@ -82,7 +82,7 @@ plain_dir="$(mktemp -d)"
   && cd widgets-tickets && git config user.email t@t.co && git config user.name t )
 ( cd "${plain_dir}" && git init -q widgets-documents \
   && cd widgets-documents && git config user.email t@t.co && git config user.name t )
-assert "amd init <project> works from a plain, non-git directory" \
+assert "rite init <project> works from a plain, non-git directory" \
   bash -c "cd '${plain_dir}' && '${AMD}' init widgets >/dev/null && test -d '${plain_dir}/widgets-tickets/tasks/backlog'"
 assert "the found-locally tickets repo's own board records the project" \
   bash -c "grep -q '^project = widgets\$' '${plain_dir}/widgets-tickets/.settings'"
@@ -103,15 +103,15 @@ assert "running init again doesn't list you twice or commit again" \
 # Deregistering both proves init registered them and cleans up the registry
 # ahead of the dedicated "registration:" tests below, which check that
 # file's exact contents.
-assert "amd init registered the tickets repo" \
+assert "rite init registered the tickets repo" \
   bash -c "'${AMD}' deregister widgets-tickets | grep -q 'deregistered widgets-tickets'"
-assert "amd init registered the documents repo" \
+assert "rite init registered the documents repo" \
   bash -c "'${AMD}' deregister widgets-documents | grep -q 'deregistered widgets-documents'"
-# Ticket 263: amd init brings an archived project back. With its clones
+# Ticket 263: rite init brings an archived project back. With its clones
 # here (no origin, so no GitHub): archived turned off and both registered.
 ( cd "${plain_dir}/widgets-tickets" && printf 'archived = on\n' >> .settings \
   && git add .settings && git commit -q -m 'settings: archived on' )
-assert "amd init brings back an archived project whose clones are here" \
+assert "rite init brings back an archived project whose clones are here" \
   bash -c "cd '${plain_dir}' && out=\$('${AMD}' init widgets 2>&1) && echo \"\$out\" | grep -q '^unarchived widgets\$' \
     && ! grep -q archived widgets-tickets/.settings \
     && '${AMD}' deregister widgets-tickets | grep -q deregistered \
@@ -136,7 +136,7 @@ case "$1 $2" in
 esac
 GH
 chmod +x "${bb}/bin/gh"
-assert "amd init clones archived repositories from GitHub, unarchiving them, and never creates" \
+assert "rite init clones archived repositories from GitHub, unarchiving them, and never creates" \
   bash -c "cd '${bb}/here' && env PATH='${bb}/bin:${PATH}' GH_LOG='${bb}/gh.log' GH_REMOTE='${bb}/remote' \
       XDG_CONFIG_HOME='${bb}/config' GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t.co GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t.co \
       '${AMD}' init gizmo >/dev/null 2>&1; \
@@ -164,7 +164,7 @@ case "$1 $2" in
 esac
 GH
 chmod +x "${nw}/bin/gh"
-assert "amd init gives the repositories it creates a .gitattributes keeping text LF" \
+assert "rite init gives the repositories it creates a .gitattributes keeping text LF" \
   bash -c "cd '${nw}/here' && env PATH='${nw}/bin:${PATH}' GH_REMOTE='${nw}/remote' \
       XDG_CONFIG_HOME='${nw}/config' GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t.co GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t.co \
       '${AMD}' init sprocket >/dev/null 2>&1; \
@@ -268,15 +268,15 @@ guard_test="$(mktemp -d)"
 ( cd "${guard_test}" && git init -q code_repo \
   && cd code_repo && git config user.email t@t.co && git config user.name t \
   && git commit -q --allow-empty -m seed )
-assert "amd init <project> refuses to run inside an existing repository" \
+assert "rite init <project> refuses to run inside an existing repository" \
   bash -c "cd '${guard_test}/code_repo' && '${AMD}' init gadgets 2>&1 | grep -q 'must not be run inside a git repository'"
 assert "nothing was created by the refused attempt" \
   test ! -e "${guard_test}/gadgets-tickets" -a ! -e "${guard_test}/code_repo/gadgets-tickets" \
   -a ! -e "${guard_test}/gadgets-documents" -a ! -e "${guard_test}/code_repo/gadgets-documents"
 
 echo "join:"
-# `amd join` clones over plain git, so local bare repositories stand in for
-# GitHub: AMD_GIT_BASE points it at "${origin}/", and the URL it builds is
+# `rite join` clones over plain git, so local bare repositories stand in for
+# GitHub: RITE_GIT_BASE points it at "${origin}/", and the URL it builds is
 # "${origin}/<owner>/<project>-tickets.git". Every simulated person gets
 # their own global git config (their identity) and their own config
 # directory (their registry), the way two machines would — and so none of
@@ -288,7 +288,7 @@ person() { # name email -> prints the env assignments for that person
   local home="${people}/$1"
   mkdir -p "${home}/config" "${home}/work"
   printf '[user]\n\tname = %s\n\temail = %s\n[commit]\n\tgpgsign = false\n' "$1" "$2" >"${home}/gitconfig"
-  echo "GIT_CONFIG_GLOBAL=${home}/gitconfig XDG_CONFIG_HOME=${home}/config AMD_GIT_BASE=${origin}/"
+  echo "GIT_CONFIG_GLOBAL=${home}/gitconfig XDG_CONFIG_HOME=${home}/config RITE_GIT_BASE=${origin}/"
 }
 seed_bare() { # project kind -> a bare repo on main, seeded from the current directory
   git init -q --bare -b main "${origin}/$1/$1-$2.git"
@@ -312,7 +312,7 @@ seed_bare() { # project kind -> a bare repo on main, seeded from the current dir
 remote_settings() { git --git-dir="${origin}/acme/acme-tickets.git" show main:.settings; }
 
 ada="$(person ada ada@t.co)"
-assert "amd join clones both repositories side by side" \
+assert "rite join clones both repositories side by side" \
   bash -c "cd '${people}/ada/work' && env ${ada} '${AMD}' join acme >/dev/null \
     && test -d acme-tickets/tasks/backlog && test -d acme-documents/.git"
 assert "the joining user is added to the remote's users" \
@@ -337,7 +337,7 @@ assert "join refuses inside a git repository" \
   bash -c "cd '${people}/ada/work/acme-tickets' && env ${ada} '${AMD}' join acme 2>&1 | grep -q 'must not be run inside a git repository'"
 assert "join refuses a project with no board, leaving no partial clones" \
   bash -c "mkdir -p '${people}/ada/blank' && cd '${people}/ada/blank' \
-    && env ${ada} '${AMD}' join blank 2>&1 | grep -q \"isn't an amd project\" \
+    && env ${ada} '${AMD}' join blank 2>&1 | grep -q \"isn't an rite project\" \
     && test -z \"\$(ls -A)\""
 assert "join refuses a repository that doesn't exist, leaving nothing behind" \
   bash -c "mkdir -p '${people}/ada/missing' && cd '${people}/ada/missing' \
@@ -360,14 +360,14 @@ assert "runs from a subdir (finds repo-root board)" \
   bash -c "cd deep/nested && '${AMD}' board | grep -q TODO"
 
 echo "discovery from a project's parent directory (not itself a git repo):"
-# The amd init <project> layout: a plain folder (not a git repo itself)
-# holding {project}-tickets as a child. amd board should find it without
+# The rite init <project> layout: a plain folder (not a git repo itself)
+# holding {project}-tickets as a child. rite board should find it without
 # needing to cd one level deeper.
 plain_parent="$(mktemp -d)"
 mkdir -p "${plain_parent}/solo-tickets/tasks/backlog"
 ( cd "${plain_parent}/solo-tickets" && git init -q && git config user.email t@t.co && git config user.name t \
   && git add -A && git commit -q -m seed --allow-empty )
-assert "amd board finds the one project sibling from its parent directory" \
+assert "rite board finds the one project sibling from its parent directory" \
   bash -c "cd '${plain_parent}' && '${AMD}' board --plain | grep -q TODO"
 mkdir -p "${plain_parent}/old-code/tasks/todo" "${plain_parent}/old-code/tasks/doing" "${plain_parent}/old-code/tasks/done"
 ( cd "${plain_parent}/old-code" && git init -q )
@@ -379,7 +379,7 @@ assert "two project siblings is an ambiguity error, not a guess" \
   bash -c "cd '${plain_parent}' && '${AMD}' board 2>&1 | grep -q 'more than one project board'"
 assert "an unrelated empty directory still errors as before" \
   bash -c "cd '${nongit}' && '${AMD}' board 2>&1 | grep -q 'not inside a git repository'"
-# Unlike `amd init`, plain board discovery no longer registers anything on
+# Unlike `rite init`, plain board discovery no longer registers anything on
 # its own — nothing to clean up here any more.
 
 echo "discovery from inside a sibling repo that has no board of its own (ticket 061):"
@@ -394,20 +394,20 @@ sibling_parent="$(mktemp -d)"
 mkdir -p "${sibling_parent}/proj-tickets/tasks/backlog"
 ( cd "${sibling_parent}/proj-tickets" && git init -q && git config user.email t@t.co && git config user.name t \
   && git add -A && git commit -q -m seed --allow-empty )
-assert "amd board finds the sibling tickets repo from inside the code repo" \
+assert "rite board finds the sibling tickets repo from inside the code repo" \
   bash -c "cd '${sibling_parent}/code' && '${AMD}' board --plain | grep -q TODO"
 mkdir -p "${sibling_parent}/code/deep/nested"
 assert "...and from a subdirectory of the code repo, not just its top level" \
   bash -c "cd '${sibling_parent}/code/deep/nested' && '${AMD}' board --plain | grep -q TODO"
 mkdir -p "${sibling_parent}/second-tickets/tasks/backlog"
 ( cd "${sibling_parent}/second-tickets" && git init -q && git config user.email t@t.co && git config user.name t )
-# Two *-tickets* siblings is the `amd init`/`amd join` layout — a folder of
+# Two *-tickets* siblings is the `rite init`/`rite join` layout — a folder of
 # projects — so from a code repository it's an error naming the fix (ticket
 # 093), no longer the silent "no board" that used to hide it. Unrelated
 # boards that merely share a parent (this suite's own scratch repos in
 # /tmp) still fall back quietly; the 093 section below checks that.
-assert "two tickets siblings from inside the code repo is an error naming amd project use" \
-  bash -c "cd '${sibling_parent}/code' && '${AMD}' board --no-input 2>&1 | grep -q 'amd project use'"
+assert "two tickets siblings from inside the code repo is an error naming rite project use" \
+  bash -c "cd '${sibling_parent}/code' && '${AMD}' board --no-input 2>&1 | grep -q 'rite project use'"
 rm -rf "${sibling_parent}"
 
 lonely_parent="$(mktemp -d)"
@@ -418,7 +418,7 @@ assert "a code repo with no tickets sibling at all still falls back to today's b
 
 echo "several projects in one folder (ticket 093):"
 # acme and beta side by side, each a tickets + documents pair, plus a code
-# repository with no board of its own — the layout two `amd init`s make.
+# repository with no board of its own — the layout two `rite init`s make.
 projects="$(mktemp -d)"
 (
   set -e
@@ -427,18 +427,18 @@ projects="$(mktemp -d)"
     git init -q "${name}-tickets" && git init -q "${name}-documents"
     ( cd "${name}-tickets" && git config user.email t@t.co && git config user.name t \
       && "${AMD}" init "${name}" --local-only >/dev/null \
-      && AMD_COMMIT=0 "${AMD}" new "${name} work" >/dev/null )
+      && RITE_COMMIT=0 "${AMD}" new "${name} work" >/dev/null )
   done
   git init -q app
 )
-assert "from the folder, two projects and no choice is an error naming amd project use" \
-  bash -c "cd '${projects}' && ! '${AMD}' board --plain 2>/dev/null && '${AMD}' board 2>&1 | grep -q 'amd project use'"
+assert "from the folder, two projects and no choice is an error naming rite project use" \
+  bash -c "cd '${projects}' && ! '${AMD}' board --plain 2>/dev/null && '${AMD}' board 2>&1 | grep -q 'rite project use'"
 assert "from a code repository beside them, the same error — not a silent empty board" \
-  bash -c "cd '${projects}/app' && '${AMD}' board --no-input 2>&1 | grep -q 'amd project use'"
-assert "amd project lists both, none current yet" \
+  bash -c "cd '${projects}/app' && '${AMD}' board --no-input 2>&1 | grep -q 'rite project use'"
+assert "rite project lists both, none current yet" \
   bash -c "cd '${projects}' && out=\"\$('${AMD}' project)\" && grep -q '^  acme ' <<<\"\${out}\" \
     && grep -q '^  beta ' <<<\"\${out}\" && grep -q 'no current project' <<<\"\${out}\""
-assert "amd project use beta makes it current" \
+assert "rite project use beta makes it current" \
   bash -c "cd '${projects}' && '${AMD}' project use beta | grep -q 'current project: beta' \
     && grep -qx beta .current-project && '${AMD}' project | grep -q '^\* beta '"
 assert "the folder then shows beta's board" \
@@ -447,17 +447,17 @@ assert "so does the code repository beside it" \
   bash -c "cd '${projects}/app' && '${AMD}' board --plain | grep -q 'beta work'"
 assert "inside acme-tickets, acme's own board still wins" \
   bash -c "cd '${projects}/acme-tickets' && '${AMD}' board --plain | grep -q 'acme work'"
-assert "amd project use works from inside a tickets repository too" \
+assert "rite project use works from inside a tickets repository too" \
   bash -c "cd '${projects}/acme-tickets' && '${AMD}' project use acme >/dev/null && grep -qx acme '${projects}/.current-project'"
-assert "amd project use refuses a project that isn't here, changing nothing" \
+assert "rite project use refuses a project that isn't here, changing nothing" \
   bash -c "cd '${projects}' && '${AMD}' project use nosuch 2>&1 | grep -q \"no project 'nosuch'\" && grep -qx acme .current-project"
-assert "amd project use with no name and no terminal is a usage error" \
-  bash -c "cd '${projects}' && '${AMD}' project use 2>&1 | grep -q 'usage: amd project use'"
+assert "rite project use with no name and no terminal is a usage error" \
+  bash -c "cd '${projects}' && '${AMD}' project use 2>&1 | grep -q 'usage: rite project use'"
 assert ".current-project naming a project that's gone is a clear error" \
   bash -c "cd '${projects}' && echo gone >.current-project && '${AMD}' board 2>&1 | grep -q \"current project 'gone'\""
 rm -f "${projects}/.current-project"
-# A second `amd init` into a folder that already holds one project keeps the
-# first one current, so adding a project never changes what amd shows.
+# A second `rite init` into a folder that already holds one project keeps the
+# first one current, so adding a project never changes what rite shows.
 second="$(mktemp -d)"
 (
   set -e
@@ -469,7 +469,7 @@ second="$(mktemp -d)"
   "${AMD}" init first >/dev/null 2>&1
 )
 assert "init of a second project keeps the first current, and says how to switch" \
-  bash -c "cd '${second}' && '${AMD}' init later 2>/dev/null | grep -q 'current is still first; .amd project use later. to switch' \
+  bash -c "cd '${second}' && '${AMD}' init later 2>/dev/null | grep -q 'current is still first; .rite project use later. to switch' \
     && grep -qx first .current-project"
 assert "init with a choice already made leaves it alone" \
   bash -c "cd '${second}' && echo later >.current-project && '${AMD}' init first >/dev/null 2>&1 && grep -qx later .current-project"
@@ -480,7 +480,7 @@ rm -rf "${projects}" "${second}"
 
 echo "two clones of one board (ticket 102):"
 # A and B clone one board from a local bare origin, each with its own git
-# identity — two people. amd keeps both in step: catching up before every
+# identity — two people. rite keeps both in step: catching up before every
 # command, and replaying or undoing a change whose push lost a race.
 two="$(mktemp -d)"
 (
@@ -510,7 +510,7 @@ in_a new "Third" --no-edit >/dev/null 2>&1
 in_b board --plain >/dev/null 2>&1
 # One-shot pre-push hook in B: just before B's push, A changes the board
 # (with git's per-repository environment cleared, or A's git would act on B).
-race() { # the amd arguments A runs at the last moment
+race() { # the rite arguments A runs at the last moment
   local args
   args="$(printf '%q ' "$@")"
   cat >"${two}/b/.git/hooks/pre-push" <<HOOK
@@ -541,7 +541,7 @@ assert "...leaving B with A's ticket and its own, both on the remote" \
 assert "...and no ticket id is on the remote twice" \
   bash -c "[ -z \"\$(git -C '${two}/origin.git' ls-tree -r --name-only main | sed -n 's|.*/\([0-9]\{3\}\)-.*|\1|p' | sort | uniq -d)\" ]"
 rm -f "${two}/b/.git/hooks/pre-push"
-# Ticket 197: origin out of reach. The change waits, amd says so, and once
+# Ticket 197: origin out of reach. The change waits, rite says so, and once
 # origin is back (A having made a ticket meanwhile) B's goes on top.
 git -C "${two}/b" remote set-url origin "${two}/nowhere.git"
 assert "with origin out of reach a change waits, and listing says how many" \
@@ -554,10 +554,10 @@ assert "...and when origin is back it goes on top of what origin got meanwhile" 
     git -C '${two}/origin.git' ls-tree -r --name-only main | grep -q 'made-offline.md' \
     && [ -z \"\$(git -C '${two}/origin.git' ls-tree -r --name-only main | sed -n 's|.*/\([0-9]\{3\}\)-.*|\1|p' | sort | uniq -d)\" ]"
 in_a new "Unseen" --no-edit >/dev/null 2>&1
-assert "AMD_SYNC=0 leaves the clone alone" \
-  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; ! AMD_SYNC=0 in_b board --plain 2>/dev/null | grep -q 'Unseen'"
+assert "RITE_SYNC=0 leaves the clone alone" \
+  bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; ! RITE_SYNC=0 in_b board --plain 2>/dev/null | grep -q 'Unseen'"
 assert "cloud ticket numbering explains it needs a plan, and creates nothing" \
-  bash -c "$(declare -f in_a); two='${two}'; AMD='${AMD}'; AMD_TICKET_NUMBERING=cloud in_a new 'Cloudy' --no-edit 2>&1 | grep -q 'needs an agile-md plan' \
+  bash -c "$(declare -f in_a); two='${two}'; AMD='${AMD}'; RITE_TICKET_NUMBERING=cloud in_a new 'Cloudy' --no-edit 2>&1 | grep -q 'needs an agile-md plan' \
     && ! ls '${two}'/a/tasks/backlog/*cloudy* >/dev/null 2>&1"
 rm -rf "${two}"
 
@@ -573,11 +573,11 @@ rp="$(mktemp -d)"
     git -C "${r}" config user.email t@t.co && git -C "${r}" config user.name t && git -C "${r}" config commit.gpgsign false
   done
   git -C code commit -q --allow-empty -m "seed for ticket 107"
-  cd board && AMD_COMMIT=0 "${AMD}" init repotest --local-only >/dev/null 2>&1
-  AMD_COMMIT=0 "${AMD}" register "${rp}/code" >/dev/null 2>&1
+  cd board && RITE_COMMIT=0 "${AMD}" init repotest --local-only >/dev/null 2>&1
+  RITE_COMMIT=0 "${AMD}" register "${rp}/code" >/dev/null 2>&1
 )
-in_rp() { (cd "${rp}/board" && AMD_COMMIT=0 "${AMD}" "$@"); }
-assert "amd new --repository names the repository the work is in" \
+in_rp() { (cd "${rp}/board" && RITE_COMMIT=0 "${AMD}" "$@"); }
+assert "rite new --repository names the repository the work is in" \
   bash -c "$(declare -f in_rp); rp='${rp}'; AMD='${AMD}'; in_rp new 'Code change' --repository code --branch-type feature --no-edit >/dev/null 2>&1 \
     && grep -qx 'repository: \"code\"' '${rp}'/board/tasks/backlog/001-code-change.md"
 assert "...and refuses one that isn't cloned on this machine" \
@@ -586,7 +586,7 @@ assert "...and refuses one that isn't cloned on this machine" \
 assert "a new ticket without one leaves the field empty" \
   bash -c "$(declare -f in_rp); rp='${rp}'; AMD='${AMD}'; in_rp new 'Board chore' --no-edit >/dev/null 2>&1 \
     && grep -qx 'repository: \"\"' '${rp}'/board/tasks/backlog/002-board-chore.md"
-assert "amd set <ref> repository points an existing ticket at one" \
+assert "rite set <ref> repository points an existing ticket at one" \
   bash -c "$(declare -f in_rp); rp='${rp}'; AMD='${AMD}'; in_rp set 2 repository code 2>/dev/null | grep -q '002 repository code' \
     && grep -qx 'repository: \"code\"' '${rp}'/board/tasks/backlog/002-board-chore.md"
 assert "...an owner/name value is the same repository" \
@@ -607,10 +607,10 @@ echo "a tickets repository holds no code branches (ticket 053):"
 tr="$(mktemp -d)"
 ( cd "${tr}" && git init -q -b main demo-tickets && git init -q -b main demo-api && cd demo-tickets \
   && git config user.email t@t.co && git config user.name t && git config commit.gpgsign false \
-  && AMD_COMMIT=0 "${AMD}" init demo --local-only >/dev/null 2>&1 \
-  && XDG_CONFIG_HOME="${tr}/config" AMD_COMMIT=0 "${AMD}" register ../demo-api >/dev/null 2>&1 \
-  && AMD_COMMIT=0 "${AMD}" new 'Needs code' --branch-type feature --no-edit >/dev/null 2>&1 )
-in_tr() { (cd "${tr}/demo-tickets" && XDG_CONFIG_HOME="${tr}/config" AMD_COMMIT=0 "${AMD}" "$@"); }
+  && RITE_COMMIT=0 "${AMD}" init demo --local-only >/dev/null 2>&1 \
+  && XDG_CONFIG_HOME="${tr}/config" RITE_COMMIT=0 "${AMD}" register ../demo-api >/dev/null 2>&1 \
+  && RITE_COMMIT=0 "${AMD}" new 'Needs code' --branch-type feature --no-edit >/dev/null 2>&1 )
+in_tr() { (cd "${tr}/demo-tickets" && XDG_CONFIG_HOME="${tr}/config" RITE_COMMIT=0 "${AMD}" "$@"); }
 assert "a ticket that wants a branch but names no repository is refused, unmoved" \
   bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; ! in_tr todo 1 >/dev/null 2>&1 \
     && in_tr todo 1 2>&1 | grep -q 'names no repository' \
@@ -621,7 +621,7 @@ assert "...and it's a draft (ticket 066), so --no-branch can't move it either" \
     && grep -q '^tags: \[DRAFT\]' '${tr}'/demo-tickets/tasks/backlog/001-needs-code.md"
 
 echo "a repository and a branch type go together (ticket 066):"
-assert "amd new with a repository and no branch type makes a draft, and says why" \
+assert "rite new with a repository and no branch type makes a draft, and says why" \
   bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
     in_tr new 'Fix the api' --repository demo-api --no-edit 2>&1 | grep -q 'draft until.*no branch type' \
     && grep -q '^tags: \[DRAFT\]' '${tr}'/demo-tickets/tasks/backlog/002-fix-the-api.md"
@@ -632,24 +632,24 @@ assert "with --branch-type none it isn't a draft, has no branch name, and todo s
     && grep -q '^branch-name: \"\"' \"\$f\" \
     && out=\"\$(in_tr todo 3 2>&1)\" && ! echo \"\$out\" | grep -q 'branch' \
     && [ \"\$(git -C '${tr}/demo-api' symbolic-ref --short HEAD)\" = main ]"
-assert "amd ready refuses a draft until its repository and branch type go together" \
+assert "rite ready refuses a draft until its repository and branch type go together" \
   bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
     in_tr ready 2 2>&1 | grep -q \"can't be ready yet\" \
     && in_tr set 2 branch-type bugfix 2>&1 | grep -q '002 branch type bugfix' \
     && grep -q '^branch-name: \"bugfix/fix-the-api\"' '${tr}'/demo-tickets/tasks/backlog/002-fix-the-api.md \
     && grep -q DRAFT '${tr}'/demo-tickets/tasks/backlog/002-fix-the-api.md \
     && in_tr ready 2 >/dev/null && ! grep -q DRAFT '${tr}'/demo-tickets/tasks/backlog/002-fix-the-api.md"
-assert "amd set repository past the backlog with no branch type is refused, unchanged" \
+assert "rite set repository past the backlog with no branch type is refused, unchanged" \
   bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
     in_tr new 'Plain' --no-edit >/dev/null 2>&1 && in_tr todo 4 >/dev/null 2>&1 \
     && in_tr set 4 repository demo-api 2>&1 | grep -q 'past the backlog' \
     && grep -q '^repository: \"\"' '${tr}'/demo-tickets/tasks/todo/004-plain.md"
-assert "amd set repository on a backlog ticket with no branch type makes it a draft" \
+assert "rite set repository on a backlog ticket with no branch type makes it a draft" \
   bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
     in_tr new 'Later' --no-edit >/dev/null 2>&1 \
     && in_tr set 5 repository demo-api 2>&1 | grep -q 'draft until' \
     && grep -q DRAFT '${tr}'/demo-tickets/tasks/backlog/005-later.md"
-assert "amd set gives a todo ticket a repository and a branch type at once, in one commit (ticket 258)" \
+assert "rite set gives a todo ticket a repository and a branch type at once, in one commit (ticket 258)" \
   bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
     in_tr new 'Both at once' --no-edit >/dev/null 2>&1 && in_tr todo 6 >/dev/null 2>&1 \
     && before=\"\$(git -C '${tr}/demo-tickets' rev-list --count HEAD 2>/dev/null || echo 0)\" \
@@ -664,7 +664,7 @@ assert "...still refused when the pair would be left mismatched, changing nothin
   bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
     in_tr set 6 repository '' title 'Renamed' 2>&1 | grep -q 'past the backlog' \
     && grep -q '^title: \"Both at once\"' '${tr}'/demo-tickets/tasks/todo/006-both-at-once.md"
-assert "amd set refuses an unknown or repeated field, and requires with others" \
+assert "rite set refuses an unknown or repeated field, and requires with others" \
   bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; \
     in_tr set 6 points 3 colour red 2>&1 | grep -q \"colour isn't a field\" \
     && in_tr set 6 points 3 points 5 2>&1 | grep -q 'points is given twice' \
@@ -672,26 +672,26 @@ assert "amd set refuses an unknown or repeated field, and requires with others" 
     && ! grep -q '^points: \"3\"' '${tr}'/demo-tickets/tasks/todo/006-both-at-once.md"
 sed -i 's/^repository: \"\"/repository: \"demo-api\"/' "${tr}"/demo-tickets/tasks/todo/004-plain.md
 tr_before="$(sha1sum < "${tr}"/demo-tickets/tasks/todo/004-plain.md)"
-assert "amd check lists a ticket mismatched by hand, and changes nothing" \
+assert "rite check lists a ticket mismatched by hand, and changes nothing" \
   bash -c "$(declare -f in_tr); tr='${tr}'; AMD='${AMD}'; out=\"\$(in_tr check 2>/dev/null)\" \
     && echo \"\$out\" | grep -q '^004 todo/ Plain: it names a repository (demo-api) but no branch type' \
     && echo \"\$out\" | grep -q '^001 backlog/' && echo \"\$out\" | grep -q '^005 backlog/' && echo \"\$out\" | grep -q '^3 to settle' \
     && [ \"\$(sha1sum < '${tr}'/demo-tickets/tasks/todo/004-plain.md)\" = '${tr_before}' ]"
-assert "the branch-type completions and amd set offer none" \
+assert "the branch-type completions and rite set offer none" \
   bash -c "'${AMD}' completions fish 2>/dev/null | grep -q 'none' && '${AMD}' set --help | grep -q 'branch-type'"
 pl="$(mktemp -d)"
 assert "a board inside its code repository is unaffected" \
   bash -c "cd '${pl}' && git init -q && git config user.email t@t.co && git config user.name t \
-    && AMD_YES=1 AMD_COMMIT=0 '${AMD}' init plain --local-only >/dev/null \
-    && AMD_COMMIT=0 '${AMD}' new 'Code work' --branch-type feature --no-edit >/dev/null 2>&1 \
+    && RITE_YES=1 RITE_COMMIT=0 '${AMD}' init plain --local-only >/dev/null \
+    && RITE_COMMIT=0 '${AMD}' new 'Code work' --branch-type feature --no-edit >/dev/null 2>&1 \
     && ! grep -q DRAFT tasks/backlog/001-code-work.md \
-    && AMD_COMMIT=0 '${AMD}' check | grep -q 'inside its code repository'"
+    && RITE_COMMIT=0 '${AMD}' check | grep -q 'inside its code repository'"
 rm -rf "${pl}"
 rm -rf "${tr}"
 
 echo "register in a folder of several projects (ticket 103):"
 # acme (current) and beta side by side, and a code repository, beta-app,
-# that belongs to beta. From inside beta-app, a plain `amd register` would
+# that belongs to beta. From inside beta-app, a plain `rite register` would
 # declare it on acme, the folder's current project.
 rg="$(mktemp -d)"
 rg_env="XDG_CONFIG_HOME=${rg}/config"
@@ -702,7 +702,7 @@ rg_env="XDG_CONFIG_HOME=${rg}/config"
   for name in acme beta; do
     git init -q "${name}-tickets"
     ( cd "${name}-tickets" && git config user.email t@t.co && git config user.name t \
-      && AMD_COMMIT=0 "${AMD}" init "${name}" --local-only >/dev/null 2>&1 )
+      && RITE_COMMIT=0 "${AMD}" init "${name}" --local-only >/dev/null 2>&1 )
   done
   git init -q beta-app
   "${AMD}" project use acme >/dev/null
@@ -739,7 +739,7 @@ rm -rf "${rg}"
 
 echo "tags (ticket 122):"
 tg="$(mktemp -d)"
-tg_env="XDG_CONFIG_HOME=${tg}/config AMD_NO_INPUT=1"
+tg_env="XDG_CONFIG_HOME=${tg}/config RITE_NO_INPUT=1"
 (
   set -e
   cd "${tg}" && git init -q tags-tickets && cd tags-tickets
@@ -747,13 +747,13 @@ tg_env="XDG_CONFIG_HOME=${tg}/config AMD_NO_INPUT=1"
   env ${tg_env} "${AMD}" init tags --local-only >/dev/null 2>&1
 )
 tgb="${tg}/tags-tickets"
-assert "with nothing listed, amd tags says only the built-ins are there" \
+assert "with nothing listed, rite tags says only the built-ins are there" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags | grep -q 'only the built-in DRAFT and TRIAGE'"
 assert "...and a new ticket can't carry any other tag (ticket 167)" \
   bash -c "cd '${tgb}' && ! env ${tg_env} '${AMD}' new 'Unlisted' -t misc --no-edit 2>/dev/null \
     && env ${tg_env} '${AMD}' new 'Unlisted' -t misc --no-edit 2>&1 | grep -q \"not on the project's tag list: MISC\" \
     && ! ls tasks/backlog/*-unlisted.md 2>/dev/null"
-assert "amd tags add saves the tag in UPPERCASE in .settings" \
+assert "rite tags add saves the tag in UPPERCASE in .settings" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags add ' future ' | grep -qx 'added FUTURE' && grep -qx 'tags = FUTURE' .settings"
 assert "...refuses one already listed, ignoring case" \
   bash -c "cd '${tgb}' && ! env ${tg_env} '${AMD}' tags add Future 2>/dev/null"
@@ -762,13 +762,13 @@ assert "...and one that isn't one word" \
 assert "arbitrary tags are prevented by default once there's a list" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags | grep -q 'only listed tags: on' \
     && ! env ${tg_env} '${AMD}' new 'Prevented' -t misc --no-edit 2>/dev/null && ! ls tasks/backlog/*-prevented.md 2>/dev/null"
-assert "amd new saves tags in UPPERCASE and, with arbitrary tags allowed, warns about an unlisted one" \
+assert "rite new saves tags in UPPERCASE and, with arbitrary tags allowed, warns about an unlisted one" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags only off | grep -q 'only listed tags: off' \
     && env ${tg_env} '${AMD}' new 'Tagged' -t future -t misc --no-edit 2>&1 | grep -q \"not on the project's tag list: MISC\" \
     && grep -q '^tags: \[FUTURE,MISC\]' tasks/backlog/*-tagged.md"
-assert "amd tag matches without regard to case" \
+assert "rite tag matches without regard to case" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tag future --plain | grep -q 'Tagged'"
-assert "amd tags lists counts, and tags in use but not listed" \
+assert "rite tags lists counts, and tags in use but not listed" \
   bash -c "cd '${tgb}' && out=\$(env ${tg_env} '${AMD}' tags) && printf '%s\\n' \"\$out\" | grep -q '^FUTURE.1\$' \
     && printf '%s\\n' \"\$out\" | grep -q 'in use but not listed: MISC (1)'"
 assert "a tag a ticket carries can't be removed" \
@@ -776,7 +776,7 @@ assert "a tag a ticket carries can't be removed" \
 assert "an unused tag can" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags add old >/dev/null && env ${tg_env} '${AMD}' tags remove OLD | grep -qx 'removed OLD' \
     && grep -qx 'tags = FUTURE' .settings"
-assert "with only listed tags on, amd new refuses an unlisted tag" \
+assert "with only listed tags on, rite new refuses an unlisted tag" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' tags only on | grep -q 'only listed tags: on' \
     && ! env ${tg_env} '${AMD}' new 'Refused' -t misc --no-edit 2>/dev/null && ! ls tasks/backlog/*-refused.md 2>/dev/null \
     && env ${tg_env} '${AMD}' new 'Allowed' -t future --no-edit >/dev/null 2>&1"
@@ -794,23 +794,23 @@ assert "...and a bare destination verb takes -TAG too" \
     && printf '%s\\n' \"\$out\" | grep -q 'Allowed' && ! printf '%s\\n' \"\$out\" | grep -q 'Tagged'"
 
 echo "drafts (ticket 114):"
-assert "amd new --draft tags it DRAFT, even with only listed tags on" \
+assert "rite new --draft tags it DRAFT, even with only listed tags on" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' new 'Draft idea' --draft --no-edit >/dev/null 2>&1 \
     && grep -q '^tags: \[DRAFT\]' tasks/backlog/*-draft-idea.md"
 dr_id() { basename "$(ls "${tgb}"/tasks/backlog/*-draft-idea.md "${tgb}"/tasks/todo/*-draft-idea.md 2>/dev/null)" | cut -c1-3; }
 assert "a draft can't leave the backlog" \
-  bash -c "cd '${tgb}' && env ${tg_env} AMD_NO_BRANCH=1 '${AMD}' todo $(dr_id) 2>&1 | grep -q 'is a draft' \
+  bash -c "cd '${tgb}' && env ${tg_env} RITE_NO_BRANCH=1 '${AMD}' todo $(dr_id) 2>&1 | grep -q 'is a draft' \
     && ls tasks/backlog/*-draft-idea.md >/dev/null"
-assert "amd draft on a draft says so and changes nothing" \
+assert "rite draft on a draft says so and changes nothing" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' draft $(dr_id) | grep -q 'already a draft'"
-assert "amd ready takes it out of draft, and then it moves on" \
+assert "rite ready takes it out of draft, and then it moves on" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' ready $(dr_id) | grep -q 'is ready' \
     && ! grep -q 'DRAFT' tasks/backlog/*-draft-idea.md \
-    && env ${tg_env} AMD_NO_BRANCH=1 '${AMD}' todo $(dr_id) >/dev/null 2>&1 && ls tasks/todo/*-draft-idea.md >/dev/null"
-assert "amd tag DRAFT lists the drafts" \
+    && env ${tg_env} RITE_NO_BRANCH=1 '${AMD}' todo $(dr_id) >/dev/null 2>&1 && ls tasks/todo/*-draft-idea.md >/dev/null"
+assert "rite tag DRAFT lists the drafts" \
   bash -c "cd '${tgb}' && env ${tg_env} '${AMD}' new 'Second draft' --draft --no-edit >/dev/null 2>&1 \
     && env ${tg_env} '${AMD}' tag DRAFT | grep -q 'Second draft'"
-assert "amd tags shows the built-ins on their own line, not as unlisted" \
+assert "rite tags shows the built-ins on their own line, not as unlisted" \
   bash -c "cd '${tgb}' && out=\$(env ${tg_env} '${AMD}' tags) && printf '%s\\n' \"\$out\" | grep -q '^built in: DRAFT ([0-9]*), TRIAGE (0)\$' \
     && ! printf '%s\\n' \"\$out\" | grep -q 'not listed: .*DRAFT'"
 assert "DRAFT is built in: it can't be added to or removed from the list" \
@@ -832,7 +832,7 @@ cat <<'JSON'
 JSON
 GH
 chmod +x "${gi}/bin/gh"
-gi_env="XDG_CONFIG_HOME=${gi}/config AMD_NO_INPUT=1 GH_LOG=${gi}/gh.log PATH=${gi}/bin:${PATH}"
+gi_env="XDG_CONFIG_HOME=${gi}/config RITE_NO_INPUT=1 GH_LOG=${gi}/gh.log PATH=${gi}/bin:${PATH}"
 (
   set -e
   cd "${gi}" && git init -q -b main issues-tickets && cd issues-tickets
@@ -841,7 +841,7 @@ gi_env="XDG_CONFIG_HOME=${gi}/config AMD_NO_INPUT=1 GH_LOG=${gi}/gh.log PATH=${g
   env ${gi_env} "${AMD}" tags add bug >/dev/null
 )
 gib="${gi}/issues-tickets"
-assert "amd issues --dry-run lists what it would import and writes nothing" \
+assert "rite issues --dry-run lists what it would import and writes nothing" \
   bash -c "cd '${gib}' && out=\$(env ${gi_env} '${AMD}' issues --repo acme/web --dry-run) \
     && printf '%s\\n' \"\$out\" | grep -q '#2 -> 001 \"Dark mode\" (acme/web) \[TRIAGE\] top\$' \
     && printf '%s\\n' \"\$out\" | grep -q '#4 -> 002 \"Checkout button overlaps\" (acme/web) \[TRIAGE, BUG\] top, labels not on the tag list: needs-info' \
@@ -861,15 +861,15 @@ assert "...a second run imports nothing" \
 assert "...nor once its ticket is abandoned" \
   bash -c "cd '${gib}' && env ${gi_env} '${AMD}' abandon 1 >/dev/null 2>&1 && rm -rf tasks/archive \
     && env ${gi_env} '${AMD}' issues --repo acme/web | grep -q '2 already imported' && ! ls tasks/backlog/003-* 2>/dev/null"
-assert "--label is passed to gh, and amd import issues points at amd issues (ticket 173)" \
+assert "--label is passed to gh, and rite import issues points at rite issues (ticket 173)" \
   bash -c "cd '${gib}' && env ${gi_env} '${AMD}' issues --repo acme/web --label bug --dry-run >/dev/null \
     && tail -1 '${gi}/gh.log' | grep -q -- '--repo acme/web .*--label bug' \
-    && env ${gi_env} '${AMD}' import issues 2>&1 | grep -q 'pulled in automatically.*amd issues. checks now'"
+    && env ${gi_env} '${AMD}' import issues 2>&1 | grep -q 'pulled in automatically.*rite issues. checks now'"
 assert "TRIAGE is built in: it can't be added to or removed from the list" \
   bash -c "cd '${gib}' && ! env ${gi_env} '${AMD}' tags add triage 2>/dev/null \
     && env ${gi_env} '${AMD}' tags remove TRIAGE 2>&1 | grep -q 'built in'"
 assert "a TRIAGE ticket isn't a draft" \
-  bash -c "cd '${gib}' && env ${gi_env} AMD_NO_BRANCH=1 '${AMD}' todo 2 >/dev/null 2>&1 && ls tasks/todo/002-* >/dev/null"
+  bash -c "cd '${gib}' && env ${gi_env} RITE_NO_BRANCH=1 '${AMD}' todo 2 >/dev/null 2>&1 && ls tasks/todo/002-* >/dev/null"
 assert "a TRIAGE ticket is always top, and its priority can't be lowered (tickets 248, 252)" \
   bash -c "cd '${gib}' && grep -q '^priority: \"top\"' tasks/backlog/002-checkout-button-overlaps.md 2>/dev/null \
       || grep -q '^priority: \"top\"' tasks/todo/002-checkout-button-overlaps.md \
@@ -877,9 +877,9 @@ assert "a TRIAGE ticket is always top, and its priority can't be lowered (ticket
     && env ${gi_env} '${AMD}' triage-priority | grep -q '^top' \
     && ! env ${gi_env} '${AMD}' triage-priority low 2>/dev/null"
 assert "with no repository on GitHub, it asks for owner/repo" \
-  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' issues 2>&1 | grep -q 'amd issues --repo owner/repo'"
-assert "amd issues off and on set whether the landing page pulls them in (ticket 173)" \
-  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' issues off | grep -q 'only pulled in by .amd issues.' \
+  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' issues 2>&1 | grep -q 'rite issues --repo owner/repo'"
+assert "rite issues off and on set whether the landing page pulls them in (ticket 173)" \
+  bash -c "cd '${gib}' && env ${gi_env} '${AMD}' issues off | grep -q 'only pulled in by .rite issues.' \
     && grep -qx 'import-issues = off' .settings \
     && env ${gi_env} '${AMD}' issues on | grep -q 'landing page pulls in' && grep -qx 'import-issues = on' .settings"
 rm -rf "${gi}"
@@ -890,7 +890,7 @@ echo "the registry is scoped by project directory (ticket 095):"
 sc="$(mktemp -d)"
 (
   set -e
-  export XDG_CONFIG_HOME="${sc}/config" AMD_COMMIT=0
+  export XDG_CONFIG_HOME="${sc}/config" RITE_COMMIT=0
   for dir in one two; do
     mkdir -p "${sc}/${dir}" && cd "${sc}/${dir}"
     for r in p-tickets p-code; do
@@ -901,7 +901,7 @@ sc="$(mktemp -d)"
     ( cd p-tickets && "${AMD}" init p --local-only >/dev/null 2>&1 && "${AMD}" register ../p-code >/dev/null 2>&1 )
   done
 )
-in_sc() { (cd "${sc}/$1/p-tickets" && shift && env XDG_CONFIG_HOME="${sc}/config" AMD_COMMIT=0 "${AMD}" "$@"); }
+in_sc() { (cd "${sc}/$1/p-tickets" && shift && env XDG_CONFIG_HOME="${sc}/config" RITE_COMMIT=0 "${AMD}" "$@"); }
 assert "both folders' p-code are registered side by side" \
   bash -c "[ \"\$(grep -c '/p-code\$' '${sc}/config/agile-md/repos')\" -eq 2 ]"
 assert "a ticket in folder one makes its branch in one's own p-code" \
@@ -932,13 +932,13 @@ assert "a registered clone that's gone is dropped from the registry" \
   bash -c "! grep -q 'clones/a' '${sc}/config/agile-md/repos' && grep -q 'clones/b/shared' '${sc}/config/agile-md/repos'"
 rm -rf "${sc}"
 
-echo "amd clone fetches a project's missing repositories (ticket 108):"
+echo "rite clone fetches a project's missing repositories (ticket 108):"
 # Remotes for p-tickets and three code repositories, side by side. The
 # maker declares all three; a teammate has only cloned the tickets repo.
 cl="$(mktemp -d)"
 (
   set -e
-  export XDG_CONFIG_HOME="${cl}/maker-config" AMD_COMMIT=0
+  export XDG_CONFIG_HOME="${cl}/maker-config" RITE_COMMIT=0
   for r in p-tickets code extra more; do
     git init -q --bare -b main "${cl}/remote/${r}.git"
     git clone -q "${cl}/remote/${r}.git" "${cl}/maker/${r}" 2>/dev/null
@@ -955,11 +955,11 @@ cl="$(mktemp -d)"
   mkdir -p "${cl}/mate" && git clone -q "${cl}/remote/p-tickets.git" "${cl}/mate/p-tickets" 2>/dev/null
   git -C "${cl}/mate/p-tickets" config user.email m@t.co && git -C "${cl}/mate/p-tickets" config user.name m
 )
-in_cl() { (cd "${cl}/mate/p-tickets" && env XDG_CONFIG_HOME="${cl}/mate-config" AMD_COMMIT=0 "${AMD}" "$@"); }
-assert "amd clone lists the declared repositories that aren't here" \
+in_cl() { (cd "${cl}/mate/p-tickets" && env XDG_CONFIG_HOME="${cl}/mate-config" RITE_COMMIT=0 "${AMD}" "$@"); }
+assert "rite clone lists the declared repositories that aren't here" \
   bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; out=\"\$(in_cl clone 2>/dev/null)\" \
     && grep -qx '  code' <<<\"\${out}\" && grep -qx '  extra' <<<\"\${out}\" && grep -qx '  more' <<<\"\${out}\""
-assert "amd clone <name> clones it beside the tickets repo, from the same place" \
+assert "rite clone <name> clones it beside the tickets repo, from the same place" \
   bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl clone code 2>/dev/null \
     | grep -q \"cloned code into ${cl}/mate/code (from ${cl}/remote/code.git)\" \
     && [ \"\$(git -C '${cl}/mate/code' log -1 --format=%s)\" = 'seed for ticket 108' ]"
@@ -978,13 +978,13 @@ assert "a directory already in the way is refused, and left alone" \
   bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl clone extra 2>&1 | grep -q 'already exists' \
     && test -d '${cl}/mate/extra' && test ! -e '${cl}/mate/extra/.git'"
 rmdir "${cl}/mate/extra"
-assert "amd clone --all clones every one still missing" \
+assert "rite clone --all clones every one still missing" \
   bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl clone --all >/dev/null 2>&1 \
     && test -d '${cl}/mate/extra/.git' && test -d '${cl}/mate/more/.git' \
     && in_cl clone 2>/dev/null | grep -q 'every declared repository is cloned here'"
 rm -rf "${cl}"
 
-echo "amd repo new makes a repository for the project (ticket 228):"
+echo "rite repo new makes a repository for the project (ticket 228):"
 # A tickets repository cloned from a local bare remote: new repositories go
 # beside that remote, as they would beside a GitHub one.
 rn="$(mktemp -d)"
@@ -1005,8 +1005,8 @@ rn="$(mktemp -d)"
   git -C "${rn}/seed" -c user.email=t@t.co -c user.name=t commit -q --allow-empty -m "already here"
   git -C "${rn}/seed" push -q origin HEAD:main 2>/dev/null
 )
-in_rn() { (cd "${rn}/work/p-tickets" && env XDG_CONFIG_HOME="${rn}/config" AMD_NO_BRANCH=1 "${AMD}" "$@"); }
-assert "amd repo new --for makes it beside the remote, clones it beside the tickets repository, with a README" \
+in_rn() { (cd "${rn}/work/p-tickets" && env XDG_CONFIG_HOME="${rn}/config" RITE_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "rite repo new --for makes it beside the remote, clones it beside the tickets repository, with a README" \
   bash -c "$(declare -f in_rn); rn='${rn}'; AMD='${AMD}'; in_rn repo new p-payments --for 1 2>/dev/null \
     | grep -q \"created p-payments at ${rn}/work/p-payments\" \
     && [ -d '${rn}/remote/p-payments.git' ] && [ -f '${rn}/work/p-payments/README.md' ] \
@@ -1044,7 +1044,7 @@ st_env="XDG_CONFIG_HOME=${st}/config"
     git -C "${r}" config user.email t@t.co && git -C "${r}" config user.name t && git -C "${r}" config commit.gpgsign false
   done
   cd proj-tickets
-  AMD_COMMIT=0 "${AMD}" init proj --local-only >/dev/null 2>&1
+  RITE_COMMIT=0 "${AMD}" init proj --local-only >/dev/null 2>&1
   echo "repos = old-repo" >>.settings
   git add -A && git commit -q -m "seed for ticket 111"
   mkdir -p ../proj-documents/.settings
@@ -1068,10 +1068,10 @@ assert "...once only: a repository deregistered stays off, though documents stil
     && env ${st_env} '${AMD}' deregister docs-repo >/dev/null 2>&1 \
     && env ${st_env} '${AMD}' board --plain >/dev/null 2>&1 \
     && grep -qx 'repos = old-repo' .settings"
-assert "amd wip-limit is committed" \
+assert "rite wip-limit is committed" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' wip-limit 3 >/dev/null 2>&1 \
     && grep -qx 'wip-limit = 3' .settings && git log -1 --format=%s | grep -q '^settings: wip-limit'"
-assert "amd shared-documents names the shared documents repository, committed (ticket 129)" \
+assert "rite shared-documents names the shared documents repository, committed (ticket 129)" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' shared-documents org-documents >/dev/null 2>&1 \
     && grep -qx 'shared-documents = org-documents' .settings \
     && git log -1 --format=%s | grep -q '^settings: shared-documents' \
@@ -1079,10 +1079,10 @@ assert "amd shared-documents names the shared documents repository, committed (t
 assert "...and --clear removes it" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' shared-documents --clear >/dev/null 2>&1 \
     && ! grep -q '^shared-documents' .settings"
-assert "amd register declares the repository in the tickets .settings, committed" \
+assert "rite register declares the repository in the tickets .settings, committed" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' register '${st}/code' >/dev/null 2>&1 \
     && grep -q '^repos = .*code' .settings && git log -1 --format=%s | grep -qx 'register: code'"
-assert "amd register --remove undeclares it for everyone, committed" \
+assert "rite register --remove undeclares it for everyone, committed" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' register --remove code 2>&1 | grep -q 'no longer part of the project' \
     && ! grep -q '^repos = .*code' .settings && git log -1 --format=%s | grep -qx 'unregister: code' && test -d '${st}/code'"
 assert "...and refuses a repository that isn't declared" \
@@ -1100,7 +1100,7 @@ assert "creates tasks/backlog/001-first-task.md (new work starts in the backlog)
 assert "title in frontmatter" grep -q '^title: "First task"$' tasks/backlog/001-first-task.md
 assert "tags in frontmatter, in UPPERCASE (ticket 122)" grep -q '^tags: \[X,Y\]$' tasks/backlog/002-second-task.md
 assert "a new ticket has priority low" grep -q '^priority: "low"$' tasks/backlog/002-second-task.md
-assert "amd set priority changes it" \
+assert "rite set priority changes it" \
   bash -c "'${AMD}' set 2 priority high | grep -q 'priority high' && grep -q '^priority: \"high\"\$' tasks/backlog/002-second-task.md"
 assert "an invalid priority is refused" \
   bash -c "'${AMD}' set 2 priority urgent 2>&1 | grep -q 'low, medium, high' && grep -q '^priority: \"high\"\$' tasks/backlog/002-second-task.md"
@@ -1145,8 +1145,8 @@ assert "the branch name comes from the type and the title" \
   grep -q '^branch-name: "bugfix/crash-on-save"$' tasks/backlog/006-crash-on-save.md
 assert "an unknown branch type is rejected, listing the valid ones" \
   bash -c "'${AMD}' new 'Nope' --branch-type feat 2>&1 | grep -q \"unknown branch type 'feat'\""
-assert "AMD_BRANCH_TYPES overrides the list" \
-  bash -c "AMD_BRANCH_TYPES='spike,chore' '${AMD}' new 'Try it' --branch-type spike >/dev/null && grep -q '^branch-name: \"spike/try-it\"\$' tasks/backlog/007-try-it.md"
+assert "RITE_BRANCH_TYPES overrides the list" \
+  bash -c "RITE_BRANCH_TYPES='spike,chore' '${AMD}' new 'Try it' --branch-type spike >/dev/null && grep -q '^branch-name: \"spike/try-it\"\$' tasks/backlog/007-try-it.md"
 assert "there is one ticket template now" \
   bash -c "'${AMD}' templates | grep -q '^ticket' && ! '${AMD}' templates | grep -q '^admin'"
 assert "the board shows the branch type" \
@@ -1177,7 +1177,7 @@ assert "an invalid --branch is rejected" \
 git checkout -q main 2>/dev/null || git checkout -q master
 assert "doing is a plain move now: no branch effect at all" \
   bash -c "'${AMD}' doing 1 >/dev/null && test -f tasks/doing/001-first-task.md"
-AMD_COMMIT=0 "${AMD}" "done" 1 >/dev/null
+RITE_COMMIT=0 "${AMD}" "done" 1 >/dev/null
 assert "done: doing -> done" test -f tasks/done/001-first-task.md
 assert "moved via git (rename tracked)" bash -c 'git status --porcelain | grep -q "^R"'
 # The move message comes from the CLI now, not from the library (ADR-0004).
@@ -1186,22 +1186,22 @@ assert "a move reports where the ticket went" \
 assert "a ticket can't skip a column" \
   bash -c "'${AMD}' done 2 2>&1 | grep -q 'one column at a time' && test -f tasks/todo/002-second-task.md"
 assert "moving into the same column fails" bash -c "! '${AMD}' done 1"
-assert "amd start no longer exists" bash -c "! '${AMD}' start 1 2>/dev/null"
+assert "rite start no longer exists" bash -c "! '${AMD}' start 1 2>/dev/null"
 
 echo "destination verbs (move + list, ticket 002):"
-assert "amd todo <ref> moves it to todo/" \
+assert "rite todo <ref> moves it to todo/" \
   bash -c "'${AMD}' todo 4 >/dev/null && test -f tasks/todo/004-address-form.md"
-assert "amd doing <ref> moves it to doing/" \
+assert "rite doing <ref> moves it to doing/" \
   bash -c "'${AMD}' doing 4 >/dev/null && test -f tasks/doing/004-address-form.md"
-assert "amd backlog <ref> moves it back to backlog/, a column at a time" \
+assert "rite backlog <ref> moves it back to backlog/, a column at a time" \
   bash -c "'${AMD}' todo 4 --no-branch >/dev/null && '${AMD}' backlog 4 >/dev/null && test -f tasks/backlog/004-address-form.md"
-assert "amd ls is gone: the bare destination verbs list (ticket 050)" \
+assert "rite ls is gone: the bare destination verbs list (ticket 050)" \
   bash -c "! '${AMD}' ls >/dev/null 2>&1 && ! '${AMD}' list >/dev/null 2>&1"
 assert "an unknown destination names what is valid" \
   bash -c "'${AMD}' retest-tui 4 2>&1 | grep -q \"'retest-tui' is not a column, 'abandon', or an epic on this board\""
 assert "the error lists the columns and says there are no epics" \
   bash -c "'${AMD}' retest-tui 4 2>&1 | grep -q 'columns: backlog, todo, doing, done; epics: none'"
-assert "amd back no longer exists" bash -c "! '${AMD}' back 4 2>/dev/null"
+assert "rite back no longer exists" bash -c "! '${AMD}' back 4 2>/dev/null"
 
 echo "refs + ids:"
 "${AMD}" todo second >/dev/null
@@ -1217,7 +1217,7 @@ echo "templates:"
 assert "templates says where each ticket type comes from" \
   bash -c "'${AMD}' templates | grep -q '^ticket  *built-in$'"
 assert "unknown template fails with a hint" \
-  bash -c "'${AMD}' new 'Nope' --template nope 2>&1 | grep -q 'amd templates'"
+  bash -c "'${AMD}' new 'Nope' --template nope 2>&1 | grep -q 'rite templates'"
 assert "eject writes an editable copy into the board" \
   bash -c "'${AMD}' templates eject ticket >/dev/null && test -f tasks/templates/ticket.md.jinja"
 assert "eject refuses to clobber without --force" \
@@ -1264,9 +1264,9 @@ assert "init creates an archive that keeps itself out of git" \
 "${AMD}" new "Bin this one" >/dev/null
 git add -A; git commit -qm junkable
 assert "abandon takes a ticket off the board" \
-  bash -c "AMD_COMMIT=0 '${AMD}' abandon bin-this-one | grep -q 'archived'"
+  bash -c "RITE_COMMIT=0 '${AMD}' abandon bin-this-one | grep -q 'archived'"
 assert "the ticket is in the archive" test -f tasks/archive/*-bin-this-one.md
-assert "amd abandon with no ref lists the archive" \
+assert "rite abandon with no ref lists the archive" \
   bash -c "'${AMD}' abandon | grep -q 'Bin this one'"
 assert "the board no longer shows it" \
   bash -c "! '${AMD}' board --plain | grep -q 'Bin this one'"
@@ -1315,23 +1315,23 @@ assert "a new ticket is unassigned" \
 "${AMD}" new "Assigned at creation" -a alex >/dev/null
 assert "--assignee sets it at creation" \
   bash -c "grep -q '^assignee: \"alex\"$' tasks/backlog/*-assigned-at-creation.md"
-assert "amd assign sets it afterwards" \
+assert "rite assign sets it afterwards" \
   bash -c "'${AMD}' assign 1 sam >/dev/null && grep -q '^assignee: \"sam\"$' tasks/*/001-first-task.md"
-assert "amd assign with no name clears it" \
+assert "rite assign with no name clears it" \
   bash -c "'${AMD}' assign 1 >/dev/null && grep -q '^assignee: \"\"$' tasks/*/001-first-task.md"
 assert "@me resolves to the git user" \
   bash -c "'${AMD}' assign 1 @me >/dev/null && grep -q '^assignee: \"t\"$' tasks/*/001-first-task.md"
 assert "the board shows the assignee" bash -c "'${AMD}' board --plain | grep -q '@t'"
 # Ticket 254: several people. One is written as before; two or more keep
 # `assignee` as the first and add an `assignees` list.
-assert "amd assign with two names assigns both, the first as assignee" \
+assert "rite assign with two names assigns both, the first as assignee" \
   bash -c "'${AMD}' assign 1 sam jo >/dev/null && grep -q '^assignee: \"sam\"$' tasks/*/001-first-task.md \
     && grep -q '^assignees: \[\"sam\",\"jo\"\]$' tasks/*/001-first-task.md"
 assert "the board shows every assignee" bash -c "'${AMD}' board --plain | grep -q '@sam @jo'"
-assert "amd assign --add adds after them" \
+assert "rite assign --add adds after them" \
   bash -c "'${AMD}' assign 1 --add ann | grep -q 'assigned to sam, jo, ann' \
     && grep -q '^assignees: \[\"sam\",\"jo\",\"ann\"\]$' tasks/*/001-first-task.md"
-assert "amd assign --remove takes the first off and the next leads" \
+assert "rite assign --remove takes the first off and the next leads" \
   bash -c "'${AMD}' assign 1 --remove SAM >/dev/null && grep -q '^assignee: \"jo\"$' tasks/*/001-first-task.md \
     && grep -q '^assignees: \[\"jo\",\"ann\"\]$' tasks/*/001-first-task.md"
 assert "down to one person, the list goes" \
@@ -1339,7 +1339,7 @@ assert "down to one person, the list goes" \
     && ! grep -q '^assignees:' tasks/*/001-first-task.md"
 "${AMD}" new "Shared work" -a @me -a jo --no-edit >/dev/null
 shared="$(ls tasks/backlog/*-shared-work.md)"
-assert "amd new -a twice assigns both" \
+assert "rite new -a twice assigns both" \
   bash -c "grep -q '^assignee: \"t\"$' '${shared}' && grep -q '^assignees: \[\"t\",\"jo\"\]$' '${shared}'"
 # Someone else's lease: every assignee may still write the ticket.
 sed -i 's/^assignee: "t"$/assignee: "t"\nlocked-by: "jo@elsewhere.co"\nlocked-until: "2999-01-01T00:00:00Z"/' "${shared}"
@@ -1353,25 +1353,25 @@ sed -i '/^locked-by:/d; /^locked-until:/d' "${shared}"
 # else is allowed, with a warning, and a board with no list never warns.
 as_list="$(mktemp -d)"
 ( cd "${as_list}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_COMMIT=0 "${AMD}" init listed --local-only >/dev/null 2>&1 \
-  && AMD_COMMIT=0 "${AMD}" new "Who does it" --no-edit >/dev/null 2>&1 )
-in_list() { (cd "${as_list}" && AMD_COMMIT=0 "${AMD}" "$@"); }
+  && RITE_COMMIT=0 "${AMD}" init listed --local-only >/dev/null 2>&1 \
+  && RITE_COMMIT=0 "${AMD}" new "Who does it" --no-edit >/dev/null 2>&1 )
+in_list() { (cd "${as_list}" && RITE_COMMIT=0 "${AMD}" "$@"); }
 assert "assigning one of the project's users doesn't warn" \
   bash -c "$(declare -f in_list); as_list='${as_list}'; AMD='${AMD}'; [ -z \"\$(in_list assign 1 t 2>&1 >/dev/null)\" ] \
     && grep -q '^assignee: \"t\"$' '${as_list}'/tasks/backlog/001-who-does-it.md"
 assert "assigning someone else works, and warns they aren't a user" \
   bash -c "$(declare -f in_list); as_list='${as_list}'; AMD='${AMD}'; in_list assign 1 stranger 2>&1 >/dev/null \
-    | grep -q \"warning: stranger isn't one of this project's users — .amd join. adds them\" \
+    | grep -q \"warning: stranger isn't one of this project's users — .rite join. adds them\" \
     && grep -q '^assignee: \"stranger\"$' '${as_list}'/tasks/backlog/001-who-does-it.md"
-assert "...and so does amd new --assignee" \
+assert "...and so does rite new --assignee" \
   bash -c "$(declare -f in_list); as_list='${as_list}'; AMD='${AMD}'; in_list new 'For a stranger' --assignee stranger --no-edit 2>&1 >/dev/null \
     | grep -q \"stranger isn't one of this project's users\""
-assert "amd assign --clear unassigns" \
+assert "rite assign --clear unassigns" \
   bash -c "$(declare -f in_list); as_list='${as_list}'; AMD='${AMD}'; in_list assign 1 --clear | grep -q '001 unassigned' \
     && grep -q '^assignee: \"\"$' '${as_list}'/tasks/backlog/001-who-does-it.md"
 assert "a board with no users list never warns" \
   bash -c "sed -i '/^users = /d' '${as_list}/.settings' \
-    && [ -z \"\$(cd '${as_list}' && AMD_COMMIT=0 '${AMD}' assign 1 anyone 2>&1 >/dev/null)\" ]"
+    && [ -z \"\$(cd '${as_list}' && RITE_COMMIT=0 '${AMD}' assign 1 anyone 2>&1 >/dev/null)\" ]"
 rm -rf "${as_list}"
 
 echo "registration:"
@@ -1380,10 +1380,10 @@ tmp_name="$(basename "${tmp}")"
 # init --local-only) — reused here specifically because it's a real board
 # that's confirmed *not* currently registered, to check that merely running
 # a board-resolving command doesn't silently re-add it.
-assert "amd board no longer registers anything on its own" \
+assert "rite board no longer registers anything on its own" \
   bash -c "cd '${periods_and_underscores}' && '${AMD}' board >/dev/null; \
     ! grep -q \"$(basename "${periods_and_underscores}")\$\" \"\${XDG_CONFIG_HOME}/agile-md/repos\" 2>/dev/null"
-assert "amd register declares the repo for the project and registers it locally" \
+assert "rite register declares the repo for the project and registers it locally" \
   bash -c "'${AMD}' register | grep -q 'registered' \
     && grep -qE \"^repos = .*${tmp_name}\" .settings \
     && grep -q \"${tmp_name}\$\" \"\${XDG_CONFIG_HOME}/agile-md/repos\""
@@ -1391,7 +1391,7 @@ assert "registering the same path again is a local no-op, not an error" \
   bash -c "'${AMD}' register | grep -q 'already registered on this machine'"
 assert "a non-repository is refused" \
   bash -c "'${AMD}' register '${nongit}' 2>&1 | grep -q 'not a git repository'"
-assert "amd deregister takes a declared repository off the project and this machine (ticket 120)" \
+assert "rite deregister takes a declared repository off the project and this machine (ticket 120)" \
   bash -c "'${AMD}' deregister \"${tmp_name}\" | grep -q 'no longer part of the project' \
     && ! grep -qE \"^repos = .*${tmp_name}\" .settings \
     && ! grep -q \"${tmp_name}\$\" \"\${XDG_CONFIG_HOME}/agile-md/repos\""
@@ -1399,7 +1399,7 @@ assert "deregistering what's neither declared nor registered fails" \
   bash -c "! '${AMD}' deregister nope"
 
 echo "aliases (removed, ticket 097):"
-assert "amd alias is no longer a command" \
+assert "rite alias is no longer a command" \
   bash -c "! '${AMD}' alias somerepo somename >/dev/null 2>&1"
 
 echo "related tickets:"
@@ -1412,16 +1412,16 @@ assert "the other end is linked back" \
   bash -c "grep -qE '^related: \[0[0-9]+\]$' tasks/*/001-first-task.md"
 assert "an unknown related ref is rejected at creation" \
   bash -c "! '${AMD}' new 'Dangling' --related 99"
-assert "amd link relates two tickets both ways" \
+assert "rite link relates two tickets both ways" \
   bash -c "'${AMD}' link 2 depends-on-the-first >/dev/null \
     && grep -q 'related: \[0' tasks/*/002-second-task.md \
     && grep -q '002' tasks/backlog/*-depends-on-the-first.md"
-assert "amd link is idempotent" \
+assert "rite link is idempotent" \
   bash -c "'${AMD}' link 2 depends-on-the-first | grep -q 'already relates to'"
 assert "a task cannot be related to itself" \
   bash -c "'${AMD}' link 2 2 2>&1 | grep -q \"can't be linked to itself\""
 "${AMD}" new "One way only" >/dev/null
-assert "amd link --one-way leaves the other end alone" \
+assert "rite link --one-way leaves the other end alone" \
   bash -c "'${AMD}' link 2 one-way --one-way >/dev/null && ! grep -q '002' tasks/backlog/*-one-way-only.md"
 assert "a ticket with no branch carries the list too" \
   bash -c "grep -q '^related: \[\]$' tasks/*/*-assigned-at-creation.md"
@@ -1429,7 +1429,7 @@ assert "a ticket with no branch carries the list too" \
 echo "typed links (ticket 207):"
 "${AMD}" new "Link blocker" >/dev/null
 "${AMD}" new "Link blocked" >/dev/null
-assert "amd link --type requires records the opposite on the other ticket" \
+assert "rite link --type requires records the opposite on the other ticket" \
   bash -c "'${AMD}' link link-blocker link-blocked --type requires >/dev/null \
     && grep -q '^links: \[requires:0' tasks/backlog/*-link-blocker.md \
     && grep -q '^links: \[required-by:0' tasks/backlog/*-link-blocked.md"
@@ -1440,7 +1440,7 @@ assert "a ticket may take several links of different types" \
     && grep -q '^links: \[requires:0[0-9]*,supersedes:0' tasks/backlog/*-link-blocker.md"
 assert "an unknown link type is refused" \
   bash -c "! '${AMD}' link link-blocker link-blocked --type befriends 2>/dev/null"
-assert "amd link --remove takes it away from both tickets" \
+assert "rite link --remove takes it away from both tickets" \
   bash -c "'${AMD}' link link-blocker link-blocked --type requires --remove >/dev/null \
     && ! grep -q 'requires:' tasks/backlog/*-link-blocker.md \
     && ! grep -q 'required-by:' tasks/backlog/*-link-blocked.md"
@@ -1452,16 +1452,16 @@ assert "child-of sets the parent and lists the child" \
 echo "done waits for required tickets and children (ticket 213):"
 dw="$(mktemp -d)"
 ( cd "${dw}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init waits --local-only >/dev/null \
+  && RITE_YES=1 "${AMD}" init waits --local-only >/dev/null \
   && for t in Feature Dependency Child; do "${AMD}" new "$t" >/dev/null; done \
   && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 3 1 --type child-of >/dev/null \
-  && AMD_NO_BRANCH=1 "${AMD}" todo 1 >/dev/null && "${AMD}" doing 1 >/dev/null )
-in_dw() { (cd "${dw}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+  && RITE_NO_BRANCH=1 "${AMD}" todo 1 >/dev/null && "${AMD}" doing 1 >/dev/null )
+in_dw() { (cd "${dw}" && RITE_NO_BRANCH=1 "${AMD}" "$@"); }
 assert "done is refused while a required ticket and a child aren't done, naming them" \
   bash -c "$(declare -f in_dw); dw='${dw}'; AMD='${AMD}'; out=\$(in_dw done 1 2>&1); [ \$? -ne 0 ] \
     && printf '%s' \"\$out\" | grep -q '002 (required, in backlog), 003 (a child, in backlog) aren.t done' \
     && test -f '${dw}'/tasks/doing/001-feature.md"
-assert "amd link --replace changes a link's type on both tickets" \
+assert "rite link --replace changes a link's type on both tickets" \
   bash -c "$(declare -f in_dw); dw='${dw}'; AMD='${AMD}'; in_dw link 1 2 --replace requires --type relates-to >/dev/null \
     && grep -q '^related: \[002\]' '${dw}'/tasks/doing/001-feature.md \
     && grep -q '^related: \[001\]' '${dw}'/tasks/backlog/002-dependency.md \
@@ -1478,65 +1478,65 @@ rm -rf "${dw}"
 echo "requires and the sprint start check (ticket 214):"
 rq="$(mktemp -d)"
 ( cd "${rq}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init reqs --local-only >/dev/null \
+  && RITE_YES=1 "${AMD}" init reqs --local-only >/dev/null \
   && "${AMD}" new "Base" >/dev/null && "${AMD}" new "Other" >/dev/null \
   && "${AMD}" new "Top" --requires 1 --requires other >/dev/null )
-in_rq() { (cd "${rq}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
-assert "amd new --requires links both ends in the new ticket's own commit" \
+in_rq() { (cd "${rq}" && RITE_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "rite new --requires links both ends in the new ticket's own commit" \
   bash -c "grep -q '^links: \[requires:001,requires:002\]' '${rq}'/tasks/backlog/003-top.md \
     && grep -q '^links: \[required-by:003\]' '${rq}'/tasks/backlog/001-base.md \
     && [ \"\$(git -C '${rq}' log --format=%s -1)\" = 'new: 003 \"Top\"' ] \
     && git -C '${rq}' show --stat HEAD | grep -q '001-base.md'"
-assert "amd new --requires with an unknown ticket creates nothing" \
+assert "rite new --requires with an unknown ticket creates nothing" \
   bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; ! in_rq new 'Nope' --requires 99 2>/dev/null \
     && ! ls '${rq}'/tasks/backlog/*-nope.md 2>/dev/null"
-assert "amd set requires makes the list exactly that, both ends, and empty clears" \
+assert "rite set requires makes the list exactly that, both ends, and empty clears" \
   bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq set 3 requires 2 >/dev/null \
     && grep -q '^links: \[requires:002\]' '${rq}'/tasks/backlog/003-top.md \
     && ! grep -q 'required-by' '${rq}'/tasks/backlog/001-base.md \
     && in_rq set 3 requires '' >/dev/null && ! grep -q 'requires:' '${rq}'/tasks/backlog/003-top.md"
-( cd "${rq}" && AMD_NO_BRANCH=1 "${AMD}" set 3 requires 1 >/dev/null && "${AMD}" group sprint s1 >/dev/null \
+( cd "${rq}" && RITE_NO_BRANCH=1 "${AMD}" set 3 requires 1 >/dev/null && "${AMD}" group sprint s1 >/dev/null \
   && "${AMD}" set 3 points 3 >/dev/null && "${AMD}" s1 3 >/dev/null )
-assert "amd group start is refused while a sprint ticket requires one outside it, naming it" \
+assert "rite group start is refused while a sprint ticket requires one outside it, naming it" \
   bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; out=\$(in_rq group start s1 2>&1); [ \$? -ne 0 ] \
     && printf '%s' \"\$out\" | grep -q 's1 can.t start: 003 requires 001 (backlog)' \
     && grep -q '^started: \"pending\"' '${rq}'/tasks/backlog/s1/_group.md"
 assert "with the required ticket in the sprint, it starts" \
   bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq set 1 points 2 >/dev/null && in_rq s1 1 >/dev/null \
     && in_rq group start s1 | grep -q 's1 started'"
-( cd "${rq}" && AMD_NO_BRANCH=1 "${AMD}" new "Loner" >/dev/null && "${AMD}" new "Friend" >/dev/null \
+( cd "${rq}" && RITE_NO_BRANCH=1 "${AMD}" new "Loner" >/dev/null && "${AMD}" new "Friend" >/dev/null \
   && "${AMD}" link 3 5 >/dev/null )
-assert "amd tree of a ticket in a started sprint says the tree leaves it out" \
+assert "rite tree of a ticket in a started sprint says the tree leaves it out" \
   bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq tree 3 2>&1 | grep -q 'started sprint s1, which the tree leaves out'"
-assert "amd tree shows the started sprint's ticket as a stub where something links to it" \
+assert "rite tree shows the started sprint's ticket as a stub where something links to it" \
   bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq tree 5 | grep -q '^└ ─ ─ 003 Top · in started sprint s1\$'"
-assert "amd tree of a ticket with no links says so" \
+assert "rite tree of a ticket with no links says so" \
   bash -c "$(declare -f in_rq); rq='${rq}'; AMD='${AMD}'; in_rq tree 4 | grep -qx '004 requires nothing and has no related tickets'"
 rm -rf "${rq}"
 tr="$(mktemp -d)"
 ( cd "${tr}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init trees --local-only >/dev/null \
+  && RITE_YES=1 "${AMD}" init trees --local-only >/dev/null \
   && for t in Alpha Beta Gamma Delta; do "${AMD}" new "$t" >/dev/null; done \
   && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 2 3 --type requires >/dev/null \
   && "${AMD}" link 1 4 >/dev/null \
-  && for c in todo doing "done"; do AMD_NO_BRANCH=1 "${AMD}" "$c" 3 >/dev/null; done )
-assert "amd tree --done draws requires solid and related dashed, with where each is and what waits" \
+  && for c in todo doing "done"; do RITE_NO_BRANCH=1 "${AMD}" "$c" 3 >/dev/null; done )
+assert "rite tree --done draws requires solid and related dashed, with where each is and what waits" \
   bash -c "cd '${tr}' && [ \"\$('${AMD}' tree 4 --done)\" = \"\$(printf '%s\\n' \\
     '001 Alpha · backlog  waits on 002' \\
     '├──── 002 Beta · backlog' \\
     '│     └──── 003 Gamma · done ✓' \\
     '└ ─ ─ 004 Delta · backlog  ◀')\" ]"
-assert "amd tree leaves done tickets out without --done" \
+assert "rite tree leaves done tickets out without --done" \
   bash -c "cd '${tr}' && [ \"\$('${AMD}' tree 4)\" = \"\$(printf '%s\\n' \\
     '001 Alpha · backlog  waits on 002' \\
     '├──── 002 Beta · backlog' \\
     '└ ─ ─ 004 Delta · backlog  ◀')\" ]"
-assert "amd tree of a ticket linked only to done ones says they're done" \
+assert "rite tree of a ticket linked only to done ones says they're done" \
   bash -c "cd '${tr}' && '${AMD}' new Epsilon >/dev/null && '${AMD}' link 5 3 >/dev/null \
-    && '${AMD}' tree 5 | grep -qx 'Everything 005 is linked to is done (amd tree 005 --done shows it)'"
+    && '${AMD}' tree 5 | grep -qx 'Everything 005 is linked to is done (rite tree 005 --done shows it)'"
 # Ticket 261: parent and child, from the top ancestor down.
 ( cd "${tr}" && "${AMD}" new Zeta --parent 1 >/dev/null && "${AMD}" new Eta --parent 6 >/dev/null )
-assert "amd tree --children draws the hierarchy from the top, the ticket marked" \
+assert "rite tree --children draws the hierarchy from the top, the ticket marked" \
   bash -c "cd '${tr}' && [ \"\$('${AMD}' tree 7 --children)\" = \"\$(printf '%s\\n' \\
     '001 Alpha · backlog' \\
     '└──── 006 Zeta · backlog' \\
@@ -1549,19 +1549,19 @@ rm -rf "${tr}"
 echo "auto priority (ticket 215):"
 ap="$(mktemp -d)"
 ( cd "${ap}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init autop --local-only >/dev/null \
+  && RITE_YES=1 "${AMD}" init autop --local-only >/dev/null \
   && "${AMD}" auto-priority > "${ap}.default" && "${AMD}" auto-priority off >/dev/null \
   && "${AMD}" due-to-todo 0 >/dev/null \
   && for t in Goal Middle Base Extra; do "${AMD}" new "$t" >/dev/null; done \
   && "${AMD}" set 1 priority high >/dev/null \
   && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 2 3 --type requires >/dev/null )
-in_ap() { (cd "${ap}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+in_ap() { (cd "${ap}" && RITE_NO_BRANCH=1 "${AMD}" "$@"); }
 assert "auto priority is on by default (ticket 252), and a board can switch it off" \
   bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; grep -qx 'auto priority is on' '${ap}.default' \
     && grep -q 'due dates raise a ticket a step each quarter from its creation to its due date' '${ap}.default' \
     && in_ap auto-priority | grep -qx 'auto priority is off' \
     && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/003-base.md"
-assert "amd auto-priority on raises a chain in the setting's own commit, saying why" \
+assert "rite auto-priority on raises a chain in the setting's own commit, saying why" \
   bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; out=\$(in_ap auto-priority on) \
     && printf '%s' \"\$out\" | grep -q '003 raised to high: 002 requires it' \
     && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/003-base.md \
@@ -1571,19 +1571,19 @@ assert "a new requires link raises in the link's own commit" \
   bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap link 3 4 --type requires >/dev/null \
     && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/004-extra.md \
     && git -C '${ap}' log --format=%s -1 | grep -q '^link: 003 -> 004'"
-assert "amd show says why a priority was raised" \
+assert "rite show says why a priority was raised" \
   bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap show 4 2>&1 >/dev/null | grep -q 'raised by auto priority, 003 requires it (own: low)'"
 assert "with override on, a priority set by hand pins the ticket" \
   bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap set 3 priority low | grep -q pinned \
     && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/003-base.md \
     && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/004-extra.md"
-assert "amd set <ref> priority auto hands it back to auto priority" \
+assert "rite set <ref> priority auto hands it back to auto priority" \
   bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap set 3 priority auto >/dev/null \
     && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/003-base.md"
 assert "with override off, a priority set by hand is only a floor" \
   bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap priority-override off >/dev/null \
     && in_ap set 3 priority low >/dev/null && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/003-base.md"
-assert "amd auto-priority off puts raised tickets back" \
+assert "rite auto-priority off puts raised tickets back" \
   bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap auto-priority off | grep -q '002 back to low' \
     && grep -q '^priority: \"low\"' '${ap}'/tasks/backlog/002-middle.md \
     && grep -q '^priority: \"high\"' '${ap}'/tasks/backlog/001-goal.md \
@@ -1611,7 +1611,7 @@ assert "entering todo and doing records when; back in the backlog clears it (tic
     && grep -q '^doing-since: \"${ap_today}\"' '${ap}'/tasks/doing/004-extra.md \
     && in_ap todo 4 >/dev/null 2>&1 && ! grep -q '^doing-since' '${ap}'/tasks/todo/004-extra.md \
     && in_ap backlog 4 >/dev/null 2>&1 && ! grep -q 'since' '${ap}'/tasks/backlog/004-extra.md"
-assert "amd auto-priority limits sets the time limits, and a ticket over them is raised" \
+assert "rite auto-priority limits sets the time limits, and a ticket over them is raised" \
   bash -c "$(declare -f in_ap); ap='${ap}'; AMD='${AMD}'; in_ap set 4 priority auto >/dev/null 2>&1; \
     in_ap todo 4 >/dev/null 2>&1 \
     && sed -i 's/^todo-since: .*/todo-since: \"2026-01-01\"/' '${ap}'/tasks/todo/004-extra.md \
@@ -1624,12 +1624,12 @@ rm -rf "${ap}" "${ap}.default"
 echo "due dates on the board (ticket 253):"
 dd="$(mktemp -d)"
 ( cd "${dd}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init dated --local-only >/dev/null \
+  && RITE_YES=1 "${AMD}" init dated --local-only >/dev/null \
   && "${AMD}" group epic checkout >/dev/null && "${AMD}" group sprint s1 >/dev/null )
-in_dd() { (cd "${dd}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+in_dd() { (cd "${dd}" && RITE_NO_BRANCH=1 "${AMD}" "$@"); }
 dd_soon="$(date -u -d '+1 day' +%F)"
 dd_later="$(date -u -d '+20 days' +%F)"
-assert "amd due-to-todo says 3 days by default" \
+assert "rite due-to-todo says 3 days by default" \
   bash -c "$(declare -f in_dd); dd='${dd}'; AMD='${AMD}'; in_dd due-to-todo | grep -qx 'a ticket due within 3 days goes straight to todo'"
 assert "a ticket made due soon goes straight to todo, recording when; one due later stays" \
   bash -c "$(declare -f in_dd); dd='${dd}'; AMD='${AMD}'; \
@@ -1648,11 +1648,11 @@ assert "a ticket with a due date can't go into an epic, nor get one while in it;
     && in_dd set 5 due '${dd_later}' 2>&1 | grep -q \"can't be in the epic checkout\" \
     && in_dd set 4 points 3 >/dev/null && in_dd set 4 epic s1 >/dev/null \
     && in_dd s1 2>&1 >/dev/null | grep -q 'warning: s1 holds tickets with due dates: 004 (due ${dd_later})'"
-assert "amd due-to-todo 0 keeps every ticket in the backlog" \
+assert "rite due-to-todo 0 keeps every ticket in the backlog" \
   bash -c "$(declare -f in_dd); dd='${dd}'; AMD='${AMD}'; in_dd due-to-todo 0 >/dev/null \
     && grep -qx 'due-to-todo-days = 0' '${dd}'/.settings \
     && in_dd new Now --due '$(date -u +%F)' >/dev/null 2>&1 && ls '${dd}'/tasks/backlog/006-now.md >/dev/null"
-assert "amd backlog-always-shown on and off" \
+assert "rite backlog-always-shown on and off" \
   bash -c "$(declare -f in_dd); dd='${dd}'; AMD='${AMD}'; in_dd backlog-always-shown on | grep -q \"can't be folded away\" \
     && grep -qx 'backlog-always-shown = on' '${dd}'/.settings \
     && in_dd backlog-always-shown off >/dev/null && ! grep -q 'backlog-always-shown' '${dd}'/.settings"
@@ -1661,23 +1661,23 @@ rm -rf "${dd}"
 echo "your own columns (ticket 224):"
 cl="$(mktemp -d)"
 ( cd "${cl}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init cols --local-only >/dev/null \
+  && RITE_YES=1 "${AMD}" init cols --local-only >/dev/null \
   && for t in One Two Three; do "${AMD}" new "$t" >/dev/null; done )
-in_cl() { (cd "${cl}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
-assert "amd column add puts a column where asked, in one commit, and amd board shows it" \
+in_cl() { (cd "${cl}" && RITE_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "rite column add puts a column where asked, in one commit, and rite board shows it" \
   bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; n=\$(git -C '${cl}' rev-list --count HEAD) \
     && in_cl column add Review --kind doing --after doing 2>/dev/null | grep -qx 'added Review (review/, doing)' \
     && [ \$(git -C '${cl}' rev-list --count HEAD) -eq \$((n + 1)) ] \
     && [ -d '${cl}'/tasks/review ] \
     && [ \"\$(in_cl board --plain | grep -E '^[A-Z]' | tr '\\n' ' ')\" = 'BACKLOG TODO DOING REVIEW DONE ' ]"
-assert "amd column lists name, folder, kind, WIP limit and count" \
+assert "rite column lists name, folder, kind, WIP limit and count" \
   bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column | grep -qx 'Review  review/  doing, no WIP limit  (0)'"
 assert "a ticket moves into the column by its name, one step at a time, and stays locked" \
   bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl todo 1 >/dev/null && in_cl doing 1 >/dev/null \
     && ! in_cl done 1 2>/dev/null >/dev/null \
     && in_cl review 1 | grep -q 'moved 001-one.md -> review/' \
     && grep -q '^locked-by: \"t@t.co\"' '${cl}'/tasks/review/001-one.md"
-assert "a doing column's own WIP limit refuses one more, and amd move --force gets past it" \
+assert "a doing column's own WIP limit refuses one more, and rite move --force gets past it" \
   bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column wip review 1 >/dev/null \
     && in_cl todo 2 >/dev/null && in_cl doing 2 >/dev/null \
     && in_cl review 2 2>&1 | grep -q 'review/ already has 1 of 1' \
@@ -1692,7 +1692,7 @@ assert "only an added column can go, and its tickets need somewhere to go first"
     && in_cl column remove review --move-to doing | grep -q 'moved 2 ticket(s) to doing/' \
     && [ ! -d '${cl}'/tasks/review ] && ls '${cl}'/tasks/doing | grep -q 001-one.md \
     && ! grep -q 'wip-limit-review' '${cl}'/.settings"
-assert "amd column move reorders, and a column can't be named like an epic" \
+assert "rite column move reorders, and a column can't be named like an epic" \
   bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; in_cl column add Triage --kind backlog --after done >/dev/null 2>&1 \
     && in_cl column move triage --before backlog | grep -qx 'Triage | Backlog | Ready | Doing | Done' \
     && in_cl group epic checkout >/dev/null && ! in_cl column add Checkout --kind doing 2>/dev/null"
@@ -1701,12 +1701,12 @@ rm -rf "${cl}"
 echo "flow rules, landing column and reset (ticket 225):"
 fl="$(mktemp -d)"
 ( cd "${fl}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init flows --local-only >/dev/null \
+  && RITE_YES=1 "${AMD}" init flows --local-only >/dev/null \
   && "${AMD}" column add Triage --kind backlog --before backlog >/dev/null 2>&1 \
   && "${AMD}" column add Review --kind doing --after doing >/dev/null 2>&1 \
   && "${AMD}" new One >/dev/null && "${AMD}" new Two >/dev/null )
-in_fl() { (cd "${fl}" && AMD_NO_BRANCH=1 "${AMD}" "$@"); }
-assert "amd column landing triage puts new tickets in Triage" \
+in_fl() { (cd "${fl}" && RITE_NO_BRANCH=1 "${AMD}" "$@"); }
+assert "rite column landing triage puts new tickets in Triage" \
   bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; in_fl column landing triage | grep -qx 'new tickets land in Triage' \
     && in_fl new Three | grep -q '^created triage/003-three.md' && [ -f '${fl}'/tasks/triage/003-three.md ]"
 assert "from Triage a ticket can't skip to todo until the move is allowed, and then can" \
@@ -1721,7 +1721,7 @@ assert "flow any lets a ticket go from the backlog straight to doing, locked" \
   bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; in_fl column flow any | grep -qx 'flow: any' \
     && in_fl doing 1 | grep -q 'moved 001-one.md -> doing/' \
     && grep -q '^locked-by: \"t@t.co\"' '${fl}'/tasks/doing/001-one.md"
-assert "amd column reset moves tickets by kind and puts every setting back, in one commit" \
+assert "rite column reset moves tickets by kind and puts every setting back, in one commit" \
   bash -c "$(declare -f in_fl); fl='${fl}'; AMD='${AMD}'; in_fl review 1 >/dev/null && in_fl new Four >/dev/null \
     && n=\$(git -C '${fl}' rev-list --count HEAD) \
     && out=\$(in_fl column reset) \
@@ -1734,7 +1734,7 @@ assert "amd column reset moves tickets by kind and puts every setting back, in o
 rm -rf "${fl}"
 
 echo "duplicate:"
-assert "amd duplicate copies a ticket" \
+assert "rite duplicate copies a ticket" \
   "${AMD}" duplicate 1
 copy="$(grep -l '^clone-of: "001"$' tasks/*/*.md | head -1)"
 assert "the copy records what it is a copy of" \
@@ -1751,13 +1751,13 @@ assert "the copy keeps the title" \
 assert "duplicating an unknown ticket is refused" \
   bash -c "! '${AMD}' duplicate 99"
 
-# `amd set` and `amd group` shipped with no coverage here, which is how the
+# `rite set` and `rite group` shipped with no coverage here, which is how the
 # suite came to disagree with the tool. They get their own repository so the
 # epic and sprint directories cannot disturb the id sequencing above.
 echo "set:"
 work="$(mktemp -d)"
 ( cd "${work}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init gadgets --local-only >/dev/null && "${AMD}" tags add urgent >/dev/null \
+  && RITE_YES=1 "${AMD}" init gadgets --local-only >/dev/null && "${AMD}" tags add urgent >/dev/null \
   && "${AMD}" new "First" >/dev/null && "${AMD}" new "Second" >/dev/null )
 assert "set points sizes a ticket" \
   bash -c "cd '${work}' && '${AMD}' set 001 points 5 | grep -q 'sized 5' && grep -q '^points: \"5\"\$' tasks/backlog/001-first.md"
@@ -1809,27 +1809,27 @@ assert "archiving straight out of a started sprint is refused" \
   bash -c "cd '${work}' && '${AMD}' abandon 001 2>&1 | grep -q 'move it on to todo before archiving'"
 assert "a ticket outside the sprint is archived" \
   bash -c "cd '${work}' && '${AMD}' abandon 002 | grep -q 'archived'"
-assert "amd abandon with no ref lists the archive" \
+assert "rite abandon with no ref lists the archive" \
   bash -c "cd '${work}' && '${AMD}' abandon | grep -q Second"
 # The bug this guards: a sprint's points fell as work progressed, because the
 # count scanned backlog/ only and a ticket in doing/ has no epic directory.
 assert "a sprint keeps its points when work starts" \
   bash -c "cd '${work}' && before=\$('${AMD}' group list | grep sprint-1) && '${AMD}' todo 001 --no-branch >/dev/null && '${AMD}' doing 001 >/dev/null && after=\$('${AMD}' group list | grep sprint-1) && [ \"\${before}\" = \"\${after}\" ]"
-assert "amd group rename renames a group and relabels its tickets" \
+assert "rite group rename renames a group and relabels its tickets" \
   bash -c "cd '${work}' && '${AMD}' group rename checkout payments | grep -q 'renamed checkout -> payments' \
     && test -d tasks/backlog/payments && ! test -d tasks/backlog/checkout \
     && ! grep -rq --exclude-dir=archive '^epic: \"checkout\"' tasks && '${AMD}' group list | grep -q payments \
     && '${AMD}' group rename payments checkout >/dev/null"
 assert "starting an unknown group fails" \
   bash -c "cd '${work}' && ! '${AMD}' group start nope"
-assert "amd <epic> <ref> files a ticket, same as set epic" \
+assert "rite <epic> <ref> files a ticket, same as set epic" \
   bash -c "cd '${work}' && '${AMD}' new 'Verb filed' >/dev/null \
     && id=\$(ls tasks/backlog | grep verb-filed | cut -d- -f1) \
     && '${AMD}' checkout \${id} | grep -q 'filed under checkout' \
     && test -f tasks/backlog/checkout/\${id}-verb-filed.md"
-assert "amd <epic> with no ref lists that epic's tickets" \
+assert "rite <epic> with no ref lists that epic's tickets" \
   bash -c "cd '${work}' && '${AMD}' checkout | grep -q 'Verb filed'"
-assert "amd <epic> --tag narrows an epic listing to tasks carrying that tag" \
+assert "rite <epic> --tag narrows an epic listing to tasks carrying that tag" \
   bash -c "cd '${work}' && '${AMD}' new 'Verb filed and urgent' -t urgent --no-edit >/dev/null \
     && id=\$(ls tasks/backlog | grep verb-filed-and-urgent | cut -d- -f1) \
     && '${AMD}' checkout \${id} >/dev/null \
@@ -1839,7 +1839,7 @@ assert "an epic cannot be created with a column's name" \
   bash -c "cd '${work}' && '${AMD}' group epic todo 2>&1 | grep -q collides"
 assert "an epic cannot be created named abandon" \
   bash -c "cd '${work}' && '${AMD}' group epic abandon 2>&1 | grep -q collides"
-assert "amd group empty moves every ticket in a group back to loose backlog, no precondition" \
+assert "rite group empty moves every ticket in a group back to loose backlog, no precondition" \
   bash -c "cd '${work}' && '${AMD}' --plain checkout | grep -q '\[' \
     && '${AMD}' group empty checkout | grep -q 'emptied into backlog' \
     && '${AMD}' --plain checkout | grep -q '(empty)'"
@@ -1871,9 +1871,9 @@ rm -rf "${work}"
 echo "statistics (ticket 233):"
 stats_repo="$(mktemp -d)"
 ( cd "${stats_repo}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
-  && git config commit.gpgsign false && AMD_YES=1 "${AMD}" init statstest --local-only >/dev/null \
+  && git config commit.gpgsign false && RITE_YES=1 "${AMD}" init statstest --local-only >/dev/null \
   && git add -A && git commit -q -m "board for ticket 233" )
-assert "amd stats counts tickets raised, done and closed from git history" \
+assert "rite stats counts tickets raised, done and closed from git history" \
   bash -c "cd '${stats_repo}' && '${AMD}' new 'Counted' --no-edit >/dev/null && '${AMD}' new 'Dropped' --no-edit >/dev/null \
     && '${AMD}' todo 1 --no-branch >/dev/null && '${AMD}' doing 1 >/dev/null && '${AMD}' done 1 >/dev/null \
     && '${AMD}' abandon 2 >/dev/null \
@@ -1884,7 +1884,7 @@ rm -rf "${stats_repo}"
 echo "recurring tickets and due dates (ticket 143):"
 recur_repo="$(mktemp -d)"
 ( cd "${recur_repo}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
-  && git config commit.gpgsign false && AMD_YES=1 "${AMD}" init recurtest --local-only >/dev/null \
+  && git config commit.gpgsign false && RITE_YES=1 "${AMD}" init recurtest --local-only >/dev/null \
   && "${AMD}" due-to-todo 0 >/dev/null \
   && git add -A && git commit -q -m "board for ticket 143" )
 assert "a recurring ticket done makes the next one, due after today, in the same commit" \
@@ -1898,7 +1898,7 @@ assert "a recurring ticket done makes the next one, due after today, in the same
     && grep -q '^recur: \"monthly\"' \$f \
     && due=\$(sed -n 's/^due: \"\\(.*\\)\"/\\1/p' \$f) && [ \"\$due\" \\> \"\$(date -u +%F)\" ] \
     && git show --stat --pretty=format: HEAD | grep -q '002-renew-the-certificate.md'"
-assert "amd set due and recur check what they're given; empty clears" \
+assert "rite set due and recur check what they're given; empty clears" \
   bash -c "cd '${recur_repo}' && ! '${AMD}' set 2 due tomorrow 2>/dev/null \
     && ! '${AMD}' set 2 recur sometimes 2>/dev/null \
     && '${AMD}' set 2 recur 'every 2 weeks' | grep -q '002 repeats fortnightly' \
@@ -1909,10 +1909,10 @@ rm -rf "${recur_repo}"
 echo "every ticket linked to a ticket (ticket 121):"
 links_repo="$(mktemp -d)"
 ( cd "${links_repo}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
-  && git config commit.gpgsign false && AMD_YES=1 "${AMD}" init linkstest --local-only >/dev/null \
+  && git config commit.gpgsign false && RITE_YES=1 "${AMD}" init linkstest --local-only >/dev/null \
   && for t in One Two Three; do "${AMD}" new "$t" --no-edit >/dev/null; done \
   && "${AMD}" link 1 2 --type requires >/dev/null && "${AMD}" link 3 1 --type supersedes --one-way >/dev/null )
-assert "amd links lists every link either way, saying which are one-sided" \
+assert "rite links lists every link either way, saying which are one-sided" \
   bash -c "cd '${links_repo}' && out=\$('${AMD}' links 1) \
     && printf '%s\\n' \"\$out\" | grep -q '^  requires  *002 Two · backlog\$' \
     && printf '%s\\n' \"\$out\" | grep -q '^  is superseded by  *003 Three · backlog  (recorded on 003 only)\$' \
@@ -1929,8 +1929,8 @@ commit_origin="$(mktemp -d)/origin.git"
 mkdir -p "${commit_origin}" && git init -q --bare "${commit_origin}"
 ( cd "${commit_repo}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
   && git remote add origin "${commit_origin}" \
-  && AMD_YES=1 "${AMD}" init committest --local-only >/dev/null )
-assert "amd new commits both the new ticket and the counter bump" \
+  && RITE_YES=1 "${AMD}" init committest --local-only >/dev/null )
+assert "rite new commits both the new ticket and the counter bump" \
   bash -c "cd '${commit_repo}' && '${AMD}' new 'First ticket' --no-edit >/dev/null \
     && git show --stat --pretty=format: HEAD | grep -q '001-first-ticket.md' \
     && git show --stat --pretty=format: HEAD | grep -q '.next-id'"
@@ -1941,12 +1941,12 @@ assert "a file staged by hand beforehand is never swept into the next commit" \
     && '${AMD}' todo 1 --no-branch >/dev/null \
     && ! git show --stat --pretty=format: HEAD | grep -q dummy.md \
     && git status --porcelain=v1 | grep -q '^A  dummy.md\$'"
-assert "AMD_COMMIT=0 suppresses the commit entirely" \
-  bash -c "cd '${commit_repo}' && AMD_COMMIT=0 '${AMD}' doing 1 >/dev/null \
+assert "RITE_COMMIT=0 suppresses the commit entirely" \
+  bash -c "cd '${commit_repo}' && RITE_COMMIT=0 '${AMD}' doing 1 >/dev/null \
     && git status --porcelain=v1 | grep -q '001-first-ticket.md'"
-assert "the move itself still happened despite AMD_COMMIT=0" \
+assert "the move itself still happened despite RITE_COMMIT=0" \
   bash -c "cd '${commit_repo}' && test -f tasks/doing/001-first-ticket.md"
-assert "amd group empty commits every ticket it moves in one commit" \
+assert "rite group empty commits every ticket it moves in one commit" \
   bash -c "cd '${commit_repo}' && '${AMD}' group epic squad >/dev/null \
     && '${AMD}' squad 1 >/dev/null && '${AMD}' new 'Second ticket' --no-edit >/dev/null \
     && '${AMD}' squad 2 >/dev/null \
@@ -1956,7 +1956,7 @@ assert "amd group empty commits every ticket it moves in one commit" \
     && [ \$((after - before)) -eq 1 ] \
     && git show --stat --pretty=format: HEAD | grep -q '001-first-ticket.md' \
     && git show --stat --pretty=format: HEAD | grep -q '002-second-ticket.md'"
-assert "amd group empty --to todo moves a group's backlog tickets to todo in one commit; drafts stay (ticket 256)" \
+assert "rite group empty --to todo moves a group's backlog tickets to todo in one commit; drafts stay (ticket 256)" \
   bash -c "cd '${commit_repo}' && '${AMD}' group epic wave >/dev/null \
     && for t in Third Fourth; do '${AMD}' new \"\$t\" --no-edit >/dev/null; done \
     && '${AMD}' new Fifth --draft --no-edit >/dev/null 2>&1 \
@@ -1968,7 +1968,7 @@ assert "amd group empty --to todo moves a group's backlog tickets to todo in one
     && grep -q '005 not moved: .*draft' /tmp/amd-wave.err \
     && grep -q '^epic: \"wave\"' tasks/todo/003-third.md && grep -q '^todo-since: ' tasks/todo/004-fourth.md \
     && ls tasks/backlog/wave/005-fifth.md >/dev/null"
-assert "amd link commits both ends of the relation in one commit (ticket 054)" \
+assert "rite link commits both ends of the relation in one commit (ticket 054)" \
   bash -c "cd '${commit_repo}' && before=\$(git rev-list --count HEAD) \
     && '${AMD}' link 1 2 >/dev/null \
     && after=\$(git rev-list --count HEAD) \
@@ -1977,7 +1977,7 @@ assert "amd link commits both ends of the relation in one commit (ticket 054)" \
     && git show --name-only --pretty=format: HEAD | grep -q '001-first-ticket.md' \
     && git show --name-only --pretty=format: HEAD | grep -q '002-second-ticket.md' \
     && git log -1 --pretty=%s | grep -q '^link: 001 -> 002'"
-assert "amd log renders a transition with a real sha" \
+assert "rite log renders a transition with a real sha" \
   bash -c "cd '${commit_repo}' && '${AMD}' log | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}  add .*[0-9a-f]{7,}\$'"
 rm -rf "${commit_repo}"
 
@@ -1987,10 +1987,10 @@ rm -rf "${commit_repo}"
 old_board="$(mktemp -d)"
 ( cd "${old_board}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
   && git config commit.gpgsign false \
-  && AMD_COMMIT=0 AMD_YES=1 "${AMD}" init oldstyle --local-only >/dev/null 2>&1 \
+  && RITE_COMMIT=0 RITE_YES=1 "${AMD}" init oldstyle --local-only >/dev/null 2>&1 \
   && rm .next-id && printf 'next-id = 5\n' >> .settings \
   && git add -A && git commit -q -m 'ticket 164 setup: a board from before ticket 150' )
-assert "on a board with its counter in .settings, amd new commits the move too, leaving nothing behind" \
+assert "on a board with its counter in .settings, rite new commits the move too, leaving nothing behind" \
   bash -c "cd '${old_board}' && '${AMD}' new 'After the move' --no-edit >/dev/null 2>&1 \
     && test -f tasks/backlog/005-after-the-move.md \
     && [ -z \"\$(git status --porcelain)\" ] \
@@ -2009,7 +2009,7 @@ rm -rf "${old_board}"
 # Ticket 142: a board with no remote commits, and doesn't try to push.
 local_repo="$(mktemp -d)"
 ( cd "${local_repo}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init localonly --local-only >/dev/null 2>&1 )
+  && RITE_YES=1 "${AMD}" init localonly --local-only >/dev/null 2>&1 )
 assert "with no remote, a change is committed and nothing is pushed or complained about" \
   bash -c "cd '${local_repo}' && out=\$('${AMD}' new 'Local only' --no-edit 2>&1) \
     && ! printf '%s' \"\$out\" | grep -qiE 'fatal|could not push' \
@@ -2025,7 +2025,7 @@ mw_bin="${mw}/bin"
 mwh="${mw}/home"
 (
   set -e
-  export XDG_CONFIG_HOME="${mw}/config" AMD_COMMIT=0 AMD_NO_BRANCH=1
+  export XDG_CONFIG_HOME="${mw}/config" RITE_COMMIT=0 RITE_NO_BRANCH=1
   for spec in "work/alpha" "work/beta" "other/gamma"; do
     dir="${mwh}/${spec%/*}"; name="${spec#*/}"
     mkdir -p "${dir}" && cd "${dir}"
@@ -2045,46 +2045,46 @@ mwh="${mw}/home"
 )
 in_mw() { (cd "${mwh}/work/alpha-tickets" && env XDG_CONFIG_HOME="${mw}/config" TMPDIR="${mw_bin}" "${AMD}" "$@"); }
 mkdir -p "${mw_bin}"
-assert "amd mine lists todo and doing across every project, high priority first" \
+assert "rite mine lists todo and doing across every project, high priority first" \
   bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; out=\$(in_mw mine) \
     && [ \"\$(printf '%s\\n' \"\$out\" | grep -c .)\" -eq 6 ] \
     && printf '%s\\n' \"\$out\" | head -3 | grep -c 'doing  high' | grep -qx 3 \
     && printf '%s\\n' \"\$out\" | grep -q 'gamma' && ! printf '%s\\n' \"\$out\" | grep -q 'backlog\\|someone else'"
-assert "amd mine --hide leaves a project out, --all brings it back, --unhide restores it" \
+assert "rite mine --hide leaves a project out, --all brings it back, --unhide restores it" \
   bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --hide beta >/dev/null \
     && ! in_mw mine 2>/dev/null | grep -q beta && in_mw mine 2>&1 >/dev/null | grep -q '1 hidden project' \
     && in_mw mine --all | grep -q beta && in_mw mine --unhide beta >/dev/null && in_mw mine | grep -q beta"
-assert "amd mine --json gives the same list for scripts" \
+assert "rite mine --json gives the same list for scripts" \
   bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --json | grep -c '\"project\"' | grep -qx 6"
 assert "a TRIAGE ticket heads everyone's My work, top, and its hidden project stays hidden (tickets 248, 252, 263)" \
   bash -c "$(declare -f in_mw); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'; in_mw mine --hide gamma >/dev/null \
-    && (cd '${mwh}/other/gamma-tickets' && env XDG_CONFIG_HOME='${mw}/config' AMD_COMMIT=0 '${AMD}' new 'Look at this issue' --tag TRIAGE --no-edit >/dev/null 2>&1) \
+    && (cd '${mwh}/other/gamma-tickets' && env XDG_CONFIG_HOME='${mw}/config' RITE_COMMIT=0 '${AMD}' new 'Look at this issue' --tag TRIAGE --no-edit >/dev/null 2>&1) \
     && out=\$(in_mw mine 2>&1) \
     && printf '%s\\n' \"\$out\" | head -1 | grep -q 'backlog  top .*gamma .*TRIAGE  Look at this issue' \
     && ! printf '%s\\n' \"\$out\" | grep -q 'gamma doing' \
     && grep '^ui.hidden-projects' '${mw}/config/agile-md/config' | grep -q gamma-tickets \
     && in_mw mine --unhide gamma >/dev/null \
-    && (cd '${mwh}/other/gamma-tickets' && env XDG_CONFIG_HOME='${mw}/config' AMD_COMMIT=0 '${AMD}' abandon 5 >/dev/null 2>&1; rm -rf tasks/archive)"
+    && (cd '${mwh}/other/gamma-tickets' && env XDG_CONFIG_HOME='${mw}/config' RITE_COMMIT=0 '${AMD}' abandon 5 >/dev/null 2>&1; rm -rf tasks/archive)"
 
 echo "archiving a project (ticket 157):"
-in_beta() { (cd "${mwh}/work/beta-tickets" && env XDG_CONFIG_HOME="${mw}/config" TMPDIR="${mw_bin}" AMD_NO_BRANCH=1 "${AMD}" "$@"); }
+in_beta() { (cd "${mwh}/work/beta-tickets" && env XDG_CONFIG_HOME="${mw}/config" TMPDIR="${mw_bin}" RITE_NO_BRANCH=1 "${AMD}" "$@"); }
 mw_fns="$(declare -f in_mw in_beta); mw='${mw}'; mwh='${mwh}'; mw_bin='${mw_bin}'; AMD='${AMD}'"
-assert "amd project archive commits archived = on and amd project marks it" \
+assert "rite project archive commits archived = on and rite project marks it" \
   bash -c "${mw_fns}; in_mw project archive beta | grep -q '^archived beta\$' \
     && grep -qx 'archived = on' '${mwh}/work/beta-tickets/.settings' \
     && git -C '${mwh}/work/beta-tickets' log -1 --format=%s | grep -q 'settings: archived' \
     && in_mw project | grep -q 'beta .*(archived)'"
-assert "...and it's off amd on this machine, its folder kept (ticket 263)" \
+assert "...and it's off rite on this machine, its folder kept (ticket 263)" \
   bash -c "${mw_fns}; ! grep -q beta-tickets '${mw}/config/agile-md/repos' && test -d '${mwh}/work/beta-tickets'"
-assert "an archived project refuses changes, naming amd init" \
+assert "an archived project refuses changes, naming rite init" \
   bash -c "${mw_fns}; for change in 'new Refused --no-edit' 'todo 3' 'set 3 priority low' 'tags add NEW' 'wip-limit 3'; do \
-      in_beta \${change} 2>&1 | grep -q 'beta is archived.*amd init beta' || exit 1; done \
+      in_beta \${change} 2>&1 | grep -q 'beta is archived.*rite init beta' || exit 1; done \
     && [ \"\$(ls '${mwh}/work/beta-tickets/tasks/backlog/' | grep -c refused)\" = 0 ]"
 assert "...but still reads" \
   bash -c "${mw_fns}; in_beta board | grep -q 'beta todo' && in_beta show 1 | grep -q 'beta doing' && in_beta tags >/dev/null"
 assert "...and is off My work" \
   bash -c "${mw_fns}; out=\$(in_mw mine) && ! printf '%s\\n' \"\$out\" | grep -q beta && printf '%s\\n' \"\$out\" | grep -q alpha"
-assert "amd project unarchive brings it back, on amd here again" \
+assert "rite project unarchive brings it back, on rite here again" \
   bash -c "${mw_fns}; in_mw project unarchive beta | grep -q '^unarchived beta\$' \
     && grep -q beta-tickets '${mw}/config/agile-md/repos' \
     && ! grep -q archived '${mwh}/work/beta-tickets/.settings' \
@@ -2103,7 +2103,7 @@ chmod +x "${mw}/ghbin/gh"
   git config url."${mw}/beta-origin.git".pushInsteadOf git@github.com:acme/beta-tickets.git
   git push -q -u origin main 2>/dev/null
 )
-gh_beta() { (cd "${mwh}/work/beta-tickets" && env XDG_CONFIG_HOME="${mw}/config" TMPDIR="${mw_bin}" AMD_SYNC=0 GH_LOG="${mw}/gh.log" PATH="${mw}/ghbin:${PATH}" "${AMD}" "$@"); }
+gh_beta() { (cd "${mwh}/work/beta-tickets" && env XDG_CONFIG_HOME="${mw}/config" TMPDIR="${mw_bin}" RITE_SYNC=0 GH_LOG="${mw}/gh.log" PATH="${mw}/ghbin:${PATH}" "${AMD}" "$@"); }
 mw_fns="${mw_fns}; $(declare -f gh_beta)"
 assert "archiving pushes the setting, then archives the tickets and documents repositories on GitHub" \
   bash -c "${mw_fns}; out=\$(gh_beta project archive 2>&1) \
@@ -2126,7 +2126,7 @@ wp="$(mktemp -d)"
 wph="${wp}/home"
 (
   set -e
-  export XDG_CONFIG_HOME="${wp}/config" AMD_COMMIT=0 AMD_NO_BRANCH=1
+  export XDG_CONFIG_HOME="${wp}/config" RITE_COMMIT=0 RITE_NO_BRANCH=1
   mkdir -p "${wph}/work" && cd "${wph}/work"
   for name in alpha beta; do
     git init -q -b main "${name}-tickets"
@@ -2152,7 +2152,7 @@ assert "(beta starts hidden)" bash -c "grep '^ui.hidden-projects' '${wp}/config/
 assert "with nothing to do, unassigned todo and doing work comes first" \
   bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; out=\$(in_wp mine 2>&1) \
     && printf '%s\\n' \"\$out\" | grep -q 'todo .*Alpha todo nobody' && ! printf '%s\\n' \"\$out\" | grep -q 'backlog'"
-(cd "${wph}/work/alpha-tickets" && env XDG_CONFIG_HOME="${wp}/config" AMD_COMMIT=0 "${AMD}" assign 4 "Priya Shah" >/dev/null 2>&1)
+(cd "${wph}/work/alpha-tickets" && env XDG_CONFIG_HOME="${wp}/config" RITE_COMMIT=0 "${AMD}" assign 4 "Priya Shah" >/dev/null 2>&1)
 assert "failing that, the backlog's highest priority it can take, from a hidden project too" \
   bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; out=\$(in_wp mine 2>&1) \
     && printf '%s\\n' \"\$out\" | grep -q 'work to pick' \
@@ -2161,7 +2161,7 @@ assert "failing that, the backlog's highest priority it can take, from a hidden 
 assert "...and the hidden project it found work in stays hidden (ticket 263)" \
   bash -c "grep '^ui.hidden-projects' '${wp}/config/agile-md/config' | grep -q beta-tickets"
 assert "a high one it can take wins over every medium" \
-  bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; (cd '${wph}/work/alpha-tickets' && env XDG_CONFIG_HOME='${wp}/config' AMD_COMMIT=0 '${AMD}' set 1 priority high >/dev/null) \
+  bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; (cd '${wph}/work/alpha-tickets' && env XDG_CONFIG_HOME='${wp}/config' RITE_COMMIT=0 '${AMD}' set 1 priority high >/dev/null) \
     && out=\$(in_wp mine) && printf '%s\\n' \"\$out\" | grep -q 'Alpha low' && ! printf '%s\\n' \"\$out\" | grep -q 'Beta medium'"
 assert "--no-unassigned offers only backlog tickets assigned to you, and is remembered" \
   bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; out=\$(in_wp mine --no-unassigned) \
@@ -2169,7 +2169,7 @@ assert "--no-unassigned offers only backlog tickets assigned to you, and is reme
     && grep -qx 'ui.include-unassigned = off' '${wp}/config/agile-md/config' \
     && in_wp mine | grep -q 'Alpha mine' && in_wp mine --unassigned | grep -q 'Alpha low'"
 assert "once something is yours, it's back to My work alone" \
-  bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; (cd '${wph}/work/alpha-tickets' && env XDG_CONFIG_HOME='${wp}/config' AMD_COMMIT=0 AMD_NO_BRANCH=1 '${AMD}' assign 1 @me >/dev/null && env XDG_CONFIG_HOME='${wp}/config' AMD_COMMIT=0 AMD_NO_BRANCH=1 '${AMD}' todo 1 >/dev/null 2>&1) \
+  bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; (cd '${wph}/work/alpha-tickets' && env XDG_CONFIG_HOME='${wp}/config' RITE_COMMIT=0 RITE_NO_BRANCH=1 '${AMD}' assign 1 @me >/dev/null && env XDG_CONFIG_HOME='${wp}/config' RITE_COMMIT=0 RITE_NO_BRANCH=1 '${AMD}' todo 1 >/dev/null 2>&1) \
     && out=\$(in_wp mine) && ! printf '%s\\n' \"\$out\" | grep -q 'work to pick' && printf '%s\\n' \"\$out\" | grep -q 'todo .*Alpha low'"
 rm -rf "${wp}"
 
@@ -2177,14 +2177,14 @@ echo "renumber (ticket 146):"
 rn="$(mktemp -d)"
 ( cd "${rn}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
   && git config commit.gpgsign false \
-  && AMD_YES=1 "${AMD}" init renum --local-only >/dev/null 2>&1 \
+  && RITE_YES=1 "${AMD}" init renum --local-only >/dev/null 2>&1 \
   && "${AMD}" new "First" --no-edit >/dev/null 2>&1 && "${AMD}" new "Second" --no-edit >/dev/null 2>&1 \
   && sed -e 's/^title: .*/title: "Clashing"/' tasks/backlog/002-second.md > tasks/backlog/002-clashing.md \
-  && git add tasks/backlog/002-clashing.md && git commit -q -m "a second 002, made outside amd" )
-assert "amd renumber shows the plan and changes nothing" \
+  && git add tasks/backlog/002-clashing.md && git commit -q -m "a second 002, made outside rite" )
+assert "rite renumber shows the plan and changes nothing" \
   bash -c "cd '${rn}' && out=\$('${AMD}' renumber) && printf '%s\\n' \"\$out\" | grep -q '^002: 002-second keeps it' \
     && printf '%s\\n' \"\$out\" | grep -q '002-clashing becomes 003' && test -f tasks/backlog/002-clashing.md"
-assert "amd renumber --apply gives the later one a new number, in one commit" \
+assert "rite renumber --apply gives the later one a new number, in one commit" \
   bash -c "cd '${rn}' && '${AMD}' renumber --apply >/dev/null 2>&1 \
     && test -f tasks/backlog/003-clashing.md && ! test -f tasks/backlog/002-clashing.md \
     && grep -qx 'id: \"003\"' tasks/backlog/003-clashing.md \
@@ -2198,19 +2198,19 @@ echo "recover (ticket 144):"
 rv="$(mktemp -d)"
 ( cd "${rv}" && git init -q -b main && git config user.email sam@example.com && git config user.name Sam \
   && git config commit.gpgsign false \
-  && AMD_YES=1 "${AMD}" init recover --local-only >/dev/null 2>&1 \
+  && RITE_YES=1 "${AMD}" init recover --local-only >/dev/null 2>&1 \
   && for t in One Two Three; do "${AMD}" new "${t}" --no-edit >/dev/null 2>&1; done \
   && cp tasks/backlog/001-one.md "${rv}.one" && cp tasks/backlog/002-two.md "${rv}.two" \
   && "${AMD}" abandon 1 >/dev/null 2>&1 && "${AMD}" abandon 2 >/dev/null 2>&1 )
-assert "amd recover lists abandoned tickets with who and when" \
+assert "rite recover lists abandoned tickets with who and when" \
   bash -c "cd '${rv}' && out=\$('${AMD}' recover) && printf '%s\\n' \"\$out\" | grep -qE '^001  [0-9-]+ [0-9:]+  abandoned by Sam  One\$' \
     && printf '%s\\n' \"\$out\" | grep -q '^002 ' && ! printf '%s\\n' \"\$out\" | grep -q '^003 '"
 assert "a ticket still on the board can't be recovered" \
   bash -c "cd '${rv}' && ! '${AMD}' recover 3 >/dev/null 2>&1"
-assert "amd recover <id> brings one back into the backlog, exactly as it was" \
+assert "rite recover <id> brings one back into the backlog, exactly as it was" \
   bash -c "cd '${rv}' && '${AMD}' recover 1 | grep -q 'recovered 001-one' \
     && cmp -s tasks/backlog/001-one.md '${rv}.one' && git log -1 --pretty=%s | grep -q '^recover: 001'"
-assert "amd recover --all --by restores the rest in one commit" \
+assert "rite recover --all --by restores the rest in one commit" \
   bash -c "cd '${rv}' && before=\$(git rev-list --count HEAD) && '${AMD}' recover --all --by sam >/dev/null \
     && [ \$((\$(git rev-list --count HEAD) - before)) -eq 1 ] \
     && cmp -s tasks/backlog/002-two.md '${rv}.two' && '${AMD}' recover | grep -q 'nothing to recover'"
@@ -2221,29 +2221,29 @@ rm -rf "${rv}" "${rv}.one" "${rv}.two"
 echo "WIP limits (doing only, ticket 083):"
 wip_repo="$(mktemp -d)"
 ( cd "${wip_repo}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init wiptest --local-only >/dev/null \
+  && RITE_YES=1 "${AMD}" init wiptest --local-only >/dev/null \
   && for t in First Second Third Fourth Fifth; do "${AMD}" new "${t}" --no-edit >/dev/null; done \
   && for n in 1 2 3; do "${AMD}" todo "${n}" --no-branch >/dev/null; done \
   && "${AMD}" doing 1 >/dev/null && "${AMD}" doing 2 >/dev/null )
 assert "todo/ is never limited, whatever the settings say" \
-  bash -c "cd '${wip_repo}' && AMD_WIP_TODO=1 '${AMD}' todo 4 --no-branch >/dev/null && test -f tasks/todo/004-fourth.md"
+  bash -c "cd '${wip_repo}' && RITE_WIP_TODO=1 '${AMD}' todo 4 --no-branch >/dev/null && test -f tasks/todo/004-fourth.md"
 assert "doing/ defaults to a WIP limit of 2 with nothing configured at all" \
   bash -c "cd '${wip_repo}' && '${AMD}' doing 3 2>&1 | grep -q 'doing/ already has 2 of 2 allowed'"
 assert "the refused move never happened" \
   bash -c "cd '${wip_repo}' && test -f tasks/todo/003-third.md"
-assert "amd doing --force overrides the WIP limit" \
+assert "rite doing --force overrides the WIP limit" \
   bash -c "cd '${wip_repo}' && '${AMD}' doing 3 --force >/dev/null && test -f tasks/doing/003-third.md"
 assert "moving something out of an over-limit column is never blocked" \
   bash -c "cd '${wip_repo}' && '${AMD}' done 3 >/dev/null && test -f tasks/done/003-third.md"
-assert "amd wip-limit sets an explicit limit, persisted in .settings" \
+assert "rite wip-limit sets an explicit limit, persisted in .settings" \
   bash -c "cd '${wip_repo}' && '${AMD}' wip-limit 3 >/dev/null && grep -q '^wip-limit = 3\$' .settings"
 assert "the new limit takes effect immediately" \
   bash -c "cd '${wip_repo}' && '${AMD}' doing 4 >/dev/null && test -f tasks/doing/004-fourth.md"
-assert "amd wip-limit 0 turns doing/'s limit off" \
+assert "rite wip-limit 0 turns doing/'s limit off" \
   bash -c "cd '${wip_repo}' && '${AMD}' wip-limit 0 >/dev/null \
     && '${AMD}' todo 5 --no-branch >/dev/null && '${AMD}' doing 5 >/dev/null \
     && test -f tasks/doing/005-fifth.md"
-assert "amd wip-limit rejects a non-numeric value" \
+assert "rite wip-limit rejects a non-numeric value" \
   bash -c "cd '${wip_repo}' && ! '${AMD}' wip-limit nope >/dev/null 2>&1"
 assert "a garbled wip-limit value in .settings resets to the default of 2, not unlimited" \
   bash -c "cd '${wip_repo}' && sed -i 's/^wip-limit = 0\$/wip-limit = nope/' .settings \
@@ -2290,14 +2290,14 @@ TICKET
 
 import_dst="$(mktemp -d)"
 ( cd "${import_dst}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init imported --local-only >/dev/null )
-assert "amd import tickets is refused outside the board's tasks directory (ticket 173)" \
+  && RITE_YES=1 "${AMD}" init imported --local-only >/dev/null )
+assert "rite import tickets is refused outside the board's tasks directory (ticket 173)" \
   bash -c "cd '${import_dst}' && '${AMD}' import '${import_src}' 2>&1 | grep -q 'from the board.s tasks directory: cd .*/tasks'"
 assert "...and when the path has nothing to import, saying what it looked for (ticket 251)" \
   bash -c "empty=\$(mktemp -d) && cd '${import_dst}/tasks' \
     && '${AMD}' import tickets \"\$empty\" 2>&1 | grep -q 'has nothing to import: no backlog/, todo/, doing/ or done/ folder, and no tickets' \
     ; rc=\$?; rm -rf \"\$empty\"; exit \$rc"
-assert "amd import lands tickets in their original columns with fresh ids, in one commit" \
+assert "rite import lands tickets in their original columns with fresh ids, in one commit" \
   bash -c "cd '${import_dst}/tasks' && '${AMD}' import '${import_src}' >/dev/null \
     && test -f backlog/001-old-backlog-ticket.md \
     && test -f todo/002-in-progress-work.md \
@@ -2311,7 +2311,7 @@ assert "a --dry-run import writes nothing" \
 assert "importing the same source again leaves out what's already here, logged to import.log, never committed" \
   bash -c "cd '${import_dst}/tasks' && out=\$('${AMD}' import tickets '${import_src}' 2>&1) \
     && grep -q 'already on this board' <<<\"\$out\" && ! ls backlog/004-* 2>/dev/null \
-    && grep -q 'amd import tickets' import.log && grep -q 'Shipped feature.* is already on this board' import.log \
+    && grep -q 'rite import tickets' import.log && grep -q 'Shipped feature.* is already on this board' import.log \
     && ! git status --porcelain --untracked-files=all | grep -q import.log"
 # Ticket 251: a source with no backlog/ and tickets loose outside any column,
 # as agile-md-hosted's was.
@@ -2325,8 +2325,8 @@ printf -- '---\nid: "130"\ntitle: "Started elsewhere"\nparent: ""\nrelated: []\n
   > "${loose_src}/todo/130-started-elsewhere.md"
 loose_dst="$(mktemp -d)"
 ( cd "${loose_dst}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init loosetest --local-only >/dev/null )
-assert "amd import takes a source missing backlog/, with tickets loose outside any column, saying so (ticket 251)" \
+  && RITE_YES=1 "${AMD}" init loosetest --local-only >/dev/null )
+assert "rite import takes a source missing backlog/, with tickets loose outside any column, saying so (ticket 251)" \
   bash -c "cd '${loose_dst}/tasks' && out=\$('${AMD}' import tickets '${loose_src}' --dry-run 2>&1) \
     && printf '%s\\n' \"\$out\" | grep -q 'has no backlog/ folder, taken as empty' \
     && printf '%s\\n' \"\$out\" | grep -q '2 tickets are loose in .*outside any column: would go into the backlog' \
@@ -2335,24 +2335,24 @@ assert "amd import takes a source missing backlog/, with tickets loose outside a
     && test -f todo/001-started-elsewhere.md && test -f backlog/002-loose-one.md && test -f backlog/003-loose-two.md"
 rm -rf "${loose_src}" "${loose_dst}"
 ( cd "${import_dst}" && "${AMD}" tags add duplicate >/dev/null && "${AMD}" new "Old backlog ticket" -t duplicate --no-edit >/dev/null 2>&1 )
-assert "amd tag finds nothing for a tag nobody has" \
+assert "rite tag finds nothing for a tag nobody has" \
   bash -c "cd '${import_dst}' && ! '${AMD}' tag NO-SUCH-TAG | grep -q 'Old backlog ticket'"
-assert "amd backlog --tag narrows the listed column to tasks carrying that tag" \
+assert "rite backlog --tag narrows the listed column to tasks carrying that tag" \
   bash -c "cd '${import_dst}' && test \"\$('${AMD}' backlog --tag DUPLICATE --plain | grep -c 'Old backlog ticket')\" = 1 \
     && test \"\$('${AMD}' backlog --plain | grep -c 'Old backlog ticket')\" = 2"
-assert "amd board --tag narrows every column to tasks carrying that tag" \
+assert "rite board --tag narrows every column to tasks carrying that tag" \
   bash -c "cd '${import_dst}' && out=\$('${AMD}' board --tag DUPLICATE --plain) \
     && echo \"\$out\" | grep -q 'Old backlog ticket' \
     && ! echo \"\$out\" | grep -q 'In progress work' \
     && test \"\$(echo \"\$out\" | grep -c 'Old backlog ticket')\" = 1"
-assert "amd <destination> --tag with no matches lists an empty column, not an error" \
+assert "rite <destination> --tag with no matches lists an empty column, not an error" \
   bash -c "cd '${import_dst}' && '${AMD}' backlog --tag NO-SUCH-TAG --plain | grep -q '(empty)'"
 
 echo "ideas (ticket 131):"
 # A project with its documents repository and a bare origin. Sam is git's identity in the clones; Priya votes through git's
 # environment config.
 ix="$(mktemp -d)"
-ix_env="XDG_CONFIG_HOME=${ix}/config AMD_NO_INPUT=1"
+ix_env="XDG_CONFIG_HOME=${ix}/config RITE_NO_INPUT=1"
 (
   set -e
   export XDG_CONFIG_HOME="${ix}/config"
@@ -2369,7 +2369,7 @@ ix_env="XDG_CONFIG_HOME=${ix}/config AMD_NO_INPUT=1"
 )
 in_ix() { (cd "${ix}/idp-tickets" && env ${ix_env} "${AMD}" "$@"); }
 ix_fns="$(declare -f in_ix); ix='${ix}'; ix_env='${ix_env}'; AMD='${AMD}'"
-assert "amd idea new puts an idea forward with your name, committed and pushed" \
+assert "rite idea new puts an idea forward with your name, committed and pushed" \
   bash -c "${ix_fns}; in_ix idea new 'Dark mode' | grep -q 'put forward ideas/dark-mode.md in idp-documents' \
     && grep -q '^author: \"Sam Lee <sam@acme.io>\"' '${ix}/idp-documents/ideas/dark-mode.md' \
     && git -C '${ix}/origin-documents.git' log -1 --format=%s main | grep -q '^idea: Dark mode'"
@@ -2386,19 +2386,19 @@ assert "another person's vote counts beside yours, and a negative one sinks" \
          GIT_CONFIG_KEY_1=user.name GIT_CONFIG_VALUE_1='Priya Shah' '${AMD}' idea vote quiet --- >/dev/null) \
     && grep -q 'Sam Lee <sam@acme.io> +1\",\"Priya Shah <priya@acme.io> -3' '${ix}/idp-documents/ideas/quiet-tweak.md' \
     && in_ix idea show quiet | grep -q 'votes: Sam Lee +1, Priya Shah -3'"
-assert "amd idea lists best first, the old idea in the middle and the negative one last" \
+assert "rite idea lists best first, the old idea in the middle and the negative one last" \
   bash -c "${ix_fns}; out=\$(in_ix idea) \
     && printf '%s\\n' \"\$out\" | head -1 | grep -q '+3 .*Dark mode — Sam Lee' \
     && printf '%s\\n' \"\$out\" | tail -1 | grep -q -- '-2 .*Quiet tweak'"
-assert "amd idea note adds a dated note; show prints votes and notes" \
+assert "rite idea note adds a dated note; show prints votes and notes" \
   bash -c "${ix_fns}; in_ix idea note dark 'Follow the OS setting' | grep -q 'added a note to Dark mode' \
     && out=\$(in_ix idea show dark) && printf '%s\\n' \"\$out\" | grep -q 'votes: Sam Lee +3' \
     && printf '%s\\n' \"\$out\" | grep -q 'Sam Lee (20[0-9-]*): Follow the OS setting'"
-assert "amd idea ticket makes a backlog ticket from it, linked both ways" \
+assert "rite idea ticket makes a backlog ticket from it, linked both ways" \
   bash -c "${ix_fns}; out=\$(in_ix idea ticket dark 2>&1) && printf '%s\\n' \"\$out\" | grep -q 'Dark mode -> ticket 001' \
     && grep -q '^source: \"idea:idp-documents/ideas/dark-mode.md\"' '${ix}'/idp-tickets/tasks/backlog/001-dark-mode.md \
     && grep -q '^tickets: \[\"idp-tickets#001\"\]' '${ix}/idp-documents/ideas/dark-mode.md'"
-assert "amd idea ticket --as epic makes an empty epic named after it, its write-up the description (ticket 231)" \
+assert "rite idea ticket --as epic makes an empty epic named after it, its write-up the description (ticket 231)" \
   bash -c "${ix_fns}; printf '\\nFollow the OS.\\nOr a switch.\\n' >> '${ix}/idp-documents/ideas/quiet-tweak.md' \
     && git -C '${ix}/idp-documents' commit -qam 'write-up for ticket 231' && git -C '${ix}/idp-documents' push -q origin main 2>/dev/null \
     && in_ix idea ticket quiet --as epic | grep -q 'Quiet tweak -> epic Quiet tweak' \
@@ -2418,27 +2418,27 @@ echo "reading documents from the command line (ticket 179):"
   printf '# Setup\n\nInstall it.\n' > docs/setup.md
   git add -A && git commit -q -m "docs for ticket 179" && git push -q origin main 2>/dev/null
 )
-assert "amd docs start prints the README until a page is pinned; --path gives its path" \
+assert "rite docs start prints the README until a page is pinned; --path gives its path" \
   bash -c "${ix_fns}; in_ix docs start | head -1 | grep -qx '# Idp' \
     && in_ix docs start --path | grep -q 'idp-documents/README.md\$'"
-assert "amd docs tree follows links from the start page, each page once" \
+assert "rite docs tree follows links from the start page, each page once" \
   bash -c "${ix_fns}; out=\$(in_ix docs tree) && [ \"\$out\" = \"\$(printf 'Idp  README.md\\n  Guide  docs/guide.md\\n    Setup  docs/setup.md')\" ]"
-assert "amd docs search finds lines across documents, ignoring case" \
+assert "rite docs search finds lines across documents, ignoring case" \
   bash -c "${ix_fns}; in_ix docs search widget | grep -qx 'idp-documents/docs/guide.md:4: The Widget lives here.' \
     && in_ix docs search no such words 2>&1 | grep -q 'nothing matches'"
-assert "a pinned start page is what amd docs start prints" \
+assert "a pinned start page is what rite docs start prints" \
   bash -c "${ix_fns}; echo 'start-page = docs/setup.md' > '${ix}/idp-documents/.agile-md' \
     && in_ix docs start | head -1 | grep -qx '# Setup' && rm '${ix}/idp-documents/.agile-md'"
-assert "amd docs pin keeps your own pins in the documents repository, pushed (ticket 232)" \
+assert "rite docs pin keeps your own pins in the documents repository, pushed (ticket 232)" \
   bash -c "${ix_fns}; in_ix docs pin idp-documents/docs/guide.md | grep -q 'pin: idp-documents/docs/guide.md' \
     && grep -qx 'idp-documents/docs/guide.md' '${ix}/idp-documents/.agile-md-pins/sam@acme.io' \
     && git -C '${ix}/origin-documents.git' log -1 --format=%s main | grep -q '^pin: idp-documents/docs/guide.md' \
     && in_ix docs pins | grep -qx 'idp-documents/docs/guide.md' \
     && ! in_ix docs pin idp-documents/docs/nothing.md 2>/dev/null"
-assert "...and amd docs unpin takes it off" \
+assert "...and rite docs unpin takes it off" \
   bash -c "${ix_fns}; in_ix docs unpin idp-documents/docs/guide.md | grep -q '^unpin:' \
     && ! test -e '${ix}/idp-documents/.agile-md-pins' && in_ix docs pins | grep -q 'nothing pinned'"
-assert "amd group close ends a sprint: the unstarted go back, a report is pushed to documents (ticket 052)" \
+assert "rite group close ends a sprint: the unstarted go back, a report is pushed to documents (ticket 052)" \
   bash -c "${ix_fns}; in_ix group sprint s9 --days 5 >/dev/null \
     && in_ix new 'Close me' --no-edit >/dev/null && in_ix new 'Left behind' --no-edit >/dev/null \
     && a=\$(ls '${ix}'/idp-tickets/tasks/backlog | grep close-me | cut -d- -f1) \
@@ -2455,7 +2455,7 @@ assert "amd group close ends a sprint: the unstarted go back, a report is pushed
     && grep -q '^## Not done' '${ix}'/idp-documents/sprint/history/*-s9.md \
     && git -C '${ix}/origin-documents.git' log -1 --format=%s main | grep -q '^sprint: s9 closed' \
     && ! in_ix s9 \$b 2>/dev/null"
-assert "amd group backfill pulls sized, unassigned backlog tickets into a running sprint" \
+assert "rite group backfill pulls sized, unassigned backlog tickets into a running sprint" \
   bash -c "${ix_fns}; in_ix group sprint s10 --days 5 >/dev/null && in_ix group start s10 >/dev/null \
     && b=\$(ls '${ix}'/idp-tickets/tasks/backlog | grep left-behind | cut -d- -f1) \
     && in_ix group backfill s10 --points 2 | grep -q \"backfilled s10: \$b\" \
@@ -2477,7 +2477,7 @@ dm_env="XDG_CONFIG_HOME=${dm}/config"
   for r in proj-tickets proj-documents; do
     git -C "${r}" config user.email t@t.co && git -C "${r}" config user.name t && git -C "${r}" config commit.gpgsign false
   done
-  ( cd proj-tickets && AMD_COMMIT=0 "${AMD}" init proj --local-only >/dev/null 2>&1 && "${AMD}" register . >/dev/null 2>&1 )
+  ( cd proj-tickets && RITE_COMMIT=0 "${AMD}" init proj --local-only >/dev/null 2>&1 && "${AMD}" register . >/dev/null 2>&1 )
   mkdir -p proj-documents/adr && echo "# Already here" > proj-documents/adr/0001-x.md
   git -C proj-documents add -A && git -C proj-documents commit -q -m "seed for ticket 079" && git -C proj-documents push -q origin main 2>/dev/null
   mkdir -p old/adr old/img old/.obsidian
@@ -2488,9 +2488,9 @@ dm_env="XDG_CONFIG_HOME=${dm}/config"
   echo unused > old/img/unused.png
   echo "# hidden" > old/.obsidian/h.md
 )
-assert "amd import documents is refused outside a documents repository (ticket 173)" \
+assert "rite import documents is refused outside a documents repository (ticket 173)" \
   bash -c "cd '${dm}/old' && env ${dm_env} '${AMD}' import documents '${dm}/old' 2>&1 | grep -q 'from inside a documents repository'"
-assert "amd import documents --dry-run lists the files and writes nothing" \
+assert "rite import documents --dry-run lists the files and writes nothing" \
   bash -c "cd '${dm}/proj-documents' && out=\"\$(env ${dm_env} '${AMD}' import documents '${dm}/old' --dry-run 2>&1)\" \
     && grep -q 'would add README.md' <<<\"\${out}\" && grep -q 'would add img/d.png' <<<\"\${out}\" \
     && grep -q 'skipped adr/0001-x.md: already in proj-documents, not overwritten' <<<\"\${out}\" \
@@ -2522,10 +2522,10 @@ rm -rf "${dm}"
 echo "locking:"
 lock_repo="$(mktemp -d)"
 ( cd "${lock_repo}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init locktest --local-only >/dev/null \
+  && RITE_YES=1 "${AMD}" init locktest --local-only >/dev/null \
   && "${AMD}" new "Lockable ticket" --no-edit >/dev/null \
   && "${AMD}" lock 1 >/dev/null )
-assert "amd lock records the holder in the ticket's own frontmatter" \
+assert "rite lock records the holder in the ticket's own frontmatter" \
   bash -c "cd '${lock_repo}' && '${AMD}' show 1 | grep -q 'locked-by: \"t@t.co\"'"
 assert "a different git identity is refused editing a leased ticket" \
   bash -c "cd '${lock_repo}' && git config user.email other@example.com && '${AMD}' set 1 points 3 2>&1 | grep -q 'leased by t@t.co'"
@@ -2547,15 +2547,15 @@ assert "the lease is gone after being broken" \
 # A ticket is locked exactly while it's in doing (ticket 156): todo only
 # means it's next. Leaving doing, or reaching done, backlog or the archive,
 # gives your own lease back (ticket 092); nobody else's is touched.
-assert "amd todo takes no lease (ticket 156)" \
+assert "rite todo takes no lease (ticket 156)" \
   bash -c "cd '${lock_repo}' && git config user.email t@t.co && '${AMD}' todo 1 --no-branch >/dev/null \
     && '${AMD}' show 1 | grep -q 'locked-by: \"\"'"
-assert "amd doing takes a now-free lease on entry" \
+assert "rite doing takes a now-free lease on entry" \
   bash -c "cd '${lock_repo}' && '${AMD}' doing 1 >/dev/null 2>&1 && '${AMD}' show 1 | grep -q 'locked-by: \"t@t.co\"'"
 assert "doing -> todo gives your lease back (ticket 156)" \
   bash -c "cd '${lock_repo}' && '${AMD}' todo 1 --no-branch >/dev/null 2>&1 \
     && '${AMD}' show 1 | grep -q 'locked-by: \"\"'"
-assert "amd done releases your lease" \
+assert "rite done releases your lease" \
   bash -c "cd '${lock_repo}' && '${AMD}' doing 1 >/dev/null 2>&1 && '${AMD}' done 1 >/dev/null 2>&1 \
     && '${AMD}' show 1 | grep -q 'locked-by: \"\"' && '${AMD}' show 1 | grep -q 'locked-until: \"\"'"
 assert "...in the same commit as the move" \
@@ -2584,7 +2584,7 @@ assert "...and a lapsed lease never blocks a write" \
   bash -c "cd '${lock_repo}' && '${AMD}' set 2 points 5 | grep -q 'sized 5'"
 assert "show says when your own lock has lapsed, and how to take it again" \
   bash -c "cd '${lock_repo}' && sed -i 's/^locked-by: .*/locked-by: \"t@t.co\"/' tasks/done/002-handed-back.md \
-    && '${AMD}' show 2 2>&1 >/dev/null | grep -q 'your lock lapsed at 2000-01-01T00:00:00Z — .amd lock 002. to keep working'"
+    && '${AMD}' show 2 2>&1 >/dev/null | grep -q 'your lock lapsed at 2000-01-01T00:00:00Z — .rite lock 002. to keep working'"
 assert "show says a lock in force is yours" \
   bash -c "cd '${lock_repo}' && '${AMD}' new 'Held now' --no-edit >/dev/null 2>&1 && '${AMD}' lock 4 >/dev/null \
     && '${AMD}' show 4 2>&1 >/dev/null | grep -q '^locked by you until '"
@@ -2606,9 +2606,9 @@ echo "completions:"
 assert "bash completions are valid bash" \
   bash -c "'${AMD}' completions bash 2>/dev/null > comp.bash && bash -n comp.bash"
 assert "zsh completions start with the compdef line" \
-  bash -c "'${AMD}' completions zsh 2>/dev/null | head -1 | grep -q '^#compdef amd$'"
+  bash -c "'${AMD}' completions zsh 2>/dev/null | head -1 | grep -q '^#compdef rite amd$'"
 assert "fish completions are fish syntax" \
-  bash -c "'${AMD}' completions fish 2>/dev/null | grep -q '^complete -c amd'"
+  bash -c "'${AMD}' completions fish 2>/dev/null | grep -q '^complete -c rite'"
 assert "completions know the subcommands" \
   bash -c "'${AMD}' completions bash 2>/dev/null | grep -q 'link' && '${AMD}' completions fish 2>/dev/null | grep -q 'templates'"
 assert "completions offer the change types" \
@@ -2618,31 +2618,31 @@ assert "completions offer the branch types" \
 assert "completions offer the set fields" \
   bash -c "'${AMD}' completions bash 2>/dev/null | grep -q 'points epic order title'"
 assert "the shell is taken from \$SHELL when not given" \
-  bash -c "SHELL=/bin/zsh '${AMD}' completions 2>/dev/null | head -1 | grep -q '^#compdef amd$'"
+  bash -c "SHELL=/bin/zsh '${AMD}' completions 2>/dev/null | head -1 | grep -q '^#compdef rite amd$'"
 assert "an unknown shell errors with the choices" \
-  bash -c "SHELL=/bin/nope '${AMD}' completions 2>&1 | grep -q 'amd completions bash|zsh|fish'"
+  bash -c "SHELL=/bin/nope '${AMD}' completions 2>&1 | grep -q 'rite completions bash|zsh|fish'"
 assert "the install hint goes to stderr, not into the script" \
   bash -c "'${AMD}' completions bash 2>/dev/null | grep -qv '^# install it with:' && '${AMD}' completions bash 2>&1 >/dev/null | grep -q 'install it with'"
 assert "completions work without a board" \
-  bash -c "cd '${nongit}' && '${AMD}' completions bash | grep -q '_amd'"
+  bash -c "cd '${nongit}' && '${AMD}' completions bash | grep -q '_rite'"
 # Epic names and added columns are destination verbs, so completion offers
 # them, read from the board at TAB time (ticket 028).
 dc="$(mktemp -d)"
 ( cd "${dc}" && git init -q && git config user.email t@t.co && git config user.name t \
-  && AMD_YES=1 "${AMD}" init dests --local-only >/dev/null \
-  && AMD_NO_BRANCH=1 "${AMD}" group epic checkout >/dev/null \
-  && AMD_NO_BRANCH=1 "${AMD}" group sprint s1 >/dev/null \
-  && AMD_NO_BRANCH=1 "${AMD}" group epic draft >/dev/null \
-  && AMD_NO_BRANCH=1 "${AMD}" group epic "Launch plan" >/dev/null \
-  && AMD_NO_BRANCH=1 "${AMD}" column add Review --kind doing --after doing >/dev/null 2>&1 )
-# The bash script's hook, run as bash would on TAB after "amd <word>".
+  && RITE_YES=1 "${AMD}" init dests --local-only >/dev/null \
+  && RITE_NO_BRANCH=1 "${AMD}" group epic checkout >/dev/null \
+  && RITE_NO_BRANCH=1 "${AMD}" group sprint s1 >/dev/null \
+  && RITE_NO_BRANCH=1 "${AMD}" group epic draft >/dev/null \
+  && RITE_NO_BRANCH=1 "${AMD}" group epic "Launch plan" >/dev/null \
+  && RITE_NO_BRANCH=1 "${AMD}" column add Review --kind doing --after doing >/dev/null 2>&1 )
+# The bash script's hook, run as bash would on TAB after "rite <word>".
 tab() { # word -> the completions offered, one a line
-  bash -c "source comp.bash; cd '${dc}'; COMP_WORDS=(amd '$1'); COMP_CWORD=1; _amd_destinations amd '$1' amd; printf '%s\\n' \"\${COMPREPLY[@]}\"" 2>/dev/null
+  bash -c "source comp.bash; cd '${dc}'; COMP_WORDS=(rite '$1'); COMP_CWORD=1; _rite_destinations rite '$1' rite; printf '%s\\n' \"\${COMPREPLY[@]}\"" 2>/dev/null
 }
 "${AMD}" completions bash 2>/dev/null > comp.bash
 dc_path="${PATH}"
 PATH="$(dirname "${AMD}"):${PATH}"
-assert "amd __destinations lists the epics, sprints and added columns (ticket 028)" \
+assert "rite __destinations lists the epics, sprints and added columns (ticket 028)" \
   bash -c "cd '${dc}' && out=\"\$('${AMD}' __destinations)\" && echo \"\${out}\" | grep -qx checkout \
     && echo \"\${out}\" | grep -qx s1 && echo \"\${out}\" | grep -qx review"
 assert "it leaves out a name a command has, and one with a space" \
@@ -2653,19 +2653,19 @@ assert "bash completes an epic name as the command" \
   bash -c "$(declare -f tab); dc='${dc}'; tab che | grep -qx checkout"
 assert "bash still completes the commands alongside them" \
   bash -c "$(declare -f tab); dc='${dc}'; tab do | grep -qx doing && tab do | grep -qx done"
-( cd "${dc}" && AMD_NO_BRANCH=1 "${AMD}" group epic payments >/dev/null )
+( cd "${dc}" && RITE_NO_BRANCH=1 "${AMD}" group epic payments >/dev/null )
 assert "an epic made since the script was sourced is offered on the next TAB" \
   bash -c "$(declare -f tab); dc='${dc}'; tab pay | grep -qx payments"
-assert "zsh and fish ask amd for them too" \
-  bash -c "'${AMD}' completions zsh 2>/dev/null | grep -q 'amd __destinations' && '${AMD}' completions fish 2>/dev/null | grep -q 'amd __destinations'"
+assert "zsh and fish ask rite for them too" \
+  bash -c "'${AMD}' completions zsh 2>/dev/null | grep -q 'rite __destinations' && '${AMD}' completions fish 2>/dev/null | grep -q 'rite __destinations'"
 PATH="${dc_path}"
 rm -rf "${dc}"
 rm -f comp.bash
 
 # The desktop board is a second binary, so the suite checks it was built and
 # that it answers without opening a window — a headless runner can't do more
-# than that, and this is what catches `amdui` disappearing from Cargo.toml.
-# A CLI-only build (`cargo build -p amd-cli`) has no amdui, and that's not a
+# than that, and this is what catches `riteui` disappearing from Cargo.toml.
+# A CLI-only build (`cargo build -p rite-cli`) has no riteui, and that's not a
 # failure.
 echo "versions read each other's boards (ticket 193):"
 cmp_repo="$(mktemp -d)"
@@ -2673,7 +2673,8 @@ cp -r "${ROOT}/tests/fixtures/board-4.5.0/." "${cmp_repo}/"
 rm -f "${cmp_repo}/README.md"
 ( cd "${cmp_repo}" && git init -q -b main && git config user.email t@t.co && git config user.name t \
   && git config commit.gpgsign false && git add -A && git commit -q -m "a board written by 4.5.0" )
-in_cmp() { (cd "${cmp_repo}" && AMD_NO_BRANCH=1 AMD_SYNC=0 XDG_CONFIG_HOME="${cmp_repo}.config" "$@"); }
+# Both names: the previous release may be a 4.x amd, which reads only AMD_ (ticket 309).
+in_cmp() { (cd "${cmp_repo}" && RITE_NO_BRANCH=1 AMD_NO_BRANCH=1 RITE_SYNC=0 AMD_SYNC=0 XDG_CONFIG_HOME="${cmp_repo}.config" "$@"); }
 assert "this build reads a board 4.5.0 wrote: every ticket, epic, sprint, link and repeat" \
   bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; out=\$(in_cmp '${AMD}' board --plain) \
     && for id in 001 002 003 004 005 006 009; do printf '%s' \"\$out\" | grep -q \"\\[\$id\\]\" || exit 1; done \
@@ -2687,15 +2688,15 @@ assert "reading the board changes nothing (no migration on open)" \
   bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; before=\$(git -C '${cmp_repo}' rev-parse HEAD) \
     && in_cmp '${AMD}' board --plain >/dev/null && in_cmp '${AMD}' show 4 >/dev/null 2>&1 \
     && [ \"\$(git -C '${cmp_repo}' rev-parse HEAD)\" = \"\$before\" ] && [ -z \"\$(git -C '${cmp_repo}' status --porcelain)\" ]"
-if [ -n "${AMD_PREVIOUS:-}" ] && [ -x "${AMD_PREVIOUS}" ]; then
-  assert "the previous release ($("${AMD_PREVIOUS}" --version)) reads and changes the board this build wrote" \
-    bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; in_cmp '${AMD_PREVIOUS}' board --plain | grep -q 'Written by the new build' \
-      && in_cmp '${AMD_PREVIOUS}' show 10 | grep -q 'due: \"2031-01-01\"' \
-      && in_cmp '${AMD_PREVIOUS}' todo 10 --no-branch >/dev/null && ls '${cmp_repo}'/tasks/todo/010-written-by-the-new-build.md >/dev/null"
+if [ -n "${RITE_PREVIOUS:-}" ] && [ -x "${RITE_PREVIOUS}" ]; then
+  assert "the previous release ($("${RITE_PREVIOUS}" --version)) reads and changes the board this build wrote" \
+    bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; in_cmp '${RITE_PREVIOUS}' board --plain | grep -q 'Written by the new build' \
+      && in_cmp '${RITE_PREVIOUS}' show 10 | grep -q 'due: \"2031-01-01\"' \
+      && in_cmp '${RITE_PREVIOUS}' todo 10 --no-branch >/dev/null && ls '${cmp_repo}'/tasks/todo/010-written-by-the-new-build.md >/dev/null"
 else
-  echo "  skip - the previous release reading this build's board (set AMD_PREVIOUS to its amd; CI does)"
+  echo "  skip - the previous release reading this build's board (set RITE_PREVIOUS to its rite; CI does)"
 fi
-assert "amd require-version refuses one above this build, and needs --yes without a terminal" \
+assert "rite require-version refuses one above this build, and needs --yes without a terminal" \
   bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; ! in_cmp '${AMD}' require-version 999.0.0 2>&1 | grep -q 'needs' \
     && in_cmp '${AMD}' require-version 999.0.0 2>&1 | grep -q 'update first' \
     && in_cmp '${AMD}' require-version 1.0.0 2>&1 | grep -q 'Add --yes to confirm' \
@@ -2706,19 +2707,19 @@ assert "with --yes it's set and committed, and says who it affects" \
 # A project requiring a version newer than this build: as an older build
 # would see it.
 sed -i 's/^min-version = .*/min-version = 999.0.0/' "${cmp_repo}/.settings"
-assert "a project needing a newer agile-md is read-only here, naming amd update" \
+assert "a project needing a newer agile-md is read-only here, naming rite update" \
   bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; in_cmp '${AMD}' board --plain >/dev/null \
     && ! in_cmp '${AMD}' new 'Refused' --no-edit 2>/tmp/amd-cmp.err && grep -q 'needs agile-md 999.0.0 or newer' /tmp/amd-cmp.err \
-    && grep -q 'amd update' /tmp/amd-cmp.err && ! in_cmp '${AMD}' doing 4 2>/dev/null \
+    && grep -q 'rite update' /tmp/amd-cmp.err && ! in_cmp '${AMD}' doing 4 2>/dev/null \
     && in_cmp '${AMD}' require-version | grep -q '999.0.0'"
 rm -rf "${cmp_repo}" "${cmp_repo}.config" /tmp/amd-cmp.err
 
-echo "amd update (ticket 191):"
+echo "rite update (ticket 191):"
 upd="$(mktemp -d)"
 mkdir -p "${upd}/bin" "${upd}/rel" "${upd}/plain" "${upd}/project/tasks/backlog"
-cp "${AMD}" "${upd}/bin/amd"
+cp "${AMD}" "${upd}/bin/rite"
 printf '#!/usr/bin/env bash\n# agile-md install: release\n' > "${upd}/bin/amd-uninstall"
-cp "${AMD}" "${upd}/plain/amd"
+cp "${AMD}" "${upd}/plain/rite"
 printf -- '---\nid: "001"\n---\n' > "${upd}/project/tasks/backlog/001-x.md"
 case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) upd_target=x86_64-unknown-linux-gnu ;;
@@ -2726,12 +2727,12 @@ case "$(uname -s)-$(uname -m)" in
   Darwin-x86_64) upd_target=x86_64-apple-darwin ;;
   *) upd_target=aarch64-apple-darwin ;;
 esac
-# A pretend 9.9.9: amd and amdui that only say their version, zipped as the
+# A pretend 9.9.9: rite and riteui that only say their version, zipped as the
 # release workflow does, and the release list naming its checksum.
 python3 - "${upd}/rel/amd-${upd_target}.zip" <<'PYZIP'
 import sys, zipfile
 with zipfile.ZipFile(sys.argv[1], "w") as z:
-    for name in ("amd", "amdui"):
+    for name in ("rite", "riteui"):
         info = zipfile.ZipInfo(name)
         info.external_attr = 0o100755 << 16
         z.writestr(info, '#!/bin/sh\necho "%s 9.9.9"\n' % name)
@@ -2744,61 +2745,75 @@ upd_list() { # digest -> the release list
 upd_list "$(printf '0%.0s' $(seq 64))" > "${upd}/rel/bad.json"
 upd_list "${upd_sha}" > "${upd}/rel/releases.json"
 upd_project="$(cd "${upd}/project" && find . -type f -exec sha256sum {} + | sort)"
-assert "amd update --check says what's out" \
-  bash -c "AMD_UPDATE_RELEASES='file://${upd}/rel/releases.json' '${upd}/bin/amd' update --check | grep -q 'agile-md 9.9.9 is out'"
-assert "amd update refuses an install the installer didn't make, and says how" \
-  bash -c "! AMD_UPDATE_RELEASES='file://${upd}/rel/releases.json' '${upd}/plain/amd' update 2>/tmp/amd-upd.err \
-    && grep -q \"wasn't put there by agile-md's installer\" /tmp/amd-upd.err && '${upd}/plain/amd' --version | grep -qv 9.9.9"
+assert "rite update --check says what's out" \
+  bash -c "RITE_UPDATE_RELEASES='file://${upd}/rel/releases.json' '${upd}/bin/rite' update --check | grep -q 'agile-md 9.9.9 is out'"
+assert "rite update refuses an install the installer didn't make, and says how" \
+  bash -c "! RITE_UPDATE_RELEASES='file://${upd}/rel/releases.json' '${upd}/plain/rite' update 2>/tmp/amd-upd.err \
+    && grep -q \"wasn't put there by agile-md's installer\" /tmp/amd-upd.err && '${upd}/plain/rite' --version | grep -qv 9.9.9"
 assert "a checksum that doesn't match changes nothing" \
-  bash -c "! AMD_UPDATE_RELEASES='file://${upd}/rel/bad.json' '${upd}/bin/amd' update >/dev/null 2>/tmp/amd-upd.err \
-    && grep -q \"doesn't match its checksum\" /tmp/amd-upd.err && ! test -e '${upd}/bin/amd.previous' \
-    && '${upd}/bin/amd' --version | grep -qv 9.9.9"
-assert "amd update installs the release, keeps the one before, and leaves the project byte-identical" \
-  bash -c "AMD_UPDATE_RELEASES='file://${upd}/rel/releases.json' '${upd}/bin/amd' update | grep -q 'amd is now 9.9.9' \
-    && '${upd}/bin/amd' --version | grep -qx 'amd 9.9.9' && '${upd}/bin/amdui' --version | grep -qx 'amdui 9.9.9' \
-    && test -x '${upd}/bin/amd.previous' \
+  bash -c "! RITE_UPDATE_RELEASES='file://${upd}/rel/bad.json' '${upd}/bin/rite' update >/dev/null 2>/tmp/amd-upd.err \
+    && grep -q \"doesn't match its checksum\" /tmp/amd-upd.err && ! test -e '${upd}/bin/rite.previous' \
+    && '${upd}/bin/rite' --version | grep -qv 9.9.9"
+assert "rite update installs the release, keeps the one before, and leaves the project byte-identical" \
+  bash -c "RITE_UPDATE_RELEASES='file://${upd}/rel/releases.json' '${upd}/bin/rite' update | grep -q 'rite is now 9.9.9' \
+    && '${upd}/bin/rite' --version | grep -qx 'rite 9.9.9' && '${upd}/bin/riteui' --version | grep -qx 'riteui 9.9.9' \
+    && test -x '${upd}/bin/rite.previous' \
     && [ \"\$(cd '${upd}/project' && find . -type f -exec sha256sum {} + | sort)\" = '${upd_project}' ]"
-assert "amd update --rollback puts the previous amd back" \
-  bash -c "'${upd}/bin/amd.previous' update --rollback | grep -q 'put back the previous amd' \
-    && '${upd}/bin/amd' --version | grep -qv 9.9.9 && ! test -e '${upd}/bin/amd.previous'"
+assert "rite update --rollback puts the previous rite back" \
+  bash -c "'${upd}/bin/rite.previous' update --rollback | grep -q 'put back the previous rite' \
+    && '${upd}/bin/rite' --version | grep -qv 9.9.9 && ! test -e '${upd}/bin/rite.previous'"
 rm -rf "${upd}" /tmp/amd-upd.err
 
+echo "the old names, amd and amdui (ticket 309):"
+old="$(mktemp -d)"
+ln -s "${AMD}" "${old}/amd"
+assert "amd, a symlink to rite, runs it and says once a day that it's now rite" \
+  bash -c "XDG_STATE_HOME='${old}/state' '${old}/amd' --version 2>'${old}/err' | grep -q '^rite ' \
+    && grep -q '^amd is now rite' '${old}/err' \
+    && XDG_STATE_HOME='${old}/state' '${old}/amd' --version 2>'${old}/err' >/dev/null && ! test -s '${old}/err'"
+assert "rite itself says nothing about the old name" \
+  bash -c "[ -z \"\$(XDG_STATE_HOME='${old}/fresh' '${AMD}' --version 2>&1 >/dev/null)\" ]"
+assert "an AMD_ variable from 4.x still counts, and RITE_ wins over it" \
+  bash -c "cd '${nongit}' && AMD_DIR=olddir '${AMD}' board 2>&1 | grep -q '<repo>/olddir' \
+    && AMD_DIR=olddir RITE_DIR=newdir '${AMD}' board 2>&1 | grep -q '<repo>/newdir'"
+rm -rf "${old}"
+
 echo "the desktop binary:"
-AMDUI="${AMDUI_BIN:-${ROOT}/target/debug/amdui}"
+AMDUI="${AMDUI_BIN:-${ROOT}/target/debug/riteui}"
 if [ -x "${AMDUI}" ]; then
-  assert "amdui --version names itself" \
-    bash -c "'${AMDUI}' --version | grep -q '^amdui '"
-  assert "amdui --help mentions the board" \
+  assert "riteui --version names itself" \
+    bash -c "'${AMDUI}' --version | grep -q '^riteui '"
+  assert "riteui --help mentions the board" \
     bash -c "'${AMDUI}' --help | grep -q 'desktop board'"
-  assert "amdui rejects an unknown argument" \
+  assert "riteui rejects an unknown argument" \
     bash -c "! '${AMDUI}' --nope"
 else
-  echo "  skip - no amdui binary (built without the gui feature)"
+  echo "  skip - no riteui binary (built without the gui feature)"
 fi
 
 # The terminal board is gone (ticket 082): no subcommand for it.
-assert "amd has no tui subcommand" \
+assert "rite has no tui subcommand" \
   bash -c "! '${AMD}' tui </dev/null >/dev/null 2>&1 && ! '${AMD}' --help | grep -q 'terminal board'"
 
 echo "guards:"
 assert "errors outside a git repository" \
   bash -c "cd '${nongit}' && ! '${AMD}' board"
 
-echo "non-interactive (--no-input / AMD_NO_INPUT):"
+echo "non-interactive (--no-input / RITE_NO_INPUT):"
 assert "new with no title errors instead of prompting" \
   bash -c "! '${AMD}' new"
 assert "new with no title shows the usage line" \
-  bash -c "'${AMD}' new 2>&1 | grep -q 'usage: amd new'"
-assert "amd todo with no ref lists instead of prompting, even non-interactively" \
+  bash -c "'${AMD}' new 2>&1 | grep -q 'usage: rite new'"
+assert "rite todo with no ref lists instead of prompting, even non-interactively" \
   bash -c "'${AMD}' todo >/dev/null"
 assert "--no-input works without the env var" \
-  bash -c "env -u AMD_NO_INPUT '${AMD}' --no-input show 2>&1 | grep -q 'usage: amd show <ref>'"
+  bash -c "env -u RITE_NO_INPUT '${AMD}' --no-input show 2>&1 | grep -q 'usage: rite show <ref>'"
 
-echo "amd mcp, the board for AI assistants (ticket 186):"
+echo "rite mcp, the board for AI assistants (ticket 186):"
 mcp="$(mktemp -d)"
 (
   cd "${mcp}" && git init -q board && cd board && git config user.email t@t.co && git config user.name Tess
-  AMD_YES=1 "${AMD}" init mcpdemo --local-only >/dev/null && git add -A && git commit -q -m "board for ticket 186"
+  RITE_YES=1 "${AMD}" init mcpdemo --local-only >/dev/null && git add -A && git commit -q -m "board for ticket 186"
 )
 in_mcp() { (cd "${mcp}/board" && XDG_STATE_HOME="${mcp}/state" "${AMD}" mcp 2>"${mcp}/stderr"); }
 rpc() { # id tool json-arguments
@@ -2814,7 +2829,7 @@ rpc() { # id tool json-arguments
   rpc 6 add_note '{"ticket":"1","text":"Checked the sizes."}'
   rpc 7 board '{}'
 } | in_mcp > "${mcp}/out"
-assert "amd mcp writes nothing but JSON-RPC on stdout, one reply per request" \
+assert "rite mcp writes nothing but JSON-RPC on stdout, one reply per request" \
   bash -c "[ \"\$(wc -l < '${mcp}/out')\" -eq 7 ] && ! grep -v '\"jsonrpc\":\"2.0\"' '${mcp}/out' | grep -q . && ! grep -qv '^{' '${mcp}/out'"
 assert "initialize agrees the protocol version and names the server" \
   bash -c "grep '\"id\":1,' '${mcp}/out' | grep -q '\"protocolVersion\":\"2025-06-18\"' && grep '\"id\":1,' '${mcp}/out' | grep -q '\"name\":\"agile-md\"'"
@@ -2824,7 +2839,7 @@ assert "create_ticket makes a backlog ticket with its priority and points, commi
   bash -c "grep -q 'priority: \"high\"' '${mcp}'/board/tasks/*/001-make-the-widget.md && git -C '${mcp}/board' log --format=%s | grep -qx 'new: 001 \"Make the widget\"'"
 assert "a move the board refuses comes back as a tool error saying why" \
   bash -c "grep '\"id\":4,' '${mcp}/out' | grep -q '\"isError\":true' && grep '\"id\":4,' '${mcp}/out' | grep -q 'one column at a time'"
-assert "move_ticket moves it as amd todo does, and commits" \
+assert "move_ticket moves it as rite todo does, and commits" \
   bash -c "test -f '${mcp}/board/tasks/todo/001-make-the-widget.md' && git -C '${mcp}/board' log --format=%s | grep -qx 'todo: 001 \"Make the widget\"'"
 assert "add_note signs and dates a note under ## Notes" \
   grep -q '^\*\*Tess, 20[0-9-]*:\*\* Checked the sizes\.$' "${mcp}/board/tasks/todo/001-make-the-widget.md"
@@ -2832,26 +2847,26 @@ assert "board lists the columns with the ticket in todo" \
   bash -c "grep '\"id\":7,' '${mcp}/out' | grep -q 'board#001 Make the widget'"
 assert "git's own output goes to stderr, never into the protocol" \
   grep -q 'new: 001' "${mcp}/stderr"
-assert "screen says amdui isn't open on the project when no window has written a note" \
+assert "screen says riteui isn't open on the project when no window has written a note" \
   bash -c "rpc() { printf '{\"jsonrpc\":\"2.0\",\"id\":%s,\"method\":\"tools/call\",\"params\":{\"name\":\"%s\",\"arguments\":%s}}\\n' \"\$1\" \"\$2\" \"\$3\"; }
     out=\$(rpc 1 screen '{}' | (cd '${mcp}/board' && XDG_STATE_HOME='${mcp}/state' '${AMD}' mcp 2>/dev/null)) \
-    && printf '%s' \"\$out\" | grep -q \"amdui isn't open\""
-assert "amd mcp setup prints how to connect an AI tool" \
-  bash -c "'${AMD}' mcp setup claude | grep -qx '  claude mcp add --scope user agile-md -- amd mcp' && '${AMD}' mcp setup | grep -q Codex"
-assert "an archived project's tickets can't be changed through amd mcp" \
+    && printf '%s' \"\$out\" | grep -q \"riteui isn't open\""
+assert "rite mcp setup prints how to connect an AI tool" \
+  bash -c "'${AMD}' mcp setup claude | grep -qx '  claude mcp add --scope user agile-md -- rite mcp' && '${AMD}' mcp setup | grep -q Codex"
+assert "an archived project's tickets can't be changed through rite mcp" \
   bash -c "cd '${mcp}/board' && echo 'archived = on' >> .settings && out=\$(printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\"params\":{\"name\":\"create_ticket\",\"arguments\":{\"title\":\"No\"}}}' | '${AMD}' mcp 2>/dev/null) && printf '%s' \"\$out\" | grep -q '\"isError\":true' && printf '%s' \"\$out\" | grep -q archived"
 rm -rf "${mcp}"
 
-echo "AMD_DIR:"
+echo "RITE_DIR:"
 # A fresh repo, not `${tmp}`: README/settings now live at the repository
-# root, so a second AMD_DIR-relocated board inside the same, already-heavily
+# root, so a second RITE_DIR-relocated board inside the same, already-heavily
 # -used `${tmp}` repo would share (and inherit the counter from) the
 # existing `tasks/` board's settings file — an edge case nobody hits in
 # practice (one repo picks one board location), not what this checks.
 dir_repo="$(mktemp -d)"
 ( cd "${dir_repo}" && git init -q && git config user.email t@t.co && git config user.name t )
-assert "AMD_DIR relocates the board" \
-  bash -c "cd '${dir_repo}' && AMD_DIR=work AMD_YES=1 '${AMD}' new 'Elsewhere' >/dev/null && test -f work/backlog/001-elsewhere.md"
+assert "RITE_DIR relocates the board" \
+  bash -c "cd '${dir_repo}' && RITE_DIR=work RITE_YES=1 '${AMD}' new 'Elsewhere' >/dev/null && test -f work/backlog/001-elsewhere.md"
 # Left behind, this repo becomes the one board next to the next run's fresh
 # repo in /tmp, and Board::discover() rightly finds it.
 rm -rf "${dir_repo}"
@@ -2860,8 +2875,8 @@ echo "auto-create when no board exists:"
 fresh="$(mktemp -d)"; ( cd "${fresh}" && git init -q )
 assert "non-interactive with no board errors (no hang)" \
   bash -c "cd '${fresh}' && ! '${AMD}' board </dev/null"
-assert "AMD_YES=1 creates the board and runs" \
-  bash -c "cd '${fresh}' && AMD_YES=1 '${AMD}' board >/dev/null && test -d tasks/todo"
+assert "RITE_YES=1 creates the board and runs" \
+  bash -c "cd '${fresh}' && RITE_YES=1 '${AMD}' board >/dev/null && test -d tasks/todo"
 rm -rf "${fresh}"
 
 echo
