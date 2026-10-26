@@ -42,15 +42,20 @@ jobs:
           - { target: x86_64-pc-windows-msvc, runner: windows-latest, exe: .exe }
           - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, exe: .exe }
     runs-on: ${{ matrix.runner }}
+    # Usually 7-20 minutes (Windows the longest).
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
       # The desktop board (crates/amd-ui) is a Tauri app: WebKitGTK on Linux.
+      # Retries and a limit, as in ci.yml (ticket 327).
       - name: Install the desktop board's system libraries
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev libasound2-dev
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+          sudo apt-get "${apt_opts[@]}" update -qq
+          sudo apt-get "${apt_opts[@]}" install -y -qq libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev libasound2-dev
 
       # bash everywhere: Windows' default shell, PowerShell, can't read the
       # `\` line continuation.
