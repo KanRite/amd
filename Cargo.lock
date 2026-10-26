@@ -116,74 +116,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "amd-cli"
-version = "4.9.0"
-dependencies = [
- "agile-md",
- "anyhow",
- "clap",
- "clap_complete",
- "dunce",
- "inquire",
- "libc",
- "richrs",
- "serde_json",
- "tempfile",
- "time",
- "ureq",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "amd-ui"
-version = "4.9.0"
-dependencies = [
- "agile-md",
- "alacritty_terminal",
- "amd-ui-model",
- "anyhow",
- "base64 0.23.1",
- "candle-core",
- "candle-nn",
- "candle-transformers",
- "cpal",
- "libc",
- "pulldown-cmark",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tempfile",
- "time",
- "ureq",
-]
-
-[[package]]
-name = "amd-ui-model"
-version = "4.9.0"
-dependencies = [
- "deunicode",
- "pulldown-cmark",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "amd-ui-web"
-version = "4.9.0"
-dependencies = [
- "amd-ui-model",
- "console_error_panic_hook",
- "js-sys",
- "leptos",
- "serde",
- "serde-wasm-bindgen",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4532,6 +4464,74 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rite-cli"
+version = "4.9.0"
+dependencies = [
+ "agile-md",
+ "anyhow",
+ "clap",
+ "clap_complete",
+ "dunce",
+ "inquire",
+ "libc",
+ "richrs",
+ "serde_json",
+ "tempfile",
+ "time",
+ "ureq",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rite-ui"
+version = "4.9.0"
+dependencies = [
+ "agile-md",
+ "alacritty_terminal",
+ "anyhow",
+ "base64 0.23.1",
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "cpal",
+ "libc",
+ "pulldown-cmark",
+ "rite-ui-model",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tempfile",
+ "time",
+ "ureq",
+]
+
+[[package]]
+name = "rite-ui-model"
+version = "4.9.0"
+dependencies = [
+ "deunicode",
+ "pulldown-cmark",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "rite-ui-web"
+version = "4.9.0"
+dependencies = [
+ "console_error_panic_hook",
+ "js-sys",
+ "leptos",
+ "rite-ui-model",
+ "serde",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

@@ -26,7 +26,7 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
-      # The desktop board (crates/amd-ui) is a Tauri app: WebKitGTK on Linux.
+      # The desktop board (crates/rite-ui) is a Tauri app: WebKitGTK on Linux.
       # apt hung this step for 22 minutes (ticket 327): the script retries
       # and cuts off a stuck apt-get, and the step stops at 30 minutes.
       - name: Install the desktop board's system libraries
@@ -40,16 +40,16 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: trunk
-      # amdui embeds the board's pages at compile time, so they come first.
+      # riteui embeds the board's pages at compile time, so they come first.
       - name: Build the desktop board's front end
-        working-directory: crates/amd-ui-web
+        working-directory: crates/rite-ui-web
         run: trunk build --release
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Clippy (the board's front end, as WebAssembly)
-        run: cargo clippy -p amd-ui-web -p amd-ui-model --target wasm32-unknown-unknown -- -D warnings
+        run: cargo clippy -p rite-ui-web -p rite-ui-model --target wasm32-unknown-unknown -- -D warnings
       - name: Unit tests
         run: cargo test --locked
       # The latest release, so the CLI tests check it still reads and
@@ -74,14 +74,17 @@ jobs:
           TAG: ${{ steps.latest.outputs.tag }}
         run: |
           dir="$HOME/previous-release"
-          if [ ! -x "$dir/amd" ]; then
+          # 4.x zips carry amd, 5.x ones rite (ticket 309).
+          if [ ! -x "$dir/rite" ] && [ ! -x "$dir/amd" ]; then
             mkdir -p "$dir"
             gh release download "$TAG" --repo agile-md/amd \
               --pattern 'amd-x86_64-unknown-linux-gnu.zip' --dir "$dir" \
               && unzip -q -o "$dir/amd-x86_64-unknown-linux-gnu.zip" -d "$dir" \
               && rm -f "$dir/amd-x86_64-unknown-linux-gnu.zip" || true
           fi
-          if [ -x "$dir/amd" ]; then echo "AMD_PREVIOUS=$dir/amd" >> "$GITHUB_ENV"; fi
+          for name in rite amd; do
+            if [ -x "$dir/$name" ]; then echo "RITE_PREVIOUS=$dir/$name" >> "$GITHUB_ENV"; break; fi
+          done
       - name: CLI tests
         run: bash tests/test.sh
 
@@ -107,26 +110,26 @@ jobs:
         with:
           tool: trunk
       - name: Build the desktop board's front end
-        working-directory: crates/amd-ui-web
+        working-directory: crates/rite-ui-web
         run: trunk build --release
-      - name: Library tests (amd-lib)
+      - name: Library tests (rite-lib)
         if: ${{ !cancelled() }}
         run: cargo test --locked -p agile-md --no-fail-fast
-      - name: Shared model tests (amd-ui-model)
+      - name: Shared model tests (rite-ui-model)
         if: ${{ !cancelled() }}
-        run: cargo test --locked -p amd-ui-model --no-fail-fast
-      - name: Build amd
+        run: cargo test --locked -p rite-ui-model --no-fail-fast
+      - name: Build rite
         if: ${{ !cancelled() }}
-        run: cargo build --locked -p amd-cli
+        run: cargo build --locked -p rite-cli
       - name: CLI unit tests
         if: ${{ !cancelled() }}
-        run: cargo test --locked -p amd-cli --no-fail-fast
-      - name: Build amdui
+        run: cargo test --locked -p rite-cli --no-fail-fast
+      - name: Build riteui
         if: ${{ !cancelled() }}
-        run: cargo build --locked -p amd-ui
-      - name: amdui unit tests
+        run: cargo build --locked -p rite-ui
+      - name: riteui unit tests
         if: ${{ !cancelled() }}
-        run: cargo test --locked -p amd-ui --no-fail-fast
+        run: cargo test --locked -p rite-ui --no-fail-fast
       # The build tasks (ticket 318), so `cargo xtask` keeps working on
       # Windows; both binaries are built already, so this is quick.
       - name: cargo xtask build

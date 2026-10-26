@@ -1,0 +1,37 @@
+# The command line: `rite`. clap for the surface, inquire for the forms,
+# tempfile for the one piece of I/O the CLI owns — the $EDITOR scratch file
+# (docs/adr/0004, exception 1).
+[package]
+name = "rite-cli"
+description = "The agile-md command line"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rite"
+path = "src/main.rs"
+
+# No window stack here: `rite gui` launches the `riteui` binary (ticket 084),
+# which install.sh and the release ship beside `rite`.
+
+[dependencies]
+agile-md.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+clap_complete.workspace = true
+dunce.workspace = true
+inquire.workspace = true
+libc.workspace = true
+richrs.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+time.workspace = true
+ureq.workspace = true
+
+# `rite mcp` swaps the process's standard handles on Windows, where children
+# inherit those rather than C file descriptors (ticket 279).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }

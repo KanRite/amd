@@ -13,7 +13,7 @@
 #
 # Looking at every open PR (no PR given), it also raises an issue on an older
 # PR that a newer one supersedes. Every issue it raises reaches the agile-md
-# board as a TRIAGE ticket, through amd's GitHub issue import.
+# board as a TRIAGE ticket, through rite's GitHub issue import.
 #
 # A PR is ready when every update in it is compatible (a patch, or a minor
 # update of a 1.x-or-later version; a major, or a minor of a 0.x version,

@@ -4,8 +4,8 @@ name: Release
 # binaries for every platform, creates the GitHub Release, and attaches
 # amd-<target>.zip to it — which is what install.sh downloads.
 #
-# amd's own workflow rather than lite-actions/rust-release (ticket 085): the
-# desktop board (amdui) is a Tauri app whose page is built to WebAssembly by
+# rite's own workflow rather than lite-actions/rust-release (ticket 085): the
+# desktop board (riteui) is a Tauri app whose page is built to WebAssembly by
 # Trunk and embedded at compile time, and on Linux it needs WebKitGTK. A plain
 # `cargo build` can't make it, so those steps live here, beside the one app
 # that needs them.
@@ -38,7 +38,7 @@ jobs:
           # Built on the Apple-silicon runner, cross-compiled to Intel.
           - { target: x86_64-apple-darwin, runner: macos-latest, cross: true }
           # Windows (ticket 281): WebView2 ships with Windows 10 and 11, so
-          # no system libraries; the binaries are amd.exe and amdui.exe.
+          # no system libraries; the binaries are rite.exe and riteui.exe.
           - { target: x86_64-pc-windows-msvc, runner: windows-latest, exe: .exe }
           - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, exe: .exe }
     runs-on: ${{ matrix.runner }}
@@ -47,7 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # The desktop board (crates/amd-ui) is a Tauri app: WebKitGTK on Linux.
+      # The desktop board (crates/rite-ui) is a Tauri app: WebKitGTK on Linux.
       # Retries and a limit, as in ci.yml (ticket 327).
       - name: Install the desktop board's system libraries
         if: runner.os == 'Linux'
@@ -71,22 +71,22 @@ jobs:
         with:
           tool: trunk
 
-      # amdui embeds the board's page at compile time, so it comes first.
+      # riteui embeds the board's page at compile time, so it comes first.
       - name: Build the desktop board's front end
-        working-directory: crates/amd-ui-web
+        working-directory: crates/rite-ui-web
         run: trunk build --release
 
-      - name: Build amd and amdui
-        run: cargo build --release --locked --target ${{ matrix.target }} -p amd-cli -p amd-ui
+      - name: Build rite and riteui
+        run: cargo build --release --locked --target ${{ matrix.target }} -p rite-cli -p rite-ui
 
-      # Both binaries start and name themselves (amdui's --version needs no
+      # Both binaries start and name themselves (riteui's --version needs no
       # window). Skipped where the runner can't run the target.
       - name: Smoke test
         if: ${{ !matrix.cross }}
         shell: bash
         run: |
-          target/${{ matrix.target }}/release/amd${{ matrix.exe }} --version
-          target/${{ matrix.target }}/release/amdui${{ matrix.exe }} --version
+          target/${{ matrix.target }}/release/rite${{ matrix.exe }} --version
+          target/${{ matrix.target }}/release/riteui${{ matrix.exe }} --version
 
       - name: Package amd-${{ matrix.target }}.zip
         if: runner.os != 'Windows'
@@ -94,8 +94,8 @@ jobs:
         run: |
           set -euo pipefail
           stage="$(mktemp -d)"
-          cp "target/${{ matrix.target }}/release/amd" "target/${{ matrix.target }}/release/amdui" "${stage}/"
-          (cd "${stage}" && zip -q "${GITHUB_WORKSPACE}/amd-${{ matrix.target }}.zip" amd amdui)
+          cp "target/${{ matrix.target }}/release/rite" "target/${{ matrix.target }}/release/riteui" "${stage}/"
+          (cd "${stage}" && zip -q "${GITHUB_WORKSPACE}/amd-${{ matrix.target }}.zip" rite riteui)
           unzip -l "amd-${{ matrix.target }}.zip"
 
       # The Windows runners have no zip in their bash.
@@ -106,7 +106,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $release = "target/${{ matrix.target }}/release"
           $zip = "amd-${{ matrix.target }}.zip"
-          Compress-Archive -Path "$release/amd.exe", "$release/amdui.exe" -DestinationPath $zip
+          Compress-Archive -Path "$release/rite.exe", "$release/riteui.exe" -DestinationPath $zip
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $archive = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zip))
           $archive.Entries | ForEach-Object { "{0,10}  {1}" -f $_.Length, $_.FullName }

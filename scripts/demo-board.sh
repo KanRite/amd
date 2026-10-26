@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Builds a demo project for screenshots (ticket 147): a fictional online shop,
-# "Acme", with a board that shows everything amd does — every column, an epic,
+# "Acme", with a board that shows everything rite does — every column, an epic,
 # a running sprint, assignees, priorities, points, tags, a draft, locks,
 # related tickets, two code repositories, documents (the project's own and a
 # shared handbook), ideas with votes and notes, and a roadmap. Every name is
 # made up and every address is @example.com, so a screenshot shows nobody's
 # real data. For screenshots, build it outside your home folder (e.g.
-# /tmp/acme): amdui's header shows the board's path.
+# /tmp/acme): riteui's header shows the board's path.
 #
 #   scripts/demo-board.sh [DIR]      # default: ./agile-md-demo
 #
@@ -17,14 +17,14 @@ set -euo pipefail
 
 DIR="${1:-./agile-md-demo}"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Which amd: $AMD if given, else the installed one, else a build in this
+# Which rite: $AMD if given, else the installed one, else a build in this
 # clone. Never a stale build over one you asked for.
 if [ -z "${AMD:-}" ]; then
-  AMD="$(command -v amd || true)"
-  [ -z "${AMD}" ] && [ -x "${SELF}/target/release/amd" ] && AMD="${SELF}/target/release/amd"
-  [ -z "${AMD}" ] && [ -x "${SELF}/target/debug/amd" ] && AMD="${SELF}/target/debug/amd"
+  AMD="$(command -v rite || true)"
+  [ -z "${AMD}" ] && [ -x "${SELF}/target/release/rite" ] && AMD="${SELF}/target/release/rite"
+  [ -z "${AMD}" ] && [ -x "${SELF}/target/debug/rite" ] && AMD="${SELF}/target/debug/rite"
 fi
-[ -n "${AMD}" ] || { echo "amd not found: install it, or build it here first" >&2; exit 1; }
+[ -n "${AMD}" ] || { echo "rite not found: install it, or build it here first" >&2; exit 1; }
 
 if [ -e "${DIR}" ]; then
   [ -f "${DIR}/.agile-md-demo" ] || { echo "${DIR} exists and isn't a demo board; choose another DIR" >&2; exit 1; }
@@ -34,7 +34,7 @@ mkdir -p "${DIR}"
 DIR="$(cd "${DIR}" && pwd)"
 touch "${DIR}/.agile-md-demo"
 
-export XDG_CONFIG_HOME="${DIR}/config" AMD_NO_INPUT=1 AMD_NO_BRANCH=1 AMD_SYNC=0
+export XDG_CONFIG_HOME="${DIR}/config" RITE_NO_INPUT=1 RITE_NO_BRANCH=1 RITE_SYNC=0
 
 # The tickets repository and two code repositories, all committed as Alex.
 repo() {
@@ -48,22 +48,22 @@ git -C "${DIR}/acme-web" commit -q --allow-empty -m "Storefront"
 git -C "${DIR}/acme-api" commit -q --allow-empty -m "Orders API"
 
 cd "${DIR}/acme-tickets"
-amd() { "${AMD}" "$@" >/dev/null 2>&1; }
-# Records what's staged, if anything: amd has usually done it already.
+rite() { "${AMD}" "$@" >/dev/null 2>&1; }
+# Records what's staged, if anything: rite has usually done it already.
 save() { git diff --cached --quiet || git commit -q -m "$1"; }
-amd init acme --local-only
+rite init acme --local-only
 git add -A && save "Board"
-amd register ../acme-web
-amd register ../acme-api
+rite register ../acme-web
+rite register ../acme-api
 
 # The team, and the project's tags.
 sed -i.bak '/^users *=/d' .settings && rm -f .settings.bak
 echo "admins = Alex Morgan <alex.morgan@example.com>" >> .settings
 echo "users = Alex Morgan <alex.morgan@example.com>, Priya Shah <priya.shah@example.com>, Sam Lee <sam.lee@example.com>, Jordan Reyes <jordan.reyes@example.com>" >> .settings
-for tag in BUG FEATURE UX API SECURITY PERFORMANCE DOCS MOBILE PAYMENTS ACCESSIBILITY; do amd tags add "${tag}"; done
+for tag in BUG FEATURE UX API SECURITY PERFORMANCE DOCS MOBILE PAYMENTS ACCESSIBILITY; do rite tags add "${tag}"; done
 git add .settings && save "Team and tags"
 
-# new TITLE [amd new options...] — prints the new ticket's number.
+# new TITLE [rite new options...] — prints the new ticket's number.
 new() {
   "${AMD}" new "$@" --no-edit 2>/dev/null | sed -n 's#^created backlog/\([0-9]*\)-.*#\1#p'
 }
@@ -75,14 +75,14 @@ note() {
   mv "${file}.tmp" "${file}"
   git add "${file}" && save "notes: $1"
 }
-size() { amd set "$1" points "$2"; }
-prio() { amd set "$1" priority "$2"; }
-walk() { local id="$1"; shift; for column in "$@"; do amd "${column}" "${id}"; done; }
+size() { rite set "$1" points "$2"; }
+prio() { rite set "$1" priority "$2"; }
+walk() { local id="$1"; shift; for column in "$@"; do rite "${column}" "${id}"; done; }
 
 # Epics and a sprint.
-amd group epic checkout --description "A faster, simpler checkout"
-amd group epic onboarding --description "First-run experience for new customers"
-amd group sprint s12 --days 14
+rite group epic checkout --description "A faster, simpler checkout"
+rite group epic onboarding --description "First-run experience for new customers"
+rite group sprint s12 --days 14
 
 # The sprint: sized, assigned, started.
 s1=$(new "Apple Pay at checkout" --branch-type feature -R acme-web -t PAYMENTS -t FEATURE -a "Priya Shah")
@@ -92,20 +92,20 @@ s4=$(new "Save the basket between visits" --branch-type feature -R acme-web -t F
 for id in "${s1}" "${s2}" "${s3}" "${s4}"; do size "${id}" 5; done
 size "${s3}" 2; size "${s4}" 3
 prio "${s1}" high; prio "${s3}" high; prio "${s2}" medium
-for id in "${s1}" "${s2}" "${s3}" "${s4}"; do amd s12 "${id}"; done
-amd group start s12
+for id in "${s1}" "${s2}" "${s3}" "${s4}"; do rite s12 "${id}"; done
+rite group start s12
 
 # The checkout epic.
 e1=$(new "One-page checkout" --branch-type feature -R acme-web -t UX -t FEATURE -a "Priya Shah")
 e2=$(new "Show delivery dates before payment" --branch-type feature -R acme-web -t UX -p "${e1}")
 e3=$(new "Address lookup by postcode" --branch-type feature -R acme-api -t API -p "${e1}" -r "${e2}")
 size "${e1}" 8; size "${e2}" 3; size "${e3}" 5; prio "${e1}" medium
-for id in "${e1}" "${e2}" "${e3}"; do amd checkout "${id}"; done
+for id in "${e1}" "${e2}" "${e3}"; do rite checkout "${id}"; done
 
 # The onboarding epic.
 o1=$(new "Welcome tour for first-time customers" --branch-type feature -R acme-web -t UX -t MOBILE)
 o2=$(new "Explain delivery options on sign-up" -t DOCS -t UX)
-for id in "${o1}" "${o2}"; do amd onboarding "${id}"; done
+for id in "${o1}" "${o2}"; do rite onboarding "${id}"; done
 
 # The loose backlog, a draft among them.
 new "Search results ignore spelling mistakes" --branch-type feature -R acme-api -t FEATURE -t API >/dev/null
@@ -126,7 +126,7 @@ f2=$(new "Mobile menu overlaps the logo" --branch-type bugfix -R acme-web -t BUG
 f3=$(new "Publish the API rate limits" -t DOCS -t API -a "Jordan Reyes")
 prio "${t1}" high; prio "${d1}" high; prio "${t2}" medium
 size "${t1}" 2; size "${t2}" 5; size "${d1}" 3; size "${d2}" 1
-amd link "${d1}" "${s3}"
+rite link "${d1}" "${s3}"
 note "${d1}" "Totals are summed from rounded line prices; round once, at the end. Same root cause as the confirmation email (see related)."
 # Done first: doing has a WIP limit of 2, and the finished work passes
 # through it. Entering doing locks a ticket for whoever moved it (Alex,
@@ -302,11 +302,11 @@ Shared by every Acme project.
 - One approval; two for anything touching payments.
 MD
 for r in acme-documents acme-handbook; do git -C "${DIR}/${r}" add -A && git -C "${DIR}/${r}" commit -q -m "Documents"; done
-amd shared-documents acme-handbook
+rite shared-documents acme-handbook
 
 cat <<EOF
 Demo board ready: ${DIR}
-  desktop board:  cd "${DIR}" && XDG_CONFIG_HOME="${DIR}/config" amdui
-  command line:   cd "${DIR}/acme-tickets" && XDG_CONFIG_HOME="${DIR}/config" amd board
+  desktop board:  cd "${DIR}" && XDG_CONFIG_HOME="${DIR}/config" riteui
+  command line:   cd "${DIR}/acme-tickets" && XDG_CONFIG_HOME="${DIR}/config" rite board
 Rebuild any time:  $0 "${DIR}"
 EOF

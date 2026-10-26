@@ -1,0 +1,20 @@
+# Tasks (agile-md)
+
+A filesystem Kanban managed by the `rite` command.
+Status is the folder; `git mv` between columns is the audit trail.
+
+Columns: {% for column in columns %}`{{ column }}/`{% if not loop.last %}, {% endif %}{% endfor %}.
+Each task is `{{ board }}/<column>/NNN-slug.md`.
+
+There is one kind of ticket, with fields you fill in as they apply. A
+`branch-type`
+({% for kind in types %}`{{ kind }}`{% if not loop.last %}, {% endif %}{% endfor %})
+gives it a branch — entering `todo` switches to `<branch-type>/<title>` — and
+a ticket without one simply has nothing to check out. `parent` nests tickets
+and `assignee` says who's doing it.
+
+Tasks are rendered from a Jinja template. Run `rite templates` to see what's
+available, and `rite templates eject ticket` to drop an editable copy into
+`{{ board }}/templates/` — anything there overrides the built-ins.
+
+See https://github.com/agile-md/amd

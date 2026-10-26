@@ -1,0 +1,55 @@
+# The desktop board: `riteui`. A Tauri window over the Leptos front end in
+# crates/rite-ui-web; every change it makes goes through rite-lib, so the board
+# and the command line are one implementation (ticket 084, docs/adr/0004).
+#
+# Building it needs the front end built first (`trunk build --release` in
+# crates/rite-ui-web), since the window's pages are embedded at compile time.
+[package]
+name = "rite-ui"
+description = "The agile-md desktop board"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "rite_ui"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "riteui"
+path = "src/main.rs"
+
+[features]
+# The window's pages are the ones built into the binary, so a plain `cargo
+# build` (install.sh, the release) makes a working board. `cargo tauri dev`
+# turns this off to serve them live from `trunk serve` instead.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+agile-md.workspace = true
+alacritty_terminal.workspace = true
+candle-core.workspace = true
+candle-nn.workspace = true
+candle-transformers.workspace = true
+cpal.workspace = true
+ureq.workspace = true
+rite-ui-model.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+libc.workspace = true
+# The documents reader renders markdown to HTML (ticket 129).
+pulldown-cmark = { workspace = true, features = ["html"] }
+serde.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
