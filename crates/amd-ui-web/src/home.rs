@@ -86,17 +86,23 @@ pub fn HomeBar() -> impl IntoView {
     // `.current-project` says), else what amdui has open.
     let on_screen = move || {
         ctx.board.with(|b| {
-            b.as_ref().and_then(|b| {
-                std::path::Path::new(&b.tasks_dir)
-                    .parent()
-                    .map(|p| p.display().to_string())
-            })
+            // Not `Path::parent`: this is wasm, which only splits on `/`,
+            // and a Windows path has `\` (ticket 329).
+            b.as_ref()
+                .and_then(|b| amd_ui_model::parent_path(&b.tasks_dir))
         })
     };
     let current = move || {
         data().and_then(|h| {
             let shown = on_screen();
-            let pick = |root: &str| h.projects.iter().find(|p| p.root == root).cloned();
+            // Git says `G:/a/b` where the registry has `G:\a\b` on Windows
+            // (ticket 329), so compare the places, not the spellings.
+            let pick = |root: &str| {
+                h.projects
+                    .iter()
+                    .find(|p| amd_ui_model::same_path(&p.root, root))
+                    .cloned()
+            };
             shown.as_deref().and_then(pick).or_else(|| pick(&h.current))
         })
     };
@@ -163,7 +169,7 @@ pub fn HomeBar() -> impl IntoView {
             >
                 {
                     let root = p.root.clone();
-                    let selected = move || current().is_some_and(|c| c.root == root);
+                    let selected = move || current().is_some_and(|c| amd_ui_model::same_path(&c.root, &root));
                     let label = if p.archived { format!("{} (archived)", p.name) } else { p.name.clone() };
                     view! { <option value=p.root.clone() selected=selected>{label}</option> }
                 }
