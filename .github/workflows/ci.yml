@@ -26,14 +26,11 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
       # The desktop board (crates/amd-ui) is a Tauri app: WebKitGTK on Linux.
-      # A mirror that stops answering hung this step for 22 minutes (ticket
-      # 327): apt retries and gives up on a silent server, and the step stops.
+      # apt hung this step for 22 minutes (ticket 327): the script retries
+      # and cuts off a stuck apt-get, and the step stops at 20 minutes.
       - name: Install the desktop board's system libraries
-        timeout-minutes: 10
-        run: |
-          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          sudo apt-get "${apt_opts[@]}" update -qq
-          sudo apt-get "${apt_opts[@]}" install -y -qq libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev libasound2-dev
+        timeout-minutes: 20
+        run: scripts/apt-install.sh libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev libasound2-dev
       - name: Install Rust (stable + rustfmt + clippy + wasm32)
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy --target wasm32-unknown-unknown
@@ -142,6 +139,5 @@ jobs:
       - uses: actions/checkout@v7
       - name: ShellCheck
         run: |
-          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
-          sudo apt-get "${apt_opts[@]}" update -qq && sudo apt-get "${apt_opts[@]}" install -y -qq shellcheck
+          scripts/apt-install.sh shellcheck
           shellcheck -x --severity=warning install.sh tests/*.sh scripts/*.sh
