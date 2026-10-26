@@ -146,7 +146,10 @@ pub fn apply() -> UpdateResult {
     let dir = match update_apply::install_dir(&exe) {
         Install::Managed(dir) => dir,
         Install::Unmanaged { why, reinstall } => {
-            return UpdateResult::Unmanaged { why, reinstall };
+            return UpdateResult::Unmanaged {
+                why,
+                install: reinstall.then(|| update_apply::INSTALL_COMMAND.to_string()),
+            };
         }
     };
     let Some(version) = Version::parse(&current) else {

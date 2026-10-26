@@ -793,17 +793,16 @@ pub enum UpdateResult {
     /// Updated to this version; riteui restarts into it.
     Updated { version: String },
     /// Not an install riteui replaces (a source build, a package manager's),
-    /// and why; `reinstall` when running the installer is the way, so the
-    /// bar shows [`INSTALL_COMMAND`].
-    Unmanaged { why: String, reinstall: bool },
+    /// and why; `install` is the installer's command when running it is the
+    /// way, for the bar to show. riteui sends it because the page can't tell
+    /// which system it's on: on Windows it's `install.ps1` (ticket 282).
+    Unmanaged {
+        why: String,
+        install: Option<String>,
+    },
     /// It stopped: why, and the version rite and riteui are now.
     Failed { why: String, now: String },
 }
-
-/// How to update by hand (an install riteui doesn't replace): the
-/// installer, run again.
-pub const INSTALL_COMMAND: &str =
-    "curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash";
 
 /// Whether to show Admin, and the note that says why (ticket 149).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

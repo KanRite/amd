@@ -10,7 +10,8 @@
 //! breaking changes (ticket 193), so there is nothing to migrate.
 //!
 //! - **Only an installer's release install updates itself.** The installer
-//!   writes `amd-uninstall` beside `rite` and records in it how it installed
+//!   writes `amd-uninstall` beside `rite` (`install.ps1` on Windows writes
+//!   `amd-uninstall.ps1`, ticket 282) and records in it how it installed
 //!   (`# agile-md install: release` or `source`). Anything else — a source
 //!   build, a package manager's install, an install from before the marker
 //!   — is told how to update and left alone ([`install_dir`]).
@@ -40,15 +41,24 @@ use crate::update::{Release, Version};
 /// `riteui` is installed when it is.
 pub const BINARIES: [&str; 2] = ["rite", "riteui"];
 
-/// What the installer writes beside `rite`, and where it says how.
-pub const MARKER: &str = "amd-uninstall";
+/// What the installer writes beside `rite`, and where it says how: on
+/// Windows the uninstaller `install.ps1` writes (ticket 282).
+pub const MARKER: &str = if cfg!(windows) {
+    "amd-uninstall.ps1"
+} else {
+    "amd-uninstall"
+};
 
 /// The line in [`MARKER`] that a release install has.
 pub const RELEASE_INSTALL: &str = "# agile-md install: release";
 
-/// How to install (or update by hand): the installer, run again.
-pub const INSTALL_COMMAND: &str =
-    "curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash";
+/// How to install (or update by hand): the installer, run again. On
+/// Windows that's `install.ps1`, in PowerShell (ticket 282).
+pub const INSTALL_COMMAND: &str = if cfg!(windows) {
+    "irm https://raw.githubusercontent.com/kanrite/amd/v4/install.ps1 | iex"
+} else {
+    "curl -fsSL https://raw.githubusercontent.com/kanrite/amd/v4/install.sh | bash"
+};
 
 /// Downloads a URL's bytes. The front end supplies the network.
 pub trait Fetch {
@@ -506,7 +516,7 @@ mod tests {
     #[test]
     #[cfg_attr(
         windows,
-        ignore = "the pretend binaries are shell scripts; self-update on Windows is ticket 282"
+        ignore = "the pretend binaries are shell scripts; on Windows scripts/test-install.ps1 updates a real install"
     )]
     fn an_update_goes_one_release_at_a_time_and_touches_only_the_binaries() {
         let dir = installed("4.5.0");
@@ -576,7 +586,7 @@ mod tests {
     #[test]
     #[cfg_attr(
         windows,
-        ignore = "the pretend binaries are shell scripts; self-update on Windows is ticket 282"
+        ignore = "the pretend binaries are shell scripts; on Windows scripts/test-install.ps1 updates a real install"
     )]
     fn a_failure_part_way_leaves_the_last_good_release_working() {
         let dir = installed("4.5.0");
@@ -607,7 +617,7 @@ mod tests {
     #[test]
     #[cfg_attr(
         windows,
-        ignore = "the pretend binaries are shell scripts; self-update on Windows is ticket 282"
+        ignore = "the pretend binaries are shell scripts; on Windows scripts/test-install.ps1 updates a real install"
     )]
     fn a_failed_download_or_a_binary_that_wont_run_changes_nothing() {
         let dir = installed("4.5.0");
@@ -662,9 +672,26 @@ mod tests {
     }
 
     #[test]
+    fn install_ps1s_uninstaller_marks_a_release_install() {
+        // Windows PowerShell 5.1 writes UTF-8 with a byte order mark, and
+        // CRLF line endings (ticket 282).
+        let dir = installed("4.5.0");
+        fs::write(
+            dir.path().join(MARKER),
+            "\u{feff}# agile-md's uninstaller, written by install.ps1 (ticket 282).\r\n\
+             # agile-md install: release\r\n#\r\n",
+        )
+        .unwrap();
+        assert_eq!(
+            install_dir(&dir.path().join("rite")),
+            Install::Managed(dir.path().to_path_buf())
+        );
+    }
+
+    #[test]
     #[cfg_attr(
         windows,
-        ignore = "the pretend binaries are shell scripts; self-update on Windows is ticket 282"
+        ignore = "the pretend binaries are shell scripts; on Windows scripts/test-install.ps1 updates a real install"
     )]
     fn rollback_puts_the_previous_binaries_back() {
         let dir = installed("4.5.0");

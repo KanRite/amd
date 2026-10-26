@@ -163,7 +163,7 @@
 
     <section class="install" id="install" aria-labelledby="install-title">
       <h2 id="install-title">Install</h2>
-      <p>On <strong>Linux or macOS</strong> (x86_64 or arm64), with <strong>git 2.29 or later</strong>. Paste this into a terminal:</p>
+      <p>On <strong>Linux, macOS or Windows</strong> (x86_64 or arm64), with <strong>git 2.29 or later</strong>. Paste this into a terminal (on Windows, PowerShell):</p>
       <div class="command">
         <pre><code id="install-command">curl -fsSL https://raw.githubusercontent.com/kanrite/amd/v4/install.sh | bash</code></pre>
         <button type="button" class="button copy" id="copy-install" aria-describedby="copy-status">Copy</button>
@@ -171,7 +171,8 @@
       <p id="copy-status" class="status" role="status" aria-live="polite"></p>
       <p id="system-note" class="note" hidden></p>
       <p>It installs <code>amd</code>, the command line, and <code>amdui</code>, the desktop board, and on Linux adds the board to your application menu. Run it again to update. If your system isn't one agile-md runs on, it tells you why and changes nothing; on Linux the desktop board needs WebKitGTK 4.1, and the installer names the package to add if it's missing.</p>
-      <p>To uninstall, run <code>amd-uninstall</code>: it removes the programs and asks before removing your settings. Your projects are never touched.</p>
+      <p>On Windows the command is <code>irm https://raw.githubusercontent.com/kanrite/amd/v4/install.ps1 | iex</code>: it installs for you alone, with no administrator needed, adds KanRite to the Start menu and lists it in Settings &gt; Apps.</p>
+      <p>To uninstall, run <code>amd-uninstall</code> (on Windows, uninstall KanRite in Settings &gt; Apps): it removes the programs and asks before removing your settings. Your projects are never touched.</p>
       <p>Then start a project, from the folder you keep projects in:</p>
       <pre><code>amd init my-project       # makes my-project-tickets and my-project-documents on GitHub
 amd new "My first task"
@@ -191,8 +192,9 @@ amdui                     # the desktop board</code></pre>
     (function () {
       var button = document.getElementById("copy-install");
       var status = document.getElementById("copy-status");
-      var command = document.getElementById("install-command").textContent;
+      var commandLine = document.getElementById("install-command");
       button.addEventListener("click", function () {
+        var command = commandLine.textContent;
         var done = function () { status.textContent = "Copied. Paste it into a terminal and press Enter."; };
         var failed = function () { status.textContent = "Couldn't copy: select the line above and copy it."; };
         try {
@@ -215,9 +217,10 @@ amdui                     # the desktop board</code></pre>
         if (bad) { note.classList.add("bad"); }
       };
       if (/Android|iPhone|iPad|iPod/i.test(ua) || (/Mac/.test(platform) && navigator.maxTouchPoints > 1)) {
-        say("This looks like a phone or tablet. KanRite is for Linux and macOS computers: install it there.", true);
+        say("This looks like a phone or tablet. KanRite is for Linux, macOS and Windows computers: install it there.", true);
       } else if (/Win/i.test(platform) || /Windows/i.test(ua)) {
-        say("This looks like Windows. KanRite runs on Linux and macOS, not Windows itself; install it inside WSL (Windows Subsystem for Linux) and run the command there.", true);
+        commandLine.textContent = "irm https://raw.githubusercontent.com/kanrite/amd/v4/install.ps1 | iex";
+        say("This looks like Windows: paste the command into PowerShell. It installs the Windows build for you alone, with no administrator needed.", false);
       } else if (/CrOS/.test(ua)) {
         say("This looks like a Chromebook: run the command in its Linux terminal (Linux development environment).", false);
       } else if (/Mac/.test(platform)) {

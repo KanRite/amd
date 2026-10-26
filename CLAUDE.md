@@ -340,11 +340,14 @@ redundant. Their history is in git if it is ever wanted again.
   the version, `rite_ui_model::ago` since the last check and Check now; both
   use `check_by_hand`, which puts a newer release in `Ctx.update_offer`.
 - `crates/rite-lib/src/update_apply.rs` — **applying an update** (ticket
-  191). `install_dir(exe)`: only a folder whose `amd-uninstall` says
+  191). `install_dir(exe)`: only a folder whose `MARKER` (`amd-uninstall`;
+  `amd-uninstall.ps1` on Windows, ticket 282) says
   `# agile-md install: release` (install.sh now writes `release` or
   `source`, `METHOD`) is `Managed`; anything else is `Unmanaged {why,
   reinstall}` (reinstall: the installer command is the fix; not for a
-  source build). `apply(dir, current, releases, fetch, progress)` goes
+  source build). `INSTALL_COMMAND` is per OS (the `irm | iex` line on
+  Windows); amdui sends it to the update bar in `UpdateResult::Unmanaged`'s
+  `install`, because the page (wasm) can't tell which OS it's on. `apply(dir, current, releases, fetch, progress)` goes
   through `steps` (newer releases, oldest first), one at a time, stopping
   at the first failure (`Applied {reached, failed}`): the asset
   `amd-<target>.zip` (`target()` from ARCH/OS), its SHA-256 checked
@@ -620,7 +623,7 @@ redundant. Their history is in git if it is ever wanted again.
   `--version`). Keep the two paths in sync. **The curl one-liner is the
   install users get** (ticket 238: the README and the website show only
   it; building from source is in CONTRIBUTING.md). `check_system` runs
-  first and refuses, saying why, on Windows (pointing at WSL), another OS,
+  first and refuses, saying why, on Windows (pointing at install.ps1), another OS,
   another processor, or git older than 2.29; a downloaded `rite` that won't
   run (an old glibc) is reported as such and exits 1. A clone is
   `in_clone` (`crates/rite-cli/Cargo.toml` beside the script), never the
@@ -641,6 +644,18 @@ redundant. Their history is in git if it is ever wanted again.
   it, then `mv` over it, never `cp` onto it — Linux refuses to write into a
   running executable ("Text file busy"), which left an install half done. A
   running one (found via `/proc/*/exe`) gets a "restart it" note.
+  **Windows has `install.ps1`** (ticket 282; `irm … | iex`, Windows
+  PowerShell 5.1, so nothing newer): the zip for the OS architecture into
+  `%LOCALAPPDATA%\Programs\KanRite\bin` (`-Dir`, `-Version`; `-Zip` for a
+  local zip), the user PATH written unexpanded in `HKCU:\Environment`, a
+  `KanRite.lnk` Start menu shortcut, a Settings > Apps entry under
+  `HKCU:\…\Uninstall\KanRite` (no DisplayVersion: `rite update` would
+  leave it stale), and `amd-uninstall.ps1` (`Uninstaller`), whose second
+  line is the release marker. A running .exe is renamed aside (`.old`),
+  never overwritten. `scripts/test-install.ps1`, in CI's Windows job,
+  installs the debug build, updates the running `rite.exe` to a pretend
+  9.9.9 (built with `rustc`), rolls back and uninstalls; it writes the
+  user's PATH and registry, so it's for a CI runner only.
   **On Linux it also installs riteui's launcher** (`install_launcher`,
   ticket 073): `riteui.desktop` and the icons (`app-icon.svg` plus the 32,
   128 and 256 px PNGs from `crates/rite-ui/icons/`) into

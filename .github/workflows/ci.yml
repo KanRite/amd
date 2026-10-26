@@ -135,6 +135,14 @@ jobs:
       - name: cargo xtask build
         if: ${{ !cancelled() }}
         run: cargo xtask build
+      # install.ps1 installs the binaries just built, rite update replaces
+      # the running rite.exe with a pretend release and rolls back, and the
+      # uninstaller removes it all (ticket 282). Windows PowerShell 5.1,
+      # which is what runs `irm | iex` on a user's machine.
+      - name: install.ps1, rite update and the uninstaller
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: scripts/test-install.ps1
 
   shell:
     runs-on: ubuntu-latest
