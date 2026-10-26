@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in amd or amdui doesn't work as it should.
+description: Something in rite or riteui doesn't work as it should.
 labels: [bug]
 body:
   - type: textarea
@@ -15,16 +15,16 @@ body:
       label: How to make it happen
       description: The commands you ran or the clicks you made, from the start.
       placeholder: |
-        1. amd new "..."
-        2. amd todo 3
+        1. rite new "..."
+        2. rite todo 3
         3. ...
   - type: dropdown
     id: where
     attributes:
       label: Where
       options:
-        - amd (the command line)
-        - amdui (the desktop board)
+        - rite (the command line)
+        - riteui (the desktop board)
         - install.sh
         - Not sure
     validations:
@@ -33,7 +33,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: The output of `amd --version`.
+      description: The output of `rite --version`.
     validations:
       required: true
   - type: input
@@ -45,5 +45,5 @@ body:
     id: output
     attributes:
       label: Output or error
-      description: Anything amd or amdui printed. Leave out anything private.
+      description: Anything rite or riteui printed. Leave out anything private.
       render: text

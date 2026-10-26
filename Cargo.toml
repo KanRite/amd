@@ -1,19 +1,19 @@
-# One library, two interfaces (docs/adr/0004): amd-lib, the `amd` command
-# line, and the `amdui` desktop board — a Tauri backend (amd-ui) with a
-# Leptos front end compiled to WebAssembly (amd-ui-web) and the types the two
-# share (amd-ui-model).
+# One library, two interfaces (docs/adr/0004): rite-lib, the `amd` command
+# line, and the `amdui` desktop board — a Tauri backend (rite-ui) with a
+# Leptos front end compiled to WebAssembly (rite-ui-web) and the types the two
+# share (rite-ui-model).
 #
-# The boundary is enforced here rather than by review — amd-lib does not list
+# The boundary is enforced here rather than by review — rite-lib does not list
 # clap, inquire, Tauri or Leptos, so a front-end dependency reaching into the
 # library fails to compile rather than passing review.
 [workspace]
 resolver = "3"
 members = [
-    "crates/amd-lib",
-    "crates/amd-cli",
-    "crates/amd-ui",
-    "crates/amd-ui-model",
-    "crates/amd-ui-web",
+    "crates/rite-lib",
+    "crates/rite-cli",
+    "crates/rite-ui",
+    "crates/rite-ui-model",
+    "crates/rite-ui-web",
     "crates/xtask",
 ]
 
@@ -25,8 +25,8 @@ repository = "https://github.com/agile-md/amd"
 license = "MIT"
 
 [workspace.dependencies]
-agile-md = { path = "crates/amd-lib" }
-amd-ui-model = { path = "crates/amd-ui-model" }
+agile-md = { path = "crates/rite-lib" }
+rite-ui-model = { path = "crates/rite-ui-model" }
 anyhow = "1"
 clap = { version = "4", features = ["derive", "string", "wrap_help"] }
 clap_complete = "4"
@@ -44,7 +44,7 @@ sha2 = "0.11"
 tempfile = "3"
 time = { version = "0.3", features = ["formatting", "parsing", "local-offset", "macros"] }
 
-# The desktop board (crates/amd-ui*).
+# The desktop board (crates/rite-ui*).
 tauri = "2.12"
 tauri-build = "2.7"
 pulldown-cmark = { version = "0.13", default-features = false }

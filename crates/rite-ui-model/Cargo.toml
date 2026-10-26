@@ -1,0 +1,20 @@
+# Types and pure rules shared by the desktop board's Tauri backend (rite-ui)
+# and its Leptos front end (rite-ui-web). It compiles to WebAssembly, so it
+# holds no file, git or settings logic — that is rite-lib's, which the
+# backend calls (ticket 084).
+[package]
+name = "rite-ui-model"
+description = "Types shared by the agile-md desktop board's backend and front end"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+deunicode.workspace = true
+pulldown-cmark.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
