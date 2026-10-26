@@ -10,10 +10,10 @@
 **An open source, fully featured, multi-project agile management system for
 individuals and teams.**
 
-**[Website](https://agilerite.github.io/amd/)** ·
+**[Website](https://kanrite.github.io/amd/)** ·
 [Install](#install) ·
 [User guide](docs/user-guide.md) ·
-[Releases](https://github.com/agilerite/amd/releases) ·
+[Releases](https://github.com/KanRite/amd/releases) ·
 [Contributing](CONTRIBUTING.md)
 
 Your tickets, documents and ideas live in your own git repositories, as
@@ -183,7 +183,7 @@ Runs on **Linux and macOS** (x86_64 and arm64), and needs **git 2.29 or
 later**. In a terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/agilerite/amd/v4/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/KanRite/amd/v4/install.sh | bash
 ```
 
 That installs two commands, **`amd`** (the command line) and **`amdui`**
@@ -192,7 +192,7 @@ and on Linux adds the board to your application menu. To choose the folder
 or pin a version, pass them after `bash -s --`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/agilerite/amd/v4/install.sh | bash -s -- --dir ~/.local/bin --version v4.9.0
+curl -fsSL https://raw.githubusercontent.com/KanRite/amd/v4/install.sh | bash -s -- --dir ~/.local/bin --version v4.9.0
 ```
 
 If your system isn't one agile-md runs on, the installer says why and
@@ -235,7 +235,7 @@ in your git repositories, are never touched. Installed before it existed?
 The installer does the same:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/agilerite/amd/v4/install.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/KanRite/amd/v4/install.sh | bash -s -- --uninstall
 ```
 
 Building from source is in [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -279,7 +279,7 @@ architecture.
 
 ## Contributing
 
-Bugs and ideas go in [issues](https://github.com/agilerite/amd/issues/new/choose);
+Bugs and ideas go in [issues](https://github.com/KanRite/amd/issues/new/choose);
 they're pulled into the maintainers' board automatically and triaged there.
 Pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) has the build,
 the checks CI runs, the branch and commit names, and how to become a
