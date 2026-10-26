@@ -439,9 +439,7 @@ pub fn after_rejected_push(
 fn save_recovered(repo: &Path, changed: &BTreeSet<PathBuf>) -> Option<PathBuf> {
     let state = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
-        })?;
+        .or_else(|| crate::home::dir().map(|home| home.join(".local/state")))?;
     let stamp = time::OffsetDateTime::now_utc().unix_timestamp_nanos();
     let dir = state.join("agile-md/recovered").join(stamp.to_string());
     let mut kept = false;

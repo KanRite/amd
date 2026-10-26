@@ -30,6 +30,7 @@ pub mod git;
 pub mod github;
 pub mod group;
 pub mod hierarchy;
+pub mod home;
 pub mod ideas;
 pub mod import;
 pub mod import_documents;

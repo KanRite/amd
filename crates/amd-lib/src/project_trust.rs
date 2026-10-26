@@ -61,7 +61,7 @@ fn check_at(board: &Board, store_path: &Path) -> Result<()> {
 fn path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+        .or_else(|| crate::home::dir().map(|home| home.join(".config")))?;
     Some(base.join("agile-md").join("project-trust"))
 }
 

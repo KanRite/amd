@@ -123,7 +123,7 @@ fn speechd_dir() -> PathBuf {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .or_else(|| agile_md::home::dir().map(|h| h.join(".config")))
         .unwrap_or_else(|| PathBuf::from(".config"))
         .join("speech-dispatcher")
 }

@@ -64,7 +64,7 @@ fn dir() -> Option<PathBuf> {
     std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
+        .or_else(|| crate::home::dir().map(|home| home.join(".local/state")))
         .map(|state| state.join("agile-md/screen"))
 }
 
