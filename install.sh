@@ -9,8 +9,9 @@
 # Default target directory: /usr/local/bin if writable, else ~/bin.
 # Downloads the prebuilt binaries for your platform from the GitHub release.
 # Run from a clone with cargo installed, it builds from source instead
-# (CONTRIBUTING.md). On a system the release doesn't cover (Windows, another
-# OS or processor, git too old, libraries too old) it says so plainly.
+# (CONTRIBUTING.md). On a system the release doesn't cover (another OS or
+# processor, git too old, libraries too old) it says so plainly. Windows has
+# its own installer, install.ps1 (ticket 282).
 #
 # Installs two commands: `amd`, the command line interface, and `amdui`, the
 # desktop board. Both come from the release zip and from a source build; the
@@ -181,7 +182,7 @@ check_system() {
   case "${os}" in
     Linux|Darwin) ;;
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
-      die "agile-md runs on Linux and macOS, not Windows itself. On Windows, install it inside WSL: https://learn.microsoft.com/windows/wsl/install" ;;
+      die "this installer is for Linux and macOS. On Windows, in PowerShell: irm https://raw.githubusercontent.com/kanrite/amd/v4/install.ps1 | iex (or install inside WSL: https://learn.microsoft.com/windows/wsl/install)" ;;
     *) die "agile-md runs on Linux and macOS; this system (${os}) isn't supported." ;;
   esac
   case "${arch}" in

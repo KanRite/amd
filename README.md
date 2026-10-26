@@ -179,8 +179,8 @@ Everything is explained in the [user guide](docs/user-guide.md).
 
 ## Install
 
-Runs on **Linux and macOS** (x86_64 and arm64), and needs **git 2.29 or
-later**. In a terminal:
+Runs on **Linux, macOS and Windows** (x86_64 and arm64), and needs **git
+2.29 or later**. On Linux or macOS, in a terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/kanrite/amd/v4/install.sh | bash
@@ -196,10 +196,30 @@ curl -fsSL https://raw.githubusercontent.com/kanrite/amd/v4/install.sh | bash -s
 ```
 
 If your system isn't one agile-md runs on, the installer says why and
-changes nothing: on Windows, install it inside
-[WSL](https://learn.microsoft.com/windows/wsl/install). On Linux the desktop
-board needs WebKitGTK 4.1; if it's missing, the installer names the package
-to add, and `amd` works without it.
+changes nothing. On Linux the desktop board needs WebKitGTK 4.1; if it's
+missing, the installer names the package to add, and `amd` works without it.
+
+On **Windows 10 or 11**, in PowerShell (no administrator needed):
+
+```powershell
+irm https://raw.githubusercontent.com/kanrite/amd/v4/install.ps1 | iex
+```
+
+That installs `amd.exe` and `amdui.exe` for you alone, into
+`%LOCALAPPDATA%\Programs\KanRite\bin`, adds that folder to your PATH (open a
+new terminal to use it), puts **KanRite** in the Start menu and lists it in
+**Settings > Apps**. Git for Windows provides the git it needs. To pin a
+version:
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/kanrite/amd/v4/install.ps1))) -Version v4.9.0
+```
+
+The first start of a download may bring up Windows' "Windows protected your
+PC" warning, because the programs aren't signed yet: **More info**, then
+**Run anyway**. You can still use agile-md inside
+[WSL](https://learn.microsoft.com/windows/wsl/install) with the Linux line
+instead.
 
 ### Updates
 
@@ -228,7 +248,9 @@ Only an install made by the installer updates itself. Running the installer
 again also updates, and is how an install from before 4.6 starts updating
 itself. More in the [user guide](docs/user-guide.md#versions-and-your-team).
 
-To uninstall, run `amd-uninstall` (the installer puts it beside `amd`). It
+To uninstall, run `amd-uninstall` (the installer puts it beside `amd`; on
+Windows, uninstall **KanRite** in Settings > Apps, or run
+`amd-uninstall.ps1`). It
 removes the programs and the menu entry, then asks whether to remove your
 agile-md settings too; `--all` removes them without asking. Your projects,
 in your git repositories, are never touched. Installed before it existed?

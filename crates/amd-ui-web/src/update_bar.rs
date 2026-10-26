@@ -13,7 +13,7 @@
 //! terminal, the installer, a package manager: ticket 208), the bar says so
 //! instead, with **Restart**. Nothing restarts without the click.
 
-use amd_ui_model::{INSTALL_COMMAND, ManualCheck, UpdateResult};
+use amd_ui_model::{ManualCheck, UpdateResult};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -97,9 +97,9 @@ enum Phase {
     EditorOpen,
     Working,
     Updated(String),
-    /// Not an install amdui replaces: why, and whether the installer is the
-    /// way (then its command is shown).
-    Unmanaged(String, bool),
+    /// Not an install amdui replaces: why, and the installer's command when
+    /// that's the way.
+    Unmanaged(String, Option<String>),
     Failed {
         why: String,
         now: String,
@@ -134,8 +134,8 @@ pub fn UpdateBar() -> impl IntoView {
                     phase.set(Phase::Updated(version));
                     let _ = api::restart_app().await;
                 }
-                Ok(UpdateResult::Unmanaged { why, reinstall }) => {
-                    phase.set(Phase::Unmanaged(why, reinstall))
+                Ok(UpdateResult::Unmanaged { why, install }) => {
+                    phase.set(Phase::Unmanaged(why, install))
                 }
                 Ok(UpdateResult::Failed { why, now }) => phase.set(Phase::Failed { why, now }),
                 Err(why) => phase.set(Phase::Failed {
@@ -350,7 +350,7 @@ fn UnmanagedHelp(phase: RwSignal<Phase>) -> impl IntoView {
         <Show when=move || phase.with(|p| matches!(p, Phase::Unmanaged(..)))>
             <p class="text-sm">{move || match phase.get() { Phase::Unmanaged(why, _) => format!("{why}."), _ => String::new() }}</p>
         </Show>
-        <Show when=move || phase.with(|p| matches!(p, Phase::Unmanaged(_, true)))>
+        <Show when=move || phase.with(|p| matches!(p, Phase::Unmanaged(_, Some(_))))>
             <div class="flex flex-col gap-1 text-sm">
                 <label for="update-command">
                     "The installer, to run in a terminal, then restart amdui. Your boards, documents and settings aren't touched."
@@ -359,7 +359,10 @@ fn UnmanagedHelp(phase: RwSignal<Phase>) -> impl IntoView {
                     id="update-command"
                     readonly
                     class="w-full rounded border border-orange-400 bg-white px-2 py-1 font-mono text-xs text-slate-900 dark:bg-slate-900 dark:text-slate-100"
-                    prop:value=INSTALL_COMMAND
+                    prop:value=move || match phase.get() {
+                        Phase::Unmanaged(_, Some(command)) => command,
+                        _ => String::new(),
+                    }
                     on:focus=move |ev| {
                         use wasm_bindgen::JsCast;
                         if let Some(input) = ev
