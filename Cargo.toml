@@ -28,7 +28,7 @@ license = "MIT"
 agile-md = { path = "crates/amd-lib" }
 amd-ui-model = { path = "crates/amd-ui-model" }
 anyhow = "1"
-clap = { version = "4", features = ["derive", "string"] }
+clap = { version = "4", features = ["derive", "string", "wrap_help"] }
 clap_complete = "4"
 deunicode = "1.6.2"
 # canonicalize without Windows' `\\?\` prefix (ticket 279); plain canonicalize elsewhere

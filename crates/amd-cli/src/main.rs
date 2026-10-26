@@ -1090,6 +1090,22 @@ fn main() -> ExitCode {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
 
+    // The command tree is big enough that clap's recursive build and parse
+    // overflow Windows' 1 MB main-thread stack (Unix gives 8 MB), so the
+    // whole run, notes included (they are thread-local), gets a thread of
+    // its own.
+    std::thread::Builder::new()
+        .stack_size(STACK_SIZE)
+        .spawn(run_and_report)
+        .ok()
+        .and_then(|handle| handle.join().ok())
+        .unwrap_or(ExitCode::FAILURE)
+}
+
+/// Stack for the thread `main` runs the command on.
+const STACK_SIZE: usize = 16 * 1024 * 1024;
+
+fn run_and_report() -> ExitCode {
     let result = run();
     // What auto priority moved along with the change (ticket 215).
     for note in agile_md::auto_priority::take_notes() {
