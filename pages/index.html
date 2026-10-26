@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Agile-MD</title>
+  <title>KanRite</title>
   <meta name="description" content="Your tickets and documents in Git, right where you work, not buried in a cloud. An open-source agile system: Kanban boards, sprints, roadmaps, documents and ideas, all markdown in Git.">
-  <meta property="og:title" content="Agile-MD">
+  <meta property="og:title" content="KanRite">
   <meta property="og:description" content="Your tickets and documents in Git, right where you work, not buried in a cloud.">
   <meta property="og:image" content="social.png">
   <link rel="icon" href="logo/icon.svg" type="image/svg+xml">
@@ -21,7 +21,7 @@
     <p class="sub">An open-source agile system: Kanban boards, sprints, roadmaps, documents and ideas, all plain markdown in your own repositories. Works with your AI tools, and just as well without them.</p>
     <nav class="actions">
       <a class="button primary" href="#install">Install</a>
-      <a class="button" href="https://github.com/KanRite/amd">View on GitHub</a>
+      <a class="button" href="https://github.com/kanrite/amd">View on GitHub</a>
     </nav>
   </header>
 
@@ -165,7 +165,7 @@
       <h2 id="install-title">Install</h2>
       <p>On <strong>Linux or macOS</strong> (x86_64 or arm64), with <strong>git 2.29 or later</strong>. Paste this into a terminal:</p>
       <div class="command">
-        <pre><code id="install-command">curl -fsSL https://raw.githubusercontent.com/KanRite/amd/v4/install.sh | bash</code></pre>
+        <pre><code id="install-command">curl -fsSL https://raw.githubusercontent.com/kanrite/amd/v4/install.sh | bash</code></pre>
         <button type="button" class="button copy" id="copy-install" aria-describedby="copy-status">Copy</button>
       </div>
       <p id="copy-status" class="status" role="status" aria-live="polite"></p>
@@ -176,18 +176,18 @@
       <pre><code>amd init my-project       # makes my-project-tickets and my-project-documents on GitHub
 amd new "My first task"
 amdui                     # the desktop board</code></pre>
-      <p>The <a href="https://github.com/KanRite/amd/blob/main/docs/user-guide.md">user guide</a> covers everything else: tickets, columns, sprints, the desktop board, documents, ideas, roadmaps and teams.</p>
-      <p class="aside">Building from source is in <a href="https://github.com/KanRite/amd/blob/main/CONTRIBUTING.md#building-from-source">CONTRIBUTING.md</a>.</p>
+      <p>The <a href="https://github.com/kanrite/amd/blob/main/docs/user-guide.md">user guide</a> covers everything else: tickets, columns, sprints, the desktop board, documents, ideas, roadmaps and teams.</p>
+      <p class="aside">Building from source is in <a href="https://github.com/kanrite/amd/blob/main/CONTRIBUTING.md#building-from-source">CONTRIBUTING.md</a>.</p>
     </section>
   </main>
 
   <footer>
-    <p>Agile-MD is open source under the <a href="https://github.com/KanRite/amd/blob/main/LICENSE">MIT licence</a>. <a href="https://github.com/KanRite/amd">GitHub</a> · <a href="https://github.com/KanRite/amd/issues">Issues</a> · <a href="https://github.com/KanRite/amd/blob/main/docs/user-guide.md">User guide</a> · <a href="https://github.com/KanRite/amd/blob/main/CONTRIBUTING.md">Contributing</a></p>
+    <p>KanRite is open source under the <a href="https://github.com/kanrite/amd/blob/main/LICENSE">MIT licence</a>. <a href="https://github.com/kanrite/amd">GitHub</a> · <a href="https://github.com/kanrite/amd/issues">Issues</a> · <a href="https://github.com/kanrite/amd/blob/main/docs/user-guide.md">User guide</a> · <a href="https://github.com/kanrite/amd/blob/main/CONTRIBUTING.md">Contributing</a></p>
   </footer>
   <script>
     // A web page can't run an installer: Install copies the command to paste
     // into a terminal, and says up front when this system isn't one
-    // agile-md runs on.
+    // KanRite runs on.
     (function () {
       var button = document.getElementById("copy-install");
       var status = document.getElementById("copy-status");
@@ -215,9 +215,9 @@ amdui                     # the desktop board</code></pre>
         if (bad) { note.classList.add("bad"); }
       };
       if (/Android|iPhone|iPad|iPod/i.test(ua) || (/Mac/.test(platform) && navigator.maxTouchPoints > 1)) {
-        say("This looks like a phone or tablet. agile-md is for Linux and macOS computers: install it there.", true);
+        say("This looks like a phone or tablet. KanRite is for Linux and macOS computers: install it there.", true);
       } else if (/Win/i.test(platform) || /Windows/i.test(ua)) {
-        say("This looks like Windows. agile-md runs on Linux and macOS, not Windows itself; install it inside WSL (Windows Subsystem for Linux) and run the command there.", true);
+        say("This looks like Windows. KanRite runs on Linux and macOS, not Windows itself; install it inside WSL (Windows Subsystem for Linux) and run the command there.", true);
       } else if (/CrOS/.test(ua)) {
         say("This looks like a Chromebook: run the command in its Linux terminal (Linux development environment).", false);
       } else if (/Mac/.test(platform)) {
