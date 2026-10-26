@@ -13,10 +13,11 @@ env:
 
 jobs:
   # Each job has a limit well above its usual time (rust 5-20 minutes,
-  # shell under one), so a hang fails in minutes, not GitHub's six hours.
+  # shell under one) plus a slow apt, so a hang fails in minutes, not
+  # GitHub's six hours.
   rust:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       # The workspace builds three times over (clippy, unit tests, the CLI
@@ -27,9 +28,9 @@ jobs:
           df -h /
       # The desktop board (crates/amd-ui) is a Tauri app: WebKitGTK on Linux.
       # apt hung this step for 22 minutes (ticket 327): the script retries
-      # and cuts off a stuck apt-get, and the step stops at 20 minutes.
+      # and cuts off a stuck apt-get, and the step stops at 30 minutes.
       - name: Install the desktop board's system libraries
-        timeout-minutes: 20
+        timeout-minutes: 30
         run: scripts/apt-install.sh libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev libasound2-dev
       - name: Install Rust (stable + rustfmt + clippy + wasm32)
         run: |
