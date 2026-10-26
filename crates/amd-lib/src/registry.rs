@@ -218,7 +218,7 @@ pub fn project_dir_of(from: &Path) -> PathBuf {
 fn path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+        .or_else(|| crate::home::dir().map(|home| home.join(".config")))?;
     Some(base.join("agile-md").join("repos"))
 }
 
