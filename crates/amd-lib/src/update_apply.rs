@@ -4,7 +4,8 @@
 //! **User data is never touched.** The only files written are the two
 //! binaries, in the folder they're installed in, their temporary copies
 //! beside them, and the previous versions kept as `amd.previous` and
-//! `amdui.previous` for [`rollback`]. No ticket, document, idea, setting,
+//! `amdui.previous` for [`rollback`] (on Windows `amd.exe`, `amdui.exe`
+//! and `amd.exe.previous`: [`file_name`]). No ticket, document, idea, setting,
 //! lock or git repository is opened, let alone changed: releases carry no
 //! breaking changes (ticket 193), so there is nothing to migrate.
 //!
@@ -55,13 +56,15 @@ pub trait Fetch {
 }
 
 /// The release build for this system, as the release workflow names it,
-/// or `None` where there's no build (Windows, say).
+/// or `None` where there's no build (FreeBSD, say).
 pub fn target() -> Option<&'static str> {
     match (std::env::consts::ARCH, std::env::consts::OS) {
         ("x86_64", "linux") => Some("x86_64-unknown-linux-gnu"),
         ("aarch64", "linux") => Some("aarch64-unknown-linux-gnu"),
         ("x86_64", "macos") => Some("x86_64-apple-darwin"),
         ("aarch64", "macos") => Some("aarch64-apple-darwin"),
+        ("x86_64", "windows") => Some("x86_64-pc-windows-msvc"),
+        ("aarch64", "windows") => Some("aarch64-pc-windows-msvc"),
         _ => None,
     }
 }
@@ -69,6 +72,12 @@ pub fn target() -> Option<&'static str> {
 /// The release file for a build target.
 pub fn asset_name(target: &str) -> String {
     format!("amd-{target}.zip")
+}
+
+/// A binary's file name here, in the zip and installed: `amd.exe` on
+/// Windows (ticket 281), `amd` everywhere else.
+pub fn file_name(bin: &str) -> String {
+    format!("{bin}{}", std::env::consts::EXE_SUFFIX)
 }
 
 /// Whether the binaries in a folder may be replaced.
@@ -213,7 +222,12 @@ fn apply_one(
         }
     };
     for (bin, data) in &files {
-        let tmp = dir.join(format!(".{bin}.new-{}", std::process::id()));
+        // Ending `.exe` on Windows, which runs nothing else.
+        let tmp = dir.join(format!(
+            ".{bin}.new-{}{}",
+            std::process::id(),
+            std::env::consts::EXE_SUFFIX
+        ));
         if let Err(err) = write_executable(&tmp, data) {
             cleanup(&ready);
             let _ = fs::remove_file(&tmp);
@@ -228,8 +242,8 @@ fn apply_one(
         }
     }
     for (bin, tmp) in &ready {
-        let live = dir.join(bin);
-        let previous = dir.join(format!("{bin}.previous"));
+        let live = dir.join(file_name(bin));
+        let previous = dir.join(format!("{}.previous", file_name(bin)));
         if live.exists() {
             fs::rename(&live, &previous)
                 .with_context(|| format!("keeping {} as {}", live.display(), previous.display()))?;
@@ -260,7 +274,7 @@ fn unzip(bytes: &[u8]) -> Result<Vec<(&'static str, Vec<u8>)>> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))?;
     let mut found = Vec::new();
     for bin in BINARIES {
-        let Ok(mut file) = archive.by_name(bin) else {
+        let Ok(mut file) = archive.by_name(&file_name(bin)) else {
             continue;
         };
         let mut data = Vec::new();
@@ -322,9 +336,9 @@ fn version_output(bin: &Path) -> std::io::Result<Output> {
 pub fn rollback(dir: &Path) -> Result<Vec<String>> {
     let mut restored = Vec::new();
     for bin in BINARIES {
-        let previous = dir.join(format!("{bin}.previous"));
+        let previous = dir.join(format!("{}.previous", file_name(bin)));
         if previous.exists() {
-            fs::rename(&previous, dir.join(bin))
+            fs::rename(&previous, dir.join(file_name(bin)))
                 .with_context(|| format!("restoring {}", previous.display()))?;
             restored.push(bin.to_string());
         }
@@ -490,6 +504,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "the pretend binaries are shell scripts; self-update on Windows is ticket 282"
+    )]
     fn an_update_goes_one_release_at_a_time_and_touches_only_the_binaries() {
         let dir = installed("4.5.0");
         // A project beside it, with a board, documents and a git repository.
@@ -556,6 +574,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "the pretend binaries are shell scripts; self-update on Windows is ticket 282"
+    )]
     fn a_failure_part_way_leaves_the_last_good_release_working() {
         let dir = installed("4.5.0");
         let (releases, fake) = published(&["4.6.0", "4.7.0", "4.8.0"], Some("4.7.0"));
@@ -583,6 +605,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "the pretend binaries are shell scripts; self-update on Windows is ticket 282"
+    )]
     fn a_failed_download_or_a_binary_that_wont_run_changes_nothing() {
         let dir = installed("4.5.0");
         let (mut releases, fake) = published(&["4.6.0"], None);
@@ -636,6 +662,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "the pretend binaries are shell scripts; self-update on Windows is ticket 282"
+    )]
     fn rollback_puts_the_previous_binaries_back() {
         let dir = installed("4.5.0");
         let (releases, fake) = published(&["4.6.0"], None);
@@ -644,6 +674,16 @@ mod tests {
         assert_eq!(rollback(dir.path()).unwrap(), ["amd", "amdui"]);
         assert_eq!(version_of(dir.path(), "amd"), "amd 4.5.0");
         assert!(rollback(dir.path()).is_err(), "nothing left to go back to");
+    }
+
+    /// Ticket 281: every system CI builds and tests on has a release
+    /// build, Windows included, and its binaries' names.
+    #[test]
+    fn this_system_has_a_release_build() {
+        let target = target().expect("a release build for this system");
+        assert!(asset_name(target).starts_with("amd-"));
+        let amd = if cfg!(windows) { "amd.exe" } else { "amd" };
+        assert_eq!(file_name("amd"), amd);
     }
 
     #[test]

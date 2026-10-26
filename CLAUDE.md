@@ -687,10 +687,13 @@ redundant. Their history is in git if it is ever wanted again.
   `dependabot-gate-closed.yml`, on `pull_request: closed` only.
   `DRY_RUN=1` prints instead of acting.
 - `.github/workflows/release.yml` — on a `vX.Y.Z` tag, builds `amd` and
-  `amdui` for Linux and macOS, x86_64 and aarch64 (ticket 085): WebKitGTK on
+  `amdui` for Linux and macOS, x86_64 and aarch64 (ticket 085), and Windows
+  (ticket 281: `x86_64-pc-windows-msvc` on `windows-latest`,
+  `aarch64-pc-windows-msvc` on `windows-11-arm`): WebKitGTK on
   Linux, the wasm target and Trunk, `trunk build`, then `cargo build -p
   amd-cli -p amd-ui`, a `--version` smoke test, and `amd-<target>.zip`
-  holding both. A `release` job then creates the GitHub Release (`gh release
+  holding both (`amd.exe` and `amdui.exe` on Windows, zipped with
+  `Compress-Archive`; `update_apply::file_name` adds the `.exe`). A `release` job then creates the GitHub Release (`gh release
   create --verify-tag --generate-notes`) and attaches every zip, so no
   release is made by hand; a platform whose build failed is left out with a
   warning. amd's own workflow, not `lite-actions/rust-release`, because only
