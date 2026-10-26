@@ -732,6 +732,36 @@ pub struct UpdateInfo {
     pub current: String,
 }
 
+/// A folder path in one comparable form (ticket 329): `\` as `/`, a
+/// Windows `\\?\` prefix and a trailing slash dropped, and the case folded
+/// when it starts with a drive letter. On Windows git reports `G:/a/b`
+/// where the registry holds `G:\a\b`, and the page compares what each gave.
+pub fn path_key(path: &str) -> String {
+    let path = path.replace('\\', "/");
+    let path = path
+        .strip_prefix("//?/")
+        .unwrap_or(&path)
+        .trim_end_matches('/');
+    if path.as_bytes().get(1) == Some(&b':') {
+        path.to_lowercase()
+    } else {
+        path.to_string()
+    }
+}
+
+/// Whether two folder paths name the same place, whichever slashes they use.
+pub fn same_path(a: &str, b: &str) -> bool {
+    path_key(a) == path_key(b)
+}
+
+/// The folder holding `path`, split on `/` or `\` alike: the page runs as
+/// wasm, where `std::path::Path` only knows `/`.
+pub fn parent_path(path: &str) -> Option<String> {
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    let cut = trimmed.rfind(['/', '\\'])?;
+    Some(trimmed[..cut].to_string())
+}
+
 /// How long ago something was, from seconds: "just now", "5 minutes ago",
 /// "2 hours ago", "3 days ago" (Preferences' last update check, ticket 304).
 pub fn ago(seconds: i64) -> String {
@@ -1599,6 +1629,26 @@ pub fn slugify(title: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn paths_match_across_slashes_and_drive_case() {
+        use super::same_path;
+        assert!(same_path(
+            r"G:\github\KanRite\kanrite-tickets",
+            "g:/github/KanRite/kanrite-tickets/"
+        ));
+        assert!(same_path(r"\\?\C:\a\b", "C:/a/b"));
+        assert!(!same_path("/home/a/Proj", "/home/a/proj"));
+        assert!(!same_path("G:/a/b", "G:/a/c"));
+    }
+
+    #[test]
+    fn parent_path_splits_on_either_slash() {
+        use super::parent_path;
+        assert_eq!(parent_path(r"G:\x\y\tasks").as_deref(), Some(r"G:\x\y"));
+        assert_eq!(parent_path("/home/x/tasks/").as_deref(), Some("/home/x"));
+        assert_eq!(parent_path("tasks"), None);
+    }
+
     #[test]
     fn ago_says_how_long_in_plain_words() {
         use super::ago;
