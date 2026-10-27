@@ -106,6 +106,10 @@ const ADMINS: &str = "admins";
 const SYNC: &str = "sync";
 const TICKET_NUMBERING: &str = "ticket-numbering";
 const TAGS: &str = "tags";
+/// The name people read for the project (ticket 326).
+const DISPLAY_NAME: &str = "display-name";
+/// The longest [`DISPLAY_NAME`] accepted: a name for a header, not a line.
+pub const DISPLAY_NAME_MAX: usize = 60;
 /// The documents repository every project shares (ticket 129).
 const SHARED_DOCUMENTS: &str = "shared-documents";
 /// The priority an imported GitHub issue's ticket starts at (ticket 158).
@@ -595,6 +599,41 @@ impl BoardSettings {
         })
     }
 
+    /// The name people read for the project (ticket 326): `KanRite` for
+    /// the project `kanrite`. Only for showing; `project` stays its
+    /// identity, in paths, `.current-project` and project trust.
+    pub fn display_name(&self) -> Option<String> {
+        self.config
+            .get(DISPLAY_NAME)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+    }
+
+    /// Sets [`display_name`](Self::display_name), or clears it with `None`
+    /// (or an empty name). One line of at most [`DISPLAY_NAME_MAX`]
+    /// characters; a `#` can't start it, since that reads as a comment.
+    pub fn set_display_name(&mut self, name: Option<&str>) -> Result<()> {
+        match name.map(str::trim).filter(|name| !name.is_empty()) {
+            Some(name) => {
+                if name.chars().any(char::is_control) {
+                    bail!("a display name is one line of text");
+                }
+                if name.chars().count() > DISPLAY_NAME_MAX {
+                    bail!("a display name is at most {DISPLAY_NAME_MAX} characters");
+                }
+                if name.starts_with('#') {
+                    bail!("a display name can't start with #");
+                }
+                self.config.set(DISPLAY_NAME, name);
+            }
+            None => {
+                self.config.remove(DISPLAY_NAME);
+            }
+        }
+        Ok(())
+    }
+
     /// The documents repository shared beside the project's own (ticket
     /// 129): standards and notes every project reads. A repository name,
     /// found on this machine the way declared repositories are.
@@ -1041,6 +1080,30 @@ mod tests {
         let written = std::fs::read_to_string(&path).unwrap();
         assert!(!written.contains('\r'), "{written:?}");
         assert!(written.contains("project = demo\n"), "{written:?}");
+    }
+
+    #[test]
+    fn a_display_name_is_kept_beside_the_project_and_cleared_when_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.set_project("kanrite").unwrap();
+        assert_eq!(settings.display_name(), None);
+        settings.set_display_name(Some("  KanRite ")).unwrap();
+        settings.save(&board).unwrap();
+        let reread = load(&board);
+        assert_eq!(reread.display_name().as_deref(), Some("KanRite"));
+        assert_eq!(reread.project(), Some("kanrite"));
+        let mut settings = reread;
+        for bad in ["two\nlines", "#comment", &"x".repeat(DISPLAY_NAME_MAX + 1)] {
+            assert!(settings.set_display_name(Some(bad)).is_err(), "{bad}");
+        }
+        assert_eq!(settings.display_name().as_deref(), Some("KanRite"));
+        settings.set_display_name(Some(" ")).unwrap();
+        assert_eq!(settings.display_name(), None);
+        settings.set_display_name(Some("Acme = Co")).unwrap();
+        settings.save(&board).unwrap();
+        assert_eq!(load(&board).display_name().as_deref(), Some("Acme = Co"));
     }
 
     #[test]

@@ -541,6 +541,13 @@ disagree.
   on GitHub (asked through the `gh` CLI). When rite can't tell (no list, no
   `gh`), Admin stays open. It's a convenience, not a lock: anyone who can
   push to the tickets repository can still change `.settings`.
+- **A display name.** A project's name is also its folders' names
+  (`kanrite-tickets`), so it's usually lowercase. Admin → Display name (or
+  `rite display-name "KanRite"`) sets the name everyone sees instead: the
+  window title, the header, the project switcher, the landing page and My
+  work, and what an AI tool is told. The project keeps its own name for
+  folders, `rite project use` and everything else; `rite project` lists
+  both, and `rite display-name --clear` goes back to the project's name.
 - **Zoom** with **Ctrl +** and **Ctrl −**, and **Ctrl 0** back to 100%; the
   size is remembered on this machine (`ui.zoom`). F5 or Ctrl+R refreshes the
   board without losing your filters.

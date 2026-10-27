@@ -296,6 +296,16 @@ impl Project {
         crate::current_project::project_name(&self.boards[0].1)
     }
 
+    /// The project as people know it (ticket 326): `KanRite (kanrite)`
+    /// when it has a display name, else just its name.
+    fn titled(&self) -> String {
+        let name = self.name();
+        match board_settings::load(self.own()).display_name() {
+            Some(shown) if shown != name => format!("{shown} ({name})"),
+            _ => name,
+        }
+    }
+
     /// The board of the repository called `name`, or the project's own.
     fn index(&self, name: Option<&str>) -> Result<usize> {
         let Some(name) = name.map(str::trim).filter(|n| !n.is_empty()) else {
@@ -584,7 +594,7 @@ fn board_tool(args: &Value) -> Result<Reply> {
                 task.epic.as_deref() == Some(e) || task.epic_meta().as_deref() == Some(e)
             })
     };
-    let mut text = format!("Project {}", project.name());
+    let mut text = format!("Project {}", project.titled());
     let mut data = Vec::new();
     for (i, (name, _, board)) in project.boards.iter().enumerate() {
         if wanted.is_some_and(|w| w != i) {
@@ -678,7 +688,8 @@ fn board_tool(args: &Value) -> Result<Reply> {
         }
         data.push(json!({"repo": name, "columns": columns}));
     }
-    let data = json!({"project": project.name(), "boards": data});
+    let display_name = board_settings::load(project.own()).display_name();
+    let data = json!({"project": project.name(), "display_name": display_name, "boards": data});
     Ok(project.reply(text, data))
 }
 
@@ -876,7 +887,10 @@ fn start_page_tool() -> Result<Reply> {
         documents_edit::start_page(&root).context("the documents repository has no start page")?;
     let content = documents::read(&root, &start)?;
     let tree = documents_edit::link_tree(&root, &start)?;
-    let mut text = format!("Start page: {name}/{start}\n\nDocuments it leads to:");
+    let mut text = format!(
+        "{}'s start page: {name}/{start}\n\nDocuments it leads to:",
+        project.titled()
+    );
     for page in tree.iter().skip(1) {
         text.push_str(&format!(
             "\n{}- {} ({})",

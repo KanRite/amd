@@ -104,6 +104,23 @@ redundant. Their history is in git if it is ever wanted again.
   use [name]`); `riteui` reads `Board.projects` and calls `use_project`, which
   writes the same file and moves the process to the folder so the file —
   not whichever tickets repo it was launched in — decides.
+- **A display name** (ticket 326): `display-name` in the tickets
+  `.settings` (`BoardSettings::display_name`/`set_display_name`: one line,
+  60 characters at most, not starting with `#`; empty clears) is what
+  people read for a project whose `project` is an identifier (`KanRite`
+  for `kanrite`). `current_project::shown_name(tickets)` is the display
+  name else `project_name`; **use it only for showing**, never to find or
+  match a project (paths, `.current-project`, `rite project use`, project
+  trust and the registry all keep `project`). Shown by riteui's window
+  title and header (`Board.shown`), the project switcher
+  (`ProjectChoice.shown`), the landing page (`HomeProject.shown`) and My
+  work (`WorkItem.project_shown`, also `rite mine`), through
+  `rite_ui_model::shown_name`, which falls back to the name for a page
+  with no `shown`; `rite project` lists it in brackets beside the name; the
+  MCP `board` and `start_page` say `KanRite (kanrite)`, and `board`'s
+  data carries `display_name`. Set with `rite display-name [NAME |
+  --clear]` and Admin → Display name (`set_display_name`), both through
+  the auto-commit (`settings: display-name …`).
 - `crates/rite-lib/src/ideas.rs` — Ideas (ticket 131): developers' ideas
   for apps and improvements, before anyone means to do them. Each is a
   markdown file in the project's **own** documents repository's `ideas/`

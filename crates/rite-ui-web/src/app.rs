@@ -371,7 +371,7 @@ pub fn App() -> impl IntoView {
     let project = move || {
         ctx.board.with(|b| {
             b.as_ref()
-                .map(|b| b.project.clone())
+                .map(|b| rite_ui_model::shown_name(&b.project, &b.shown).to_string())
                 .filter(|p| !p.is_empty())
                 .unwrap_or_else(|| "KanRite".to_string())
         })
@@ -1318,7 +1318,7 @@ fn ProjectSwitcher(project: impl Fn() -> String + Send + Sync + Copy + 'static) 
                                         value=choice.name.clone()
                                         selected=choice.current
                                     >
-                                        {choice.name.clone()}
+                                        {rite_ui_model::shown_name(&choice.name, &choice.shown).to_string()}
                                     </option>
                                 }
                             })

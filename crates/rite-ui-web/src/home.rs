@@ -170,7 +170,8 @@ pub fn HomeBar() -> impl IntoView {
                 {
                     let root = p.root.clone();
                     let selected = move || current().is_some_and(|c| rite_ui_model::same_path(&c.root, &root));
-                    let label = if p.archived { format!("{} (archived)", p.name) } else { p.name.clone() };
+                    let name = rite_ui_model::shown_name(&p.name, &p.shown).to_string();
+                    let label = if p.archived { format!("{name} (archived)") } else { name };
                     view! { <option value=p.root.clone() selected=selected>{label}</option> }
                 }
             </For>
@@ -181,7 +182,7 @@ pub fn HomeBar() -> impl IntoView {
             class=small
             title=move || match current() {
                 None => "Choose a project first".to_string(),
-                Some(p) => format!("Open {}'s board", p.name),
+                Some(p) => format!("Open {}'s board", rite_ui_model::shown_name(&p.name, &p.shown)),
             }
             disabled=move || current().is_none()
             on:click=move |_| {
@@ -198,7 +199,7 @@ pub fn HomeBar() -> impl IntoView {
             class=small
             title=move || match current() {
                 None => "Choose a project first".to_string(),
-                Some(p) => format!("{}'s roadmaps and milestones", p.name),
+                Some(p) => format!("{}'s roadmaps and milestones", rite_ui_model::shown_name(&p.name, &p.shown)),
             }
             disabled=move || current().is_none()
             on:click=move |_| {
@@ -394,7 +395,7 @@ fn work_row(w: WorkItem) -> impl IntoView {
                 <span class="flex-1 font-medium">{w.title.clone()}</span>
                 {(!w.points.is_empty())
                     .then(|| view! { <span class="font-mono text-xs text-slate-500">{format!("{} pts", w.points)}</span> })}
-                <span class="text-xs text-slate-500">{w.project.clone()}</span>
+                <span class="text-xs text-slate-500">{rite_ui_model::shown_name(&w.project, &w.project_shown).to_string()}</span>
             </button>
         </li>
     }
@@ -452,7 +453,7 @@ fn Projects(
                     title="Open this project's board"
                     on:click=move |_| open(ctx, root.clone(), View::Board, None)
                 >
-                    {p.name.clone()}
+                    {rite_ui_model::shown_name(&p.name, &p.shown).to_string()}
                     {show_dir.then(|| view! { <span class="ml-2 text-xs font-normal text-slate-500">{p.dir.clone()}</span> })}
                 </button>
                 <button
