@@ -21,7 +21,7 @@ members = [
 version = "4.9.0"
 edition = "2024"
 rust-version = "1.88"
-repository = "https://github.com/agile-md/amd"
+repository = "https://github.com/KanRite/rite"
 license = "MIT"
 
 [workspace.dependencies]

@@ -14,7 +14,7 @@ use agile_md::update::{self, Release, Version};
 use agile_md::update_apply::{self, Applied, Fetch, Install, Step};
 use anyhow::{Context, Result, anyhow, bail};
 
-const RELEASES: &str = "https://api.github.com/repos/agile-md/amd/releases?per_page=100";
+const RELEASES: &str = "https://api.github.com/repos/KanRite/rite/releases?per_page=100";
 
 struct Net {
     agent: ureq::Agent,

@@ -9,7 +9,7 @@
 # repository — an owner with read access is silently ignored and shows up in
 # the repo's CODEOWNERS errors, which is why write access is granted before
 # protection is turned on. Check with:
-#   gh api repos/agile-md/amd/codeowners/errors
+#   gh api repos/KanRite/rite/codeowners/errors
 
 *                          @mrdoodles @MrDClaudeBot
 

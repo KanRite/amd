@@ -17,7 +17,7 @@ discussions) and anywhere you represent the project.
 ## Reporting
 
 Tell the maintainers privately through
-[Report a vulnerability](https://github.com/kanrite/amd/security/advisories/new)
+[Report a vulnerability](https://github.com/KanRite/rite/security/advisories/new)
 on the Security tab, which only maintainers can read; say it's a conduct
 report. Reports are kept confidential.
 

@@ -15,7 +15,7 @@ use agile_md::update_apply::{self, Applied, Fetch, Install};
 use rite_ui_model::{ManualCheck, UpdateInfo, UpdateResult};
 
 /// agile-md's releases, newest first; 30 is far more than a build is behind.
-const RELEASES: &str = "https://api.github.com/repos/agile-md/amd/releases?per_page=30";
+const RELEASES: &str = "https://api.github.com/repos/KanRite/rite/releases?per_page=30";
 
 /// GitHub, as `update::check`'s source.
 struct GitHub;
