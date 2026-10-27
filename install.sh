@@ -3,7 +3,7 @@
 # agile-md installer — install the `rite` command onto your PATH.
 #
 #   ./install.sh [--dir DIR] [--version vX.Y.Z] [--from-source]
-#   curl -fsSL https://raw.githubusercontent.com/KanRite/rite/v4/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/kanrite/rite/v4/install.sh | bash
 #   ... | bash -s -- --uninstall [--all] [--yes]      (or run rite-uninstall)
 #
 # Default target directory: /usr/local/bin if writable, else ~/bin.
@@ -30,7 +30,7 @@
 #
 set -euo pipefail
 
-REPO="KanRite/rite"
+REPO="kanrite/rite"
 DIR=""
 VERSION="latest"
 FROM_SOURCE=0
@@ -206,7 +206,7 @@ check_system() {
   case "${os}" in
     Linux|Darwin) ;;
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
-      die "this installer is for Linux and macOS. On Windows, in PowerShell: irm https://raw.githubusercontent.com/KanRite/rite/v4/install.ps1 | iex (or install inside WSL: https://learn.microsoft.com/windows/wsl/install)" ;;
+      die "this installer is for Linux and macOS. On Windows, in PowerShell: irm https://raw.githubusercontent.com/kanrite/rite/v4/install.ps1 | iex (or install inside WSL: https://learn.microsoft.com/windows/wsl/install)" ;;
     *) die "agile-md runs on Linux and macOS; this system (${os}) isn't supported." ;;
   esac
   case "${arch}" in
@@ -403,7 +403,7 @@ download_release() {
   fi
   unzip -q -o "${TMP}/rite.zip" -d "${TMP}" || return 1
   if [ ! -f "${TMP}/rite" ] && [ -f "${TMP}/amd" ]; then
-    die "${VERSION} is from before amd was renamed rite (5.0); install it with the 4.x installer: curl -fsSL https://raw.githubusercontent.com/KanRite/rite/v4/install.sh | bash -s -- --version ${VERSION}"
+    die "${VERSION} is from before amd was renamed rite (5.0); install it with the 4.x installer: curl -fsSL https://raw.githubusercontent.com/kanrite/rite/v4/install.sh | bash -s -- --version ${VERSION}"
   fi
   [ -f "${TMP}/rite" ] || return 1
   mkdir -p "${DIR}"

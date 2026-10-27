@@ -5,7 +5,7 @@ contribute is under the same licence.
 
 ## Reporting a bug or asking for something
 
-Open an [issue](https://github.com/KanRite/rite/issues/new/choose). There's
+Open an [issue](https://github.com/kanrite/rite/issues/new/choose). There's
 a form for bugs and one for ideas.
 
 The project's own board is KanRite itself: open issues are pulled into the
@@ -114,7 +114,7 @@ Everyone else works from issues and pull requests here.
 ## Security
 
 Please report a vulnerability privately rather than in an issue: use
-[Report a vulnerability](https://github.com/KanRite/rite/security/advisories/new)
+[Report a vulnerability](https://github.com/kanrite/rite/security/advisories/new)
 on the repository's Security tab. [SECURITY.md](SECURITY.md) says what's
 covered and what happens next.
 

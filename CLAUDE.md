@@ -1805,7 +1805,7 @@ must keep working on data a newer one has touched. So:
 Cut releases by tag: `git tag -a vX.Y.Z && git push --tags` triggers
 `release.yml`, which builds and attaches `amd-<target>.zip`. Force-move the
 major tag (`git tag -f -a vN`) and push it, since `install.sh` and the README
-`curl` URL point at `raw…/KanRite/rite/vN`. Invocation model by major (breaking
+`curl` URL point at `raw…/kanrite/rite/vN`. Invocation model by major (breaking
 changes):
 
 - **v1** — script vendored per board (`tasks/task`); board = the script's own dir.

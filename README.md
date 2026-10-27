@@ -13,7 +13,7 @@ individuals and teams.**
 **[Website](https://kanrite.github.io/rite/)** ·
 [Install](#install) ·
 [User guide](docs/user-guide.md) ·
-[Releases](https://github.com/KanRite/rite/releases) ·
+[Releases](https://github.com/kanrite/rite/releases) ·
 [Contributing](CONTRIBUTING.md)
 
 Your tickets, documents and ideas live in your own git repositories, as
@@ -183,7 +183,7 @@ Runs on **Linux, macOS and Windows** (x86_64 and arm64), and needs **git
 2.29 or later**. On Linux or macOS, in a terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KanRite/rite/v4/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kanrite/rite/v4/install.sh | bash
 ```
 
 That installs two commands, **`rite`** (the command line) and **`riteui`**
@@ -192,7 +192,7 @@ and on Linux adds the board to your application menu. To choose the folder
 or pin a version, pass them after `bash -s --`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KanRite/rite/v4/install.sh | bash -s -- --dir ~/.local/bin --version v4.9.0
+curl -fsSL https://raw.githubusercontent.com/kanrite/rite/v4/install.sh | bash -s -- --dir ~/.local/bin --version v4.9.0
 ```
 
 If your system isn't one KanRite runs on, the installer says why and
@@ -202,7 +202,7 @@ missing, the installer names the package to add, and `rite` works without it.
 On **Windows 10 or 11**, in PowerShell (no administrator needed):
 
 ```powershell
-irm https://raw.githubusercontent.com/KanRite/rite/v4/install.ps1 | iex
+irm https://raw.githubusercontent.com/kanrite/rite/v4/install.ps1 | iex
 ```
 
 That installs `rite.exe` and `riteui.exe` (and `amd.exe`, the old name) for you alone, into
@@ -212,7 +212,7 @@ new terminal to use it), puts **KanRite** in the Start menu and lists it in
 version:
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/KanRite/rite/v4/install.ps1))) -Version v4.9.0
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/kanrite/rite/v4/install.ps1))) -Version v4.9.0
 ```
 
 The first start of a download may bring up Windows' "Windows protected your
@@ -265,7 +265,7 @@ in your git repositories, are never touched. Installed before it existed?
 The installer does the same:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KanRite/rite/v4/install.sh | bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/kanrite/rite/v4/install.sh | bash -s -- --uninstall
 ```
 
 Building from source is in [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -309,7 +309,7 @@ architecture.
 
 ## Contributing
 
-Bugs and ideas go in [issues](https://github.com/KanRite/rite/issues/new/choose);
+Bugs and ideas go in [issues](https://github.com/kanrite/rite/issues/new/choose);
 they're pulled into the maintainers' board automatically and triaged there.
 Pull requests are welcome: [CONTRIBUTING.md](CONTRIBUTING.md) has the build,
 the checks CI runs, the branch and commit names, and how to become a
