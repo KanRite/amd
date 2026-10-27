@@ -71,7 +71,7 @@ pub fn VersionCheck() -> impl IntoView {
         <span class="relative">
             <button
                 type="button"
-                class="rounded text-xs text-slate-500 hover:text-slate-300 hover:underline"
+                class="rounded text-xs font-medium text-slate-500 hover:text-slate-300 hover:underline"
                 title="The version of KanRite running. Click to check for updates."
                 on:click=click
             >
