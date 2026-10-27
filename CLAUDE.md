@@ -1831,6 +1831,20 @@ changes):
   `amd-<target>.zip` asset and `amd-uninstall` marker (311, 312), the Tauri
   identifier `io.github.agile-md.amdui` (it names riteui's WebView data
   folder), and the repository `KanRite/amd` (313).
+  **4.x installs update across it** (ticket 311): 4.x's `update_apply`
+  takes only the zip entries `amd` and `amdui` (and checks `--version`
+  contains the version, which `rite 5.0.0` does), so `release.yml`'s Unix
+  zips also carry the new programs under those names (Windows had no 4.x
+  release). The first 5.x run by the old name, from a release install with
+  no `rite` (`renamed::finish_update_from_4x`, before the notice), calls
+  `update_apply::adopt_new_names`: renames `amd` to `rite` and `amdui` to
+  `riteui`, leaves the old names as relative symlinks (copies on Windows),
+  and patches 4.x's `amd-uninstall` loop to remove the new names and
+  dangling links. `rollback` with no `rite.previous` restores 4.x's
+  `amd.previous`/`amdui.previous` over the links and removes `rite` and
+  `riteui`. On Windows `refresh_old_copies` replaces the `amd.exe`/`amdui.exe`
+  copies after every update and rollback. test.sh runs the real previous
+  release (`RITE_PREVIOUS`, a 4.x `amd` in CI) through all of it.
 
 ## Epics and sprints (`crates/rite-lib/src/group.rs`, ADR-0009)
 

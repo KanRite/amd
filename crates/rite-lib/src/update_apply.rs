@@ -65,6 +65,94 @@ pub trait Fetch {
     fn get(&self, url: &str) -> Result<Vec<u8>>;
 }
 
+/// The 4.x names, each with its 5.x one. They stay through 5.x (ticket
+/// 309): a symlink to the new program, or on Windows a copy of it.
+pub const OLD_NAMES: [(&str, &str); 2] = [("amd", "rite"), ("amdui", "riteui")];
+
+/// Finishes an update from 4.x (ticket 311). A 4.x install updates itself
+/// by the old names: it takes `amd` and `amdui` from the release zip, which
+/// carries the new programs under those names too. So the first 5.x run
+/// finds `amd` and no `rite`; this renames each to its new name and leaves
+/// the old one as a link to it (a copy on Windows), as install.sh does. The
+/// uninstaller 4.x wrote is taught the new names too. Returns the new names
+/// put in place; nothing, and no change, for any other folder.
+pub fn adopt_new_names(dir: &Path) -> Result<Vec<String>> {
+    let mut adopted = Vec::new();
+    for (old, new) in OLD_NAMES {
+        let old_path = dir.join(file_name(old));
+        let new_path = dir.join(file_name(new));
+        if new_path.exists() {
+            continue;
+        }
+        let Ok(meta) = fs::symlink_metadata(&old_path) else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        fs::rename(&old_path, &new_path)
+            .with_context(|| format!("renaming {} to {new}", old_path.display()))?;
+        if let Err(err) = keep_old_name(dir, old, new) {
+            let _ = fs::rename(&new_path, &old_path);
+            return Err(err).with_context(|| format!("keeping {old} as a name for {new}"));
+        }
+        adopted.push(new.to_string());
+    }
+    if !adopted.is_empty() {
+        teach_uninstaller(dir);
+    }
+    Ok(adopted)
+}
+
+/// `old` as a second name for `new` in `dir`: a relative symlink, or on
+/// Windows (no symlinks without developer mode) a copy.
+fn keep_old_name(dir: &Path, old: &str, new: &str) -> Result<()> {
+    let link = dir.join(file_name(old));
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(file_name(new), &link)?;
+    #[cfg(not(unix))]
+    fs::copy(dir.join(file_name(new)), &link)?;
+    Ok(())
+}
+
+/// On Windows the old names are copies, so after the programs change (an
+/// update, a rollback) each copy is replaced with the new program. A copy
+/// that is running is moved aside first, as Windows allows. Elsewhere they
+/// are symlinks, which follow by themselves.
+fn refresh_old_copies(dir: &Path) {
+    if !cfg!(windows) {
+        return;
+    }
+    for (old, new) in OLD_NAMES {
+        let copy = dir.join(file_name(old));
+        let program = dir.join(file_name(new));
+        if !copy.exists() || !program.exists() {
+            continue;
+        }
+        let aside = dir.join(format!("{}.old", file_name(old)));
+        let _ = fs::remove_file(&aside);
+        if fs::rename(&copy, &aside).is_ok() {
+            let _ = fs::copy(&program, &copy);
+            let _ = fs::remove_file(&aside);
+        }
+    }
+}
+
+/// The uninstaller a 4.x install.sh wrote removes `amd` and `amdui` only;
+/// after [`adopt_new_names`] it must remove `rite` and `riteui` too, and the
+/// old names, now links that may dangle by the time they're reached. A
+/// script that doesn't have the 4.x line is left alone.
+fn teach_uninstaller(dir: &Path) {
+    const OLD: &str = "for name in amd amdui; do\n  [ -e \"${BIN}/${name}\" ] || continue";
+    const NEW: &str = "for name in rite riteui amd amdui; do\n  [ -e \"${BIN}/${name}\" ] || [ -L \"${BIN}/${name}\" ] || continue";
+    let path = dir.join(MARKER);
+    if let Ok(text) = fs::read_to_string(&path)
+        && text.contains(OLD)
+    {
+        let _ = fs::write(&path, text.replacen(OLD, NEW, 1));
+    }
+}
+
 /// The release build for this system, as the release workflow names it,
 /// or `None` where there's no build (FreeBSD, say).
 pub fn target() -> Option<&'static str> {
@@ -265,6 +353,7 @@ fn apply_one(
             return Err(err).with_context(|| format!("installing {}", live.display()));
         }
     }
+    refresh_old_copies(dir);
     progress(Step::Installed(version));
     Ok(())
 }
@@ -352,6 +441,23 @@ pub fn rollback(dir: &Path) -> Result<Vec<String>> {
                 .with_context(|| format!("restoring {}", previous.display()))?;
             restored.push(bin.to_string());
         }
+    }
+    if restored.is_empty() {
+        // The first 5.x, put there by a 4.x update: what it kept is
+        // `amd.previous` (ticket 311). The 4.x program goes back under its
+        // own name, over the link, and the 5.x one is removed, leaving the
+        // folder as 4.x had it.
+        for (old, new) in OLD_NAMES {
+            let previous = dir.join(format!("{}.previous", file_name(old)));
+            if previous.exists() {
+                fs::rename(&previous, dir.join(file_name(old)))
+                    .with_context(|| format!("restoring {}", previous.display()))?;
+                let _ = fs::remove_file(dir.join(file_name(new)));
+                restored.push(old.to_string());
+            }
+        }
+    } else {
+        refresh_old_copies(dir);
     }
     if restored.is_empty() {
         bail!(
@@ -449,6 +555,86 @@ mod tests {
         )
         .unwrap();
         dir
+    }
+
+    /// A 4.x install just updated by 4.x to `version`: the new programs
+    /// under the old names, 4.x's kept as `.previous`, and the uninstaller
+    /// 4.x's install.sh wrote (ticket 311).
+    fn updated_by_4x(version: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for (old, new) in OLD_NAMES {
+            write_executable(
+                &dir.path().join(old),
+                format!("#!/bin/sh\necho \"{new} {version}\"\n").as_bytes(),
+            )
+            .unwrap();
+            write_executable(
+                &dir.path().join(format!("{old}.previous")),
+                format!("#!/bin/sh\necho \"{old} 4.9.0\"\n").as_bytes(),
+            )
+            .unwrap();
+        }
+        fs::write(
+            dir.path().join(MARKER),
+            format!(
+                "#!/usr/bin/env bash\n{RELEASE_INSTALL}\nfor name in amd amdui; do\n  [ -e \"${{BIN}}/${{name}}\" ] || continue\n  gone\ndone\n"
+            ),
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "the pretend binaries are shell scripts; on Windows scripts/test-install.ps1 updates a real install"
+    )]
+    fn the_first_5x_run_after_a_4x_update_puts_in_the_new_names() {
+        let dir = updated_by_4x("5.0.0");
+        assert_eq!(adopt_new_names(dir.path()).unwrap(), ["rite", "riteui"]);
+        assert_eq!(version_of(dir.path(), "rite"), "rite 5.0.0");
+        assert_eq!(version_of(dir.path(), "riteui"), "riteui 5.0.0");
+        // The old names still run the new programs, as links.
+        assert_eq!(version_of(dir.path(), "amd"), "rite 5.0.0");
+        assert!(
+            fs::symlink_metadata(dir.path().join("amd"))
+                .unwrap()
+                .is_symlink()
+        );
+        // 4.x's kept programs are untouched, for rollback.
+        assert_eq!(version_of(dir.path(), "amd.previous"), "amd 4.9.0");
+        // The uninstaller removes the new names, and links that dangle.
+        let uninstaller = fs::read_to_string(dir.path().join(MARKER)).unwrap();
+        assert!(
+            uninstaller.contains("for name in rite riteui amd amdui; do\n  [ -e \"${BIN}/${name}\" ] || [ -L \"${BIN}/${name}\" ] || continue"),
+            "{uninstaller}"
+        );
+        // Once only: a finished install is left alone.
+        assert!(adopt_new_names(dir.path()).unwrap().is_empty());
+        // And a 5.x install, or any folder without the old programs, too.
+        let fresh = tempfile::tempdir().unwrap();
+        assert!(adopt_new_names(fresh.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "the pretend binaries are shell scripts; on Windows scripts/test-install.ps1 updates a real install"
+    )]
+    fn rollback_from_the_first_5x_puts_4x_back_as_it_was() {
+        let dir = updated_by_4x("5.0.0");
+        adopt_new_names(dir.path()).unwrap();
+        assert_eq!(rollback(dir.path()).unwrap(), ["amd", "amdui"]);
+        assert_eq!(version_of(dir.path(), "amd"), "amd 4.9.0");
+        assert_eq!(version_of(dir.path(), "amdui"), "amdui 4.9.0");
+        assert!(
+            fs::symlink_metadata(dir.path().join("amd"))
+                .unwrap()
+                .is_file()
+        );
+        assert!(!dir.path().join("rite").exists());
+        assert!(!dir.path().join("riteui").exists());
+        assert!(!dir.path().join("amd.previous").exists());
     }
 
     /// Ticket 319: the checksum is the lowercase hex GitHub gives, checked

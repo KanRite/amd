@@ -68,9 +68,11 @@ pub fn notice(argv0: &OsStr, state: Option<&Path>, now: i64) -> Option<String> {
     ))
 }
 
-/// Prints [`notice`] on stderr for this run, when it has something to say.
-/// `rite` and `riteui` call it first thing.
-pub fn say_if_run_by_old_name() {
+/// What `rite` and `riteui` do first, when run by an old name: finish an
+/// update from 4.x ([`finish_update_from_4x`]), then print [`notice`] on
+/// stderr when it has something to say.
+pub fn when_run_by_old_name() {
+    finish_update_from_4x();
     let Some(argv0) = std::env::args_os().next() else {
         return;
     };
@@ -79,6 +81,33 @@ pub fn say_if_run_by_old_name() {
         .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
     if let Some(text) = notice(&argv0, notice_state().as_deref(), now) {
         eprintln!("{text}");
+    }
+}
+
+/// A 4.x install that has just updated itself to 5.x has the new program
+/// under the old name, `amd`, and no `rite` (ticket 311): this puts in the
+/// new names, once, saying so. Only for an installer's release install, and
+/// only when this program is the real file by the old name (a symlink
+/// resolves to `rite`, so a finished install is never touched again).
+pub fn finish_update_from_4x() {
+    use crate::update_apply::{self, Install};
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let Some((old, _)) = old_name(exe.as_os_str()) else {
+        return;
+    };
+    let Install::Managed(dir) = update_apply::install_dir(&exe) else {
+        return;
+    };
+    match update_apply::adopt_new_names(&dir) {
+        Ok(names) if !names.is_empty() => eprintln!(
+            "finished updating from {old}: {} now in {}, and {old} still works",
+            names.join(" and "),
+            dir.display()
+        ),
+        Ok(_) => {}
+        Err(err) => eprintln!("couldn't finish the update to rite: {err:#}"),
     }
 }
 

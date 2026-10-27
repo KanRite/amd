@@ -81,11 +81,12 @@ $list = Join-Path $work 'releases.json'
 Set-Content -LiteralPath $list -Value ('[{"tag_name":"v9.9.9","html_url":"https://example.test/9.9.9","draft":false,"prerelease":false,"assets":[{"name":"amd-' + $target + '.zip","browser_download_url":"' + $url + '","digest":"sha256:' + $sha + '"}]}]')
 $env:AMD_UPDATE_RELEASES = 'file://' + ($list -replace '\\', '/')
 
-Check 'rite update replaces the running rite.exe and riteui.exe, keeping the ones before' {
+Check 'rite update replaces the running rite.exe and riteui.exe, keeping the ones before, and refreshes the amd.exe copy' {
     $out = & $rite update 2>&1 | Out-String
     Write-Host $out.Trim()
     (& $rite --version) -eq 'rite 9.9.9' -and (& (Join-Path $dir 'riteui.exe') --version) -eq 'riteui 9.9.9' -and
-        (Test-Path -LiteralPath "$rite.previous")
+        (Test-Path -LiteralPath "$rite.previous") -and
+        (& (Join-Path $dir 'amd.exe') --version 2>$null) -eq 'rite 9.9.9'
 }
 Check 'rite update --rollback puts the previous rite.exe back' {
     # Run from the kept copy, as a user stuck on a broken 9.9.9 would; under
@@ -97,6 +98,10 @@ Check 'rite update --rollback puts the previous rite.exe back' {
     Remove-Item -LiteralPath $kept
     (& $rite --version) -match '^rite ' -and (& $rite --version) -ne 'rite 9.9.9' -and
         -not (Test-Path -LiteralPath "$rite.previous")
+}
+Check 'the amd.exe copy follows: the update, then the rollback (ticket 311)' {
+    $copy = Join-Path $dir 'amd.exe'
+    (& $copy --version 2>$null) -eq (& $rite --version) -and (& $copy --version 2>$null) -ne 'rite 9.9.9'
 }
 Remove-Item Env:\AMD_UPDATE_RELEASES
 

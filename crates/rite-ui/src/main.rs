@@ -28,7 +28,7 @@ fn main() -> ExitCode {
     // in for.
     let args: Vec<String> = std::env::args().skip(1).collect();
     // Run as `amdui`, the shim of the old name (ticket 309): said once a day.
-    agile_md::renamed::say_if_run_by_old_name();
+    agile_md::renamed::when_run_by_old_name();
     match args.first().map(String::as_str) {
         None => {}
         Some("-h" | "--help") => {
