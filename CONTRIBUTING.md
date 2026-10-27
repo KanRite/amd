@@ -5,7 +5,7 @@ contribute is under the same licence.
 
 ## Reporting a bug or asking for something
 
-Open an [issue](https://github.com/kanrite/amd/issues/new/choose). There's
+Open an [issue](https://github.com/kanrite/rite/issues/new/choose). There's
 a form for bugs and one for ideas.
 
 The project's own board is KanRite itself: open issues are pulled into the
@@ -106,7 +106,7 @@ and settings are untouched, and prints the command to open it.
 
 The maintainers' tickets (`kanrite-tickets`) and design documents
 (`kanrite-documents`) are private repositories in the
-[KanRite](https://github.com/KanRite) organisation. To work from them,
+[KanRite](https://github.com/kanrite) organisation. To work from them,
 become a maintainer: you're added to the organisation, and then
 `rite join kanrite` clones both and adds you to the project's users.
 Everyone else works from issues and pull requests here.
@@ -114,7 +114,7 @@ Everyone else works from issues and pull requests here.
 ## Security
 
 Please report a vulnerability privately rather than in an issue: use
-[Report a vulnerability](https://github.com/kanrite/amd/security/advisories/new)
+[Report a vulnerability](https://github.com/kanrite/rite/security/advisories/new)
 on the repository's Security tab. [SECURITY.md](SECURITY.md) says what's
 covered and what happens next.
 

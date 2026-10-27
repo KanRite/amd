@@ -1805,7 +1805,7 @@ must keep working on data a newer one has touched. So:
 Cut releases by tag: `git tag -a vX.Y.Z && git push --tags` triggers
 `release.yml`, which builds and attaches `amd-<target>.zip`. Force-move the
 major tag (`git tag -f -a vN`) and push it, since `install.sh` and the README
-`curl` URL point at `raw…/agile-md/vN`. Invocation model by major (breaking
+`curl` URL point at `raw…/kanrite/rite/vN`. Invocation model by major (breaking
 changes):
 
 - **v1** — script vendored per board (`tasks/task`); board = the script's own dir.
@@ -1831,7 +1831,12 @@ changes):
   goes through it). Unchanged on purpose: the library crate `agile_md`, the
   `amd-<target>.zip` asset (311), the Tauri
   identifier `io.github.agile-md.amdui` (it names riteui's WebView data
-  folder), and the repository `KanRite/amd` (313).
+  folder). **The repository is `KanRite/rite`** (ticket 313, renamed from
+  `KanRite/amd` on 2026-10-27): GitHub redirects git, the web, raw files
+  and the releases API from the old names, and every 4.x build's update
+  check goes through that redirect, so no repository may ever be created
+  as `KanRite/amd` again. The website is `kanrite.github.io/rite`; Pages
+  doesn't redirect, so the old `/amd` address stops when it redeploys.
   **Names people read say KanRite** (ticket 315): `--help`, messages,
   riteui's header and Preferences, the README and the user guide (whose
   "Coming from agile-md" section explains the old names). The MCP server
@@ -1839,7 +1844,7 @@ changes):
   `agile-md` entry. Left as they are, because older builds or people's
   machines depend on them: the `# agile-md install:` marker, `.agile-md`
   and `.agile-md-pins/` in documents repositories, `.git/amd-*` files, the
-  zip names, the GitHub URLs (ticket 313) and the website, which is live
+  zip names and the website, which is live
   as soon as it merges and so changes with the release (316).
   **The machine folders are `kanrite`** (ticket 310, `places.rs`):
   `places::config()`/`state()`/`data()` are `$XDG_*_HOME/kanrite` (an XDG

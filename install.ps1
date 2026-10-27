@@ -1,7 +1,7 @@
 # agile-md installer for Windows (ticket 282): install.sh's counterpart.
 #
-#   irm https://raw.githubusercontent.com/kanrite/amd/v4/install.ps1 | iex
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/kanrite/amd/v4/install.ps1))) -Version v4.9.0
+#   irm https://raw.githubusercontent.com/kanrite/rite/v4/install.ps1 | iex
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/kanrite/rite/v4/install.ps1))) -Version v4.9.0
 #   ... -Uninstall [-All] [-Yes]          (or Settings > Apps > KanRite > Uninstall)
 #
 # Downloads the release zip for this machine (x64 or Arm64) and installs
@@ -36,7 +36,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest is many times slower with it
 
-$Repo = "kanrite/amd"
+$Repo = "kanrite/rite"
 $AppName = "KanRite"
 $UninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$AppName"
 

@@ -60,7 +60,7 @@ jobs:
         id: latest
         env:
           GH_TOKEN: ${{ github.token }}
-        run: echo "tag=$(gh release view --repo agile-md/amd --json tagName --jq .tagName || true)" >> "$GITHUB_OUTPUT"
+        run: echo "tag=$(gh release view --repo kanrite/rite --json tagName --jq .tagName || true)" >> "$GITHUB_OUTPUT"
       - name: Cache the previous release
         if: steps.latest.outputs.tag != ''
         uses: actions/cache@v6
@@ -77,7 +77,7 @@ jobs:
           # 4.x zips carry amd, 5.x ones rite (ticket 309).
           if [ ! -x "$dir/rite" ] && [ ! -x "$dir/amd" ]; then
             mkdir -p "$dir"
-            gh release download "$TAG" --repo agile-md/amd \
+            gh release download "$TAG" --repo kanrite/rite \
               --pattern 'amd-x86_64-unknown-linux-gnu.zip' --dir "$dir" \
               && unzip -q -o "$dir/amd-x86_64-unknown-linux-gnu.zip" -d "$dir" \
               && rm -f "$dir/amd-x86_64-unknown-linux-gnu.zip" || true
