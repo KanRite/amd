@@ -723,6 +723,19 @@ enum Cmd {
         #[arg(value_name = "PRIORITY")]
         priority: Option<String>,
     },
+    /// Show or set the name riteui shows for the project
+    ///
+    /// The project keeps its name (`kanrite`) for folders and `rite project
+    /// use`; this is what people read (`KanRite`): the window title, the
+    /// board's header and the landing page. With no name, says it
+    DisplayName {
+        /// The name to show, quoted if it has spaces
+        #[arg(value_name = "NAME")]
+        name: Option<String>,
+        /// Show the project's own name again
+        #[arg(long, conflicts_with = "name")]
+        clear: bool,
+    },
     /// Show or set the documents repository every project shares
     ///
     /// Shown in riteui's Documents beside the project's own. With no name,
@@ -1458,6 +1471,7 @@ fn run() -> Result<()> {
         }
         Cmd::WipLimit { limit } => cmd_wip_limit(&board, limit),
         Cmd::SharedDocuments { name, clear } => cmd_shared_documents(&board, name, clear),
+        Cmd::DisplayName { name, clear } => cmd_display_name(&board, name, clear),
         Cmd::TriagePriority { priority } => cmd_triage_priority(&board, priority),
         Cmd::AutoPriority { action, days } => cmd_auto_priority(&board, action.as_deref(), &days),
         Cmd::PriorityOverride { action } => cmd_priority_override(&board, action.as_deref()),
@@ -2131,7 +2145,7 @@ fn cmd_mine(
         let triage = if item.triage { "TRIAGE  " } else { "" };
         println!(
             "{:<5}  {:<6}  {}  {:<16}  {}  {triage}{}",
-            item.column, item.priority, points, item.project, item.id, item.title
+            item.column, item.priority, points, item.project_shown, item.id, item.title
         );
     };
     items.iter().for_each(line);
@@ -2705,6 +2719,36 @@ fn cmd_shared_documents(board: &Board, name: Option<String>, clear: bool) -> Res
     match name {
         Some(name) => println!("shared documents: {name}"),
         None => println!("no shared documents repository"),
+    }
+    Ok(())
+}
+
+/// `rite display-name [NAME | --clear]` (ticket 326): the name riteui and
+/// the MCP tools show for the project, committed and pushed like any
+/// setting; with neither, says what's shown.
+fn cmd_display_name(board: &Board, name: Option<String>, clear: bool) -> Result<()> {
+    let settings = board_settings::load(board);
+    if name.is_none() && !clear {
+        match settings.display_name() {
+            Some(name) => println!("{name}"),
+            None => eprintln!(
+                "no display name: the project's own name is shown (rite display-name <name>)"
+            ),
+        }
+        return Ok(());
+    }
+    let name = name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+    // Checked before anything is committed.
+    settings.clone().set_display_name(name.as_deref())?;
+    let what = name.clone().unwrap_or_else(|| "cleared".to_string());
+    with_auto_commit(board, "settings", "display-name", &what, || {
+        let mut settings = board_settings::load(board);
+        settings.set_display_name(name.as_deref())?;
+        settings.save(board)
+    })?;
+    match name {
+        Some(name) => println!("display name: {name}"),
+        None => println!("no display name: the project's own name is shown"),
     }
     Ok(())
 }
@@ -3773,6 +3817,8 @@ fn changes_board(command: &Cmd) -> bool {
                 | Cmd::BacklogAlwaysShown { action: Some(_) }
                 | Cmd::SharedDocuments { name: Some(_), .. }
                 | Cmd::SharedDocuments { clear: true, .. }
+                | Cmd::DisplayName { name: Some(_), .. }
+                | Cmd::DisplayName { clear: true, .. }
                 | Cmd::Templates {
                     command: Some(TemplateCmd::Eject { .. })
                 }
@@ -3816,6 +3862,7 @@ fn sync_purpose(command: &Cmd) -> agile_md::sync::Purpose {
         | Cmd::Clone { .. }
         | Cmd::WipLimit { .. }
         | Cmd::SharedDocuments { .. }
+        | Cmd::DisplayName { .. }
         | Cmd::TriagePriority { .. }
         | Cmd::AutoPriority { action: None, .. }
         | Cmd::PriorityOverride { action: None }

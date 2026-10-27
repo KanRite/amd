@@ -77,6 +77,15 @@ pub fn project_name(tickets: &Path) -> String {
         .unwrap_or(dir_name)
 }
 
+/// The name to show for the project whose board is in `tickets` (ticket
+/// 326): its `display-name`, else [`project_name`]. For people to read
+/// only; anything that finds or matches a project uses `project_name`.
+pub fn shown_name(tickets: &Path) -> String {
+    board_settings::load(&Board::in_repo(tickets))
+        .display_name()
+        .unwrap_or_else(|| project_name(tickets))
+}
+
 /// Every project in `dir`, sorted by name.
 pub fn projects(dir: &Path) -> Vec<ProjectEntry> {
     let mut found: Vec<ProjectEntry> = project_siblings(dir)

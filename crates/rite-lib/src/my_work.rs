@@ -46,6 +46,8 @@ const UNASSIGNED: &str = "ui.include-unassigned";
 #[derive(Clone, Debug, Serialize)]
 pub struct Project {
     pub name: String,
+    /// What to show for it (ticket 326): its display name, else `name`.
+    pub shown: String,
     /// Its board's repository (the tickets repository, usually).
     pub root: PathBuf,
     /// The folder holding its repositories.
@@ -60,6 +62,8 @@ pub struct Project {
 #[derive(Clone, Debug, Serialize)]
 pub struct WorkItem {
     pub project: String,
+    /// The project's display name, else `project` (ticket 326).
+    pub project_shown: String,
     /// The project's board repository, for opening it.
     pub project_root: PathBuf,
     /// The repository whose board the ticket is on.
@@ -111,6 +115,7 @@ fn projects_in(registry: &Registry, hidden: &[PathBuf]) -> Vec<Project> {
         .filter(|e| !is_scratch(&e.root, &temp))
         .map(|e| Project {
             name: current_project::project_name(&e.root),
+            shown: current_project::shown_name(&e.root),
             dir: registry::project_dir_of(&e.root),
             hidden: hidden.iter().any(|h| h == &e.root),
             archived: crate::archive::is_archived(&Board::in_repo(&e.root)),
@@ -449,6 +454,7 @@ fn each_board(
 fn item(project: &Project, repo: &str, task: &crate::task::Task) -> WorkItem {
     WorkItem {
         project: project.name.clone(),
+        project_shown: project.shown.clone(),
         project_root: project.root.clone(),
         repo: repo.to_string(),
         column: task.column.to_string(),
@@ -520,6 +526,7 @@ mod tests {
     fn item(priority: &str, created: &str, points: &str, id: &str) -> WorkItem {
         WorkItem {
             project: "p".into(),
+            project_shown: "p".into(),
             project_root: PathBuf::from("/p"),
             repo: "p-tickets".into(),
             column: "todo".into(),

@@ -876,6 +876,11 @@ struct SharedArgs<'a> {
     name: &'a str,
 }
 
+/// Sets the project's display name (ticket 326); empty clears it.
+pub async fn set_display_name(name: &str) -> Result<SyncReport, String> {
+    call("set_display_name", &SharedArgs { name }).await
+}
+
 /// Names the documents repository every project shares; empty clears it.
 pub async fn set_shared_documents(name: &str) -> Result<SyncReport, String> {
     call("set_shared_documents", &SharedArgs { name }).await
