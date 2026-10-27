@@ -106,7 +106,7 @@ and settings are untouched, and prints the command to open it.
 
 The maintainers' tickets (`kanrite-tickets`) and design documents
 (`kanrite-documents`) are private repositories in the
-[KanRite](https://github.com/KanRite) organisation. To work from them,
+[KanRite](https://github.com/kanrite) organisation. To work from them,
 become a maintainer: you're added to the organisation, and then
 `rite join kanrite` clones both and adds you to the project's users.
 Everyone else works from issues and pull requests here.
