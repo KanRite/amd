@@ -10,8 +10,9 @@
 //! breaking changes (ticket 193), so there is nothing to migrate.
 //!
 //! - **Only an installer's release install updates itself.** The installer
-//!   writes `amd-uninstall` beside `rite` (`install.ps1` on Windows writes
-//!   `amd-uninstall.ps1`, ticket 282) and records in it how it installed
+//!   writes `rite-uninstall` beside `rite` (`install.ps1` on Windows writes
+//!   `rite-uninstall.ps1`, ticket 282; 4.x wrote `amd-uninstall`, which is
+//!   still read, ticket 312) and records in it how it installed
 //!   (`# agile-md install: release` or `source`). Anything else — a source
 //!   build, a package manager's install, an install from before the marker
 //!   — is told how to update and left alone ([`install_dir`]).
@@ -44,10 +45,29 @@ pub const BINARIES: [&str; 2] = ["rite", "riteui"];
 /// What the installer writes beside `rite`, and where it says how: on
 /// Windows the uninstaller `install.ps1` writes (ticket 282).
 pub const MARKER: &str = if cfg!(windows) {
+    "rite-uninstall.ps1"
+} else {
+    "rite-uninstall"
+};
+
+/// The uninstaller's name before the rename (ticket 312). A 4.x install,
+/// and one 4.x updated to 5.x, has only this, so it's read when [`MARKER`]
+/// isn't there.
+pub const OLD_MARKER: &str = if cfg!(windows) {
     "amd-uninstall.ps1"
 } else {
     "amd-uninstall"
 };
+
+/// The uninstaller in `dir`, by its name or else its old one.
+fn marker_in(dir: &Path) -> PathBuf {
+    let new = dir.join(MARKER);
+    if new.exists() {
+        new
+    } else {
+        dir.join(OLD_MARKER)
+    }
+}
 
 /// The line in [`MARKER`] that a release install has.
 pub const RELEASE_INSTALL: &str = "# agile-md install: release";
@@ -145,7 +165,7 @@ fn refresh_old_copies(dir: &Path) {
 fn teach_uninstaller(dir: &Path) {
     const OLD: &str = "for name in amd amdui; do\n  [ -e \"${BIN}/${name}\" ] || continue";
     const NEW: &str = "for name in rite riteui amd amdui; do\n  [ -e \"${BIN}/${name}\" ] || [ -L \"${BIN}/${name}\" ] || continue";
-    let path = dir.join(MARKER);
+    let path = dir.join(OLD_MARKER);
     if let Ok(text) = fs::read_to_string(&path)
         && text.contains(OLD)
     {
@@ -197,7 +217,7 @@ pub fn install_dir(exe: &Path) -> Install {
         };
     };
     let shown = dir.display();
-    match crate::eol::read(dir.join(MARKER)) {
+    match crate::eol::read(marker_in(dir)) {
         Err(_) => Install::Unmanaged {
             why: format!(
                 "rite in {shown} wasn't put there by agile-md's installer, so it isn't replaced: \
@@ -575,7 +595,7 @@ mod tests {
             .unwrap();
         }
         fs::write(
-            dir.path().join(MARKER),
+            dir.path().join(OLD_MARKER),
             format!(
                 "#!/usr/bin/env bash\n{RELEASE_INSTALL}\nfor name in amd amdui; do\n  [ -e \"${{BIN}}/${{name}}\" ] || continue\n  gone\ndone\n"
             ),
@@ -604,7 +624,7 @@ mod tests {
         // 4.x's kept programs are untouched, for rollback.
         assert_eq!(version_of(dir.path(), "amd.previous"), "amd 4.9.0");
         // The uninstaller removes the new names, and links that dangle.
-        let uninstaller = fs::read_to_string(dir.path().join(MARKER)).unwrap();
+        let uninstaller = fs::read_to_string(dir.path().join(OLD_MARKER)).unwrap();
         assert!(
             uninstaller.contains("for name in rite riteui amd amdui; do\n  [ -e \"${BIN}/${name}\" ] || [ -L \"${BIN}/${name}\" ] || continue"),
             "{uninstaller}"
@@ -755,8 +775,8 @@ mod tests {
         assert_eq!(
             names,
             [
-                "amd-uninstall",
                 "rite",
+                "rite-uninstall",
                 "rite.previous",
                 "riteui",
                 "riteui.previous"
@@ -854,6 +874,29 @@ mod tests {
         assert!(matches!(
             install_dir(&exe),
             Install::Unmanaged { why, reinstall: true } if why.contains("wasn't put there")
+        ));
+        // 4.x's uninstaller, by its old name, still marks a release install
+        // (ticket 312); the new name wins when both are there.
+        fs::write(
+            dir.path().join(OLD_MARKER),
+            format!("#!/usr/bin/env bash\n{RELEASE_INSTALL}\n"),
+        )
+        .unwrap();
+        assert_eq!(
+            install_dir(&exe),
+            Install::Managed(dir.path().to_path_buf())
+        );
+        fs::write(
+            dir.path().join(MARKER),
+            "#!/usr/bin/env bash\n# agile-md install: source\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            install_dir(&exe),
+            Install::Unmanaged {
+                reinstall: false,
+                ..
+            }
         ));
     }
 

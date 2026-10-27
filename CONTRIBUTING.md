@@ -80,7 +80,7 @@ or web stack and none of the board's tools; without Trunk, a plain
 `cargo xtask build` does the same and says what's missing.
 
 `cargo xtask install` runs `./install.sh --from-source` on Linux and macOS,
-which also installs riteui's launcher and `amd-uninstall` (`--dir DIR` picks
+which also installs riteui's launcher and `rite-uninstall` (`--dir DIR` picks
 the folder). On Windows it copies `rite.exe` and `riteui.exe` into Cargo's
 bin folder (`%USERPROFILE%\.cargo\bin`, already on the PATH where rustup
 is installed), or `--dir DIR`; there's no uninstaller or Start menu entry

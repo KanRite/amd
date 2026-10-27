@@ -38,7 +38,7 @@ $zip = Join-Path $work 'rite.zip'
 Zip $built $zip
 & (Join-Path $root 'install.ps1') -Dir $dir -Zip $zip
 $rite = Join-Path $dir 'rite.exe'
-$uninstaller = Join-Path $dir 'amd-uninstall.ps1'
+$uninstaller = Join-Path $dir 'rite-uninstall.ps1'
 $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\KanRite'
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'KanRite.lnk'
 function UserPath { (Get-Item 'HKCU:\Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames') -split ';' }
@@ -57,7 +57,7 @@ Check 'the folder is on the user PATH' { (UserPath) -contains $dir }
 Check 'there is a Start menu shortcut to riteui' {
     (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath -eq (Join-Path $dir 'riteui.exe')
 }
-Check 'Settings > Apps lists it, uninstalling with amd-uninstall.ps1' {
+Check 'Settings > Apps lists it, uninstalling with rite-uninstall.ps1' {
     (Get-ItemProperty $key).UninstallString -like "*$uninstaller*"
 }
 
@@ -109,7 +109,7 @@ Write-Host 'install.ps1 again, over the install:'
 & (Join-Path $root 'install.ps1') -Dir $dir -Zip $zip
 Check 'the PATH has the folder once' { @((UserPath) | Where-Object { $_ -eq $dir }).Count -eq 1 }
 
-Write-Host 'amd-uninstall.ps1:'
+Write-Host 'rite-uninstall.ps1:'
 & $uninstaller -Yes
 Check 'the programs, uninstaller and folder are gone' { -not (Test-Path -LiteralPath $dir) }
 Check 'the Start menu shortcut is gone' { -not (Test-Path -LiteralPath $shortcut) }

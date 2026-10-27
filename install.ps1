@@ -14,7 +14,7 @@
 #   through 5.x;
 # - a Start menu shortcut, KanRite, for riteui;
 # - an entry in Settings > Apps that runs the uninstaller;
-# - amd-uninstall.ps1 beside the programs. It records that this is a release
+# - rite-uninstall.ps1 beside the programs. It records that this is a release
 #   install, which is what lets `rite update` and riteui's update bar replace
 #   it with newer releases.
 #
@@ -51,7 +51,7 @@ if ($Dir -eq "") {
 }
 
 # The uninstaller for an install into BIN. One script, written beside rite.exe
-# as amd-uninstall.ps1, and also what `install.ps1 -Uninstall` runs. Its
+# as rite-uninstall.ps1, and also what `install.ps1 -Uninstall` runs. Its
 # second line is the marker `rite update` looks for (update_apply::MARKER).
 function Uninstaller([string]$bin, [string]$method) {
     $quoted = $bin.Replace("'", "''")
@@ -59,7 +59,7 @@ function Uninstaller([string]$bin, [string]$method) {
 # agile-md's uninstaller, written by install.ps1 (ticket 282).
 # agile-md install: $method
 #
-#   amd-uninstall.ps1 [-All] [-Yes]
+#   rite-uninstall.ps1 [-All] [-Yes]
 #
 # Removes rite.exe, riteui.exe, this script, the Start menu shortcut, the
 # Settings > Apps entry and the folder on your PATH. Then asks whether to
@@ -147,12 +147,12 @@ if ($present.Count -gt 0) {
     if ($removeData) {
         foreach ($d in $present) { Remove-Item -LiteralPath $d -Recurse -Force; Write-Host "Removed $d" }
     } else {
-        Write-Host 'Kept your settings and data (amd-uninstall.ps1 -All removes them):'
+        Write-Host 'Kept your settings and data (rite-uninstall.ps1 -All removes them):'
         $present | ForEach-Object { Write-Host "  $_" }
     }
 }
 
-Remove-Item -LiteralPath (Join-Path $Bin 'amd-uninstall.ps1') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $Bin 'rite-uninstall.ps1') -Force -ErrorAction SilentlyContinue
 # The folders the installer made, when nothing else is in them.
 foreach ($folder in $Bin, (Split-Path $Bin)) {
     if ((Split-Path $folder -Leaf) -in 'bin', $AppName -and (Test-Path -LiteralPath $folder) -and
@@ -166,11 +166,11 @@ Write-Host 'agile-md is uninstalled. Your projects, in your git repositories, we
 }
 
 if ($Uninstall) {
-    $script = Join-Path $Dir 'amd-uninstall.ps1'
+    $script = Join-Path $Dir 'rite-uninstall.ps1'
     if (-not (Test-Path -LiteralPath $script)) {
         # No uninstaller there (an install from before this one, say): a
         # fresh copy of it does the same.
-        $script = Join-Path ([IO.Path]::GetTempPath()) "amd-uninstall-$PID.ps1"
+        $script = Join-Path ([IO.Path]::GetTempPath()) "rite-uninstall-$PID.ps1"
         Set-Content -LiteralPath $script -Value (Uninstaller $Dir 'unknown') -Encoding UTF8
     }
     & $script -All:$All -Yes:$Yes
@@ -287,7 +287,7 @@ if (Test-Path -LiteralPath $riteui) {
     Write-Host "Added $AppName to the Start menu"
 }
 
-$uninstallScript = Join-Path $Dir 'amd-uninstall.ps1'
+$uninstallScript = Join-Path $Dir 'rite-uninstall.ps1'
 Set-Content -LiteralPath $uninstallScript -Value (Uninstaller $Dir 'release') -Encoding UTF8
 
 # Settings > Apps. No DisplayVersion: `rite update` changes the version later,

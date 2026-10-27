@@ -3,8 +3,8 @@
 # agile-md installer — install the `rite` command onto your PATH.
 #
 #   ./install.sh [--dir DIR] [--version vX.Y.Z] [--from-source]
-#   curl -fsSL https://raw.githubusercontent.com/agile-md/amd/v4/install.sh | bash
-#   ... | bash -s -- --uninstall [--all] [--yes]      (or run amd-uninstall)
+#   curl -fsSL https://raw.githubusercontent.com/kanrite/amd/v4/install.sh | bash
+#   ... | bash -s -- --uninstall [--all] [--yes]      (or run rite-uninstall)
 #
 # Default target directory: /usr/local/bin if writable, else ~/bin.
 # Downloads the prebuilt binaries for your platform from the GitHub release.
@@ -22,7 +22,7 @@
 # ~/.local/share ($XDG_DATA_HOME), which is where the dock and top bar take
 # the board's icon from (from the clone, or else fetched for the release).
 #
-# It also writes `amd-uninstall` beside them (ticket 242): it removes what
+# It also writes `rite-uninstall` beside them (ticket 242): it removes what
 # was installed, and asks before removing your settings and data
 # (`--all` removes them, `--yes` doesn't ask). Projects are never touched.
 #
@@ -30,12 +30,14 @@
 #
 set -euo pipefail
 
-REPO="agile-md/amd"
+REPO="kanrite/amd"
 DIR=""
 VERSION="latest"
 FROM_SOURCE=0
 UNINSTALL=0
 UNINSTALL_ARGS=()
+# A release zip on disk instead of a download (tests/test.sh, ticket 312).
+ZIP=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -43,6 +45,7 @@ while [ $# -gt 0 ]; do
     --version) VERSION="$2"; shift 2 ;;
     --from-source) FROM_SOURCE=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
+    --zip) ZIP="$2"; shift 2 ;;
     --all|--yes) UNINSTALL_ARGS+=("$1"); shift ;;
     *) shift ;;
   esac
@@ -134,6 +137,13 @@ link_old_names() {
 install_launcher() {
   local src data apps icons size
   [ "$(uname -s)" = "Linux" ] && [ -x "${DIR}/riteui" ] || return 0
+  data="${XDG_DATA_HOME:-${HOME}/.local/share}"
+  apps="${data}/applications"
+  icons="${data}/icons/hicolor"
+  # A 4.x install's entry, amdui.desktop, would show the board twice. Gone
+  # first, even if the new one can't be made (ticket 312).
+  rm -f "${apps}/amdui.desktop" "${icons}/scalable/apps/amdui.svg" \
+    "${icons}/32x32/apps/amdui.png" "${icons}/128x128/apps/amdui.png" "${icons}/256x256/apps/amdui.png"
   if in_clone; then
     src="${SELF}/crates/rite-ui"
   else
@@ -143,9 +153,6 @@ install_launcher() {
       return 0
     }
   fi
-  data="${XDG_DATA_HOME:-${HOME}/.local/share}"
-  apps="${data}/applications"
-  icons="${data}/icons/hicolor"
   mkdir -p "${apps}" "${icons}/scalable/apps"
   cp "${src}/app-icon.svg" "${icons}/scalable/apps/riteui.svg"
   # <size directory>:<generated file>, all made from app-icon.svg.
@@ -172,9 +179,6 @@ EOF
   if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database -q "${apps}" 2>/dev/null || true
   fi
-  # A 4.x install's entry, amdui.desktop, would show the board twice.
-  rm -f "${apps}/amdui.desktop" "${icons}/scalable/apps/amdui.svg" \
-    "${icons}/32x32/apps/amdui.png" "${icons}/128x128/apps/amdui.png" "${icons}/256x256/apps/amdui.png"
   echo "Installed the riteui launcher -> ${apps}/riteui.desktop"
 }
 
@@ -219,7 +223,7 @@ check_system() {
 }
 
 # The uninstaller for an install into BIN, with the launcher under DATA:
-# one script, written beside rite as amd-uninstall, and also what
+# one script, written beside rite as rite-uninstall, and also what
 # `install.sh --uninstall` runs.
 uninstaller() {
   local bin="$1" data="$2" method="${3:-}"
@@ -228,7 +232,7 @@ uninstaller() {
 # agile-md's uninstaller, written by its installer (ticket 242).
 # agile-md install: ${method:-unknown}
 #
-#   amd-uninstall [--all] [--yes]
+#   rite-uninstall [--all] [--yes]
 #
 # Removes rite, riteui, this script and riteui's launcher and icons. Then asks
 # whether to remove your agile-md settings and data too (--all: yes without
@@ -268,6 +272,10 @@ for name in rite riteui amd amdui; do
   fi
   gone "${BIN}/${name}"
 done
+# What `rite update` keeps for --rollback, under either name.
+for name in rite riteui amd amdui; do
+  rm -f "${BIN}/${name}.previous"
+done
 for app in riteui amdui; do for file in applications/${app}.desktop icons/hicolor/scalable/apps/${app}.svg \
   icons/hicolor/32x32/apps/${app}.png icons/hicolor/128x128/apps/${app}.png \
   icons/hicolor/256x256/apps/${app}.png; do
@@ -305,12 +313,13 @@ if [ "${#present[@]}" -gt 0 ]; then
   if [ "${ALL}" = "1" ]; then
     for d in "${present[@]}"; do rm -rf "${d}"; printf 'Removed %s\n' "${d}"; done
   else
-    printf 'Kept your settings and data (amd-uninstall --all removes them):\n'
+    printf 'Kept your settings and data (rite-uninstall --all removes them):\n'
     printf '  %s\n' "${present[@]}"
   fi
 fi
 
-rm -f "${BIN}/amd-uninstall"
+# Its own name since 5.0, and 4.x's (ticket 312).
+rm -f "${BIN}/rite-uninstall" "${BIN}/amd-uninstall"
 printf 'agile-md is uninstalled. Your projects, in your git repositories, were not touched.\n'
 BODY
 }
@@ -383,8 +392,12 @@ download_release() {
   fi
 
   TMP="$(mktemp -d)"
-  printf 'Downloading %s\n' "${url}"
-  curl -fsSL "${url}" -o "${TMP}/rite.zip" || return 1
+  if [ -n "${ZIP}" ]; then
+    cp "${ZIP}" "${TMP}/rite.zip" || return 1
+  else
+    printf 'Downloading %s\n' "${url}"
+    curl -fsSL "${url}" -o "${TMP}/rite.zip" || return 1
+  fi
   unzip -q -o "${TMP}/rite.zip" -d "${TMP}" || return 1
   if [ ! -f "${TMP}/rite" ] && [ -f "${TMP}/amd" ]; then
     die "${VERSION} is from before amd was renamed rite (5.0); install it with the 4.x installer: curl -fsSL https://raw.githubusercontent.com/kanrite/amd/v4/install.sh | bash -s -- --version ${VERSION}"
@@ -417,14 +430,16 @@ check_board_libraries() {
 
 if [ "${UNINSTALL}" = "1" ]; then
   TMP="$(mktemp -d)"
-  uninstaller "${DIR}" "${XDG_DATA_HOME:-${HOME}/.local/share}" > "${TMP}/amd-uninstall"
-  bash "${TMP}/amd-uninstall" "${UNINSTALL_ARGS[@]+"${UNINSTALL_ARGS[@]}"}"
+  uninstaller "${DIR}" "${XDG_DATA_HOME:-${HOME}/.local/share}" > "${TMP}/rite-uninstall"
+  bash "${TMP}/rite-uninstall" "${UNINSTALL_ARGS[@]+"${UNINSTALL_ARGS[@]}"}"
   exit
 fi
 
 check_system
 if [ "${FROM_SOURCE}" = "1" ]; then
   build_from_source
+elif [ -n "${ZIP}" ]; then
+  download_release || die "couldn't install from ${ZIP}"
 elif in_clone && command -v cargo >/dev/null 2>&1; then
   build_from_source
 elif ! download_release; then
@@ -455,10 +470,13 @@ if [ -f "${DIR}/riteui" ]; then
   echo "Installed riteui -> ${DIR}/riteui   (the desktop board)"
   install_launcher
 fi
-uninstaller "${DIR}" "${XDG_DATA_HOME:-${HOME}/.local/share}" "${METHOD:-unknown}" > "${DIR}/amd-uninstall"
-chmod +x "${DIR}/amd-uninstall"
+uninstaller "${DIR}" "${XDG_DATA_HOME:-${HOME}/.local/share}" "${METHOD:-unknown}" > "${DIR}/rite-uninstall"
+chmod +x "${DIR}/rite-uninstall"
+# A 4.x install's uninstaller, amd-uninstall (ticket 312): replaced by
+# rite-uninstall, which removes the old names as well.
+rm -f "${DIR}/amd-uninstall"
 link_old_names
-echo "To uninstall later:  ${DIR}/amd-uninstall"
+echo "To uninstall later:  ${DIR}/rite-uninstall"
 case ":${PATH}:" in
   *":${DIR}:"*) ;;
   *) echo "Note: ${DIR} is not on your PATH. Add this to your shell profile:"
