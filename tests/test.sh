@@ -1084,6 +1084,20 @@ assert "rite shared-documents names the shared documents repository, committed (
 assert "...and --clear removes it" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' shared-documents --clear >/dev/null 2>&1 \
     && ! grep -q '^shared-documents' .settings"
+assert "rite display-name sets the name shown, committed, keeping the project's own (ticket 326)" \
+  bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' display-name 'Proj Co' >/dev/null 2>&1 \
+    && grep -qx 'display-name = Proj Co' .settings && grep -q '^project = ' .settings \
+    && git log -1 --format=%s | grep -q '^settings: display-name' \
+    && env ${st_env} '${AMD}' display-name 2>/dev/null | grep -qx 'Proj Co'"
+assert "...rite project lists it beside the name, and project use still takes the name" \
+  bash -c "cd '${st}' && env ${st_env} '${AMD}' project 2>/dev/null | grep -q '^. proj .*(Proj Co)' \
+    && env ${st_env} '${AMD}' project use proj >/dev/null 2>&1"
+assert "...a name over 60 characters is refused, changing nothing" \
+  bash -c "cd '${st}/proj-tickets' && ! env ${st_env} '${AMD}' display-name \"$(printf 'x%.0s' $(seq 61))\" >/dev/null 2>&1 \
+    && grep -qx 'display-name = Proj Co' .settings"
+assert "...and --clear shows the project's own name again" \
+  bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' display-name --clear >/dev/null 2>&1 \
+    && ! grep -q '^display-name' .settings && ! env ${st_env} '${AMD}' project 2>/dev/null | grep -q '(Proj Co)'"
 assert "rite register declares the repository in the tickets .settings, committed" \
   bash -c "cd '${st}/proj-tickets' && env ${st_env} '${AMD}' register '${st}/code' >/dev/null 2>&1 \
     && grep -q '^repos = .*code' .settings && git log -1 --format=%s | grep -qx 'register: code'"

@@ -639,12 +639,22 @@ impl Board {
     }
 }
 
+/// `shown` when there is one, else `name` (ticket 326): a page sent by an
+/// older riteui has no `shown`.
+pub fn shown_name<'a>(name: &'a str, shown: &'a str) -> &'a str {
+    if shown.trim().is_empty() { name } else { shown }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Board {
     /// The project's name (`project` in its `.settings`), shown in the
     /// header; the repository's name when the board doesn't declare one.
     #[serde(default)]
     pub project: String,
+    /// What people read for the project (ticket 326): its `display-name`,
+    /// else `project`. The window title and the header show it.
+    #[serde(default)]
+    pub shown: String,
     /// Absolute path of the `tasks/` directory being shown.
     pub tasks_dir: String,
     /// Every repository the project spans, the board's own first. Tickets
@@ -860,6 +870,9 @@ pub fn repo_name(value: &str) -> String {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectChoice {
     pub name: String,
+    /// Its display name, else `name` (ticket 326); `name` is what's chosen.
+    #[serde(default)]
+    pub shown: String,
     /// Whether it's the one on screen.
     pub current: bool,
 }
@@ -1360,6 +1373,9 @@ pub struct SprintBurn {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HomeProject {
     pub name: String,
+    /// Its display name, else `name` (ticket 326).
+    #[serde(default)]
+    pub shown: String,
     /// Its board's repository: what opening it opens.
     pub root: String,
     /// The folder holding its repositories, to tell two clones apart.
@@ -1407,6 +1423,9 @@ impl DocScope {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkItem {
     pub project: String,
+    /// The project's display name, else `project` (ticket 326).
+    #[serde(default)]
+    pub project_shown: String,
     /// The project's board repository, opened to show the ticket.
     pub project_root: String,
     /// The repository whose board the ticket is on.
@@ -1822,6 +1841,7 @@ mod assigned_tests {
     fn assignees_are_listed_once_in_order() {
         let mut board = Board {
             project: String::new(),
+            shown: String::new(),
             tasks_dir: String::new(),
             repos: Vec::new(),
             workflow: Workflow::standard(),

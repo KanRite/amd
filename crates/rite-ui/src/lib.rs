@@ -184,7 +184,10 @@ fn titled(
     board: Result<rite_ui_model::Board>,
 ) -> Result<rite_ui_model::Board> {
     if let Ok(board) = &board {
-        let _ = window.set_title(&window_title(&board.project));
+        let _ = window.set_title(&window_title(rite_ui_model::shown_name(
+            &board.project,
+            &board.shown,
+        )));
     }
     board
 }
@@ -1571,6 +1574,23 @@ async fn set_tags_only(state: Tauri<'_, AppState>, on: bool) -> Result<SyncRepor
     .await
 }
 
+/// Sets the name people read for the project (ticket 326), or clears it
+/// when `name` is empty, so the project's own name shows again.
+#[tauri::command]
+async fn set_display_name(state: Tauri<'_, AppState>, name: String) -> Result<SyncReport> {
+    change(&state, move |p| {
+        let board = &p.repos[0].1;
+        let name = name.trim().to_string();
+        let what = if name.is_empty() {
+            "display-name cleared".to_string()
+        } else {
+            format!("display-name {name}")
+        };
+        save_setting(board, &what, |s| s.set_display_name(Some(name.as_str())))
+    })
+    .await
+}
+
 /// Names the documents repository every project shares (ticket 129), or
 /// clears it when `name` is empty.
 #[tauri::command]
@@ -2789,6 +2809,7 @@ async fn home() -> Result<rite_ui_model::Home> {
         };
         let convert = |w: my_work::WorkItem| rite_ui_model::WorkItem {
             project: w.project,
+            project_shown: w.project_shown,
             project_root: w.project_root.display().to_string(),
             repo: w.repo,
             column: agile_md::workflow::Workflow::standard()
@@ -2818,6 +2839,7 @@ async fn home() -> Result<rite_ui_model::Home> {
                     let own = docs.iter().find(|d| d.kind == Kind::Own);
                     let shared = docs.iter().find(|d| d.kind == Kind::Shared);
                     rite_ui_model::HomeProject {
+                        shown: p.shown,
                         name: p.name,
                         root: p.root.display().to_string(),
                         dir: p.dir.display().to_string(),
@@ -3158,6 +3180,7 @@ pub fn run() {
             remove_tag,
             set_tags_only,
             set_shared_documents,
+            set_display_name,
             import_issues,
             pull_issues,
             set_import_issues,

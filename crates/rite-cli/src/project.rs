@@ -34,8 +34,15 @@ pub fn list() -> Result<()> {
         } else {
             ""
         };
+        // A display name (ticket 326) beside the name `use` takes.
+        let shown = current_project::shown_name(&project.tickets);
+        let shown = if shown == project.name {
+            String::new()
+        } else {
+            format!("  ({shown})")
+        };
         println!(
-            "{marker} {:<width$}  {}{archived}",
+            "{marker} {:<width$}  {}{shown}{archived}",
             project.name,
             repositories(&dir, project)
         );

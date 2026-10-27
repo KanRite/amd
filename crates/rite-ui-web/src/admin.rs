@@ -124,6 +124,7 @@ pub fn AdminPanel() -> impl IntoView {
 
                 <LeaseAdmin />
 
+                <DisplayNameAdmin />
                 <DocumentsAdmin />
 
                 <IssuesAdmin />
@@ -1040,6 +1041,77 @@ fn TagsAdmin() -> impl IntoView {
 
 /// How long a ticket lock lasts on the board: kept with the tickets in
 /// `.settings` (`lease-hours`), a team decision like the WIP limit.
+/// The name people read for the project (ticket 326): the window title,
+/// the header and the landing page show it; the project keeps its own name
+/// for folders and `rite project use`.
+#[component]
+fn DisplayNameAdmin() -> impl IntoView {
+    let ctx = Ctx::get();
+    let project = move || {
+        ctx.board
+            .with(|b| b.as_ref().map(|b| b.project.clone()).unwrap_or_default())
+    };
+    let saved = move || {
+        ctx.board.with(|b| {
+            b.as_ref()
+                .filter(|b| !b.shown.is_empty() && b.shown != b.project)
+                .map(|b| b.shown.clone())
+                .unwrap_or_default()
+        })
+    };
+    let name = RwSignal::new(saved());
+    let note = RwSignal::new(None::<String>);
+    let busy = RwSignal::new(false);
+    let save = move |_| {
+        let value = name.get_untracked().trim().to_string();
+        busy.set(true);
+        spawn_local(async move {
+            match api::set_display_name(&value).await {
+                Ok(report) => {
+                    ctx.report(report);
+                    note.set(Some(if value.is_empty() {
+                        format!("The project's own name, {}, is shown.", project())
+                    } else {
+                        format!("{value} is shown for this project.")
+                    }));
+                    ctx.reload();
+                }
+                Err(e) => note.set(Some(e)),
+            }
+            busy.set(false);
+        });
+    };
+    let field = "flex-1 rounded border border-slate-300 bg-slate-50 px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-900";
+    let button = "rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50";
+    view! {
+        <section class="flex flex-col gap-2">
+            <h3 class="text-sm font-semibold">"Display name"</h3>
+            <p class="text-xs text-slate-500">
+                {move || format!(
+                    "The name everyone sees for the project: the window title, the header and the landing page. The project is still {} in folder names and `rite project use`. Leave it empty to show that.",
+                    project()
+                )}
+            </p>
+            <div class="flex items-center gap-2">
+                <input
+                    class=field
+                    aria-label="Display name"
+                    placeholder=move || format!("e.g. {}", project())
+                    maxlength="60"
+                    prop:value=move || name.get()
+                    on:input=move |ev| name.set(event_target_value(&ev))
+                />
+                <button class=button disabled=move || busy.get() on:click=save>
+                    "Save"
+                </button>
+            </div>
+            <Show when=move || note.with(Option::is_some)>
+                <p class="text-xs text-slate-600 dark:text-slate-300">{move || note.get().unwrap_or_default()}</p>
+            </Show>
+        </section>
+    }
+}
+
 /// The documents repository every project shares (ticket 129), shown in
 /// Documents beside the project's own.
 #[component]

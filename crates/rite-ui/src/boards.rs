@@ -72,6 +72,7 @@ impl Project {
             .into_iter()
             .map(|project| ui::ProjectChoice {
                 current: project.tickets == shown,
+                shown: current_project::shown_name(&project.tickets),
                 name: project.name,
             })
             .collect()
@@ -186,10 +187,12 @@ impl Project {
             .unwrap_or_else(|| own_name.clone());
         let ticket_repos = self.ticket_repos();
         let settings = board_settings::load(&self.repos[0].1);
+        let shown = settings.display_name().unwrap_or_else(|| project.clone());
         let tags = self.tag_uses(&settings)?;
         Ok(ui::Board {
             workflow,
             project,
+            shown,
             tasks_dir: self.repos[0].1.root.display().to_string(),
             repos,
             columns,
