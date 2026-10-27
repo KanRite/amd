@@ -77,10 +77,30 @@ pub fn with_auto_commit<T>(
 ) -> Result<(T, Option<String>)> {
     let before = snapshot(board);
     let result = mutate()?;
+    // When the change itself touched nothing (a settings migration with
+    // nothing left to move, run before every command), whatever settling
+    // moves is only priorities, and is committed as that rather than under
+    // the change's name (ticket 331).
+    let changed_nothing = before.as_ref().is_some_and(|before| {
+        git::changed_paths(
+            before,
+            &git::dirty_paths(board.repo_root()).unwrap_or_default(),
+        )
+        .is_empty()
+    });
     settle_priorities(board);
-    let warning = commit_since(board, before, &commit_message(verb, subject, detail))?;
+    let message = if changed_nothing && verb != PRIORITY {
+        commit_message(PRIORITY, "auto", "")
+    } else {
+        commit_message(verb, subject, detail)
+    };
+    let warning = commit_since(board, before, &message)?;
     Ok((result, warning))
 }
+
+/// The verb of a commit that only moves priorities (`priority: auto`,
+/// riteui's hourly `priority: due dates`).
+pub const PRIORITY: &str = "priority";
 
 /// Auto priority (ticket 215), after a change and before its commit, so
 /// the commit carries the priorities it moved. Never undoes the change: a

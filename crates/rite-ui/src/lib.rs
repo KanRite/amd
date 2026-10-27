@@ -270,7 +270,7 @@ fn raise_for_due_dates(
     if !agile_md::auto_priority::pending(board, agile_md::recur::today()) {
         return Ok(());
     }
-    transition::with_auto_commit(board, "priority", "due dates", "", || Ok(()))?;
+    transition::with_auto_commit(board, transition::PRIORITY, "due dates", "", || Ok(()))?;
     agile_md::auto_priority::take_notes();
     Ok(())
 }

@@ -1620,6 +1620,21 @@ assert "rite auto-priority limits sets the time limits, and a ticket over them i
     && grep -q '^priority-from: \"todo\"' '${ap}'/tasks/todo/004-extra.md \
     && in_ap auto-priority | grep -q 'time limits: 8 days in todo'"
 rm -rf "${ap}" "${ap}.default"
+# A priority that moves on its own (a due date reached), then a change:
+# the settings carry-over run before every change used to commit the move
+# under its own name, `settings: migrate "from documents"` (ticket 331).
+pa="$(mktemp -d)"
+( cd "${pa}" && git init -q && git config user.email t@t.co && git config user.name t \
+  && git config commit.gpgsign false && RITE_YES=1 "${AMD}" init prio --local-only >/dev/null \
+  && RITE_NO_BRANCH=1 "${AMD}" new Later --due "$(date -u -d '+90 days' +%F)" >/dev/null 2>&1 \
+  && sed -i "s/^due: .*/due: \"$(date -u +%F)\"/" tasks/backlog/001-later.md \
+  && git commit -q -a -m "due today, by hand (ticket 331)" )
+assert "a priority that moved by itself gets its own commit, priority: auto, before the change's (ticket 331)" \
+  bash -c "cd '${pa}' && RITE_NO_BRANCH=1 '${AMD}' new Other >/dev/null 2>&1 \
+    && [ \"\$(git log --format=%s -2)\" = \"\$(printf 'new: 002 \"Other\"\npriority: auto')\" ] \
+    && grep -q '^priority: \"top\"' tasks/backlog/001-later.md \
+    && ! git log --format=%s | grep -q '^settings: migrate'"
+rm -rf "${pa}"
 
 echo "due dates on the board (ticket 253):"
 dd="$(mktemp -d)"
