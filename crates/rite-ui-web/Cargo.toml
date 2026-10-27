@@ -4,7 +4,7 @@
 # which makes it through rite-lib.
 [package]
 name = "rite-ui-web"
-description = "The agile-md desktop board's Leptos front end"
+description = "The KanRite desktop board's Leptos front end"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

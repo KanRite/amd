@@ -54,7 +54,7 @@ fn releases(net: &Net) -> Result<Vec<Release>> {
         agile_md::renamed::var("RITE_UPDATE_RELEASES").unwrap_or_else(|_| RELEASES.to_string());
     let body = net
         .get(&url)
-        .context("asking GitHub for agile-md's releases")?;
+        .context("asking GitHub for KanRite's releases")?;
     update::parse_releases(&String::from_utf8_lossy(&body))
 }
 
@@ -86,7 +86,7 @@ pub fn run(check: bool, rollback: bool) -> Result<()> {
     };
     if check {
         println!(
-            "rite {current}; agile-md {newest} is out{}: `rite update` installs it",
+            "rite {current}; KanRite {newest} is out{}: `rite update` installs it",
             if steps.len() > 1 {
                 format!(" ({} releases)", steps.len())
             } else {

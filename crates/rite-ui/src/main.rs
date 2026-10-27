@@ -1,4 +1,4 @@
-//! riteui — the agile-md desktop board.
+//! riteui — the KanRite desktop board.
 //!
 //! The same window `rite gui` opens, with a name of its own so it can be
 //! launched the way an app is launched: from a dock, a runner, a shortcut,
@@ -8,7 +8,7 @@
 use std::process::ExitCode;
 
 const USAGE: &str = "\
-riteui — the agile-md desktop board
+riteui — the KanRite desktop board
 
 Usage: riteui [OPTIONS]
 

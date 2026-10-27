@@ -562,7 +562,7 @@ in_a new "Unseen" --no-edit >/dev/null 2>&1
 assert "RITE_SYNC=0 leaves the clone alone" \
   bash -c "$(declare -f in_b); two='${two}'; AMD='${AMD}'; ! RITE_SYNC=0 in_b board --plain 2>/dev/null | grep -q 'Unseen'"
 assert "cloud ticket numbering explains it needs a plan, and creates nothing" \
-  bash -c "$(declare -f in_a); two='${two}'; AMD='${AMD}'; RITE_TICKET_NUMBERING=cloud in_a new 'Cloudy' --no-edit 2>&1 | grep -q 'needs an agile-md plan' \
+  bash -c "$(declare -f in_a); two='${two}'; AMD='${AMD}'; RITE_TICKET_NUMBERING=cloud in_a new 'Cloudy' --no-edit 2>&1 | grep -q 'needs a KanRite plan' \
     && ! ls '${two}'/a/tasks/backlog/*cloudy* >/dev/null 2>&1"
 rm -rf "${two}"
 
@@ -2722,14 +2722,14 @@ assert "rite require-version refuses one above this build, and needs --yes witho
     && in_cmp '${AMD}' require-version 1.0.0 2>&1 | grep -q 'Add --yes to confirm' \
     && ! grep -q 'min-version' '${cmp_repo}'/.settings"
 assert "with --yes it's set and committed, and says who it affects" \
-  bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; in_cmp '${AMD}' require-version 1.0.0 --yes | grep -q 'needs agile-md 1.0.0 or newer' \
+  bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; in_cmp '${AMD}' require-version 1.0.0 --yes | grep -q 'needs KanRite 1.0.0 or newer' \
     && grep -qx 'min-version = 1.0.0' '${cmp_repo}'/.settings && git -C '${cmp_repo}' log -1 --format=%s | grep -q 'min-version'"
 # A project requiring a version newer than this build: as an older build
 # would see it.
 sed -i 's/^min-version = .*/min-version = 999.0.0/' "${cmp_repo}/.settings"
-assert "a project needing a newer agile-md is read-only here, naming rite update" \
+assert "a project needing a newer KanRite is read-only here, naming rite update" \
   bash -c "$(declare -f in_cmp); cmp_repo='${cmp_repo}'; in_cmp '${AMD}' board --plain >/dev/null \
-    && ! in_cmp '${AMD}' new 'Refused' --no-edit 2>/tmp/amd-cmp.err && grep -q 'needs agile-md 999.0.0 or newer' /tmp/amd-cmp.err \
+    && ! in_cmp '${AMD}' new 'Refused' --no-edit 2>/tmp/amd-cmp.err && grep -q 'needs KanRite 999.0.0 or newer' /tmp/amd-cmp.err \
     && grep -q 'rite update' /tmp/amd-cmp.err && ! in_cmp '${AMD}' doing 4 2>/dev/null \
     && in_cmp '${AMD}' require-version | grep -q '999.0.0'"
 rm -rf "${cmp_repo}" "${cmp_repo}.config" /tmp/amd-cmp.err
@@ -2766,10 +2766,10 @@ upd_list "$(printf '0%.0s' $(seq 64))" > "${upd}/rel/bad.json"
 upd_list "${upd_sha}" > "${upd}/rel/releases.json"
 upd_project="$(cd "${upd}/project" && find . -type f -exec sha256sum {} + | sort)"
 assert "rite update --check says what's out" \
-  bash -c "RITE_UPDATE_RELEASES='file://${upd}/rel/releases.json' '${upd}/bin/rite' update --check | grep -q 'agile-md 9.9.9 is out'"
+  bash -c "RITE_UPDATE_RELEASES='file://${upd}/rel/releases.json' '${upd}/bin/rite' update --check | grep -q 'KanRite 9.9.9 is out'"
 assert "rite update refuses an install the installer didn't make, and says how" \
   bash -c "! RITE_UPDATE_RELEASES='file://${upd}/rel/releases.json' '${upd}/plain/rite' update 2>/tmp/amd-upd.err \
-    && grep -q \"wasn't put there by agile-md's installer\" /tmp/amd-upd.err && '${upd}/plain/rite' --version | grep -qv 9.9.9"
+    && grep -q \"wasn't put there by KanRite's installer\" /tmp/amd-upd.err && '${upd}/plain/rite' --version | grep -qv 9.9.9"
 assert "a checksum that doesn't match changes nothing" \
   bash -c "! RITE_UPDATE_RELEASES='file://${upd}/rel/bad.json' '${upd}/bin/rite' update >/dev/null 2>/tmp/amd-upd.err \
     && grep -q \"doesn't match its checksum\" /tmp/amd-upd.err && ! test -e '${upd}/bin/rite.previous' \
@@ -2950,7 +2950,7 @@ rpc() { # id tool json-arguments
 assert "rite mcp writes nothing but JSON-RPC on stdout, one reply per request" \
   bash -c "[ \"\$(wc -l < '${mcp}/out')\" -eq 7 ] && ! grep -v '\"jsonrpc\":\"2.0\"' '${mcp}/out' | grep -q . && ! grep -qv '^{' '${mcp}/out'"
 assert "initialize agrees the protocol version and names the server" \
-  bash -c "grep '\"id\":1,' '${mcp}/out' | grep -q '\"protocolVersion\":\"2025-06-18\"' && grep '\"id\":1,' '${mcp}/out' | grep -q '\"name\":\"agile-md\"'"
+  bash -c "grep '\"id\":1,' '${mcp}/out' | grep -q '\"protocolVersion\":\"2025-06-18\"' && grep '\"id\":1,' '${mcp}/out' | grep -q '\"name\":\"kanrite\"'"
 assert "tools/list offers the read and change tools, and nothing that abandons" \
   bash -c "l=\$(grep '\"id\":2,' '${mcp}/out') && for t in screen board ticket search_tickets create_ticket move_ticket edit_ticket add_note file_ticket; do printf '%s' \"\$l\" | grep -q \"\\\"name\\\":\\\"\$t\\\"\" || exit 1; done && ! printf '%s' \"\$l\" | grep -q abandon"
 assert "create_ticket makes a backlog ticket with its priority and points, committed" \
@@ -2970,7 +2970,7 @@ assert "screen says riteui isn't open on the project when no window has written 
     out=\$(rpc 1 screen '{}' | (cd '${mcp}/board' && XDG_STATE_HOME='${mcp}/state' '${AMD}' mcp 2>/dev/null)) \
     && printf '%s' \"\$out\" | grep -q \"riteui isn't open\""
 assert "rite mcp setup prints how to connect an AI tool" \
-  bash -c "'${AMD}' mcp setup claude | grep -qx '  claude mcp add --scope user agile-md -- rite mcp' && '${AMD}' mcp setup | grep -q Codex"
+  bash -c "'${AMD}' mcp setup claude | grep -qx '  claude mcp add --scope user kanrite -- rite mcp' && '${AMD}' mcp setup | grep -q Codex"
 assert "an archived project's tickets can't be changed through rite mcp" \
   bash -c "cd '${mcp}/board' && echo 'archived = on' >> .settings && out=\$(printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\"params\":{\"name\":\"create_ticket\",\"arguments\":{\"title\":\"No\"}}}' | '${AMD}' mcp 2>/dev/null) && printf '%s' \"\$out\" | grep -q '\"isError\":true' && printf '%s' \"\$out\" | grep -q archived"
 rm -rf "${mcp}"

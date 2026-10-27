@@ -752,6 +752,14 @@ mod tests {
         let (_root, _origin, a, b) = two_clones();
         catch_up(&board(&b), Purpose::Read).unwrap();
         commit_file(&a, "002-two.md", true);
+        // The fetch counts as just now, however long that commit and push
+        // took (over the throttle's 10 s on a busy Windows runner).
+        std::fs::File::options()
+            .write(true)
+            .open(b.join(".git/amd-fetched"))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now())
+            .unwrap();
         catch_up(&board(&b), Purpose::Read).unwrap();
         assert!(
             !b.join("tasks/backlog/002-two.md").exists(),

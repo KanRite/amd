@@ -380,7 +380,7 @@ pub async fn delete_epic(repo: Option<&str>, name: &str) -> Result<SyncReport, S
     call("delete_epic", &DeleteEpicArgs { repo, name }).await
 }
 
-/// A newer agile-md to offer (ticket 192), if any.
+/// A newer KanRite to offer (ticket 192), if any.
 pub async fn update_status() -> Result<Option<rite_ui_model::UpdateInfo>, String> {
     call("update_status", &NoArgs {}).await
 }

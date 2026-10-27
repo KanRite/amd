@@ -6,7 +6,7 @@
 # crates/rite-ui-web), since the window's pages are embedded at compile time.
 [package]
 name = "rite-ui"
-description = "The agile-md desktop board"
+description = "The KanRite desktop board (riteui)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

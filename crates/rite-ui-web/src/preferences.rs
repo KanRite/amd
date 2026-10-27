@@ -305,7 +305,7 @@ fn AiSection() -> impl IntoView {
 
 /// Connects Claude Code to `rite mcp` (ticket 186), as `rite mcp setup
 /// claude` prints it.
-const CONNECT_CLAUDE: &str = "claude mcp add --scope user agile-md -- rite mcp";
+const CONNECT_CLAUDE: &str = "claude mcp add --scope user kanrite -- rite mcp";
 
 /// The editor the board's Editor button opens the project folder in (ticket
 /// 188). Empty means no button.
@@ -790,7 +790,7 @@ fn UpdatesSection() -> impl IntoView {
             <h3 class="text-sm font-semibold">"Updates"</h3>
             <div class="flex items-center gap-2">
                 <p class="flex-1 text-sm">
-                    {concat!("agile-md ", env!("CARGO_PKG_VERSION"), ". ")}
+                    {concat!("KanRite ", env!("CARGO_PKG_VERSION"), ". ")}
                     <span class="text-xs text-slate-500">{last}</span>
                 </p>
                 <button

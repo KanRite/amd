@@ -4,7 +4,7 @@
 # backend calls (ticket 084).
 [package]
 name = "rite-ui-model"
-description = "Types shared by the agile-md desktop board's backend and front end"
+description = "Types shared by the KanRite desktop board's backend and front end"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

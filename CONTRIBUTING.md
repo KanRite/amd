@@ -1,6 +1,6 @@
-# Contributing to agile-md
+# Contributing to KanRite
 
-Thanks for taking an interest. agile-md is MIT licensed; anything you
+Thanks for taking an interest. KanRite is MIT licensed; anything you
 contribute is under the same licence.
 
 ## Reporting a bug or asking for something
@@ -8,7 +8,7 @@ contribute is under the same licence.
 Open an [issue](https://github.com/kanrite/amd/issues/new/choose). There's
 a form for bugs and one for ideas.
 
-The project's own board is agile-md itself: open issues are pulled into the
+The project's own board is KanRite itself: open issues are pulled into the
 maintainers' backlog automatically, tagged `TRIAGE`, and looked at from
 there. Once one becomes work, the issue is where you'll hear about it.
 
@@ -52,7 +52,7 @@ Some things worth knowing first:
 
 ## Building from source
 
-People installing agile-md use the release (the curl line in the README),
+People installing KanRite use the release (the curl line in the README),
 which needs none of this. To build it yourself you need
 [Rust](https://rustup.rs) and git 2.29 or later. The desktop board's page is
 Rust compiled to WebAssembly by [Trunk](https://trunkrs.dev) and built into
@@ -104,11 +104,11 @@ and settings are untouched, and prints the command to open it.
 
 ## Maintainers
 
-The maintainers' tickets (`agile-md-tickets`) and design documents
-(`agile-md-documents`) are private repositories in the
-[agile-md](https://github.com/agile-md) organisation. To work from them,
+The maintainers' tickets (`kanrite-tickets`) and design documents
+(`kanrite-documents`) are private repositories in the
+[KanRite](https://github.com/KanRite) organisation. To work from them,
 become a maintainer: you're added to the organisation, and then
-`rite join agile-md` clones both and adds you to the project's users.
+`rite join kanrite` clones both and adds you to the project's users.
 Everyone else works from issues and pull requests here.
 
 ## Security

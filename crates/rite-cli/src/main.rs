@@ -215,7 +215,7 @@ Environment:
   NO_COLOR           set to any value for plain output (same as --plain)
   EDITOR             editor used by `rite edit` (default: vi)
   RITE_SYNC          set to 0 to stop catching up with the remote (default: on)
-  RITE_TICKET_NUMBERING  local (default) or cloud — cloud needs an agile-md
+  RITE_TICKET_NUMBERING  local (default) or cloud — cloud needs a KanRite
                      plan, which isn't available yet
 The AMD_ names from before the rename (AMD_DIR, AMD_YES, …) still work; a
 RITE_ one wins when both are set. So does `amd`, which runs `rite`.
@@ -684,10 +684,10 @@ enum Cmd {
         #[arg(value_name = "on|off", value_parser = PossibleValuesParser::new(["on", "off"]))]
         action: Option<String>,
     },
-    /// Show or set the oldest agile-md allowed to change this project
+    /// Show or set the oldest KanRite version allowed to change this project
     ///
     /// For a team that has adopted a change older builds don't understand:
-    /// anyone on an older agile-md can then only read the project until
+    /// anyone on an older KanRite version can then only read the project until
     /// they update (`rite update`). Only you set it, never a release; it
     /// asks first (or --yes), and is committed for the team. --clear
     /// removes it
@@ -872,7 +872,7 @@ enum Cmd {
     /// One release at a time, each verified against GitHub's checksum and
     /// run once before it replaces the last; only the two binaries are
     /// written, never your projects or settings. Only an install made by
-    /// agile-md's installer updates itself; anything else says how
+    /// KanRite's installer updates itself; anything else says how
     Update {
         /// Only say whether there's a newer release
         #[arg(long)]
@@ -2818,15 +2818,15 @@ fn cmd_require_version(board: &Board, version: Option<&str>, clear: bool, yes: b
     let Some(version) = version else {
         match current {
             Some(v) => println!(
-                "this project needs agile-md {v} or newer to change it; older builds only read it"
+                "this project needs KanRite {v} or newer to change it; older builds only read it"
             ),
-            None => println!("this project requires no version: any agile-md can change it"),
+            None => println!("this project requires no version: any KanRite version can change it"),
         }
         return Ok(());
     };
     let version = agile_md::compat::check_required(version)?;
     let warning = format!(
-        "Everyone on agile-md older than {version} will only be able to read this project until they update. Continue?"
+        "Everyone on a KanRite version older than {version} will only be able to read this project until they update. Continue?"
     );
     if !yes {
         if !form::available() {
@@ -2848,7 +2848,7 @@ fn cmd_require_version(board: &Board, version: Option<&str>, clear: bool, yes: b
         },
     )?;
     println!(
-        "this project now needs agile-md {version} or newer to change it; older builds only read it"
+        "this project now needs KanRite {version} or newer to change it; older builds only read it"
     );
     Ok(())
 }

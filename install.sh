@@ -323,7 +323,7 @@ fi
 
 # Its own name since 5.0, and 4.x's (ticket 312).
 rm -f "${BIN}/rite-uninstall" "${BIN}/amd-uninstall"
-printf 'agile-md is uninstalled. Your projects, in your git repositories, were not touched.\n'
+printf 'KanRite is uninstalled. Your projects, in your git repositories, were not touched.\n'
 BODY
 }
 
@@ -461,7 +461,7 @@ chmod +x "${DIR}/rite"
 if ! version_out="$("${DIR}/rite" --version 2>&1)"; then
   printf 'install: rite was copied to %s but does not run on this system:\n  %s\n' "${DIR}/rite" "${version_out}" >&2
   if printf '%s' "${version_out}" | grep -q GLIBC; then
-    printf 'This Linux is older than agile-md'"'"'s release builds support (its C library, glibc, is too old).\n' >&2
+    printf 'This Linux is older than KanRite'"'"'s release builds support (its C library, glibc, is too old).\n' >&2
     printf 'Building from source may work: see https://github.com/%s/blob/main/CONTRIBUTING.md\n' "${REPO}" >&2
   fi
   exit 1

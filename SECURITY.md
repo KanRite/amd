@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/kanrite/amd/v4/install.sh | bash
 Please report it **privately**, not in a public issue: use
 [Report a vulnerability](https://github.com/kanrite/amd/security/advisories/new)
 on the repository's Security tab. Say what you found, how to reproduce it,
-and which version (`amd --version`) and system you saw it on.
+and which version (`rite --version`) and system you saw it on.
 
 What happens next:
 
@@ -27,13 +27,13 @@ Please give us a chance to release a fix before telling anyone else about it.
 
 ## What's covered
 
-- `amd`, the command line, including `amd mcp`, the server AI tools connect
+- `rite`, the command line, including `rite mcp`, the server AI tools connect
   to.
-- `amdui`, the desktop board.
-- `install.sh` and the uninstaller it writes, `amd-uninstall`.
+- `riteui`, the desktop board.
+- `install.sh` and the uninstaller it writes, `rite-uninstall`.
 - The release builds on this repository's Releases page.
 
-agile-md runs on your own machine, has no server and holds no data of its
+KanRite runs on your own machine, has no server and holds no data of its
 own: your tickets, documents and ideas are files in your git repositories.
 So these aren't covered here:
 
