@@ -2733,7 +2733,7 @@ echo "rite update (ticket 191):"
 upd="$(mktemp -d)"
 mkdir -p "${upd}/bin" "${upd}/rel" "${upd}/plain" "${upd}/project/tasks/backlog"
 cp "${AMD}" "${upd}/bin/rite"
-printf '#!/usr/bin/env bash\n# agile-md install: release\n' > "${upd}/bin/amd-uninstall"
+printf '#!/usr/bin/env bash\n# agile-md install: release\n' > "${upd}/bin/rite-uninstall"
 cp "${AMD}" "${upd}/plain/rite"
 printf -- '---\nid: "001"\n---\n' > "${upd}/project/tasks/backlog/001-x.md"
 case "$(uname -s)-$(uname -m)" in
@@ -2822,6 +2822,44 @@ PYZIP
 else
   echo "  skip - a 4.x install updating across the rename (set RITE_PREVIOUS to a 4.x amd; CI does)"
 fi
+
+echo "install.sh over a 4.x install, and its uninstaller (ticket 312):"
+ins="$(mktemp -d)"
+mkdir -p "${ins}/bin" "${ins}/home/.local/share/applications" "${ins}/home/.local/share/icons/hicolor/scalable/apps"
+# What a 4.x install left: amd, amdui, amd-uninstall and amdui's launcher.
+printf '#!/bin/sh\necho "amd 4.9.0"\n' > "${ins}/bin/amd"
+printf '#!/bin/sh\necho "amdui 4.9.0"\n' > "${ins}/bin/amdui"
+printf '#!/usr/bin/env bash\n# agile-md install: release\n' > "${ins}/bin/amd-uninstall"
+chmod +x "${ins}/bin/amd" "${ins}/bin/amdui" "${ins}/bin/amd-uninstall"
+printf '[Desktop Entry]\nName=agile-md\n' > "${ins}/home/.local/share/applications/amdui.desktop"
+printf '<svg/>' > "${ins}/home/.local/share/icons/hicolor/scalable/apps/amdui.svg"
+python3 - "${ins}/release.zip" "${AMD}" "${AMDUI_BIN:-${ROOT}/target/debug/riteui}" <<'PYZIP'
+import os, sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    for name, path in (("rite", sys.argv[2]), ("riteui", sys.argv[3])):
+        if os.path.exists(path):
+            info = zipfile.ZipInfo(name)
+            info.external_attr = 0o100755 << 16
+            with open(path, "rb") as f:
+                z.writestr(info, f.read())
+PYZIP
+in_ins() { HOME="${ins}/home" XDG_DATA_HOME="${ins}/home/.local/share" XDG_CONFIG_HOME="${ins}/home/.config" \
+  XDG_STATE_HOME="${ins}/home/.local/state" "$@"; }
+assert "install.sh puts in rite, riteui, the amd and amdui links and rite-uninstall, and takes away 4.x's" \
+  bash -c "$(declare -f in_ins); ins='${ins}'; in_ins bash '${ROOT}/install.sh' --dir '${ins}/bin' --zip '${ins}/release.zip' >/dev/null 2>&1 \
+    && '${ins}/bin/rite' --version | grep -q '^rite ' && test -L '${ins}/bin/amd' && [ \"\$(readlink '${ins}/bin/amd')\" = rite ] \
+    && grep -qx '# agile-md install: release' '${ins}/bin/rite-uninstall' && ! test -e '${ins}/bin/amd-uninstall'"
+if [ -x "${AMDUI_BIN:-${ROOT}/target/debug/riteui}" ]; then
+  assert "...and one launcher, riteui's: 4.x's amdui.desktop and its icon are gone" \
+    bash -c "test -L '${ins}/bin/amdui' && test -f '${ins}/home/.local/share/applications/riteui.desktop' \
+      && ! test -e '${ins}/home/.local/share/applications/amdui.desktop' \
+      && ! test -e '${ins}/home/.local/share/icons/hicolor/scalable/apps/amdui.svg'"
+fi
+touch "${ins}/bin/rite.previous" "${ins}/bin/amd.previous"
+assert "rite-uninstall removes the new names and the old, the kept copies and itself" \
+  bash -c "$(declare -f in_ins); ins='${ins}'; in_ins '${ins}/bin/rite-uninstall' --yes >/dev/null 2>&1 \
+    && [ -z \"\$(ls -A '${ins}/bin')\" ] && ! test -e '${ins}/home/.local/share/applications/riteui.desktop'"
+rm -rf "${ins}"
 
 echo "the old names, amd and amdui (ticket 309):"
 old="$(mktemp -d)"

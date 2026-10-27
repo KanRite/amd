@@ -130,7 +130,7 @@ fn check(args: &[String]) -> Result {
 fn install(args: &[String]) -> Result {
     if !cfg!(windows) {
         // install.sh already does the rest for Linux and macOS (the
-        // replace-while-running rename, riteui's launcher, amd-uninstall and
+        // replace-while-running rename, riteui's launcher, rite-uninstall and
         // the install marker `rite update` reads), and builds through
         // `cargo xtask build`.
         let mut sh = command("bash", ["install.sh", "--from-source"]);
