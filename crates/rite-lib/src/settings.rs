@@ -109,12 +109,9 @@ impl Config {
     }
 }
 
-/// `$XDG_CONFIG_HOME/agile-md/config`, else `~/.config/agile-md/config`.
+/// `config` in the config folder ([`crate::places::config`]).
 pub fn path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| crate::home::dir().map(|home| home.join(".config")))?;
-    Some(base.join("agile-md").join("config"))
+    crate::places::config().map(|dir| dir.join("config"))
 }
 
 /// The app-tier precedence for a knob that has no CLI flag of its own:
@@ -172,7 +169,7 @@ mod tests {
     #[test]
     fn a_new_key_appends_and_survives_a_round_trip() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("agile-md/config");
+        let path = dir.path().join("kanrite/config");
         let mut config = Config::default();
         config.set("gui.font", "medium");
         config.save_to(&path).unwrap();

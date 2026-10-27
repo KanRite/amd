@@ -1,5 +1,5 @@
 //! The user's home folder, for the places rite keeps per-machine files
-//! (`~/.config/agile-md`, `~/.local/state/agile-md`, …).
+//! (`~/.config/kanrite`, `~/.local/state/kanrite`, …).
 //!
 //! `HOME` is what Unix sets, and what Git Bash sets on Windows. A plain
 //! Windows shell (PowerShell, cmd) sets only `USERPROFILE`, so a lookup of

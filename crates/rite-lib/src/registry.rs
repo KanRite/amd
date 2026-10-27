@@ -8,7 +8,7 @@
 //! listing and a few small files, which is fast enough that caching it would
 //! only buy staleness.
 //!
-//! Stored one path per line at `$XDG_CONFIG_HOME/agile-md/repos`, so it can be
+//! Stored one path per line at `$XDG_CONFIG_HOME/kanrite/repos`, so it can be
 //! read, edited and version-controlled by hand.
 //!
 //! **This is not the whole of registration any more.** The *other* half —
@@ -214,12 +214,9 @@ pub fn project_dir_of(from: &Path) -> PathBuf {
         .to_path_buf()
 }
 
-/// `$XDG_CONFIG_HOME/agile-md/repos`, else `~/.config/agile-md/repos`.
+/// `repos` in the config folder ([`crate::places::config`]).
 fn path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| crate::home::dir().map(|home| home.join(".config")))?;
-    Some(base.join("agile-md").join("repos"))
+    crate::places::config().map(|dir| dir.join("repos"))
 }
 
 #[cfg(test)]

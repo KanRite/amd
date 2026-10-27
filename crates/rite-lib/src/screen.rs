@@ -7,7 +7,7 @@
 //! through the other tools, each of which the AI tool shows.
 //!
 //! One note per project, keyed by the project's own board repository, in
-//! `$XDG_STATE_HOME/agile-md/screen/`: machine-local, never committed. With
+//! `$XDG_STATE_HOME/kanrite/screen/`: machine-local, never committed. With
 //! two windows on one project the latest write wins; a note whose window
 //! has closed (its `pid` isn't running) is ignored.
 
@@ -61,11 +61,7 @@ pub struct Place {
 
 /// Where the notes live.
 fn dir() -> Option<PathBuf> {
-    std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| crate::home::dir().map(|home| home.join(".local/state")))
-        .map(|state| state.join("agile-md/screen"))
+    crate::places::state().map(|state| state.join("screen"))
 }
 
 /// The note for the project whose own board is in `repo`: its name, plus a
@@ -196,7 +192,7 @@ mod tests {
         assert!(
             path(a)
                 .unwrap()
-                .starts_with(state.path().join("agile-md/screen"))
+                .starts_with(state.path().join("kanrite/screen"))
         );
         assert_eq!(read(a), None);
 

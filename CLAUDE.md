@@ -1833,6 +1833,21 @@ changes):
   `amd-<target>.zip` asset (311), the Tauri
   identifier `io.github.agile-md.amdui` (it names riteui's WebView data
   folder), and the repository `KanRite/amd` (313).
+  **The machine folders are `kanrite`** (ticket 310, `places.rs`):
+  `places::config()`/`state()`/`data()` are `$XDG_*_HOME/kanrite` (an XDG
+  variable only when absolute), falling back to an `agile-md` folder that's
+  the only one there. Every path is built through them (settings, registry,
+  project trust, update.json, screen notes, recovered tickets, speech).
+  `places::move_old_folders_and_say`, first thing in `rite` and `riteui`,
+  renames each real `agile-md` folder with no `kanrite` beside it and
+  leaves a relative symlink at the old name, so a 4.x build still finds its
+  config; on Windows (no 4.x release) just the rename. riteui's Piper
+  module is `kanrite-piper`; `piper::adopt_new_name` renames a 4.x
+  `agile-md-piper` setup (module file, its data paths, the `speechd.conf`
+  block) at start, and Remove takes either away. The uninstallers offer
+  both folder names. **test.sh exports temporary `XDG_CONFIG_HOME`,
+  `XDG_STATE_HOME` and `XDG_DATA_HOME`**: any run moves a real `agile-md`
+  folder, and the suite must never touch the user's.
   **4.x installs update across it** (ticket 311): 4.x's `update_apply`
   takes only the zip entries `amd` and `amdui` (and checks `--version`
   contains the version, which `rite 5.0.0` does), so `release.yml`'s Unix

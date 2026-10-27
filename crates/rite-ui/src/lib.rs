@@ -3033,6 +3033,15 @@ fn show_from(path: &Path) -> Result<rite_ui_model::Board> {
 
 /// Starts the board. Launched from outside any project (a desktop launcher
 /// starts in the home directory), it opens the board it showed last.
+/// Renames a read-aloud voice set up before 5.0 (ticket 310): Piper's
+/// speech-dispatcher module was `agile-md-piper`. Linux only, where Piper
+/// is offered; once.
+pub fn adopt_old_speech_setup() {
+    if cfg!(target_os = "linux") && speech::piper::adopt_new_name() {
+        eprintln!("renamed the Piper voice's speech-dispatcher module to kanrite-piper");
+    }
+}
+
 pub fn run() {
     boards::init_local_offset();
     if Board::discover().is_err()

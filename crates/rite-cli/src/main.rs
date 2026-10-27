@@ -1094,6 +1094,8 @@ fn main() -> ExitCode {
 
     // Run as `amd`, the shim of the old name (ticket 309): said once a day.
     agile_md::renamed::when_run_by_old_name();
+    // The machine folders' new name (ticket 310), once.
+    agile_md::places::move_old_folders_and_say();
 
     // The command tree is big enough that clap's recursive build and parse
     // overflow Windows' 1 MB main-thread stack (Unix gives 8 MB), so the

@@ -10,7 +10,7 @@
 //! limit or a garbled answer means "nothing to report", never an error the
 //! user has to read.
 //!
-//! The state is machine-local, in `$XDG_STATE_HOME/agile-md/update.json`,
+//! The state is machine-local, in `$XDG_STATE_HOME/kanrite/update.json`,
 //! never in a tickets or documents repository: whether *you* have seen a
 //! release is nothing a teammate's clone should inherit.
 
@@ -218,13 +218,9 @@ impl State {
     }
 }
 
-/// `$XDG_STATE_HOME/agile-md/update.json`, else `~/.local/state/agile-md/update.json`.
+/// `update.json` in the state folder ([`crate::places::state`]).
 pub fn state_path() -> Option<PathBuf> {
-    std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| crate::home::dir().map(|home| home.join(".local/state")))
-        .map(|state| state.join("agile-md/update.json"))
+    crate::places::state().map(|state| state.join("update.json"))
 }
 
 /// Whether to look for updates at all: `RITE_UPDATE_CHECK`, then the
@@ -605,7 +601,7 @@ mod tests {
         unsafe { std::env::set_var("XDG_STATE_HOME", state.path()) };
         assert_eq!(
             state_path().unwrap(),
-            state.path().join("agile-md/update.json")
+            state.path().join("kanrite/update.json")
         );
     }
 

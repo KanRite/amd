@@ -14,9 +14,14 @@ set -uo pipefail
 
 export RITE_NO_INPUT=1
 # Keep the suite away from the real registry and theme: `rite register` writes
-# to the config directory, and a test must never touch the user's.
-XDG_CONFIG_HOME="$(mktemp -d)/config"
-export XDG_CONFIG_HOME
+# to the config directory, and a test must never touch the user's. State and
+# data too: every run moves an agile-md folder it finds to kanrite (ticket
+# 310), which must only ever happen to the suite's own.
+xdg="$(mktemp -d)"
+XDG_CONFIG_HOME="${xdg}/config"
+XDG_STATE_HOME="${xdg}/state"
+XDG_DATA_HOME="${xdg}/data"
+export XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -144,7 +149,7 @@ assert "rite init clones archived repositories from GitHub, unarchiving them, an
     && grep -qx 'repo unarchive gizmo/gizmo-documents --yes' '${bb}/gh.log' \
     && ! grep -q 'repo create' '${bb}/gh.log' \
     && test -f gizmo-tickets/README.md -a -d gizmo-tickets/tasks/backlog \
-    && grep -q gizmo-tickets '${bb}/config/agile-md/repos'"
+    && grep -q gizmo-tickets '${bb}/config/kanrite/repos'"
 rm -rf "${bb}"
 
 # Ticket 277: repositories init creates say LF for every text file, so a
@@ -903,7 +908,7 @@ sc="$(mktemp -d)"
 )
 in_sc() { (cd "${sc}/$1/p-tickets" && shift && env XDG_CONFIG_HOME="${sc}/config" RITE_COMMIT=0 "${AMD}" "$@"); }
 assert "both folders' p-code are registered side by side" \
-  bash -c "[ \"\$(grep -c '/p-code\$' '${sc}/config/agile-md/repos')\" -eq 2 ]"
+  bash -c "[ \"\$(grep -c '/p-code\$' '${sc}/config/kanrite/repos')\" -eq 2 ]"
 assert "a ticket in folder one makes its branch in one's own p-code" \
   bash -c "$(declare -f in_sc); sc='${sc}'; AMD='${AMD}'; in_sc one new 'From one' --repository p-code --branch-type feature --no-edit >/dev/null 2>&1 \
     && in_sc one todo 1 >/dev/null 2>&1 \
@@ -929,7 +934,7 @@ assert "a clone of a different remote doesn't" \
 rm -rf "${sc}/clones/a"
 in_sc one register "${sc}/clones/b/shared" >/dev/null 2>&1
 assert "a registered clone that's gone is dropped from the registry" \
-  bash -c "! grep -q 'clones/a' '${sc}/config/agile-md/repos' && grep -q 'clones/b/shared' '${sc}/config/agile-md/repos'"
+  bash -c "! grep -q 'clones/a' '${sc}/config/kanrite/repos' && grep -q 'clones/b/shared' '${sc}/config/kanrite/repos'"
 rm -rf "${sc}"
 
 echo "rite clone fetches a project's missing repositories (ticket 108):"
@@ -964,7 +969,7 @@ assert "rite clone <name> clones it beside the tickets repo, from the same place
     | grep -q \"cloned code into ${cl}/mate/code (from ${cl}/remote/code.git)\" \
     && [ \"\$(git -C '${cl}/mate/code' log -1 --format=%s)\" = 'seed for ticket 108' ]"
 assert "...registers it, so a ticket can now name it" \
-  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; grep -q '/mate/code\$' '${cl}/mate-config/agile-md/repos' \
+  bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; grep -q '/mate/code\$' '${cl}/mate-config/kanrite/repos' \
     && in_cl new 'Work on code' --repository code --no-edit >/dev/null 2>&1"
 assert "...and isn't listed as missing any more" \
   bash -c "$(declare -f in_cl); cl='${cl}'; AMD='${AMD}'; ! in_cl clone 2>/dev/null | grep -qx '  code'"
@@ -1014,7 +1019,7 @@ assert "rite repo new --for makes it beside the remote, clones it beside the tic
     && [ \"\$(git -C '${rn}/remote/p-payments.git' log -1 --format=%s main)\" = 'Start the repository' ]"
 assert "...declares and registers it, and the ticket says so, in one commit" \
   bash -c "rn='${rn}'; grep -q '^repos = .*p-payments' '${rn}/work/p-tickets/.settings' \
-    && grep -q '/work/p-payments\$' '${rn}/config/agile-md/repos' \
+    && grep -q '/work/p-payments\$' '${rn}/config/kanrite/repos' \
     && grep -q '^repository: \"p-payments\"' '${rn}'/work/p-tickets/tasks/backlog/001-*.md \
     && grep -q 'Created repository p-payments (private).' '${rn}'/work/p-tickets/tasks/backlog/001-*.md \
     && [ \"\$(git -C '${rn}/work/p-tickets' log -1 --format=%s)\" = 'repo: new \"p-payments\"' ] \
@@ -1382,11 +1387,11 @@ tmp_name="$(basename "${tmp}")"
 # a board-resolving command doesn't silently re-add it.
 assert "rite board no longer registers anything on its own" \
   bash -c "cd '${periods_and_underscores}' && '${AMD}' board >/dev/null; \
-    ! grep -q \"$(basename "${periods_and_underscores}")\$\" \"\${XDG_CONFIG_HOME}/agile-md/repos\" 2>/dev/null"
+    ! grep -q \"$(basename "${periods_and_underscores}")\$\" \"\${XDG_CONFIG_HOME}/kanrite/repos\" 2>/dev/null"
 assert "rite register declares the repo for the project and registers it locally" \
   bash -c "'${AMD}' register | grep -q 'registered' \
     && grep -qE \"^repos = .*${tmp_name}\" .settings \
-    && grep -q \"${tmp_name}\$\" \"\${XDG_CONFIG_HOME}/agile-md/repos\""
+    && grep -q \"${tmp_name}\$\" \"\${XDG_CONFIG_HOME}/kanrite/repos\""
 assert "registering the same path again is a local no-op, not an error" \
   bash -c "'${AMD}' register | grep -q 'already registered on this machine'"
 assert "a non-repository is refused" \
@@ -1394,7 +1399,7 @@ assert "a non-repository is refused" \
 assert "rite deregister takes a declared repository off the project and this machine (ticket 120)" \
   bash -c "'${AMD}' deregister \"${tmp_name}\" | grep -q 'no longer part of the project' \
     && ! grep -qE \"^repos = .*${tmp_name}\" .settings \
-    && ! grep -q \"${tmp_name}\$\" \"\${XDG_CONFIG_HOME}/agile-md/repos\""
+    && ! grep -q \"${tmp_name}\$\" \"\${XDG_CONFIG_HOME}/kanrite/repos\""
 assert "deregistering what's neither declared nor registered fails" \
   bash -c "! '${AMD}' deregister nope"
 
@@ -2077,7 +2082,7 @@ assert "a TRIAGE ticket heads everyone's My work, top, and its hidden project st
     && out=\$(in_mw mine 2>&1) \
     && printf '%s\\n' \"\$out\" | head -1 | grep -q 'backlog  top .*gamma .*TRIAGE  Look at this issue' \
     && ! printf '%s\\n' \"\$out\" | grep -q 'gamma doing' \
-    && grep '^ui.hidden-projects' '${mw}/config/agile-md/config' | grep -q gamma-tickets \
+    && grep '^ui.hidden-projects' '${mw}/config/kanrite/config' | grep -q gamma-tickets \
     && in_mw mine --unhide gamma >/dev/null \
     && (cd '${mwh}/other/gamma-tickets' && env XDG_CONFIG_HOME='${mw}/config' RITE_COMMIT=0 '${AMD}' abandon 5 >/dev/null 2>&1; rm -rf tasks/archive)"
 
@@ -2090,7 +2095,7 @@ assert "rite project archive commits archived = on and rite project marks it" \
     && git -C '${mwh}/work/beta-tickets' log -1 --format=%s | grep -q 'settings: archived' \
     && in_mw project | grep -q 'beta .*(archived)'"
 assert "...and it's off rite on this machine, its folder kept (ticket 263)" \
-  bash -c "${mw_fns}; ! grep -q beta-tickets '${mw}/config/agile-md/repos' && test -d '${mwh}/work/beta-tickets'"
+  bash -c "${mw_fns}; ! grep -q beta-tickets '${mw}/config/kanrite/repos' && test -d '${mwh}/work/beta-tickets'"
 assert "an archived project refuses changes, naming rite init" \
   bash -c "${mw_fns}; for change in 'new Refused --no-edit' 'todo 3' 'set 3 priority low' 'tags add NEW' 'wip-limit 3'; do \
       in_beta \${change} 2>&1 | grep -q 'beta is archived.*rite init beta' || exit 1; done \
@@ -2101,7 +2106,7 @@ assert "...and is off My work" \
   bash -c "${mw_fns}; out=\$(in_mw mine) && ! printf '%s\\n' \"\$out\" | grep -q beta && printf '%s\\n' \"\$out\" | grep -q alpha"
 assert "rite project unarchive brings it back, on rite here again" \
   bash -c "${mw_fns}; in_mw project unarchive beta | grep -q '^unarchived beta\$' \
-    && grep -q beta-tickets '${mw}/config/agile-md/repos' \
+    && grep -q beta-tickets '${mw}/config/kanrite/repos' \
     && ! grep -q archived '${mwh}/work/beta-tickets/.settings' \
     && in_beta new 'Back again' --no-edit >/dev/null 2>&1 && ls '${mwh}/work/beta-tickets/tasks/backlog/' | grep -q back-again"
 # --github: a fake gh logs what it's asked; origin looks like GitHub but
@@ -2163,7 +2168,7 @@ wph="${wp}/home"
 in_wp() { (cd "${wph}/work/alpha-tickets" && env XDG_CONFIG_HOME="${wp}/config" TMPDIR="${wp}/bin" "${AMD}" "$@"); }
 mkdir -p "${wp}/bin"
 in_wp mine --hide beta >/dev/null
-assert "(beta starts hidden)" bash -c "grep '^ui.hidden-projects' '${wp}/config/agile-md/config' | grep -q beta-tickets"
+assert "(beta starts hidden)" bash -c "grep '^ui.hidden-projects' '${wp}/config/kanrite/config' | grep -q beta-tickets"
 assert "with nothing to do, unassigned todo and doing work comes first" \
   bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; out=\$(in_wp mine 2>&1) \
     && printf '%s\\n' \"\$out\" | grep -q 'todo .*Alpha todo nobody' && ! printf '%s\\n' \"\$out\" | grep -q 'backlog'"
@@ -2174,14 +2179,14 @@ assert "failing that, the backlog's highest priority it can take, from a hidden 
     && printf '%s\\n' \"\$out\" | grep -q 'backlog  medium .*beta .*Beta medium' \
     && ! printf '%s\\n' \"\$out\" | grep -q 'Alpha low\\|Priya\\|draft\\|locked'"
 assert "...and the hidden project it found work in stays hidden (ticket 263)" \
-  bash -c "grep '^ui.hidden-projects' '${wp}/config/agile-md/config' | grep -q beta-tickets"
+  bash -c "grep '^ui.hidden-projects' '${wp}/config/kanrite/config' | grep -q beta-tickets"
 assert "a high one it can take wins over every medium" \
   bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; (cd '${wph}/work/alpha-tickets' && env XDG_CONFIG_HOME='${wp}/config' RITE_COMMIT=0 '${AMD}' set 1 priority high >/dev/null) \
     && out=\$(in_wp mine) && printf '%s\\n' \"\$out\" | grep -q 'Alpha low' && ! printf '%s\\n' \"\$out\" | grep -q 'Beta medium'"
 assert "--no-unassigned offers only backlog tickets assigned to you, and is remembered" \
   bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; out=\$(in_wp mine --no-unassigned) \
     && printf '%s\\n' \"\$out\" | grep -q 'Alpha mine' && ! printf '%s\\n' \"\$out\" | grep -q 'Alpha low' \
-    && grep -qx 'ui.include-unassigned = off' '${wp}/config/agile-md/config' \
+    && grep -qx 'ui.include-unassigned = off' '${wp}/config/kanrite/config' \
     && in_wp mine | grep -q 'Alpha mine' && in_wp mine --unassigned | grep -q 'Alpha low'"
 assert "once something is yours, it's back to My work alone" \
   bash -c "$(declare -f in_wp); wp='${wp}'; wph='${wph}'; AMD='${AMD}'; (cd '${wph}/work/alpha-tickets' && env XDG_CONFIG_HOME='${wp}/config' RITE_COMMIT=0 RITE_NO_BRANCH=1 '${AMD}' assign 1 @me >/dev/null && env XDG_CONFIG_HOME='${wp}/config' RITE_COMMIT=0 RITE_NO_BRANCH=1 '${AMD}' todo 1 >/dev/null 2>&1) \
@@ -2860,6 +2865,22 @@ assert "rite-uninstall removes the new names and the old, the kept copies and it
   bash -c "$(declare -f in_ins); ins='${ins}'; in_ins '${ins}/bin/rite-uninstall' --yes >/dev/null 2>&1 \
     && [ -z \"\$(ls -A '${ins}/bin')\" ] && ! test -e '${ins}/home/.local/share/applications/riteui.desktop'"
 rm -rf "${ins}"
+
+echo "the machine folders move from agile-md to kanrite (ticket 310):"
+mv_home="$(mktemp -d)"
+mkdir -p "${mv_home}/config/agile-md" "${mv_home}/state/agile-md" "${mv_home}/data/agile-md/speech"
+printf '/srv/clones/p-tickets\n' > "${mv_home}/config/agile-md/repos"
+printf '{}' > "${mv_home}/state/agile-md/update.json"
+in_mv() { XDG_CONFIG_HOME="${mv_home}/config" XDG_STATE_HOME="${mv_home}/state" XDG_DATA_HOME="${mv_home}/data" "$@"; }
+assert "the first run moves each agile-md folder to kanrite, saying so, and leaves a link for older versions" \
+  bash -c "$(declare -f in_mv); mv_home='${mv_home}'; in_mv '${AMD}' --version 2>'${mv_home}/err' >/dev/null \
+    && [ \"\$(grep -c '^moved .*agile-md to .*kanrite' '${mv_home}/err')\" -eq 3 ] \
+    && for d in config state data; do test -d '${mv_home}'/\$d/kanrite && [ \"\$(readlink '${mv_home}'/\$d/agile-md)\" = kanrite ] || exit 1; done \
+    && grep -qx /srv/clones/p-tickets '${mv_home}/config/kanrite/repos' \
+    && grep -qx /srv/clones/p-tickets '${mv_home}/config/agile-md/repos'"
+assert "...once: the next run moves nothing" \
+  bash -c "$(declare -f in_mv); mv_home='${mv_home}'; [ -z \"\$(in_mv '${AMD}' --version 2>&1 >/dev/null)\" ]"
+rm -rf "${mv_home}"
 
 echo "the old names, amd and amdui (ticket 309):"
 old="$(mktemp -d)"
