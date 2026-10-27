@@ -98,7 +98,7 @@ impl Registry {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let mut text = String::from("# Repositories agile-md knows about, one path per line.\n");
+        let mut text = String::from("# Repositories KanRite knows about, one path per line.\n");
         for entry in &self.entries {
             text.push_str(&entry.root.display().to_string());
             text.push('\n');

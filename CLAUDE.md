@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Scope
 
-`agile-md` is a tiny **filesystem Kanban**. It ships two binaries over one
+KanRite (agile-md before 5.0) is a tiny **filesystem Kanban**. It ships two binaries over one
 library — **`rite`**, the command line, and **`riteui`**, the desktop board —
 which manage markdown task files moved between `backlog/`, `todo/`, `doing/`
 and `done/` directories. Board data lives in each *consuming* repo at `<repo-root>/tasks/`;
@@ -1829,10 +1829,18 @@ changes):
   `renamed-notice` beside update.json). `RITE_*` variables are read first,
   then the `AMD_*` of the same name (`renamed::var`; `settings::resolved`
   goes through it). Unchanged on purpose: the library crate `agile_md`, the
-  `agile-md` MCP server (ticket 315), the config folders (310), the
   `amd-<target>.zip` asset (311), the Tauri
   identifier `io.github.agile-md.amdui` (it names riteui's WebView data
   folder), and the repository `KanRite/amd` (313).
+  **Names people read say KanRite** (ticket 315): `--help`, messages,
+  riteui's header and Preferences, the README and the user guide (whose
+  "Coming from agile-md" section explains the old names). The MCP server
+  is `kanrite` (`mcp::SERVER`); `rite mcp setup` says to remove an
+  `agile-md` entry. Left as they are, because older builds or people's
+  machines depend on them: the `# agile-md install:` marker, `.agile-md`
+  and `.agile-md-pins/` in documents repositories, `.git/amd-*` files, the
+  zip names, the GitHub URLs (ticket 313) and the website, which is live
+  as soon as it merges and so changes with the release (316).
   **The machine folders are `kanrite`** (ticket 310, `places.rs`):
   `places::config()`/`state()`/`data()` are `$XDG_*_HOME/kanrite` (an XDG
   variable only when absolute), falling back to an `agile-md` folder that's

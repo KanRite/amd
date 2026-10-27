@@ -7,7 +7,7 @@
 //! optional (the update bar's Later).
 //!
 //! A *required* update exists only as a tool the team chooses: a project
-//! may record the oldest agile-md allowed to change it, `min-version` in
+//! may record the oldest KanRite allowed to change it, `min-version` in
 //! the tickets `.settings`, travelling through git like any setting. Only a
 //! person sets it (`rite require-version`, confirmed); no release or code
 //! path does. An older build is then **read-only** there
@@ -35,11 +35,11 @@ pub fn needed(board: &Board) -> Option<Version> {
     (min > running()).then_some(min)
 }
 
-/// Refuses a change when the team requires a newer agile-md.
+/// Refuses a change when the team requires a newer KanRite.
 pub fn ensure_version(board: &Board) -> Result<()> {
     if let Some(min) = needed(board) {
         bail!(
-            "this project needs agile-md {min} or newer (its team set that), and this is {}: \
+            "this project needs KanRite {min} or newer (its team set that), and this is {}: \
              it's read-only here until you update (`rite update`)",
             running()
         );
@@ -89,7 +89,7 @@ mod tests {
         let err = crate::archive::ensure_writable(&board)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("needs agile-md 999.0.0 or newer"), "{err}");
+        assert!(err.contains("needs KanRite 999.0.0 or newer"), "{err}");
         assert!(err.contains("rite update"), "{err}");
         // This version or older: fine.
         require(&board, &running().to_string());

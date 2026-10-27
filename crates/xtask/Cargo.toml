@@ -4,7 +4,7 @@
 # install beyond Rust itself. Standard library only, so it builds in seconds.
 [package]
 name = "xtask"
-description = "Build, check and install agile-md from a clone"
+description = "Build, check and install KanRite from a clone"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

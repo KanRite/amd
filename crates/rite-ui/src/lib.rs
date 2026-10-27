@@ -1126,7 +1126,7 @@ async fn move_epic_tickets(
     .await
 }
 
-/// A newer agile-md to offer in the update bar (ticket 192), if any.
+/// A newer KanRite to offer in the update bar (ticket 192), if any.
 #[tauri::command]
 async fn update_status() -> Result<Option<rite_ui_model::UpdateInfo>> {
     blocking(|| Ok(updates::status())).await

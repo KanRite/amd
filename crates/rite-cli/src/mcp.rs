@@ -23,7 +23,12 @@ use agile_md::assistant;
 /// The protocol versions this server speaks, newest first.
 const VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
-const INSTRUCTIONS: &str = "agile-md is a Kanban board kept as markdown files in git. \
+/// The server's name in every client's config (ticket 315). It was
+/// `agile-md` before 5.0; [`setup`] says to remove an entry by that name.
+const SERVER: &str = "kanrite";
+const OLD_SERVER: &str = "agile-md";
+
+const INSTRUCTIONS: &str = "KanRite is a Kanban board kept as markdown files in git. \
 These tools read the project's board, tickets, documents and ideas, and change tickets \
 the way the `rite` command and the riteui desktop board do: each change is committed and \
 pushed. Call `screen` to find what the user is looking at in riteui (\"this ticket\"). \
@@ -153,8 +158,8 @@ fn initialize(params: &Value) -> Value {
         "protocolVersion": version,
         "capabilities": {"tools": {"listChanged": false}},
         "serverInfo": {
-            "name": "agile-md",
-            "title": "agile-md board",
+            "name": SERVER,
+            "title": "KanRite board",
             "version": env!("CARGO_PKG_VERSION"),
         },
         "instructions": INSTRUCTIONS,
@@ -229,34 +234,38 @@ pub fn setup(client: Option<&str>) -> Result<String> {
     }
     if wants("claude") {
         out.push_str(&format!(
-            "Claude Code (in a terminal, or riteui's AI tab):\n  claude mcp add --scope user agile-md -- {rite} mcp\n\n"
+            "Claude Code (in a terminal, or riteui's AI tab):\n  claude mcp add --scope user {SERVER} -- {rite} mcp\n\n"
         ));
     }
     if wants("vscode") {
         out.push_str(&format!(
-            "VS Code (Copilot agent mode): add to .vscode/mcp.json, or run \"MCP: Add Server\":\n  {{\"servers\": {{\"agile-md\": {{\"type\": \"stdio\", \"command\": \"{rite}\", \"args\": [\"mcp\"]}}}}}}\n\n"
+            "VS Code (Copilot agent mode): add to .vscode/mcp.json, or run \"MCP: Add Server\":\n  {{\"servers\": {{\"{SERVER}\": {{\"type\": \"stdio\", \"command\": \"{rite}\", \"args\": [\"mcp\"]}}}}}}\n\n"
         ));
     }
     if wants("cursor") {
         out.push_str(&format!(
-            "Cursor: add to ~/.cursor/mcp.json:\n  {{\"mcpServers\": {{\"agile-md\": {{\"command\": \"{rite}\", \"args\": [\"mcp\"]}}}}}}\n\n"
+            "Cursor: add to ~/.cursor/mcp.json:\n  {{\"mcpServers\": {{\"{SERVER}\": {{\"command\": \"{rite}\", \"args\": [\"mcp\"]}}}}}}\n\n"
         ));
     }
     if wants("codex") {
         out.push_str(&format!(
-            "Codex: add to ~/.codex/config.toml:\n  [mcp_servers.agile-md]\n  command = \"{rite}\"\n  args = [\"mcp\"]\n\n"
+            "Codex: add to ~/.codex/config.toml:\n  [mcp_servers.{SERVER}]\n  command = \"{rite}\"\n  args = [\"mcp\"]\n\n"
         ));
     }
     if wants("gemini") {
         out.push_str(&format!(
-            "Gemini CLI: add to ~/.gemini/settings.json:\n  {{\"mcpServers\": {{\"agile-md\": {{\"command\": \"{rite}\", \"args\": [\"mcp\"]}}}}}}\n\n"
+            "Gemini CLI: add to ~/.gemini/settings.json:\n  {{\"mcpServers\": {{\"{SERVER}\": {{\"command\": \"{rite}\", \"args\": [\"mcp\"]}}}}}}\n\n"
         ));
     }
     if all {
         out.push_str(
-            "Any other tool: run `rite mcp` as a stdio MCP server, started in the project's folder.\n",
+            "Any other tool: run `rite mcp` as a stdio MCP server, started in the project's folder.\n\n",
         );
     }
+    out.push_str(&format!(
+        "Connected before 5.0? The server was called {OLD_SERVER} then: remove that entry \
+         (for Claude Code, `claude mcp remove --scope user {OLD_SERVER}`), or the tools appear twice."
+    ));
     Ok(out.trim_end().to_string())
 }
 
@@ -314,10 +323,15 @@ mod tests {
         for name in ["Claude Code", "VS Code", "Cursor", "Codex", "Gemini"] {
             assert!(all.contains(name), "{name}");
         }
-        assert_eq!(
-            setup(Some("claude")).unwrap(),
-            "Claude Code (in a terminal, or riteui's AI tab):\n  claude mcp add --scope user agile-md -- rite mcp"
+        let claude = setup(Some("claude")).unwrap();
+        assert!(
+            claude.starts_with(
+                "Claude Code (in a terminal, or riteui's AI tab):\n  claude mcp add --scope user kanrite -- rite mcp\n\n"
+            ),
+            "{claude}"
         );
+        assert!(claude.contains("claude mcp remove --scope user agile-md"));
+        assert!(!all.contains("\"agile-md\"") && all.contains("[mcp_servers.kanrite]"));
         assert!(setup(Some("emacs")).is_err());
     }
 }

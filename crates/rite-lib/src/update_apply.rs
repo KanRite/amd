@@ -220,7 +220,7 @@ pub fn install_dir(exe: &Path) -> Install {
     match crate::eol::read(marker_in(dir)) {
         Err(_) => Install::Unmanaged {
             why: format!(
-                "rite in {shown} wasn't put there by agile-md's installer, so it isn't replaced: \
+                "rite in {shown} wasn't put there by KanRite's installer, so it isn't replaced: \
                  update it the way you installed it (a package manager, say), or use the installer"
             ),
             reinstall: true,

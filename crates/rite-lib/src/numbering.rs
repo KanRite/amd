@@ -59,7 +59,7 @@ impl Numbering {
 
 fn cloud_unavailable() -> Result<u32> {
     bail!(
-        "cloud ticket numbering needs an agile-md plan, which isn't available yet — \
+        "cloud ticket numbering needs a KanRite plan, which isn't available yet — \
          set ticket-numbering = local (or unset RITE_TICKET_NUMBERING)"
     )
 }
@@ -90,7 +90,7 @@ mod tests {
         let (_dir, board) = board_with("ticket-numbering = cloud\n");
         assert_eq!(Numbering::for_board(&board).unwrap(), Numbering::Cloud);
         let err = board.next_id().unwrap_err().to_string();
-        assert!(err.contains("needs an agile-md plan"), "{err}");
+        assert!(err.contains("needs a KanRite plan"), "{err}");
         board.record_id(3).unwrap();
     }
 

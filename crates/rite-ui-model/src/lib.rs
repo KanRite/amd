@@ -721,7 +721,7 @@ pub struct Board {
     pub archived: bool,
 }
 
-/// A newer agile-md release for the update bar (ticket 192): its version,
+/// A newer KanRite release for the update bar (ticket 192): its version,
 /// its release notes, how many releases this build is behind, and the
 /// version running now.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

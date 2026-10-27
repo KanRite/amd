@@ -136,7 +136,7 @@ pub struct TimeLimits {
 const MIGRATED: &str = "migrated-from-documents";
 /// The project is archived (ticket 157): read-only for rite until unarchived.
 const ARCHIVED: &str = "archived";
-/// The oldest agile-md allowed to change this project (ticket 193), set
+/// The oldest KanRite allowed to change this project (ticket 193), set
 /// only by the team (`rite require-version`).
 const MIN_VERSION: &str = "min-version";
 const TAGS_ONLY: &str = "prevent-arbitrary-tags";
@@ -744,7 +744,7 @@ impl BoardSettings {
 
     /// Whether the project is archived (ticket 157): `archived`, off unless
     /// set on. rite and riteui refuse changes to an archived project.
-    /// The oldest agile-md allowed to change this project (ticket 193):
+    /// The oldest KanRite allowed to change this project (ticket 193):
     /// `min-version`, `None` unless the team set one.
     pub fn min_version(&self) -> Option<String> {
         self.config

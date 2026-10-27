@@ -373,7 +373,7 @@ pub fn App() -> impl IntoView {
             b.as_ref()
                 .map(|b| b.project.clone())
                 .filter(|p| !p.is_empty())
-                .unwrap_or_else(|| "agile-md".to_string())
+                .unwrap_or_else(|| "KanRite".to_string())
         })
     };
 
@@ -404,7 +404,7 @@ pub fn App() -> impl IntoView {
                     // The version (ticket 240): the page is built with riteui,
                     // so its own is riteui's.
                     <span class="flex items-baseline gap-1.5 whitespace-nowrap">
-                        <span class="text-lg font-semibold">"agile-md"</span>
+                        <span class="text-lg font-semibold">"KanRite"</span>
                         <crate::update_bar::VersionCheck />
                     </span>
                 </Show>

@@ -1,7 +1,7 @@
-# agile-md user guide
+# KanRite user guide
 
-How to use agile-md day to day: the command line (`amd`) and the desktop
-board (`amdui`). For what it is and how to install it, see the
+How to use KanRite day to day: the command line (`rite`) and the desktop
+board (`riteui`). For what it is and how to install it, see the
 [README](../README.md); for building it yourself,
 [CONTRIBUTING.md](../CONTRIBUTING.md).
 
@@ -23,60 +23,61 @@ board (`amdui`). For what it is and how to install it, see the
 - [Bringing in existing work](#bringing-in-existing-work)
 - [Working together, and getting tickets back](#working-together-and-getting-tickets-back)
 - [Who can change the project's settings](#who-can-change-the-projects-settings)
-- [Using AI with agile-md](#using-ai-with-agile-md)
+- [Using AI with KanRite](#using-ai-with-kanrite)
 - [Shell completion](#shell-completion)
+- [Coming from agile-md](#coming-from-agile-md)
 
 ## Getting started
 
 Start a project, or join one:
 
 ```bash
-amd init acme                     # make acme-tickets and acme-documents on GitHub and clone them here
-amd join acme                     # …or join a project someone else made
-amd init acme --local-only        # …or keep the board in the repository you're in (tasks/)
+rite init acme                     # make acme-tickets and acme-documents on GitHub and clone them here
+rite join acme                     # …or join a project someone else made
+rite init acme --local-only        # …or keep the board in the repository you're in (tasks/)
 ```
 
 A team can mix Windows, macOS and Linux. Windows tools often save files
-with Windows line endings (CRLF); amd reads those like any other and
+with Windows line endings (CRLF); rite reads those like any other and
 always writes plain LF, so a ticket edited on one system reads the same on
-every other. The repositories `amd init` creates also get a
+every other. The repositories `rite init` creates also get a
 `.gitattributes` asking git to keep text files LF in every clone.
 
 Then, from any of its repositories (or the folder holding them):
 
 ```bash
-amd new "Publish to Marketplace" --branch-type feature --repository acme-web --assignee @me
-amd board                         # show all columns (the default)
-amd todo    1                     # backlog -> todo, and switch acme-web to feature/publish-to-marketplace
-amd doing   1                     # todo -> doing: locked to you while it's there
-amd done    1                     # doing -> done
-amd todo                          # no ref: list what's in todo/ instead of moving anything
-amd show    publish               # print a task (id or slug substring)
-amd edit    1                     # open in $EDITOR
-amd abandon 1                     # take it off the board, into tasks/archive/ — and
+rite new "Publish to Marketplace" --branch-type feature --repository acme-web --assignee @me
+rite board                         # show all columns (the default)
+rite todo    1                     # backlog -> todo, and switch acme-web to feature/publish-to-marketplace
+rite doing   1                     # todo -> doing: locked to you while it's there
+rite done    1                     # doing -> done
+rite todo                          # no ref: list what's in todo/ instead of moving anything
+rite show    publish               # print a task (id or slug substring)
+rite edit    1                     # open in $EDITOR
+rite abandon 1                     # take it off the board, into tasks/archive/ — and
                                    # delete its branch too, if it's still empty
-amd mine                          # your todo and doing tickets, across every project on this machine
-amd recover                       # tickets deleted or abandoned: who removed each, and when
-amd recover 1                     # bring one back into the backlog, exactly as it was
-amd renumber                      # two tickets with the same number: shows the fix
-amd renumber --apply              # ...and makes it, in one commit
-amd link    1 3                   # relate two tickets
-amd tag     urgent                # list every ticket carrying a tag, across every column
-amd tags                          # the project's tag list, with how many tickets carry each
-amd tags add future               # add a tag (saved as FUTURE); `amd tags remove` takes an unused one off
-amd new     "Idea" --draft        # a draft: tagged DRAFT, it stays in the backlog
-amd ready   1                     # take it out of draft (`amd draft 1` puts it back)
-amd todo    --tag urgent          # any listing form narrows to a tag: board, a
+rite mine                          # your todo and doing tickets, across every project on this machine
+rite recover                       # tickets deleted or abandoned: who removed each, and when
+rite recover 1                     # bring one back into the backlog, exactly as it was
+rite renumber                      # two tickets with the same number: shows the fix
+rite renumber --apply              # ...and makes it, in one commit
+rite link    1 3                   # relate two tickets
+rite tag     urgent                # list every ticket carrying a tag, across every column
+rite tags                          # the project's tag list, with how many tickets carry each
+rite tags add future               # add a tag (saved as FUTURE); `rite tags remove` takes an unused one off
+rite new     "Idea" --draft        # a draft: tagged DRAFT, it stays in the backlog
+rite ready   1                     # take it out of draft (`rite draft 1` puts it back)
+rite todo    --tag urgent          # any listing form narrows to a tag: board, a
                                    # destination verb, or an epic by name
-amd lock    1                     # claim a ticket so someone else's edits and moves
+rite lock    1                     # claim a ticket so someone else's edits and moves
                                    # are refused until you release it or it lapses
-amd unlock  1                     # release your own lease
-amd unlock  1 --force             # break someone else's — a separate, deliberate act
+rite unlock  1                     # release your own lease
+rite unlock  1 --force             # break someone else's — a separate, deliberate act
 ```
 
-`amd` works from any subdirectory — it resolves the board from the repo root,
+`rite` works from any subdirectory — it resolves the board from the repo root,
 and from a code repository it finds the project's tickets repository beside
-it. Set `AMD_DIR` to use a board directory other than `tasks`.
+it. Set `RITE_DIR` to use a board directory other than `tasks`.
 
 ## What's on a ticket
 
@@ -102,7 +103,7 @@ rest:
 | `due`         | optional | when it's due, `YYYY-MM-DD`; past it and not done, it's overdue |
 | `recur`       | optional | how it repeats: `weekly`, `fortnightly`, `monthly`, `quarterly`, `yearly`, or `every N days|weeks|months|years` |
 
-**Who to ask.** `amd show` and the desktop board's editor say who created a
+**Who to ask.** `rite show` and the desktop board's editor say who created a
 ticket and who last edited it: "created by Priya Shah on 2026-10-02; last
 edited by Sam Lee on 2026-10-08". Last edited comes from git history (a move
 between columns doesn't count), so an edit made in any editor is credited
@@ -110,19 +111,19 @@ to the right person. A ticket made before `created-by` existed is credited
 from git, and gets the field the next time it's saved.
 
 **Tags** are always UPPERCASE, so they stand out. Each project keeps a tag
-list (Admin in the desktop board, or `amd tags`), saved in the tickets
+list (Admin in the desktop board, or `rite tags`), saved in the tickets
 repository's `.settings`. Every list starts with the built-in DRAFT and
-TRIAGE; add the project's own with `amd tags add`. The editor offers the
+TRIAGE; add the project's own with `rite tags add`. The editor offers the
 list as a sorted dropdown, and a tag that isn't on it is refused: "Prevent
 arbitrary tags" is on by default, so a new project allows only DRAFT and
-TRIAGE until you add more. Turn it off (`amd tags only off`) to allow other tags, which `amd
+TRIAGE until you add more. Turn it off (`rite tags only off`) to allow other tags, which `rite
 new` then only warns about and the editor shows dashed. A tag can only be removed from
 the list once no ticket carries it. Matching ignores case, so a ticket written
 before tags were uppercase still matches.
 
 **Due dates and recurring tickets.** Any ticket can have a due date: the
 card shows it, red and marked overdue once the date has passed and it isn't
-done, and `amd show` says so too. A ticket that comes round again (a
+done, and `rite show` says so too. A ticket that comes round again (a
 monthly report, a certificate renewal, a weekly backup check) gets a
 repeat: when it's moved to done, the next one is made in the same commit,
 a new ticket in the backlog with the same title, body (its checklist
@@ -132,9 +133,9 @@ noting which ticket it follows. Nothing else makes a copy: an overdue one
 just shows as overdue until it's done.
 
 ```bash
-amd new "Renew the certificate" --recur yearly --due 2027-03-01
-amd set 12 due 2026-11-30          # empty clears
-amd set 12 recur "every 2 weeks"   # stored as fortnightly; empty stops it
+rite new "Renew the certificate" --recur yearly --due 2027-03-01
+rite set 12 due 2026-11-30          # empty clears
+rite set 12 recur "every 2 weeks"   # stored as fortnightly; empty stops it
 ```
 
 In the editor they're **Due** and **Repeats**.
@@ -142,23 +143,23 @@ In the editor they're **Due** and **Repeats**.
 **Due dates on the board.** A ticket in the loose backlog that's made, or
 given a due date, with 3 days or fewer left (or already overdue) goes
 **straight to todo**, unless it's a draft; todo has no WIP limit, so
-nothing stops it. `amd due-to-todo 5` changes the days, `0` turns it off,
+nothing stops it. `rite due-to-todo 5` changes the days, `0` turns it off,
 and so does Admin → Due dates and the backlog. Other tickets with due
 dates sit at the **top of the backlog**, soonest first. A ticket with a due
 date **can't go in an epic**, since an epic has no end date: filing one
 there, or dating one that's in an epic, is refused. A sprint can hold one,
-but its column shows a warning listing them, and so does `amd s12`, so you
+but its column shows a warning listing them, and so does `rite s12`, so you
 can check they fit. Admin's **Always show the backlog**
-(`amd backlog-always-shown on`) stops the backlog column being folded
+(`rite backlog-always-shown on`) stops the backlog column being folded
 away. A 13-point ticket has a **red border**: break it into a parent with
 smaller children.
 
 **Drafts.** A ticket tagged **DRAFT** is a draft: it can't leave the
 backlog, or go into a sprint, until the tag is taken off. It can still be
 edited, assigned, sized and filed into an epic, or abandoned. Make one with
-`amd new --draft`, `amd draft <ref>` or "Save as draft" in the desktop
-board; `amd ready <ref>` (or the editor's **Mark ready**) takes it out of
-draft, and `amd tag DRAFT` lists them. DRAFT is built in: it's allowed even
+`rite new --draft`, `rite draft <ref>` or "Save as draft" in the desktop
+board; `rite ready <ref>` (or the editor's **Mark ready**) takes it out of
+draft, and `rite tag DRAFT` lists them. DRAFT is built in: it's allowed even
 when only listed tags are, and it can't be removed from the list.
 
 **The branch type is what makes a ticket a piece of code work**, and it's empty
@@ -166,15 +167,15 @@ by default. A ticket without one is still a ticket — a rota, an approval, a
 renewal — it just has nothing to check out:
 
 ```bash
-amd new "Renew the certificates"                    # no branch
-amd new "Crash on save" --branch-type bugfix -a alex
-amd todo 1      # moves it; "no branch type on this ticket"
-amd todo 2      # moves it and switches to bugfix/crash-on-save
+rite new "Renew the certificates"                    # no branch
+rite new "Crash on save" --branch-type bugfix -a alex
+rite todo 1      # moves it; "no branch type on this ticket"
+rite todo 2      # moves it and switches to bugfix/crash-on-save
 ```
 
 The branch is made in the repository the ticket names (`--repository`, or
-`amd set <ref> repository <name>`). On a board in its own `*-tickets`
-repository, the layout `amd init <project>` makes, a ticket that wants a
+`rite set <ref> repository <name>`). On a board in its own `*-tickets`
+repository, the layout `rite init <project>` makes, a ticket that wants a
 branch but names no repository is refused on entering todo rather than
 branching the tickets repository.
 
@@ -184,7 +185,7 @@ type has to name the repository its branch goes in. The branch type `none`
 says "no branch, on purpose", for work about a repository that needs no
 branch, such as a release or an investigation. Until the two go together
 the ticket is a **draft**: nothing you typed is lost, but it stays in the
-backlog, and `amd ready` (or **Mark ready**) refuses it, saying why. That
+backlog, and `rite ready` (or **Mark ready**) refuses it, saying why. That
 covers every way a ticket is made, GitHub issues included (which arrive
 with a repository and no branch type, so as drafts as well as TRIAGE).
 Fixing the fields doesn't take DRAFT off by itself; mark it ready when it
@@ -192,29 +193,29 @@ is. Past the backlog a ticket can't be a draft, so a change there that
 would leave the two apart is refused.
 
 ```bash
-amd new "Fix the API" --repository acme-api       # a draft: no branch type
-amd set 3 branch-type bugfix                      # or none, for no branch
-amd ready 3
-amd set 7 repository acme-api branch-type feature  # both at once, past the backlog too
-amd check       # tickets whose repository and branch type don't go together
+rite new "Fix the API" --repository acme-api       # a draft: no branch type
+rite set 3 branch-type bugfix                      # or none, for no branch
+rite ready 3
+rite set 7 repository acme-api branch-type feature  # both at once, past the backlog too
+rite check       # tickets whose repository and branch type don't go together
 ```
 
-`amd set` takes several fields at once (`amd set 7 points 3 priority high`),
+`rite set` takes several fields at once (`rite set 7 points 3 priority high`),
 written in one go and committed together. That's how a ticket already in
 todo gets a repository and a branch type: either one alone would leave the
 pair apart, so the two are checked together, as they'll be once both are
 set.
 
-`amd check` only reads: it lists tickets that don't meet the rule, such as
+`rite check` only reads: it lists tickets that don't meet the rule, such as
 ones from before it or edited by hand, and changes nothing. A board inside
-its own code repository (`amd init --local-only` there) is exempt, since
+its own code repository (`rite init --local-only` there) is exempt, since
 the code is the board's own repository. In the desktop board, the editor's
 Branch type offers **not chosen** and **none (no branch)**, says when the
 two fields don't go together, and holds Mark ready until they do.
 
 The branch types are the ones
 [conventional-validator](https://github.com/mrdoodles/conventional-validator)
-accepts, so a branch made from a ticket passes its check. `AMD_BRANCH_TYPES`
+accepts, so a branch made from a ticket passes its check. `RITE_BRANCH_TYPES`
 changes the list.
 
 The branch name is written into the ticket at creation, so you can see it — and
@@ -225,24 +226,24 @@ rather than producing a ticket that can never start.
 ## Assignees
 
 ```bash
-amd new "Add login" --assignee alex   # or -a @me for whoever git says you are
-amd new "Big job" -a alex -a sam      # several people, alex first
-amd assign 3 sam                      # assign an existing ticket
-amd assign 3 sam jo                   # to several people, replacing whoever had it
-amd assign 3 --add ann                # add someone
-amd assign 3 --remove sam             # take someone off
-amd assign 3                          # unassign it (or --clear)
+rite new "Add login" --assignee alex   # or -a @me for whoever git says you are
+rite new "Big job" -a alex -a sam      # several people, alex first
+rite assign 3 sam                      # assign an existing ticket
+rite assign 3 sam jo                   # to several people, replacing whoever had it
+rite assign 3 --add ann                # add someone
+rite assign 3 --remove sam             # take someone off
+rite assign 3                          # unassign it (or --clear)
 ```
 
 Tickets are meant to be created now and assigned later, so `assignee` starts
 empty. The name lands in the ticket's frontmatter (`assignee: "sam"`), so it
 moves with the file and shows in the diff; the board shows it as `@sam`. In a
-terminal, a bare `amd assign 3` offers the project's users to pick from. Who
+terminal, a bare `rite assign 3` offers the project's users to pick from. Who
 *created* a ticket is recorded separately, as `created-by`.
 
 A big ticket can be shared. With several people, the first is the main
 assignee and stays in `assignee`, and the whole list is added beside it
-(`assignees: ["sam","jo"]`), so an older amd still sees the first person.
+(`assignees: ["sam","jo"]`), so an older rite still sees the first person.
 Everyone on it sees it in My work, the desktop board's User filter finds it
 under any of them, and the card shows `@sam +1` (every name on hover). The
 editor's Assignee field is a row of names, each with a ×, and a box to add
@@ -255,9 +256,9 @@ Tickets that belong together carry a `related` list — empty by default,
 holding ids so a link survives a rename or a move between columns:
 
 ```bash
-amd new "Session store" --related 1 --related add-logout   # ids or slugs
-amd link 3 7                                               # link two that exist
-amd link 3 7 --one-way                                     # …or just one end
+rite new "Session store" --related 1 --related add-logout   # ids or slugs
+rite link 3 7                                               # link two that exist
+rite link 3 7 --one-way                                     # …or just one end
 ```
 
 The relation is symmetric: linking 3 to 7 records 7 on ticket 3 *and* 3 on
@@ -269,18 +270,18 @@ A link can say more than "related": `--type requires`, `parent-of`,
 `child-of`, `clone-of`, `supersedes` and their opposites, each recorded the
 other way round on the other ticket. **A ticket can't move to done until the
 tickets it requires and its children are done**, and nothing overrides that.
-If the link was wrong, change it (`amd link 3 7 --replace requires --type
+If the link was wrong, change it (`rite link 3 7 --replace requires --type
 relates-to`) or remove it (`--remove`). On the desktop board a card that's
 waiting says "waits on N", and each link in the editor has a type picker.
 
-`amd new "Checkout" --requires 3` and `amd set 12 requires 3,7` set what a
+`rite new "Checkout" --requires 3` and `rite set 12 requires 3,7` set what a
 ticket requires directly (`set` makes the list exactly that; empty clears
 it). **A sprint can't start while one of its tickets requires a ticket
-that's neither in the sprint nor done**: `amd group start` names each one
+that's neither in the sprint nor done**: `rite group start` names each one
 (`s12 can't start: 003 requires 010 (backlog)`), and so does the sprint's
 Start button on the desktop board. Outside sprints nothing more is enforced.
 
-`amd links 12` (or `amd related 12`) lists every ticket linked to 12 in
+`rite links 12` (or `rite related 12`) lists every ticket linked to 12 in
 any way, in either direction, with where each one is: what it requires and
 what requires it, related, parent and children, clones and supersedes. A
 link recorded on only one of the two tickets (made with `--one-way`, by
@@ -295,10 +296,10 @@ same for scripts:
 
 The editor's Relationships panel shows the same, one-sided links included.
 
-`amd tree 12` draws a ticket's family, what it requires (solid) and what
+`rite tree 12` draws a ticket's family, what it requires (solid) and what
 it relates to (dashed), saying where each ticket is and what's still
-waited on; `amd tree` draws every family on the board. Done tickets are
-left out unless you add `--done` (`amd tree 12 --done`):
+waited on; `rite tree` draws every family on the board. Done tickets are
+left out unless you add `--done` (`rite tree 12 --done`):
 
 ```
 001 Alpha · backlog  waits on 002
@@ -307,7 +308,7 @@ left out unless you add `--done` (`amd tree 12 --done`):
 └ ─ ─ 004 Delta · backlog
 ```
 
-That's `amd tree 4 --done`. Tickets in a sprint that has started aren't
+That's `rite tree 4 --done`. Tickets in a sprint that has started aren't
 expanded: a link to one shows it as "in started sprint s12".
 
 On the desktop board, a card that requires or relates to others has a small
@@ -320,9 +321,9 @@ or a link icon when it has no tree), and a ticket linked to nothing at all
 shows a small blue circle, so loose tickets are easy to spot.
 
 **Parent and child** have a view of their own, since each ticket has at
-most one parent: `amd tree 7 --children` draws the hierarchy from the
+most one parent: `rite tree 7 --children` draws the hierarchy from the
 topmost ancestor down through every child and theirs, the ticket marked
-(`amd tree --children` draws every hierarchy on the board):
+(`rite tree --children` draws every hierarchy on the board):
 
 ```
 001 Alpha · backlog
@@ -334,7 +335,7 @@ On the desktop board, a card with a parent or children has a small
 hierarchy button (a box above two) that opens the same view; click a ticket
 in it to go to its card. Done children are left out until "Include done".
 
-**Auto priority** (on unless switched off: `amd auto-priority off`, or
+**Auto priority** (on unless switched off: `rite auto-priority off`, or
 Admin → Auto priority) makes a ticket at least as urgent as the most urgent
 ticket that requires it, down a chain, so the priorities you set on your
 goals flow to the work they wait on. **It also raises a ticket as its due
@@ -343,22 +344,22 @@ created to its due date, so medium from 25%, high from 50% and top from
 75%, and top once it's overdue. That passes on to what it requires.
 
 **Time limits** say how long a ticket should take in todo and in doing
-(`amd auto-priority limits 10 5`, or Admin; none unless set). Each quarter
+(`rite auto-priority limits 10 5`, or Admin; none unless set). Each quarter
 of a limit a ticket uses raises it a step: medium from 25%, high from 50%,
 top from 75%. The time it waited in todo keeps counting once someone picks
 it up, so a ticket that became urgent while it waited stays urgent if the
 person working on it is away; doing's own limit can raise it further.
-amd records when a ticket entered todo and doing (`todo-since`,
+rite records when a ticket entered todo and doing (`todo-since`,
 `doing-since`) as it moves; back in the backlog, both are cleared.
 
 A priority is written into the ticket, and nothing runs in the background,
 so a due date or a limit coming near is picked up by the next change anyone
 makes on the board, or within the hour by an open desktop board, which
 commits it as `priority: due dates`. A raised ticket records why
-(`priority-from`, `priority-own`; `amd show` says it, and its card shows
+(`priority-from`, `priority-own`; `rite show` says it, and its card shows
 `↑ high`), and switching it off puts them back. With **allow override** on
-(the default, `amd priority-override`), a priority you set by hand pins that
-ticket; `amd set 12 priority auto` (or "auto" in the editor) hands it back.
+(the default, `rite priority-override`), a priority you set by hand pins that
+ticket; `rite set 12 priority auto` (or "auto" in the editor) hands it back.
 With it off, a hand-set priority is only a floor.
 
 Auto priority only passes urgency down: if the ticket at the top of a chain
@@ -390,24 +391,24 @@ Columns. Each column has a **kind** that decides what it does:
 | done | a ticket can't go in while what it requires isn't done; anything here counts as done |
 
 ```bash
-amd column add Review --kind doing --after doing
-amd column wip review 3
-amd column add Triage --kind backlog --before backlog
-amd column rename todo Ready
-amd review 12                  # or: amd move 12 review
-amd column remove review --move-to doing
-amd column                     # name, folder, kind, WIP limit and count of each
+rite column add Review --kind doing --after doing
+rite column wip review 3
+rite column add Triage --kind backlog --before backlog
+rite column rename todo Ready
+rite review 12                  # or: rite move 12 review
+rite column remove review --move-to doing
+rite column                     # name, folder, kind, WIP limit and count of each
 ```
 
 **Moves and where new work arrives.** Tickets move one column at a time,
-either way, unless the team says otherwise: `amd column allow triage todo`
-adds an extra one-way move beside that, and `amd column flow any` lets a
+either way, unless the team says otherwise: `rite column allow triage todo`
+adds an extra one-way move beside that, and `rite column flow any` lets a
 ticket go from any column to any other. Whatever the flow, a draft stays in
 the backlog, a started sprint's tickets only move on to todo, done waits for
-what a ticket requires, and WIP limits and locks still apply. `amd column
-landing triage` makes new tickets (from `amd new`, the desktop board, an AI
+what a ticket requires, and WIP limits and locks still apply. `rite column
+landing triage` makes new tickets (from `rite new`, the desktop board, an AI
 tool or an imported GitHub issue) arrive in Triage; one filed straight into
-an epic or sprint still goes to the Backlog. `amd column reset` puts the
+an epic or sprint still goes to the Backlog. `rite column reset` puts the
 board back to Backlog, To do, Doing and Done: each ticket in an added column
 moves to the standard column of the same kind, and the names, flow, extra
 moves, landing column and column WIP limits go back to standard, in one
@@ -422,12 +423,12 @@ board; everyone needs amd 4.1 or later to see tickets in an added column.
 
 ## The desktop board
 
-`amdui` opens a project's board in a window, with the tickets of all its
+`riteui` opens a project's board in a window, with the tickets of all its
 repositories. It's the front end as its own command — launch it from a dock or a
-runner, no subcommand to remember — and `amd gui` opens the same window if
+runner, no subcommand to remember — and `rite gui` opens the same window if
 you're already in a terminal. Launched from outside a project, it opens the
 board it showed last. It is a Tauri window over a Leptos page, and every
-change it makes goes through the same library as `amd`, so the two never
+change it makes goes through the same library as `rite`, so the two never
 disagree.
 
 - **It opens on a landing page**: **My work** (your todo and doing tickets
@@ -459,16 +460,16 @@ disagree.
   are rewritten so they keep working. **☆ Pin** puts a document you're
   writing or working from at the top of your own list, under Pinned; pins
   are yours, kept in the documents repository so they follow you to every
-  machine (`amd docs pins`, `amd docs pin <repository>/<path>`, `amd docs
+  machine (`rite docs pins`, `rite docs pin <repository>/<path>`, `rite docs
   unpin`). Every change is pushed straight to
   main rather than reviewed in pull requests. A
   documents repository the whole organisation shares (standards, the
   handbook) can sit beside it: name it in Admin, or with
-  `amd shared-documents <repository>`, and clone it next to the project's
+  `rite shared-documents <repository>`, and clone it next to the project's
   repositories. Raw HTML in a document is shown as text, never run.
 - **A Backlogs column** of sprints, then epics, beside the board's columns. Drag
   a card to the next column, or into and out of an epic or sprint; the move is
-  a `git mv`, committed and pushed like `amd`'s. Moving into doing
+  a `git mv`, committed and pushed like `rite`'s. Moving into doing
   locks the ticket for you, and moving it out again unlocks it: a ticket is
   locked while it's being worked on.
 - **Click a ticket** to edit it: its fields as a form (title, assignee, branch
@@ -481,52 +482,52 @@ disagree.
   doesn't exist yet. **Add child** does the same starting on "A child of
   012", for breaking a big ticket into smaller ones: the new ticket gets
   `parent`, and the parent lists it under Children, in one commit. (On the
-  command line, `amd new "Card form" --parent 12`.)
+  command line, `rite new "Card form" --parent 12`.)
 - **Filters** across the top: repository, person, a search, the sort order,
   and Reset.
 - **New ticket**, **+ Sprint**, **+ Epic**; open one from its box to start
   a sprint, rename it, or delete it once everything in it is done.
 - **Preferences**, your own settings on this machine, in
-  `~/.config/agile-md/config`: the colour scheme (light, dark or the
-  system's, with an accent colour: indigo, teal or slate), the zoom, the board to open when amdui
+  `~/.config/kanrite/config`: the colour scheme (light, dark or the
+  system's, with an accent colour: indigo, teal or slate), the zoom, the board to open when riteui
   starts outside a project, the AI tab's command, speech to text, read aloud,
   and your editor.
-- **The update bar.** When a newer agile-md is out, an orange bar across
+- **The update bar.** When a newer KanRite is out, an orange bar across
   the top of every screen says so, with **What's new** (the release notes),
-  **Update** and **Later**. Update installs it and restarts amdui (close a
+  **Update** and **Later**. Update installs it and restarts riteui (close a
   ticket you're editing first). Later hides that version for a day, even across
-  restarts; a newer release still shows at once. amdui looks when it starts
+  restarts; a newer release still shows at once. riteui looks when it starts
   and every half hour while open, but asks GitHub at most every three
   hours, so a release shows the same day. It ignores drafts and
   pre-releases. A failed check says nothing and tries again an hour later.
-  To check now, click the version beside "agile-md" in the top bar, or
+  To check now, click the version beside "KanRite" in the top bar, or
   Preferences → Updates → Check now (which also says when it last
   checked): it asks GitHub straight away, says "You're up to date" or
   brings up the bar, and says so when GitHub can't be reached. It works
   even with automatic checks off, and undoes a Later.
-  Turn it off with `update-check = off` in `~/.config/agile-md/config`, or
-  `AMD_UPDATE_CHECK=0`, which wins over the setting. What it remembers (the releases it last saw, and a Later) is in
-  `~/.local/state/agile-md/update.json`, or under `$XDG_STATE_HOME`: on
+  Turn it off with `update-check = off` in `~/.config/kanrite/config`, or
+  `RITE_UPDATE_CHECK=0`, which wins over the setting. What it remembers (the releases it last saw, and a Later) is in
+  `~/.local/state/kanrite/update.json`, or under `$XDG_STATE_HOME`: on
   this machine only, never in a project's repositories.
 
-  **How an update is applied** (also `amd update` on the command line,
-  `amd update --check` to only look): if you're several releases behind,
+  **How an update is applied** (also `rite update` on the command line,
+  `rite update --check` to only look): if you're several releases behind,
   each one is installed in turn, oldest first. Each download is checked
   against the SHA-256 GitHub publishes for it and run once before it
   replaces anything, so a failure part way leaves the last good release
-  working. Only `amd` and `amdui` are written, each to a temporary file
+  working. Only `rite` and `riteui` are written, each to a temporary file
   beside it and then renamed over the old one; the old ones are kept as
-  `amd.previous` and `amdui.previous`, and `amd update --rollback` puts
+  `rite.previous` and `riteui.previous`, and `rite update --rollback` puts
   them back. Your projects, settings and locks are never opened.
 
-  If amdui's program is replaced while it's open (`amd update` in a
+  If riteui's program is replaced while it's open (`rite update` in a
   terminal, the installer run again, a package manager), the bar says
-  "amdui was updated to X" with **Restart**: the open window keeps running
+  "riteui was updated to X" with **Restart**: the open window keeps running
   the old version until then. Nothing restarts without the click, and open
   Terminal and AI sessions close when it does. A rebuild or a `touch` that
   leaves the version the same says nothing.
 
-  Only an install made by agile-md's installer from a release updates
+  Only an install made by KanRite's installer from a release updates
   itself. One built from source, from a package manager, or installed
   before 4.6 says so and shows what to do instead: for the last, run the
   installer once more.
@@ -537,7 +538,7 @@ disagree.
   project, and the ticket template (with a preview). It's shown to the project's admins: anyone on its `admins` list
   (`admins = Alex Morgan <alex@example.com>, sam@example.com` in the tickets
   `.settings`), or with admin or maintain access to the tickets repository
-  on GitHub (asked through the `gh` CLI). When amd can't tell (no list, no
+  on GitHub (asked through the `gh` CLI). When rite can't tell (no list, no
   `gh`), Admin stays open. It's a convenience, not a lock: anyone who can
   push to the tickets repository can still change `.settings`.
 - **Zoom** with **Ctrl +** and **Ctrl −**, and **Ctrl 0** back to 100%; the
@@ -553,12 +554,12 @@ to todo, keeping its epic, and sent back from todo it returns to it (unless
 that is a sprint that has started).
 
 **Backfill** is the one way more goes into a running sprint: when it runs
-short, **Backfill** in its column (or `amd group backfill s12 --points 5`)
+short, **Backfill** in its column (or `rite group backfill s12 --points 5`)
 pulls sized, unassigned tickets that aren't drafts from the loose backlog,
 never from an epic, highest priority first and then oldest, up to that many
 points.
 
-**Close sprint** (or `amd group close s12`) ends it, done or not: a sprint
+**Close sprint** (or `rite group close s12`) ends it, done or not: a sprint
 ends on schedule. It becomes read-only, so nothing goes in or out. Tickets
 still in its backlog folder go back to the loose backlog; tickets already
 in todo or doing keep its name and carry on. A report goes into the
@@ -573,21 +574,21 @@ Everything the board does is a command, so a script — or an agent — can work
 board without opening a window. `--no-input` makes it never prompt.
 
 ```bash
-amd new "Checkout revamp" --no-input   # lands in backlog/
-amd set 001 points 5                   # points, epic, order, title, priority
-amd set 001 priority high              # low (the default), medium or high
-amd group epic checkout --description "the checkout flow"
-amd group sprint sprint-1 --days 10
-amd set 001 epic sprint-1              # refused unless the ticket is sized
-amd group start sprint-1               # one way: no route back to pending
-amd group                              # tickets and points per epic and sprint
-amd group empty checkout               # every ticket in it, back to backlog/ at once
-amd group empty checkout --to todo     # or on to todo, keeping the epic's name
-amd group rename checkout payments     # the folder and every ticket's epic
-amd group backfill sprint-1 --points 5 # top up a running sprint from the backlog
-amd group close sprint-1               # end it: read-only, and a report in the documents
-amd group delete payments              # once every ticket in it is done (or moved out)
-amd todo 001 --no-branch && amd doing 001 && amd done 001
+rite new "Checkout revamp" --no-input   # lands in backlog/
+rite set 001 points 5                   # points, epic, order, title, priority
+rite set 001 priority high              # low (the default), medium or high
+rite group epic checkout --description "the checkout flow"
+rite group sprint sprint-1 --days 10
+rite set 001 epic sprint-1              # refused unless the ticket is sized
+rite group start sprint-1               # one way: no route back to pending
+rite group                              # tickets and points per epic and sprint
+rite group empty checkout               # every ticket in it, back to backlog/ at once
+rite group empty checkout --to todo     # or on to todo, keeping the epic's name
+rite group rename checkout payments     # the folder and every ticket's epic
+rite group backfill sprint-1 --points 5 # top up a running sprint from the backlog
+rite group close sprint-1               # end it: read-only, and a report in the documents
+rite group delete payments              # once every ticket in it is done (or moved out)
+rite todo 001 --no-branch && rite doing 001 && rite done 001
 ```
 
 `--to todo` moves only the tickets still in that epic or sprint's backlog
@@ -601,15 +602,15 @@ too: tickets move one column at a time (unless the team allows other moves),
 a sprint refuses an unsized ticket, and a started sprint takes nothing more
 and gives nothing back.
 
-`doing` carries a WIP limit: 2 unless changed (`amd wip-limit <n>`,
-`AMD_WIP_LIMIT`, or the board's own `.settings`; 0 turns it off). Todo is
+`doing` carries a WIP limit: 2 unless changed (`rite wip-limit <n>`,
+`RITE_WIP_LIMIT`, or the board's own `.settings`; 0 turns it off). Todo is
 never limited, so work can't get stuck there. A move into a full doing is
 refused, naming the limit; `--force` overrides it. The limit only ever
 gates entry — moving a ticket *out* of doing always works.
 
 ## The board in a terminal
 
-In a terminal `amd board` draws with [richrs](https://crates.io/crates/richrs) —
+In a terminal `rite board` draws with [richrs](https://crates.io/crates/richrs) —
 tree guides, a colour per column, counts, and ids that open the ticket when
 clicked:
 
@@ -621,14 +622,14 @@ TODO  (3)
 ```
 
 Piped or redirected output stays plain text (`    [002] Guest checkout  (feature)`,
-indented by depth), so `amd board | grep` keeps working and log files don't fill
+indented by depth), so `rite board | grep` keeps working and log files don't fill
 with escape sequences. `--plain` or `NO_COLOR=1` forces that everywhere.
 
 ## My work, across every project
 
-`amd mine` (and the desktop board's landing page) lists the tickets
+`rite mine` (and the desktop board's landing page) lists the tickets
 assigned to you in todo and doing, across
-every project on this machine (everything `amd init`, `amd join` or `amd
+every project on this machine (everything `rite init`, `rite join` or `rite
 register` has registered), highest priority first, then oldest:
 
 ```
@@ -640,7 +641,7 @@ doing  low      1 pts  fantastic-tools   004  Write the returns policy page
 "You" is git's identity in each project's own repository (else your global
 one), matched against that project's users list for the name the team
 knows you by. `--sort age` or `--sort points` changes the
-order, and `--json` is for scripts. `amd mine --hide <project>` leaves a
+order, and `--json` is for scripts. `rite mine --hide <project>` leaves a
 project out on this machine (`--unhide` puts it back, `--all` shows
 everything); scratch boards under the temporary directory are never
 listed. It reads each board as this machine last saw it.
@@ -649,29 +650,29 @@ listed. It reads each board as this machine last saw it.
 TRIAGE (an imported GitHub issue, or a dependency update that needs a
 person) heads everyone's My work on its project, marked TRIAGE, unless it's
 assigned to someone else, even from a project you've hidden (the project
-itself stays hidden: amd never undoes a Hide). A
+itself stays hidden: rite never undoes a Hide). A
 TRIAGE ticket is always top priority: you can't set it lower until you've
 looked at it and taken TRIAGE off.
 
 With nothing in todo or doing, it offers work to pick instead (never a
 draft, or a ticket locked by someone else). With unassigned tickets
 included (the landing page's "Include unassigned tickets" checkbox, on
-by default; `amd mine --unassigned`/`--no-unassigned` set it), that's
+by default; `rite mine --unassigned`/`--no-unassigned` set it), that's
 unassigned todo and doing tickets first; failing those, backlog tickets
 that are unassigned or yours: every high-priority one there is, else
 every medium, else every low, oldest first. Without, only backlog tickets
 assigned to you. Hidden projects are searched too, and stay hidden.
 
-**Archiving a project** is for one that's no longer maintained: `amd
+**Archiving a project** is for one that's no longer maintained: `rite
 project archive [name]`, or Admin → Archive this project. It's committed
 for the whole team, so the project becomes read-only and leaves My work
 and the landing page everywhere. Its repositories are archived on GitHub
 (tickets, documents and every declared code repository; never the shared
-documents), and it's taken off amd on your machine, with its folders left
-on disk. To bring it back, run `amd init <name>` from the folder that holds
+documents), and it's taken off rite on your machine, with its folders left
+on disk. To bring it back, run `rite init <name>` from the folder that holds
 (or should hold) its repositories. That unarchives them on GitHub, clones
 the tickets and documents repositories if they aren't here, turns
-archiving off for everyone and puts the project back on amd. `amd init`
+archiving off for everyone and puts the project back on rite. `rite init`
 never tries to create a repository that's already on GitHub: it clones it.
 
 ## Ideas
@@ -687,12 +688,12 @@ admins, an epic or a sprint whose description is the idea's write-up. What
 it became is recorded on the idea, with a button to open it.
 
 ```bash
-amd idea                              # best first
-amd idea new "Dark mode" [--anonymous]
-amd idea vote dark ++                 # +2 from you
-amd idea note dark "Follow the OS setting"
-amd idea ticket dark                  # a backlog ticket, linked both ways
-amd idea ticket dark --as epic        # or an epic (--as sprint --days 10 for a sprint)
+rite idea                              # best first
+rite idea new "Dark mode" [--anonymous]
+rite idea vote dark ++                 # +2 from you
+rite idea note dark "Follow the OS setting"
+rite idea ticket dark                  # a backlog ticket, linked both ways
+rite idea ticket dark --as epic        # or an epic (--as sprint --days 10 for a sprint)
 ```
 
 In the desktop board, Ideas is on the landing page's top bar.
@@ -727,31 +728,31 @@ and for each running sprint a burn-up (points done against its scope) and a
 burn-down (points left against the ideal line). They're read from the
 boards' git history when the page opens; nothing is stored. **▾ Sprint
 graphs** beside a project's numbers folds its graphs away and ▸ brings them
-back; amdui remembers which are folded on this machine
-(`ui.folded-graphs` in `~/.config/agile-md/config`).
+back; riteui remembers which are folded on this machine
+(`ui.folded-graphs` in `~/.config/kanrite/config`).
 
 ```bash
-amd stats             # the same, over the landing page's period
-amd stats --days 90
+rite stats             # the same, over the landing page's period
+rite stats --days 90
 ```
 
 ## Several repositories at once
 
 A project's tickets live on one board, in `{project}-tickets`, and a ticket
-says which repository it's about (`--repository`, or `amd set <ref>
+says which repository it's about (`--repository`, or `rite set <ref>
 repository <name>`), which is also where its branch is made. The
 repositories a project spans are declared in its `.settings`, so the whole
 team shares the list:
 
 ```bash
-amd register ../acme-api      # add a repository to the project (and note where it's cloned here)
-amd clone                     # the project's repositories this machine hasn't got
-amd clone acme-api            # clone one beside the others, and note it
-amd deregister acme-api       # take one off the project
+rite register ../acme-api      # add a repository to the project (and note where it's cloned here)
+rite clone                     # the project's repositories this machine hasn't got
+rite clone acme-api            # clone one beside the others, and note it
+rite deregister acme-api       # take one off the project
 ```
 
 Where each repository is cloned is kept per machine, one path per line in
-`~/.config/agile-md/repos`; which repositories the project has is shared.
+`~/.config/kanrite/repos`; which repositories the project has is shared.
 A repository can also have a board of its own (a `tasks/` in it); its
 tickets show on the project's board too, each card saying which repository
 it came from, since ids restart at 001 on every board. The desktop board's
@@ -759,11 +760,11 @@ Repository filter narrows it to one.
 
 **A repository the project hasn't got yet** can be made from the ticket that
 needs it: the editor's Repository list has **＋ New repository…** (for the
-project's admins), and the command line has `amd repo new`:
+project's admins), and the command line has `rite repo new`:
 
 ```bash
-amd repo new acme-payments --for 12          # make it, clone it, add it to the project, set ticket 12
-amd repo new acme-payments --public --description "Card payments"
+rite repo new acme-payments --for 12          # make it, clone it, add it to the project, set ticket 12
+rite repo new acme-payments --public --description "Card payments"
 ```
 
 It's made under the tickets repository's owner on GitHub (through `gh`),
@@ -793,8 +794,8 @@ happen and writes nothing.
 
 ```
 cd acme-tickets/tasks
-amd import tickets ../../old-project/tasks --dry-run
-amd import tickets ../../old-project/tasks     # a bare `amd import <PATH>` is the same
+rite import tickets ../../old-project/tasks --dry-run
+rite import tickets ../../old-project/tasks     # a bare `rite import <PATH>` is the same
 ```
 
 Each ticket keeps its column, gets a fresh number, and keeps its parent and
@@ -814,58 +815,58 @@ into, name the folder to copy:
 
 ```
 cd acme-documents/docs
-amd import documents ~/old-notes --dry-run
-amd import documents ~/old-notes               # commit on main and push
+rite import documents ~/old-notes --dry-run
+rite import documents ~/old-notes               # commit on main and push
 ```
 
 The folder is mirrored as it is: every markdown file, and every picture or
 other file a document links to; hidden files and folders are left out.
 Documents are pushed straight to main, with git as their history, so the
 import catches up with origin, commits on the main branch and pushes, and
-amdui's History can undo any of it. It refuses a clone with uncommitted
+riteui's History can undo any of it. It refuses a clone with uncommitted
 changes, one that isn't on its main branch, and one that has diverged.
 
-**GitHub issues** come in by themselves: when amdui's landing page opens, it
+**GitHub issues** come in by themselves: when riteui's landing page opens, it
 pulls in the open issues of each project's repositories on GitHub (at most
 every five minutes per project), tagged `TRIAGE`, with a link back to the
 issue and its text, as one commit. A label becomes a tag when it's on the
 project's tag list; any other is named in the ticket's notes. An issue is
 only ever imported once, so abandoning a `TRIAGE` ticket turns its issue down
 for good. New tickets are top priority, as every TRIAGE ticket is, and
-head everyone's My work until they're triaged. Admin's "GitHub issues" switch, or `amd
-issues off`, stops the automatic pull; `amd issues` checks now (`--repo
+head everyone's My work until they're triaged. Admin's "GitHub issues" switch, or `rite
+issues off`, stops the automatic pull; `rite issues` checks now (`--repo
 owner/repo` and `--label` for a one-off, `--dry-run` to preview). It reads
 GitHub with `gh`.
 
 ## Working together, and getting tickets back
 
-Every change amd makes is committed and pushed, and before each command it
+Every change rite makes is committed and pushed, and before each command it
 catches up with the remote: it fast-forwards when you're behind and pushes
 anything you made offline.
 
 **When GitHub (or wherever origin is) can't be reached,** carry on: each
-change is committed on your machine and waits. amd says how many are
+change is committed on your machine and waits. rite says how many are
 waiting ("1 change waiting to push"), and the desktop board shows a bar
 across the top until origin is back. If teammates changed the board
 meanwhile, your changes go on top of theirs. A ticket you made while away
 whose number someone else had already used gets the next free number, with
-its links updated, and amd tells you ("ticket 264 is now 266"): nobody else
+its links updated, and rite tells you ("ticket 264 is now 266"): nobody else
 had seen it under its old number. Only a real conflict, the same lines
 changed on both sides, or changes to files that aren't the board's, stops
 for you to sort out with git.
 
-Nothing a commit has seen is lost. `amd recover` lists every ticket that was
+Nothing a commit has seen is lost. `rite recover` lists every ticket that was
 deleted or abandoned, with who removed it and when, and brings any of them
 back exactly as it was. If catching up would remove five or more tickets at
-once, amd says so (how many, which commits, by whom) and points at `amd
-recover`. If someone force-pushes and rewrites the remote's history, amd
+once, rite says so (how many, which commits, by whom) and points at `rite
+recover`. If someone force-pushes and rewrites the remote's history, rite
 names it as that and changes nothing, so your clone, which still holds the
 old history, is there to put it back. Branch protection on `main` stops a
 force push in the first place.
 
 ## Versions and your team
 
-Every release reads what earlier ones wrote, and an older agile-md keeps
+Every release reads what earlier ones wrote, and an older KanRite keeps
 working on a board a newer one has changed. Updating never rewrites your
 tickets, documents or settings, and opening a board never migrates
 anything. So taking an update, or putting it off with Later, is always
@@ -875,13 +876,13 @@ If your team adopts something older versions can't follow, it can require a
 minimum version:
 
 ```bash
-amd require-version 4.6.0    # asks first; --yes to skip; committed for the team
-amd require-version          # what's required, if anything
-amd require-version --clear
+rite require-version 4.6.0    # asks first; --yes to skip; committed for the team
+rite require-version          # what's required, if anything
+rite require-version --clear
 ```
 
-Anyone on an older agile-md can then only read the project: changes are
-refused with a message saying to run `amd update`, and amdui's update bar
+Anyone on an older KanRite can then only read the project: changes are
+refused with a message saying to run `rite update`, and riteui's update bar
 has Update but no Later until they do. Nobody but a person on the team sets
 this; no release ever does. Versions before 4.6 don't know the setting.
 
@@ -892,10 +893,10 @@ repositories and the rest) live in the tickets repository's `.settings`,
 shared with the whole team. The ticket number counter is kept apart, in
 `.next-id`, so `.settings` changes only when someone changes a setting.
 
-**What amd does on its own.** The desktop board shows **Admin** only to the
+**What rite does on its own.** The desktop board shows **Admin** only to the
 project's admins: people on the `admins` list in `.settings`
 (`admins = Alex Morgan <alex@example.com>, sam@example.com`), or with admin
-or maintain access to the tickets repository on GitHub (amd asks through the
+or maintain access to the tickets repository on GitHub (rite asks through the
 `gh` CLI when it's installed). That keeps settings out of everyone else's
 way, but it isn't a lock: anyone who can push to the tickets repository can
 still edit `.settings` by hand.
@@ -918,46 +919,46 @@ public repos cannot have push rules"), and a private repository on the free
 plan gets "Upgrade to GitHub Pro" instead. Check GitHub's current rulesets
 documentation for which plans include them.
 
-When a push is refused, amd keeps the change in your clone and says the push
+When a push is refused, rite keeps the change in your clone and says the push
 failed; nothing is lost. Ask an admin to make the change, or undo yours with
 `git reset --hard origin/main` in the tickets repository once you've checked
 nothing else is waiting to be pushed.
 
-## Using AI with agile-md
+## Using AI with KanRite
 
-Bring your own AI tool, or none. `amd mcp` is an
+Bring your own AI tool, or none. `rite mcp` is an
 [MCP](https://modelcontextprotocol.io) server: any AI tool that speaks it
 (Claude Code, Copilot in VS Code, Cursor, Codex, Gemini CLI and others)
-can work on the board through amd itself rather than by editing files.
+can work on the board through rite itself rather than by editing files.
 Connect yours once:
 
 ```bash
-amd mcp setup              # what to add for each tool
-claude mcp add --scope user agile-md -- amd mcp   # e.g. Claude Code
+rite mcp setup              # what to add for each tool
+claude mcp add --scope user kanrite -- rite mcp   # e.g. Claude Code
 ```
 
 Then ask it things like "what am I looking at?", "what should I pick up
 next?", "make a ticket for this bug" or "move this to doing". Its tools:
 
-- **Read:** what amdui is showing (the open ticket, document or idea, and
+- **Read:** what riteui is showing (the open ticket, document or idea, and
   the board's filters), the board, a ticket, ticket search, My work, the
   documents (search, a document, the start page and its tree) and ideas.
 - **Change tickets:** create, move, edit, assign, add a note, and file into
   an epic or sprint. Each goes through the same rules as the board: one
   column at a time, the WIP limit, drafts, started sprints, locks. Each is
-  committed and pushed as `amd` would, so git has the record.
+  committed and pushed as `rite` would, so git has the record.
 - **Never:** abandoning a ticket, breaking someone's lock, settings, or
   branches. Those stay with you.
 
 Your AI tool asks before running a change, as it does for its other tools.
-Nothing runs unless your AI tool starts `amd mcp`; amd holds no API keys
-and talks to no AI service itself. For "this" to work, amdui leaves a note
+Nothing runs unless your AI tool starts `rite mcp`; rite holds no API keys
+and talks to no AI service itself. For "this" to work, riteui leaves a note
 of what it's showing (names and paths only) in
-`~/.local/state/agile-md/screen/`; the AI reads content through the tools,
+`~/.local/state/kanrite/screen/`; the AI reads content through the tools,
 which your AI tool lists as it goes.
 
-amdui's **AI tab** runs your AI tool's command line (Preferences → AI
-command, `claude` by default) in the project folder, so with `amd mcp`
+riteui's **AI tab** runs your AI tool's command line (Preferences → AI
+command, `claude` by default) in the project folder, so with `rite mcp`
 connected it can see what's on the board beside it.
 
 You can talk to it and have it talk back, both on this machine only:
@@ -975,9 +976,9 @@ You can talk to it and have it talk back, both on this machine only:
   Preferences → Read aloud has a Test button and the switch that hides the
   🔊. On Linux, speech-dispatcher's usual voice (espeak-ng) is robotic:
   **A natural voice (Piper)** there sets up Piper, a voice that runs on
-  this machine. Pick a voice and press Set up: amdui installs Piper (with
+  this machine. Pick a voice and press Set up: riteui installs Piper (with
   `uv`, or Python 3's `venv`; about 190 MB) into its own folder
-  (`~/.local/share/agile-md/speech/piper`), downloads the voice (about 60
+  (`~/.local/share/kanrite/speech/piper`), downloads the voice (about 60
   MB), and makes it speech-dispatcher's voice, in your own
   `~/.config/speech-dispatcher` (other programs that speak through it get
   the voice too). Use this voice switches; Remove undoes all of it. On
@@ -987,25 +988,58 @@ You can talk to it and have it talk back, both on this machine only:
 ## Shell completion
 
 ```bash
-amd completions bash > /usr/local/etc/bash_completion.d/amd
-amd completions zsh  > "${fpath[1]}/_amd"          # then: rm -f ~/.zcompdump; compinit
-amd completions fish > ~/.config/fish/completions/amd.fish
+rite completions bash > /usr/local/etc/bash_completion.d/rite
+rite completions zsh  > "${fpath[1]}/_rite"          # then: rm -f ~/.zcompdump; compinit
+rite completions fish > ~/.config/fish/completions/rite.fish
 ```
 
-`amd completions` with no argument works the shell out from `$SHELL`; elvish and
+`rite completions` with no argument works the shell out from `$SHELL`; elvish and
 powershell are available too. The script goes to stdout and the install hint to
 stderr, so redirecting gives you a clean file.
 
-Completion covers values, not just names — `amd new --branch-type <TAB>` offers
+Completion covers values, not just names — `rite new --branch-type <TAB>` offers
 the branch types this board accepts (including anything you added with
-`AMD_BRANCH_TYPES`), `-T <TAB>` the templates, and
-`amd set <ref> <TAB>` the fields. Scripts are generated from the CLI itself, so
+`RITE_BRANCH_TYPES`), `-T <TAB>` the templates, and
+`rite set <ref> <TAB>` the fields. Scripts are generated from the CLI itself, so
 they can't drift from it.
 
-In bash, zsh and fish, `amd <TAB>` also offers the board's epics and sprints,
-and any columns you've added, since each is a destination too (`amd checkout
+In bash, zsh and fish, `rite <TAB>` also offers the board's epics and sprints,
+and any columns you've added, since each is a destination too (`rite checkout
 7`). These are read from the board when you press TAB, so an epic made,
 renamed or deleted — by you, by a pull, or in the desktop board — is offered
 straight away, with no need to reload your shell. A name a command already has,
-or one with a space in it, isn't offered (`amd group` reaches those). Make the
-script again after updating amd, so it knows the new release's commands.
+or one with a space in it, isn't offered (`rite group` reaches those). Make the
+script again after updating rite, so it knows the new release's commands.
+
+## Coming from agile-md
+
+KanRite was called agile-md before 5.0, and its commands were `amd` and
+`amdui`. Nothing in your projects changes: tickets, documents, ideas and
+settings in your repositories are read exactly as before, and a 4.x build
+still reads a board 5.x has written.
+
+- **The commands are `rite` and `riteui`.** Updating a 4.x install (the
+  update bar, or `amd update`) brings it to 5.x and renames the programs.
+  `amd` and `amdui` stay through 5.x as links to them (copies on Windows)
+  and say once a day, on stderr, that they're now `rite`; `amd gui` and
+  scripts calling `amd` keep working. Shell completion covers both names.
+- **Environment variables** are `RITE_*`. The `AMD_*` of the same name is
+  still read; when both are set, `RITE_*` wins.
+- **Your settings folders** are `~/.config/kanrite`,
+  `~/.local/state/kanrite` and `~/.local/share/kanrite` (or under the
+  `XDG_*` folders). The first time `rite` or `riteui` runs it moves each
+  `agile-md` folder there, says so, and leaves a link at the old name, so
+  a 4.x build on the same machine still finds everything. A Piper voice
+  set up in Preferences is moved with it.
+- **The AI tools' MCP server is `kanrite`.** If you connected a tool
+  before 5.0, its entry is called `agile-md`: remove it, or the tools
+  appear twice. For Claude Code:
+
+  ```bash
+  claude mcp remove --scope user agile-md
+  claude mcp add --scope user kanrite -- rite mcp
+  ```
+
+  `rite mcp setup` prints the lines for each tool.
+- **The uninstaller** is `rite-uninstall`; installing 5.x replaces 4.x's
+  `amd-uninstall`, and either removes the old names too.

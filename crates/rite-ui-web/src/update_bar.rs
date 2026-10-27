@@ -5,7 +5,7 @@
 //! why and how instead. **Later** hides that version for a day, across
 //! restarts; a still newer release shows at once.
 //!
-//! When the project's team requires a newer agile-md (ticket 193), the bar
+//! When the project's team requires a newer KanRite (ticket 193), the bar
 //! is the **required** kind: the board is read-only here, and there's
 //! Update but no Later.
 //!
@@ -30,14 +30,14 @@ pub fn check_by_hand(note: RwSignal<Option<String>>) {
         let said = match api::check_for_update().await {
             Ok(ManualCheck::Newer { info }) => {
                 let said = format!(
-                    "agile-md {} is out: Update is in the bar above.",
+                    "KanRite {} is out: Update is in the bar above.",
                     info.version
                 );
                 ctx.update_offer.set(Some(info));
                 said
             }
             Ok(ManualCheck::Current { current }) => {
-                format!("You're up to date (agile-md {current}).")
+                format!("You're up to date (KanRite {current}).")
             }
             Ok(ManualCheck::Failed { why }) => why,
             Err(why) => why,
@@ -72,7 +72,7 @@ pub fn VersionCheck() -> impl IntoView {
             <button
                 type="button"
                 class="rounded text-xs text-slate-500 hover:text-slate-300 hover:underline"
-                title="The version of agile-md running. Click to check for updates."
+                title="The version of KanRite running. Click to check for updates."
                 on:click=click
             >
                 {concat!("v", env!("CARGO_PKG_VERSION"))}
@@ -205,7 +205,7 @@ pub fn UpdateBar() -> impl IntoView {
             });
         }
     };
-    // The team requires a newer agile-md (ticket 193).
+    // The team requires a newer KanRite (ticket 193).
     let required = move || {
         ctx.board
             .with(|b| b.as_ref().and_then(|b| b.needs_version.clone()))
@@ -242,7 +242,7 @@ pub fn UpdateBar() -> impl IntoView {
                 <div class="flex flex-wrap items-center gap-3">
                     <p class="flex-1 text-sm">
                         {move || format!(
-                            "This project needs agile-md {} or newer (its team set that), so it's read-only here until you update.",
+                            "This project needs KanRite {} or newer (its team set that), so it's read-only here until you update.",
                             required().unwrap_or_default()
                         )}
                     </p>
@@ -281,7 +281,7 @@ pub fn UpdateBar() -> impl IntoView {
                                             String::new()
                                         };
                                         format!(
-                                            "agile-md {} is available. You have {}{behind}.",
+                                            "KanRite {} is available. You have {}{behind}.",
                                             o.version, o.current
                                         )
                                     })

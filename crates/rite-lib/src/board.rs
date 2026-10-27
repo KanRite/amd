@@ -215,7 +215,7 @@ impl Board {
     pub fn locate() -> Result<Board> {
         let dir = dir_name();
         let repo = git::repo_root().ok_or_else(|| {
-            anyhow!("not inside a git repository (agile-md boards live at <repo>/{dir})")
+            anyhow!("not inside a git repository (KanRite boards live at <repo>/{dir})")
         })?;
         Ok(Board {
             root: repo.join(dir),
@@ -295,7 +295,7 @@ impl Board {
             Some(only) => Ok(Board::in_repo(&only)),
             None => bail!(
                 "not inside a git repository, and no project board among this directory's own \
-                 subdirectories either (agile-md boards live at <repo>/{})",
+                 subdirectories either (KanRite boards live at <repo>/{})",
                 dir_name()
             ),
         }

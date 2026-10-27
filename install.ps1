@@ -161,7 +161,7 @@ foreach ($folder in $Bin, (Split-Path $Bin)) {
         Remove-Item -LiteralPath $folder -Force
     }
 }
-Write-Host 'agile-md is uninstalled. Your projects, in your git repositories, were not touched.'
+Write-Host 'KanRite is uninstalled. Your projects, in your git repositories, were not touched.'
 '@
     return $head + "`r`n" + $body
 }

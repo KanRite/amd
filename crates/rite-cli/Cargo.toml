@@ -3,7 +3,7 @@
 # (docs/adr/0004, exception 1).
 [package]
 name = "rite-cli"
-description = "The agile-md command line"
+description = "The KanRite command line (rite)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

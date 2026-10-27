@@ -269,7 +269,7 @@ fn init_here(project: &str) -> Result<()> {
     if registry.add(board.repo_root()).is_ok() {
         let _ = registry.save();
     }
-    println!("Initialised agile-md board at {}", board.root.display());
+    println!("Initialised KanRite board at {}", board.root.display());
     Ok(())
 }
 

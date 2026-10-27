@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-# agile-md
+# KanRite
 
 **An open source, fully featured, multi-project agile management system for
 individuals and teams.**
@@ -17,7 +17,7 @@ individuals and teams.**
 [Contributing](CONTRIBUTING.md)
 
 Your tickets, documents and ideas live in your own git repositories, as
-markdown, right beside your work: not in someone else's cloud. agile-md works
+markdown, right beside your work: not in someone else's cloud. KanRite works
 well with AI, but AI is never a requirement; it's just as useful to a team or
 a solo developer without it.
 
@@ -86,7 +86,7 @@ a solo developer without it.
 - **A WIP limit on doing** (2 unless changed), with a deliberate override.
 - **Locks:** a ticket is yours while it's in doing and is released when it
   leaves; someone else's lock is only broken on purpose.
-- **Every change is committed and pushed**, and boards stay in step: amd
+- **Every change is committed and pushed**, and boards stay in step: rite
   catches up before a change, replays it if someone pushed first, and warns
   when many tickets vanish or history is rewritten.
 
@@ -110,30 +110,30 @@ a solo developer without it.
 - **A documents repository per project** for ADRs, RFCs and docs, plus an
   optional one every project shares. Changes go straight to main, with
   history and restore.
-- **Write in amdui:** rich text or markdown, folders, moves that keep links
+- **Write in riteui:** rich text or markdown, folders, moves that keep links
   working, archiving, a pinned start page and search, and your own pinned
   documents, first in your list on every machine.
 - **Ideas** before they're tickets: everyone votes up to ±3 and adds notes,
   and an idea becomes a backlog ticket in one click, or (for the project's
   admins) an epic or a sprint with the idea's write-up as its description
-  (`amd idea ticket <idea> --as epic|sprint`).
+  (`rite idea ticket <idea> --as epic|sprint`).
 
 ### Teams and projects
 
-- **`amd init`** creates a project's repositories on GitHub; **`amd join`**
+- **`rite init`** creates a project's repositories on GitHub; **`rite join`**
   gives a teammate the project and adds them as a user.
 - **Several repositories per project**, and several projects side by side;
   a new repository can be made from the ticket that needs it.
 - **Admin** settings are committed for the team; **Preferences** are your
   own, on your machine.
 - **Archive a project** that's no longer maintained: read-only, archived
-  on GitHub and gone from amd, until `amd init` brings it back.
+  on GitHub and gone from rite, until `rite init` brings it back.
 
 ### Bringing work in, and getting it back
 
 - **GitHub issues** arrive as TRIAGE tickets, each one only once.
 - **Import** tickets from another board and documents from a folder.
-- **`amd recover`** brings back deleted or abandoned tickets; **`amd
+- **`rite recover`** brings back deleted or abandoned tickets; **`rite
   renumber`** fixes duplicate numbers.
 
 ### The desktop board
@@ -148,24 +148,24 @@ a solo developer without it.
 - **Drag and drop**, with the rules shown while you drag.
 - **A landing page** with My work and every project, each with its tickets
   raised, done and closed over 7, 30 or 90 days and its running sprint's
-  burn-up and burn-down (`amd stats` on the command line).
+  burn-up and burn-down (`rite stats` on the command line).
 - **Live:** changes made anywhere (the command line, an editor, a pull) show
   within a second.
 - **A bottom panel** with a terminal and an AI tab running your own AI tool.
 - **Speech to text and read aloud**, optional and entirely on your machine.
 - **An Editor button**, themes, accent colours and zoom.
-- **Updates:** an orange bar in amdui tells you when a newer release is
-  out; Update installs it and restarts (`amd update` does the same), never
+- **Updates:** an orange bar in riteui tells you when a newer release is
+  out; Update installs it and restarts (`rite update` does the same), never
   touching your projects. Releases stay compatible with each other, and a
-  team can require a minimum version (`amd require-version`).
+  team can require a minimum version (`rite require-version`).
 
 ### AI, if you want it
 
-- **`amd mcp`** lets any MCP-capable AI tool (Claude Code, Copilot, Cursor,
+- **`rite mcp`** lets any MCP-capable AI tool (Claude Code, Copilot, Cursor,
   Codex, Gemini CLI) read the board, documents, ideas and what's on screen,
   and change tickets under the same rules, each change committed. It never
   abandons tickets, breaks locks or changes settings.
-- **Nothing built in:** amd holds no API keys, and nothing runs unless your
+- **Nothing built in:** rite holds no API keys, and nothing runs unless your
   AI tool starts it.
 
 ### Command line
@@ -173,7 +173,7 @@ a solo developer without it.
 - **Everything the board does is a command**, safe in scripts and CI: it
   never prompts without a terminal.
 - **Shell completion** for bash, zsh and fish, epic names included, and
-  `amd log` for a board's history.
+  `rite log` for a board's history.
 
 Everything is explained in the [user guide](docs/user-guide.md).
 
@@ -186,7 +186,7 @@ Runs on **Linux, macOS and Windows** (x86_64 and arm64), and needs **git
 curl -fsSL https://raw.githubusercontent.com/kanrite/amd/v4/install.sh | bash
 ```
 
-That installs two commands, **`amd`** (the command line) and **`amdui`**
+That installs two commands, **`rite`** (the command line) and **`riteui`**
 (the desktop board), into `/usr/local/bin` when it can, otherwise `~/bin`,
 and on Linux adds the board to your application menu. To choose the folder
 or pin a version, pass them after `bash -s --`:
@@ -195,9 +195,9 @@ or pin a version, pass them after `bash -s --`:
 curl -fsSL https://raw.githubusercontent.com/kanrite/amd/v4/install.sh | bash -s -- --dir ~/.local/bin --version v4.9.0
 ```
 
-If your system isn't one agile-md runs on, the installer says why and
+If your system isn't one KanRite runs on, the installer says why and
 changes nothing. On Linux the desktop board needs WebKitGTK 4.1; if it's
-missing, the installer names the package to add, and `amd` works without it.
+missing, the installer names the package to add, and `rite` works without it.
 
 On **Windows 10 or 11**, in PowerShell (no administrator needed):
 
@@ -217,13 +217,13 @@ version:
 
 The first start of a download may bring up Windows' "Windows protected your
 PC" warning, because the programs aren't signed yet: **More info**, then
-**Run anyway**. You can still use agile-md inside
+**Run anyway**. You can still use KanRite inside
 [WSL](https://learn.microsoft.com/windows/wsl/install) with the Linux line
 instead.
 
 ### Updates
 
-The desktop board looks for a newer release of agile-md on GitHub when it
+The desktop board looks for a newer release of KanRite on GitHub when it
 starts and every few hours while it's open, asking GitHub at most once a
 day (drafts and pre-releases are ignored). When there is one, an orange bar
 across the top says so, with **What's new**, **Update** and **Later**:
@@ -231,28 +231,36 @@ across the top says so, with **What's new**, **Update** and **Later**:
 - **Update** installs it and restarts the board. Each release's download
   is checked against the checksum GitHub publishes, and only the two
   programs are replaced, never your projects or settings. On the command
-  line, `amd update` does the same (`amd update --check` only looks, and
-  `amd update --rollback` puts the previous version back).
+  line, `rite update` does the same (`rite update --check` only looks, and
+  `rite update --rollback` puts the previous version back).
 - **Later** hides that version for a day, even if you restart; a newer
   release still shows straight away.
 - If the check fails (offline, say), nothing is shown; it tries again an
   hour later.
 
 To turn the check off, add `update-check = off` to
-`~/.config/agile-md/config`, or set `AMD_UPDATE_CHECK=0` (which wins over
+`~/.config/kanrite/config`, or set `RITE_UPDATE_CHECK=0` (which wins over
 the setting). What it remembers, the releases it last saw and a Later, is
-kept in `~/.local/state/agile-md/update.json` (or under `$XDG_STATE_HOME`),
+kept in `~/.local/state/kanrite/update.json` (or under `$XDG_STATE_HOME`),
 on your machine only, never in a project's repositories.
 
 Only an install made by the installer updates itself. Running the installer
 again also updates, and is how an install from before 4.6 starts updating
 itself. More in the [user guide](docs/user-guide.md#versions-and-your-team).
 
-To uninstall, run `amd-uninstall` (the installer puts it beside `amd`; on
+### Coming from agile-md
+
+Before 5.0 the commands were `amd` and `amdui`. Updating a 4.x install
+(its update bar, or `amd update`) brings it to 5.x and renames them; `amd`
+and `amdui` keep working through 5.x and say once a day that they're now
+`rite` and `riteui`. Your projects don't change. More in the
+[user guide](docs/user-guide.md#coming-from-agile-md).
+
+To uninstall, run `rite-uninstall` (the installer puts it beside `rite`; on
 Windows, uninstall **KanRite** in Settings > Apps, or run
-`amd-uninstall.ps1`). It
+`rite-uninstall.ps1`). It
 removes the programs and the menu entry, then asks whether to remove your
-agile-md settings too; `--all` removes them without asking. Your projects,
+KanRite settings too; `--all` removes them without asking. Your projects,
 in your git repositories, are never touched. Installed before it existed?
 The installer does the same:
 
@@ -267,19 +275,19 @@ Building from source is in [CONTRIBUTING.md](CONTRIBUTING.md).
 Start a project, or join one, from the folder you keep projects in:
 
 ```bash
-amd init acme              # make acme-tickets and acme-documents on GitHub and clone them here
-amd join acme              # …or join a project someone else made
+rite init acme              # make acme-tickets and acme-documents on GitHub and clone them here
+rite join acme              # …or join a project someone else made
 ```
 
 Then, from any of its repositories (or the folder holding them):
 
 ```bash
-amd new "Publish to Marketplace"
-amd todo 1                 # backlog -> todo
-amd doing 1                # todo -> doing: it's yours (locked) while you work on it
-amd done 1                 # doing -> done
-amd board                  # every column
-amdui                      # the desktop board
+rite new "Publish to Marketplace"
+rite todo 1                 # backlog -> todo
+rite doing 1                # todo -> doing: it's yours (locked) while you work on it
+rite done 1                 # doing -> done
+rite board                  # every column
+riteui                      # the desktop board
 ```
 
 The [user guide](docs/user-guide.md) covers tickets, links and
@@ -295,7 +303,7 @@ independently movable, while the folders give an unambiguous board.
 
 ## Development
 
-How to build agile-md, run its checks and work on the desktop board is in
+How to build KanRite, run its checks and work on the desktop board is in
 [CONTRIBUTING.md](CONTRIBUTING.md); [CLAUDE.md](CLAUDE.md) describes the
 architecture.
 
