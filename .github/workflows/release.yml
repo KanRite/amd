@@ -95,7 +95,13 @@ jobs:
           set -euo pipefail
           stage="$(mktemp -d)"
           cp "target/${{ matrix.target }}/release/rite" "target/${{ matrix.target }}/release/riteui" "${stage}/"
-          (cd "${stage}" && zip -q "${GITHUB_WORKSPACE}/amd-${{ matrix.target }}.zip" rite riteui)
+          # Also under the 4.x names (ticket 311): a 4.x install updates by
+          # taking `amd` and `amdui` from this zip, and the first 5.x run
+          # puts in the new names. Windows had no 4.x release, so its zip
+          # doesn't need them.
+          cp "${stage}/rite" "${stage}/amd"
+          cp "${stage}/riteui" "${stage}/amdui"
+          (cd "${stage}" && zip -q "${GITHUB_WORKSPACE}/amd-${{ matrix.target }}.zip" rite riteui amd amdui)
           unzip -l "amd-${{ matrix.target }}.zip"
 
       # The Windows runners have no zip in their bash.

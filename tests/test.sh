@@ -2779,6 +2779,50 @@ assert "rite update --rollback puts the previous rite back" \
     && '${upd}/bin/rite' --version | grep -qv 9.9.9 && ! test -e '${upd}/bin/rite.previous'"
 rm -rf "${upd}" /tmp/amd-upd.err
 
+echo "a 4.x install updating across the rename (ticket 311):"
+if [ -n "${RITE_PREVIOUS:-}" ] && "${RITE_PREVIOUS}" --version 2>/dev/null | grep -q '^amd 4\.'; then
+  x4="$(mktemp -d)"
+  mkdir -p "${x4}/bin" "${x4}/rel"
+  # A 4.x release install: the real previous release's amd, an amdui, and
+  # the uninstaller 4.x's install.sh wrote.
+  cp "${RITE_PREVIOUS}" "${x4}/bin/amd"
+  printf '#!/bin/sh\necho "amdui 4.9.0"\n' > "${x4}/bin/amdui"
+  chmod +x "${x4}/bin/amdui"
+  printf '#!/usr/bin/env bash\n# agile-md install: release\nfor name in amd amdui; do\n  [ -e "${BIN}/${name}" ] || continue\n  gone\ndone\n' > "${x4}/bin/amd-uninstall"
+  # A release zip shaped like 5.x's: the new programs, and the same under
+  # the 4.x names, which are what 4.x takes.
+  python3 - "${x4}/rel/amd-${upd_target}.zip" <<'PYZIP'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    for name, says in (("rite", "rite"), ("riteui", "riteui"), ("amd", "rite"), ("amdui", "riteui")):
+        info = zipfile.ZipInfo(name)
+        info.external_attr = 0o100755 << 16
+        z.writestr(info, '#!/bin/sh\necho "%s 9.9.9"\n' % says)
+PYZIP
+  x4_sha="$(sha256sum "${x4}/rel/amd-${upd_target}.zip" | cut -d' ' -f1)"
+  printf '[{"tag_name":"v9.9.9","html_url":"https://example.test/9.9.9","draft":false,"prerelease":false,"assets":[{"name":"amd-%s.zip","browser_download_url":"file://%s/rel/amd-%s.zip","digest":"sha256:%s"}]}]' \
+    "${upd_target}" "${x4}" "${upd_target}" "${x4_sha}" > "${x4}/rel/releases.json"
+  assert "the previous release's amd update takes the new programs by its old names" \
+    bash -c "AMD_UPDATE_RELEASES='file://${x4}/rel/releases.json' '${x4}/bin/amd' update >/dev/null 2>&1 \
+      && '${x4}/bin/amd' --version | grep -qx 'rite 9.9.9' && '${x4}/bin/amdui' --version | grep -qx 'riteui 9.9.9' \
+      && '${x4}/bin/amd.previous' --version | grep -q '^amd 4\.' && ! test -e '${x4}/bin/rite'"
+  # What lands is this build: the first run by the old name finishes the job.
+  cp "${AMD}" "${x4}/bin/amd"
+  assert "the first run of the new amd puts in rite and riteui, keeping amd and amdui as links" \
+    bash -c "XDG_STATE_HOME='${x4}/state' '${x4}/bin/amd' --version 2>'${x4}/err' | grep -q '^rite ' \
+      && grep -q 'finished updating from amd: rite and riteui now in' '${x4}/err' \
+      && test -L '${x4}/bin/amd' && test -L '${x4}/bin/amdui' && test -f '${x4}/bin/rite' \
+      && '${x4}/bin/riteui' --version | grep -qx 'riteui 9.9.9' \
+      && grep -q 'for name in rite riteui amd amdui' '${x4}/bin/amd-uninstall'"
+  assert "rite update --rollback puts the previous release back as amd, as it was" \
+    bash -c "'${x4}/bin/rite' update --rollback | grep -q 'put back the previous amd and amdui' \
+      && '${x4}/bin/amd' --version | grep -q '^amd 4\.' && ! test -L '${x4}/bin/amd' \
+      && ! test -e '${x4}/bin/rite' && ! test -e '${x4}/bin/riteui'"
+  rm -rf "${x4}"
+else
+  echo "  skip - a 4.x install updating across the rename (set RITE_PREVIOUS to a 4.x amd; CI does)"
+fi
+
 echo "the old names, amd and amdui (ticket 309):"
 old="$(mktemp -d)"
 ln -s "${AMD}" "${old}/amd"

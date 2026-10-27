@@ -1093,7 +1093,7 @@ fn main() -> ExitCode {
     }
 
     // Run as `amd`, the shim of the old name (ticket 309): said once a day.
-    agile_md::renamed::say_if_run_by_old_name();
+    agile_md::renamed::when_run_by_old_name();
 
     // The command tree is big enough that clap's recursive build and parse
     // overflow Windows' 1 MB main-thread stack (Unix gives 8 MB), so the
