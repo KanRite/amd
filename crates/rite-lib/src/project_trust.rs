@@ -5,7 +5,7 @@
 //! not a filesystem lock — nothing stops a direct hand-edit of `<repo-root>/.settings`.
 //! This is the other half: a per-machine, **not** git-tracked record of the
 //! project name `rite` last saw for each board it has visited, at
-//! `$XDG_CONFIG_HOME/agile-md/project-trust`. Machine-generated bookkeeping,
+//! `$XDG_CONFIG_HOME/kanrite/project-trust`. Machine-generated bookkeeping,
 //! not a preference, so it gets its own file — the same reasoning
 //! `registry.rs` already gives for keeping the repository list out of the
 //! settings file.
@@ -57,12 +57,9 @@ fn check_at(board: &Board, store_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `$XDG_CONFIG_HOME/agile-md/project-trust`, else `~/.config/agile-md/project-trust`.
+/// `project-trust` in the config folder ([`crate::places::config`]).
 fn path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| crate::home::dir().map(|home| home.join(".config")))?;
-    Some(base.join("agile-md").join("project-trust"))
+    crate::places::config().map(|dir| dir.join("project-trust"))
 }
 
 #[cfg(test)]

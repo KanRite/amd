@@ -434,14 +434,12 @@ pub fn after_rejected_push(
 }
 
 /// Copies whichever of `changed` still exist into a fresh directory under
-/// `$XDG_STATE_HOME/agile-md/recovered/`, so text typed into an undone
+/// `$XDG_STATE_HOME/kanrite/recovered/`, so text typed into an undone
 /// change isn't lost. `None` if there was nothing to keep or nowhere to put it.
 fn save_recovered(repo: &Path, changed: &BTreeSet<PathBuf>) -> Option<PathBuf> {
-    let state = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| crate::home::dir().map(|home| home.join(".local/state")))?;
+    let state = crate::places::state()?;
     let stamp = time::OffsetDateTime::now_utc().unix_timestamp_nanos();
-    let dir = state.join("agile-md/recovered").join(stamp.to_string());
+    let dir = state.join("recovered").join(stamp.to_string());
     let mut kept = false;
     for path in changed {
         let source = repo.join(path);

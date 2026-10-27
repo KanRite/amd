@@ -42,6 +42,7 @@ pub mod my_work;
 pub mod new_repo;
 pub mod numbering;
 pub mod pairing;
+pub mod places;
 pub mod project_trust;
 pub mod recover;
 pub mod recur;

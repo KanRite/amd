@@ -7,8 +7,9 @@
 //! virtual environment in riteui's own data folder, with `uv` when there is
 //! one, else Python's `venv`; voices come from Piper's own downloader. Then a
 //! marked block in the user's `speechd.conf` (copied from the system's when
-//! there's none) makes an `agile-md-piper` module the default. Remove undoes
-//! every part of it.
+//! there's none) makes a `kanrite-piper` module the default. Remove undoes
+//! every part of it. Before 5.0 the module was `agile-md-piper`
+//! ([`adopt_new_name`] renames a setup made then, ticket 310).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -54,12 +55,21 @@ pub const VOICES: [Voice; 6] = [
 ];
 
 /// The speech-dispatcher module riteui adds.
-pub const MODULE: &str = "agile-md-piper";
+pub const MODULE: &str = "kanrite-piper";
 const BEGIN: &str =
-    "# agile-md: Piper voice (begin). Preferences → Read aloud → Remove takes it out.";
-const END: &str = "# agile-md: Piper voice (end)";
+    "# kanrite: Piper voice (begin). Preferences → Read aloud → Remove takes it out.";
+const END: &str = "# kanrite: Piper voice (end)";
 /// The first line of a `speechd.conf` riteui made (from the system's).
-const CREATED: &str = "# Made by agile-md from the system's speechd.conf, to add a Piper voice.";
+const CREATED: &str = "# Made by kanrite from the system's speechd.conf, to add a Piper voice.";
+
+/// The same, as made before 5.0 (ticket 310): still recognised, removed and
+/// renamed by [`adopt_new_name`].
+const OLD_MODULE: &str = "agile-md-piper";
+const OLD_BEGIN: &str =
+    "# agile-md: Piper voice (begin). Preferences → Read aloud → Remove takes it out.";
+const OLD_END: &str = "# agile-md: Piper voice (end)";
+const OLD_CREATED: &str =
+    "# Made by agile-md from the system's speechd.conf, to add a Piper voice.";
 
 pub fn voice(id: &str) -> Option<Voice> {
     VOICES.iter().copied().find(|v| v.id == id)
@@ -132,6 +142,10 @@ fn module_file(dir: &Path) -> PathBuf {
     dir.join("modules").join(format!("{MODULE}.conf"))
 }
 
+fn old_module_file(dir: &Path) -> PathBuf {
+    dir.join("modules").join(format!("{OLD_MODULE}.conf"))
+}
+
 const SYSTEM_CONF: &str = "/etc/speech-dispatcher/speechd.conf";
 
 /// Can this machine have it: Linux with speech-dispatcher.
@@ -145,7 +159,9 @@ pub fn installed() -> Option<String> {
 }
 
 fn installed_in(speechd: &Path, root: &Path) -> Option<String> {
-    let conf = fs::read_to_string(module_file(speechd)).ok()?;
+    let conf = fs::read_to_string(module_file(speechd))
+        .or_else(|_| fs::read_to_string(old_module_file(speechd)))
+        .ok()?;
     if !piper_program(root).exists() {
         return None;
     }
@@ -358,7 +374,7 @@ impl Player {
 /// The module's configuration for speech-dispatcher's generic module.
 fn module_conf(piper: &Path, model: &Path, voice: Voice, rate: u32, player: Player) -> String {
     format!(
-        "# agile-md: Piper for speech-dispatcher. Made by riteui; Preferences →\n\
+        "# kanrite: Piper for speech-dispatcher. Made by riteui; Preferences →\n\
          # Read aloud → Remove takes it away.\n\
          GenericExecuteSynth \"printf %s \\'$DATA\\' | {piper} --model {model} --output-raw 2>/dev/null | {play}\"\n\
          GenericCmdDependency \"{program}\"\n\
@@ -400,12 +416,12 @@ fn without_block(conf: &str) -> String {
     let mut inside = false;
     for line in conf.split_inclusive('\n') {
         let bare = line.trim_end();
-        if bare == BEGIN {
+        if bare == BEGIN || bare == OLD_BEGIN {
             inside = true;
             continue;
         }
         if inside {
-            if bare == END {
+            if bare == END || bare == OLD_END {
                 inside = false;
             }
             continue;
@@ -444,9 +460,10 @@ fn configure(
 }
 
 fn unconfigure(dir: &Path) -> Result<()> {
-    let module = module_file(dir);
-    if module.exists() {
-        fs::remove_file(&module).with_context(|| format!("removing {}", module.display()))?;
+    for module in [module_file(dir), old_module_file(dir)] {
+        if module.exists() {
+            fs::remove_file(&module).with_context(|| format!("removing {}", module.display()))?;
+        }
     }
     let conf_path = dir.join("speechd.conf");
     let Ok(conf) = fs::read_to_string(&conf_path) else {
@@ -454,7 +471,7 @@ fn unconfigure(dir: &Path) -> Result<()> {
     };
     let rest = without_block(&conf);
     let system = fs::read_to_string(SYSTEM_CONF).unwrap_or_default();
-    if rest == format!("{CREATED}\n{system}") {
+    if rest == format!("{CREATED}\n{system}") || rest == format!("{OLD_CREATED}\n{system}") {
         fs::remove_file(&conf_path).with_context(|| format!("removing {}", conf_path.display()))?;
     } else if rest != conf {
         fs::write(&conf_path, rest).with_context(|| format!("writing {}", conf_path.display()))?;
@@ -463,6 +480,48 @@ fn unconfigure(dir: &Path) -> Result<()> {
     let _ = fs::remove_dir(dir.join("modules"));
     let _ = fs::remove_dir(dir);
     Ok(())
+}
+
+/// Renames a Piper setup made before 5.0 (ticket 310): the module file
+/// becomes `kanrite-piper.conf`, pointing into the data folder by its new
+/// name, and `speechd.conf`'s block names the new module. Nothing for any
+/// other setup. Returns whether it renamed one, and restarts
+/// speech-dispatcher then so the next `spd-say` reads it.
+pub fn adopt_new_name() -> bool {
+    let renamed = adopt_new_name_in(&speechd_dir()).unwrap_or(false);
+    if renamed {
+        restart_speech_dispatcher();
+    }
+    renamed
+}
+
+fn adopt_new_name_in(dir: &Path) -> Result<bool> {
+    let old = old_module_file(dir);
+    let new = module_file(dir);
+    let Ok(module) = fs::read_to_string(&old) else {
+        return Ok(false);
+    };
+    if new.exists() {
+        return Ok(false);
+    }
+    let module = module
+        .replace(
+            &format!("/{}/", agile_md::places::OLD_NAME),
+            &format!("/{}/", agile_md::places::NAME),
+        )
+        .replacen("# agile-md: Piper", "# kanrite: Piper", 1);
+    fs::write(&new, module).with_context(|| format!("writing {}", new.display()))?;
+    let conf_path = dir.join("speechd.conf");
+    if let Ok(conf) = fs::read_to_string(&conf_path) {
+        let conf = match conf.strip_prefix(OLD_CREATED) {
+            Some(rest) => format!("{CREATED}{rest}"),
+            None => conf,
+        };
+        fs::write(&conf_path, with_block(&conf))
+            .with_context(|| format!("writing {}", conf_path.display()))?;
+    }
+    fs::remove_file(&old).with_context(|| format!("removing {}", old.display()))?;
+    Ok(true)
 }
 
 /// Ends this user's speech-dispatcher so the next `spd-say` starts it with
@@ -498,11 +557,11 @@ mod tests {
         let system = "# system\nAddModule \"x\" \"sd_x\" \"x.conf\"\n";
         let once = with_block(system);
         assert!(once.starts_with(system));
-        assert!(once.contains("DefaultModule agile-md-piper"));
+        assert!(once.contains("DefaultModule kanrite-piper"));
         assert_eq!(with_block(&once), once, "added twice is still once");
         assert_eq!(without_block(&once), system);
         // A file without a final newline still gets the block on its own line.
-        assert!(with_block("a").starts_with("a\n# agile-md"));
+        assert!(with_block("a").starts_with("a\n# kanrite"));
     }
 
     #[test]
@@ -521,7 +580,7 @@ mod tests {
         .unwrap();
         let conf = fs::read_to_string(dir.join("speechd.conf")).unwrap();
         assert!(conf.starts_with(CREATED));
-        assert!(conf.contains("DefaultModule agile-md-piper"));
+        assert!(conf.contains("DefaultModule kanrite-piper"));
         let module = fs::read_to_string(module_file(&dir)).unwrap();
         assert!(module.contains("--output-raw"));
         assert!(module.contains("aplay -q -r 22050"));
@@ -529,6 +588,40 @@ mod tests {
 
         unconfigure(&dir).unwrap();
         assert!(!dir.exists(), "made by riteui, so all of it goes");
+    }
+
+    #[test]
+    fn a_setup_from_before_5_0_is_renamed_and_still_removed_cleanly() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("speech-dispatcher");
+        fs::create_dir_all(dir.join("modules")).unwrap();
+        // What riteui 4.x wrote.
+        fs::write(
+            old_module_file(&dir),
+            "# agile-md: Piper for speech-dispatcher.\nGenericExecuteSynth \"/h/.local/share/agile-md/speech/piper/venv/bin/piper\"\nDefaultVoice \"en_GB-alba-medium\"\n",
+        )
+        .unwrap();
+        let system = fs::read_to_string(SYSTEM_CONF).unwrap_or_default();
+        fs::write(
+            dir.join("speechd.conf"),
+            format!("{OLD_CREATED}\n{system}{OLD_BEGIN}\nAddModule \"{OLD_MODULE}\" \"sd_generic\" \"{OLD_MODULE}.conf\"\nDefaultModule {OLD_MODULE}\n{OLD_END}\n"),
+        )
+        .unwrap();
+        assert!(adopt_new_name_in(&dir).unwrap());
+        assert!(!old_module_file(&dir).exists());
+        let module = fs::read_to_string(module_file(&dir)).unwrap();
+        assert!(module.contains("/share/kanrite/speech/piper/"), "{module}");
+        let conf = fs::read_to_string(dir.join("speechd.conf")).unwrap();
+        assert!(conf.starts_with(CREATED), "{conf}");
+        assert!(
+            conf.contains("DefaultModule kanrite-piper") && !conf.contains(OLD_MODULE),
+            "{conf}"
+        );
+        // Once only.
+        assert!(!adopt_new_name_in(&dir).unwrap());
+        // Remove still takes all of it away.
+        unconfigure(&dir).unwrap();
+        assert!(!dir.exists());
     }
 
     #[test]

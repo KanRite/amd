@@ -291,13 +291,16 @@ else
   printf "agile-md's programs were not in %s.\n" "${BIN}"
 fi
 
-# Your own settings and data: kept unless you say.
-config="${XDG_CONFIG_HOME:-${HOME}/.config}/agile-md"
-state="${XDG_STATE_HOME:-${HOME}/.local/state}/agile-md"
-share="${XDG_DATA_HOME:-${HOME}/.local/share}/agile-md"
+# Your own settings and data: kept unless you say. Called kanrite since
+# 5.0, agile-md before; an agile-md left by the move is a link to kanrite
+# (ticket 310), which rm -rf removes as a link.
+state="${XDG_STATE_HOME:-${HOME}/.local/state}/kanrite"
 present=()
-for d in "${config}" "${state}" "${share}"; do
-  if [ -d "${d}" ]; then present+=("${d}"); fi
+for base in "${XDG_CONFIG_HOME:-${HOME}/.config}" "${XDG_STATE_HOME:-${HOME}/.local/state}" \
+  "${XDG_DATA_HOME:-${HOME}/.local/share}"; do
+  for name in kanrite agile-md; do
+    if [ -d "${base}/${name}" ] || [ -L "${base}/${name}" ]; then present+=("${base}/${name}"); fi
+  done
 done
 if [ "${#present[@]}" -gt 0 ]; then
   if [ "${ALL}" = "0" ] && [ "${ASK}" = "1" ] && { : </dev/tty; } 2>/dev/null; then

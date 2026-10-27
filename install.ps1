@@ -123,14 +123,15 @@ if ($removed.Count -gt 0) {
 # Your own settings and data: kept unless you say. These are where rite keeps
 # them on Windows today ($HOME, else your user folder; XDG_* when set).
 $homeDir = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
-function Place([string]$xdg, [string]$fallback) {
-    if ($xdg -and [IO.Path]::IsPathRooted($xdg)) { Join-Path $xdg 'agile-md' } else { Join-Path $homeDir "$fallback\agile-md" }
+# Called kanrite since 5.0, agile-md before (ticket 310).
+function Place([string]$xdg, [string]$fallback, [string]$name) {
+    if ($xdg -and [IO.Path]::IsPathRooted($xdg)) { Join-Path $xdg $name } else { Join-Path $homeDir "$fallback\$name" }
 }
-$present = @(
-    (Place $env:XDG_CONFIG_HOME '.config'),
-    (Place $env:XDG_STATE_HOME '.local\state'),
-    (Place $env:XDG_DATA_HOME '.local\share')
-) | Where-Object { Test-Path -LiteralPath $_ }
+$present = @(foreach ($name in 'kanrite', 'agile-md') {
+    (Place $env:XDG_CONFIG_HOME '.config' $name)
+    (Place $env:XDG_STATE_HOME '.local\state' $name)
+    (Place $env:XDG_DATA_HOME '.local\share' $name)
+}) | Where-Object { Test-Path -LiteralPath $_ }
 if ($present.Count -gt 0) {
     $removeData = [bool]$All
     if (-not $All -and -not $Yes) {

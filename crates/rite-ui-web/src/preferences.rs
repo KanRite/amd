@@ -1,6 +1,6 @@
 //! Preferences (ticket 148): settings that belong to you on this machine,
 //! not to the project. Saved in agile-md's own config
-//! (`~/.config/agile-md/config`), never committed: the colour scheme, the
+//! (`~/.config/kanrite/config`), never committed: the colour scheme, the
 //! zoom, and which board this machine opens when started from anywhere.
 
 use leptos::prelude::*;

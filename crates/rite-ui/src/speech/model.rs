@@ -83,7 +83,7 @@ impl Model {
         }
     }
 
-    /// `$XDG_DATA_HOME/agile-md/speech/<id>`.
+    /// `$XDG_DATA_HOME/kanrite/speech/<id>`.
     pub fn dir(self) -> PathBuf {
         speech_dir().join(self.id())
     }
@@ -167,12 +167,9 @@ impl Model {
 }
 
 pub(crate) fn speech_dir() -> PathBuf {
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| agile_md::home::dir().map(|h| h.join(".local/share")))
-        .unwrap_or_else(|| PathBuf::from(".local/share"));
-    base.join("agile-md").join("speech")
+    agile_md::places::data()
+        .unwrap_or_else(|| PathBuf::from(".local/share").join(agile_md::places::NAME))
+        .join("speech")
 }
 
 #[cfg(test)]
@@ -185,11 +182,8 @@ mod tests {
             assert_eq!(Model::from_id(model.id()), Some(model));
             let names: Vec<&str> = model.files().iter().map(|f| f.name).collect();
             assert!(names.contains(&"config.json") && names.contains(&"tokenizer.json"));
-            assert!(
-                model
-                    .dir()
-                    .ends_with(format!("agile-md/speech/{}", model.id()))
-            );
+            // In the data folder, kanrite or (until it's moved) agile-md.
+            assert!(model.dir().ends_with(format!("speech/{}", model.id())));
         }
         assert_eq!(Model::from_id("large"), None);
         assert!(Model::TinyEn.quantized() && !Model::BaseEn.quantized());
