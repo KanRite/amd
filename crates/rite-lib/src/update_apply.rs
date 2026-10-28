@@ -75,9 +75,9 @@ pub const RELEASE_INSTALL: &str = "# agile-md install: release";
 /// How to install (or update by hand): the installer, run again. On
 /// Windows that's `install.ps1`, in PowerShell (ticket 282).
 pub const INSTALL_COMMAND: &str = if cfg!(windows) {
-    "irm https://raw.githubusercontent.com/kanrite/rite/v4/install.ps1 | iex"
+    "irm https://raw.githubusercontent.com/kanrite/rite/v5/install.ps1 | iex"
 } else {
-    "curl -fsSL https://raw.githubusercontent.com/kanrite/rite/v4/install.sh | bash"
+    "curl -fsSL https://raw.githubusercontent.com/kanrite/rite/v5/install.sh | bash"
 };
 
 /// Downloads a URL's bytes. The front end supplies the network.
