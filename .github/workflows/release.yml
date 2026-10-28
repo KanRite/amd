@@ -38,7 +38,8 @@ jobs:
           # Built on the Apple-silicon runner, cross-compiled to Intel.
           - { target: x86_64-apple-darwin, runner: macos-latest, cross: true }
           # Windows (ticket 281): WebView2 ships with Windows 10 and 11, so
-          # no system libraries; the binaries are rite.exe and riteui.exe.
+          # no system libraries, and the C runtime is linked in (ticket 333);
+          # the binaries are rite.exe and riteui.exe.
           - { target: x86_64-pc-windows-msvc, runner: windows-latest, exe: .exe }
           - { target: aarch64-pc-windows-msvc, runner: windows-11-arm, exe: .exe }
     runs-on: ${{ matrix.runner }}
@@ -87,6 +88,13 @@ jobs:
         run: |
           target/${{ matrix.target }}/release/rite${{ matrix.exe }} --version
           target/${{ matrix.target }}/release/riteui${{ matrix.exe }} --version
+
+      # The runners have the VC++ Redistributable, so a program needing it
+      # still starts there; read the imports instead (ticket 333).
+      - name: No Visual C++ runtime DLLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/check-windows-dlls.ps1 target/${{ matrix.target }}/release/rite.exe target/${{ matrix.target }}/release/riteui.exe
 
       - name: Package amd-${{ matrix.target }}.zip
         if: runner.os != 'Windows'

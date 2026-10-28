@@ -1,3 +1,10 @@
 # `cargo xtask build|check|install` (ticket 318): crates/xtask.
 [alias]
 xtask = "run --quiet --package xtask --"
+
+# Windows (ticket 333): the C runtime linked into the programs, so they
+# don't need VCRUNTIME140.dll, which comes with the Visual C++
+# Redistributable and isn't on every Windows install. Checked by
+# scripts/check-windows-dlls.ps1 in CI and the release.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

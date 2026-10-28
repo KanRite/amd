@@ -727,7 +727,14 @@ redundant. Their history is in git if it is ever wanted again.
   Linux, the wasm target and Trunk, `trunk build`, then `cargo build -p
   rite-cli -p rite-ui`, a `--version` smoke test, and `amd-<target>.zip`
   holding both (`rite.exe` and `riteui.exe` on Windows, zipped with
-  `Compress-Archive`; `update_apply::file_name` adds the `.exe`). A `release` job then creates the GitHub Release (`gh release
+  `Compress-Archive`; `update_apply::file_name` adds the `.exe`). **The
+  Windows programs link the C runtime statically** (ticket 333,
+  `+crt-static` for windows-msvc in `.cargo/config.toml`): built the
+  default way they need VCRUNTIME140.dll from the VC++ Redistributable,
+  which a fresh Windows 11 may lack, and they don't start. The runners
+  have it, so `scripts/check-windows-dlls.ps1` (dumpbin `/dependents`,
+  in release.yml and CI's Windows job) fails a build that imports
+  `vcruntime*`/`msvcp*`. A `release` job then creates the GitHub Release (`gh release
   create --verify-tag --generate-notes`) and attaches every zip, so no
   release is made by hand; a platform whose build failed is left out with a
   warning. rite's own workflow, not `lite-actions/rust-release`, because only
