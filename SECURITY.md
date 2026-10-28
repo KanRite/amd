@@ -6,7 +6,7 @@ Fixes go into the latest 4.x release. Older releases aren't patched: the way
 to a fix is to update, which the installer does when run again:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kanrite/rite/v4/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/kanrite/rite/v5/install.sh | bash
 ```
 
 ## Reporting a vulnerability
