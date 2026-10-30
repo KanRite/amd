@@ -218,6 +218,17 @@ pub fn install_dir(exe: &Path) -> Install {
     };
     let shown = dir.display();
     match crate::eol::read(marker_in(dir)) {
+        // Cargo's bin folder is where `cargo xtask install` and `cargo install`
+        // put it (ticket 339). The installer would add a second copy
+        // elsewhere, with this one still first on the PATH, so it isn't offered.
+        Err(_) if is_cargo_bin(dir, std::env::var_os("CARGO_HOME"), crate::home::dir()) => {
+            Install::Unmanaged {
+                why: format!(
+                    "rite in {shown} was installed with cargo, so it isn't replaced: update                      your clone and run `cargo xtask install` there again"
+                ),
+                reinstall: false,
+            }
+        }
         Err(_) => Install::Unmanaged {
             why: format!(
                 "rite in {shown} wasn't put there by KanRite's installer, so it isn't replaced: \
@@ -249,6 +260,23 @@ pub fn install_dir(exe: &Path) -> Install {
             reinstall: true,
         },
     }
+}
+
+/// Whether `dir` is Cargo's bin folder: `$CARGO_HOME/bin`, by default
+/// `~/.cargo/bin`.
+fn is_cargo_bin(dir: &Path, cargo_home: Option<std::ffi::OsString>, home: Option<PathBuf>) -> bool {
+    let cargo_bin = match cargo_home.filter(|v| !v.is_empty()) {
+        Some(cargo_home) => PathBuf::from(cargo_home).join("bin"),
+        None => match home {
+            Some(home) => home.join(".cargo").join("bin"),
+            None => return false,
+        },
+    };
+    let same = |a: &Path, b: &Path| match (dunce::canonicalize(a), dunce::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    };
+    same(dir, &cargo_bin)
 }
 
 /// The releases to apply to go from `current` to the newest, oldest first.
@@ -898,6 +926,23 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn cargos_bin_folder_is_told_to_use_cargo_xtask_install() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bin = tmp.path().join("cargo").join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let cargo_home = Some(tmp.path().join("cargo").into_os_string());
+        // CARGO_HOME names it.
+        assert!(is_cargo_bin(&bin, cargo_home.clone(), None));
+        assert!(!is_cargo_bin(tmp.path(), cargo_home, None));
+        // Else ~/.cargo/bin.
+        let home = tmp.path().join("me");
+        let dot_cargo = home.join(".cargo").join("bin");
+        fs::create_dir_all(&dot_cargo).unwrap();
+        assert!(is_cargo_bin(&dot_cargo, None, Some(home)));
+        assert!(!is_cargo_bin(&dot_cargo, None, None));
     }
 
     #[test]
