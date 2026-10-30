@@ -111,8 +111,8 @@ impl Registry {
     pub fn add(&mut self, root: &Path) -> Result<bool> {
         let root = dunce::canonicalize(root)
             .with_context(|| format!("{} doesn't exist", root.display()))?;
-        if !root.join(".git").exists() {
-            bail!("{} is not a git repository", root.display());
+        if !crate::git::is_repo_dir(&root) {
+            bail!("{}", crate::git::not_a_repo(&root));
         }
         if self.entries.iter().any(|entry| entry.root == root) {
             return Ok(false);
@@ -208,7 +208,7 @@ pub fn clone_of(from: &Path, name: &str) -> Option<PathBuf> {
 pub fn project_dir_of(from: &Path) -> PathBuf {
     let from = dunce::canonicalize(from).unwrap_or_else(|_| from.to_path_buf());
     from.ancestors()
-        .find(|dir| dir.join(".git").exists())
+        .find(|dir| crate::git::is_repo_dir(dir))
         .and_then(Path::parent)
         .unwrap_or(&from)
         .to_path_buf()
@@ -276,6 +276,12 @@ mod tests {
         let mut registry = Registry::default();
         let err = registry.add(&plain).unwrap_err().to_string();
         assert!(err.contains("not a git repository"), "{err}");
+        // A `.git` folder with nothing in it is no clone either (ticket 341).
+        let hollow = dir.path().join("hollow");
+        fs::create_dir_all(hollow.join(".git")).unwrap();
+        let err = registry.add(&hollow).unwrap_err().to_string();
+        assert!(err.contains("nothing in it"), "{err}");
+        assert!(registry.entries.is_empty());
         let err = registry
             .add(&dir.path().join("nowhere"))
             .unwrap_err()

@@ -1281,7 +1281,7 @@ pub(crate) fn project_siblings(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = entries
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
-        .filter(|path| path.join(".git").is_dir() && is_project_board(path))
+        .filter(|path| crate::git::is_repo_dir(path) && is_project_board(path))
         .collect();
     found.sort();
     found
@@ -2319,11 +2319,11 @@ mod tests {
     }
 
     /// A child that qualifies as a project sibling: a git repo with a board
-    /// of its own. `project_siblings` only checks for directories, not a
-    /// real git repository, so a bare `.git` dir is enough here.
+    /// of its own. `project_siblings` looks for a `.git` with a `HEAD`, not
+    /// a real repository, so a fake one is enough here.
     fn project_child(parent: &Path, name: &str) {
         let child = parent.join(name);
-        fs::create_dir_all(child.join(".git")).unwrap();
+        crate::git::fake_repo(&child);
         board_at(&child);
     }
 
@@ -2345,12 +2345,25 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_whose_dot_git_is_empty_is_not_a_project_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        project_child(dir.path(), "acme-tickets");
+        let hollow = dir.path().join("hollow-tickets");
+        fs::create_dir_all(hollow.join(".git")).unwrap();
+        board_at(&hollow);
+        assert_eq!(
+            project_siblings(dir.path()),
+            vec![dir.path().join("acme-tickets")]
+        );
+    }
+
+    #[test]
     fn an_old_board_in_a_code_repo_is_not_a_project() {
         let dir = tempfile::tempdir().unwrap();
         project_child(dir.path(), "acme-tickets");
         // A v3 board: todo/doing/done only, nothing declared.
         let old = dir.path().join("versioning-tests");
-        fs::create_dir_all(old.join(".git")).unwrap();
+        crate::git::fake_repo(&old);
         for column in ["todo", "doing", "done"] {
             fs::create_dir_all(old.join("tasks").join(column)).unwrap();
         }

@@ -85,7 +85,7 @@ pub fn sources(board: &Board) -> Vec<Source> {
 /// other repositories, else registered on this machine (`find_near`).
 fn locate(registry: &Registry, name: &str, dir: &Path) -> Option<PathBuf> {
     let sibling = dir.join(name);
-    if sibling.join(".git").exists() {
+    if crate::git::is_repo_dir(&sibling) {
         return Some(sibling);
     }
     registry
@@ -623,7 +623,7 @@ mod tests {
     fn reads_stay_inside() {
         let outer = tempfile::tempdir().unwrap();
         let root = outer.path().join("docs");
-        fs::create_dir_all(root.join(".git")).unwrap();
+        crate::git::fake_repo(&root);
         fs::write(root.join("a.md"), "# A\n").unwrap();
         fs::write(root.join(".git/config"), "secret\n").unwrap();
         fs::write(outer.path().join("secret.md"), "no\n").unwrap();

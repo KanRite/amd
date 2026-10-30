@@ -138,7 +138,7 @@ pub fn archive(name: Option<String>, on: bool) -> Result<()> {
         let project = agile_md::current_project::project_name(&root);
         if let Some(dir) = root.parent() {
             let documents = dir.join(format!("{project}-documents"));
-            if documents.join(".git").exists() {
+            if agile_md::git::is_repo_dir(&documents) {
                 crate::init::register(&documents)?;
             }
         }

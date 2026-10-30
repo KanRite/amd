@@ -241,7 +241,7 @@ impl Task {
         if people.is_empty() {
             return false;
         }
-        let Some(repo) = self.path.ancestors().find(|dir| dir.join(".git").exists()) else {
+        let Some(repo) = self.path.ancestors().find(|dir| git::is_repo_dir(dir)) else {
             return false;
         };
         let board = crate::board::Board::in_repo(repo);

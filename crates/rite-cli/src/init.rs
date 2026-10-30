@@ -190,7 +190,10 @@ pub(crate) fn warn_if_cloned_twice(registry: &Registry, target: &Path) {
 }
 
 fn warn_if_already_present(target: &Path) -> Result<()> {
-    if !target.join(".git").exists() {
+    if !git::is_repo_dir(target) {
+        if git::has_empty_dot_git(target) {
+            bail!("{}", git::not_a_repo(target));
+        }
         bail!(
             "{} already exists and isn't a git repository — remove it or choose a \
              different project name",
@@ -467,7 +470,7 @@ fn bring_back(base: &Path, tickets: &Path) -> Result<()> {
     let mut missing = Vec::new();
     for name in board_settings::load(&board).repos() {
         let clone = base.join(&name);
-        if clone.join(".git").exists() {
+        if git::is_repo_dir(&clone) {
             register(&clone)?;
         } else {
             missing.push(name);
@@ -522,6 +525,20 @@ fn create_and_clone(base: &Path, full_name: &str, target: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_with_an_empty_dot_git_is_refused_before_anything_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("proj-tickets");
+        std::fs::create_dir_all(target.join(".git")).unwrap();
+        let err = warn_if_already_present(&target).unwrap_err().to_string();
+        assert!(err.contains("nothing in it"), "{err}");
+        // A folder with no `.git` at all keeps its own message.
+        let plain = dir.path().join("proj-documents");
+        std::fs::create_dir_all(&plain).unwrap();
+        let err = warn_if_already_present(&plain).unwrap_err().to_string();
+        assert!(err.contains("isn't a git repository"), "{err}");
+    }
 
     #[test]
     fn the_owner_defaults_to_the_project_name() {
