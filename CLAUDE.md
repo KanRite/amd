@@ -627,7 +627,10 @@ redundant. Their history is in git if it is ever wanted again.
   leaves out command names and names with spaces.
 - `crates/rite-cli/src/value.rs` — `TypedValueParser`s that advertise their possible values, so
   completions and `--help` list them while validation stays ours.
-- `crates/rite-lib/src/git.rs` — thin wrappers over the `git` CLI: repo
+- `crates/rite-lib/src/git.rs` — thin wrappers over the `git` CLI: **whether a
+  folder is a clone** (`is_repo_dir`: a `.git` file, or a `.git` holding a
+  `HEAD`; never `.git` exists, since a copy that skipped its contents leaves
+  an empty folder, ticket 341; `fake_repo` makes one for tests), repo
   discovery and file state (`repo_root`, `is_tracked`, `mv`, `config`),
   branches (`current_branch`, `branch_exists`, `switch_branch`,
   `commits_ahead`, `branch_pushed`, `delete_branch`, `set_head_branch`), and

@@ -171,8 +171,14 @@ pub fn HomeBar() -> impl IntoView {
                     let root = p.root.clone();
                     let selected = move || current().is_some_and(|c| rite_ui_model::same_path(&c.root, &root));
                     let name = rite_ui_model::shown_name(&p.name, &p.shown).to_string();
-                    let label = if p.archived { format!("{name} (archived)") } else { name };
-                    view! { <option value=p.root.clone() selected=selected>{label}</option> }
+                    let label = if p.archived {
+                        format!("{name} (archived)")
+                    } else if p.broken.is_some() {
+                        format!("{name} (not a git repository)")
+                    } else {
+                        name
+                    };
+                    view! { <option value=p.root.clone() selected=selected disabled=p.broken.is_some()>{label}</option> }
                 }
             </For>
         </select>
@@ -444,9 +450,21 @@ fn Projects(
         let hide = !p.hidden;
         let stats_root = p.root.clone();
         let folded = p.graphs_folded;
+        let broken = p.broken.clone();
         view! {
             <li class="flex flex-col gap-1 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
                 <div class="flex items-center gap-3">
+                {match broken.clone() {
+                    // Its repository isn't one (ticket 341): say why, not a
+                    // button that fails.
+                    Some(why) => view! {
+                        <div class="flex-1">
+                            <span class="font-medium">{rite_ui_model::shown_name(&p.name, &p.shown).to_string()}</span>
+                            {show_dir.then(|| view! { <span class="ml-2 text-xs font-normal text-slate-500">{p.dir.clone()}</span> })}
+                            <p class="text-xs text-red-700 dark:text-red-400" role="alert">{format!("Can't be opened: {why}.")}</p>
+                        </div>
+                    }.into_any(),
+                    None => view! {
                 <button
                     type="button"
                     class="flex-1 text-left font-medium hover:underline"
@@ -456,6 +474,8 @@ fn Projects(
                     {rite_ui_model::shown_name(&p.name, &p.shown).to_string()}
                     {show_dir.then(|| view! { <span class="ml-2 text-xs font-normal text-slate-500">{p.dir.clone()}</span> })}
                 </button>
+                    }.into_any(),
+                }}
                 <button
                     type="button"
                     class="rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
@@ -465,7 +485,7 @@ fn Projects(
                     {if hide { "Hide" } else { "Show" }}
                 </button>
                 </div>
-                <ProjectStatsView root=stats_root days folded />
+                {broken.is_none().then(|| view! { <ProjectStatsView root=stats_root.clone() days folded /> })}
             </li>
         }
     };
