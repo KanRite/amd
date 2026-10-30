@@ -197,9 +197,23 @@ impl Registry {
 /// 101/107): no ticket can be pointed at it, and no branch made for it,
 /// until it's cloned.
 pub fn clone_of(from: &Path, name: &str) -> Option<PathBuf> {
+    registered_clone_of(from, name).or_else(|| beside(from, name))
+}
+
+/// [`clone_of`], only a clone this machine's registry knows.
+pub fn registered_clone_of(from: &Path, name: &str) -> Option<PathBuf> {
     Registry::load()
         .find_near(name, &project_dir_of(from))
         .map(|entry| entry.root.clone())
+}
+
+/// A clone of `name` in the project's own folder, beside its tickets
+/// repository, whether or not it's registered (ticket 342): a project
+/// cloned again, or copied, has them there before anyone runs `rite
+/// register`, and they're cloned all the same.
+pub fn beside(from: &Path, name: &str) -> Option<PathBuf> {
+    let clone = project_dir_of(from).join(name);
+    git::is_repo_dir(&clone).then_some(clone)
 }
 
 /// The project directory `from` is in: the parent of the repository

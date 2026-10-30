@@ -949,6 +949,21 @@ pub fn commit_paths_locally(repo: &Path, message: &str, paths: &BTreeSet<PathBuf
             bail!(failed("git add", &detail));
         }
     }
+    // A write that left the files as they were (declaring a repository the
+    // project already declares) has nothing to commit; `git commit` would
+    // fail, and the caller would warn of a failure that isn't one (ticket
+    // 342). Whatever is staged for these paths is a rename's old side, so
+    // this is checked against them, not the whole index.
+    let unchanged = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["diff", "--cached", "--quiet", "--"])
+        .args(paths)
+        .status()
+        .is_ok_and(|status| status.success());
+    if unchanged {
+        return Ok(());
+    }
     let (ok, detail) = run(Command::new("git")
         .arg("-C")
         .arg(repo)
@@ -1301,6 +1316,41 @@ mod tests {
         std::fs::write(repo.join("README.md"), "hello\n").unwrap();
         commit_all(&repo, "seed").unwrap();
         assert!(dirty_paths(&repo).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_commit_of_files_left_as_they_were_is_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        init_repo(&repo);
+        std::fs::write(
+            repo.join(".settings"),
+            "repos = a
+",
+        )
+        .unwrap();
+        commit_all(&repo, "seed").unwrap();
+        let before = head(&repo);
+        // Rewritten with the same text, so the file is dirty to a timestamp
+        // check but not to git (ticket 342).
+        std::fs::write(
+            repo.join(".settings"),
+            "repos = a
+",
+        )
+        .unwrap();
+        let paths = BTreeSet::from([PathBuf::from(".settings")]);
+        commit_paths_locally(&repo, "register: a", &paths).unwrap();
+        assert_eq!(head(&repo), before, "nothing was committed");
+        // A real change still is.
+        std::fs::write(
+            repo.join(".settings"),
+            "repos = a,b
+",
+        )
+        .unwrap();
+        commit_paths_locally(&repo, "register: b", &paths).unwrap();
+        assert_ne!(head(&repo), before);
     }
 
     #[test]

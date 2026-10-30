@@ -3667,11 +3667,18 @@ fn cmd_clone(board: &Board, name: Option<&str>, all: bool) -> Result<()> {
     for name in &names {
         match agile_md::clone::clone_repo(board, name) {
             Ok(cloned) => {
-                println!(
-                    "cloned {name} into {} (from {})",
-                    cloned.path.display(),
-                    cloned.url
-                );
+                if cloned.already_there {
+                    println!(
+                        "registered {name}: already cloned at {}",
+                        cloned.path.display()
+                    );
+                } else {
+                    println!(
+                        "cloned {name} into {} (from {})",
+                        cloned.path.display(),
+                        cloned.url
+                    );
+                }
                 for other in cloned.also_at {
                     eprintln!(
                         "warning: {name} is also cloned at {} — two copies of one repository \

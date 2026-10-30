@@ -1660,7 +1660,7 @@ project, into one `riteui` window:
   two folders, so `Registry::find_near(name, project_dir)`/`clone_of(from,
   name)` take the clone in the current project's folder, else the only
   clone of that name anywhere, else nothing (ambiguous → shown as not
-  cloned, never a guess). `find(name)` is only for `deregister`. A path
+  cloned, never a guess). `clone_of` is that registered clone, else one **beside the tickets repository** (`registry::beside`, a folder of the name that `git::is_repo_dir` accepts, registered or not: a project cloned again or copied has them before anyone runs `rite register`, ticket 342; `rite clone <name>` registers it). `find(name)` is only for `deregister`. A path
   that no longer exists is skipped on load and so dropped on the next
   save. Registering (`init`, `join`, `register`) a clone of a remote
   that's already registered elsewhere **warns** (`same_remote`: `origin`s
