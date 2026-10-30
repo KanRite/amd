@@ -19,6 +19,9 @@ pub struct Cloned {
     pub url: String,
     /// Other registered clones of the same remote (ticket 095), to warn about.
     pub also_at: Vec<PathBuf>,
+    /// The clone was there already, beside the tickets repository, and only
+    /// got registered (ticket 342); nothing was fetched.
+    pub already_there: bool,
 }
 
 /// The repositories the project declares that aren't cloned for it here.
@@ -42,8 +45,23 @@ pub fn clone_repo(board: &Board, name: &str) -> Result<Cloned> {
     if !declared.contains(&name) {
         bail!("{name} isn't declared for this project — `rite register` it from a clone first");
     }
-    if let Some(path) = registry::clone_of(&board.root, &name) {
+    if let Some(path) = registry::registered_clone_of(&board.root, &name) {
         bail!("{name} is already cloned here, at {}", path.display());
+    }
+    // Cloned beside the tickets repository but not registered: a project
+    // cloned again or copied. Register it, as the clone would have been
+    // (ticket 342), rather than say a directory is in the way.
+    if let Some(path) = registry::beside(&board.root, &name) {
+        let mut registry = Registry::load();
+        registry.add(&path)?;
+        registry.save()?;
+        let also_at = registry.same_remote(&path);
+        return Ok(Cloned {
+            url: git::remote_url(&path).unwrap_or_default(),
+            path,
+            also_at,
+            already_there: true,
+        });
     }
     let tickets = board.repo_root();
     let target = registry::project_dir_of(tickets).join(&name);
@@ -77,6 +95,7 @@ pub fn clone_repo(board: &Board, name: &str) -> Result<Cloned> {
         path: target,
         url,
         also_at,
+        already_there: false,
     })
 }
 
@@ -160,6 +179,23 @@ mod tests {
         let (_dir, board) = project();
         let err = clone_repo(&board, "other").unwrap_err().to_string();
         assert!(err.contains("isn't declared for this project"), "{err}");
+    }
+
+    #[test]
+    fn a_clone_beside_the_tickets_repository_is_found_whether_or_not_it_is_registered() {
+        let (dir, board) = project();
+        // Nothing there, a plain folder, and a `.git` with nothing in it.
+        assert_eq!(registry::beside(&board.root, "code"), None);
+        std::fs::create_dir_all(dir.path().join("code")).unwrap();
+        assert_eq!(registry::beside(&board.root, "code"), None);
+        std::fs::create_dir_all(dir.path().join("code").join(".git")).unwrap();
+        assert_eq!(registry::beside(&board.root, "code"), None);
+        // A repository is one (ticket 342).
+        git::fake_repo(&dir.path().join("code"));
+        assert_eq!(
+            registry::beside(&board.root, "code").map(|p| dunce::canonicalize(p).unwrap()),
+            Some(dunce::canonicalize(dir.path().join("code")).unwrap())
+        );
     }
 
     #[test]

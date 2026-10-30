@@ -519,8 +519,8 @@ mod tests {
             git::head(&origins.join("acme-payments.git")).is_some(),
             "README pushed"
         );
-        // Again: its folder is there now (registering it, which would make
-        // it "already cloned", is the machine's registry: left alone here).
+        // Again: its folder is there now, beside the tickets repository, so
+        // it is cloned for the project (ticket 342) though unregistered.
         let err = create(
             &board,
             &NewRepo {
@@ -530,7 +530,7 @@ mod tests {
             &mut no_gh,
         )
         .unwrap_err();
-        assert!(err.to_string().contains("already exists"), "{err}");
+        assert!(err.to_string().contains("already cloned"), "{err}");
         // Declared for the project, and the ticket's note (setting the
         // ticket's repository needs the clone registered: test.sh does that).
         declare(&board, &made.name).unwrap();

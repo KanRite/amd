@@ -213,8 +213,8 @@ pub struct Repos {
     /// The current project's own board first, then each declared repository
     /// that is registered here and has a board.
     pub repos: Vec<RepoBoard>,
-    /// Declared names with no usable local clone, for a front end to show
-    /// greyed out rather than silently omit.
+    /// Declared names with no clone here, for a front end to show greyed out
+    /// rather than silently omit.
     pub unregistered: Vec<String>,
     /// The git identity (`user.email`) leases are compared against.
     pub identity: Option<String>,
@@ -252,19 +252,28 @@ pub fn find_repos() -> Result<FoundRepos> {
     let project_dir = crate::registry::project_dir_of(&current_root);
 
     let mut repos = vec![(repo_name(&current_root), current_root.clone(), current)];
-    // A name this project declares but that isn't registered locally
-    // (or is, but its board has since gone missing) — rendered greyed
-    // out in the repo-visibility row, not silently omitted, so a
-    // teammate who's added a repository sees it exists before they've
-    // cloned it.
+    // A name this project declares with no clone here — registered, or
+    // beside the tickets repository (ticket 342) — is rendered greyed out
+    // in the repo-visibility row, not silently omitted, so a teammate who's
+    // added a repository sees it exists before they've cloned it. A clone
+    // with no board of its own (a code repository whose tickets are on the
+    // project's board) is cloned, and has no board to add.
     let mut unregistered = Vec::new();
     for name in &declared {
-        match registry.find_near(name, &project_dir) {
-            Some(entry) if entry.root == current_root => {} // already added, above
-            Some(entry) if entry.has_board() => {
-                repos.push((repo_name(&entry.root), entry.root.clone(), entry.board()));
-            }
-            _ => unregistered.push(name.clone()),
+        let clone = registry
+            .find_near(name, &project_dir)
+            .map(|entry| entry.root.clone())
+            .or_else(|| crate::registry::beside(&current_root, name));
+        let Some(root) = clone else {
+            unregistered.push(name.clone());
+            continue;
+        };
+        if root == current_root {
+            continue; // already added, above
+        }
+        let board = Board::in_repo(&root);
+        if board.root.is_dir() {
+            repos.push((repo_name(&root), root, board));
         }
     }
     // `user.email` is ordinarily global, so any registered repo's
