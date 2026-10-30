@@ -1398,6 +1398,9 @@ pub struct HomeProject {
     /// Its sprint graphs folded on the landing page, by you (ticket 305).
     #[serde(default)]
     pub graphs_folded: bool,
+    /// Why its repository isn't one, so it can't be opened (ticket 341).
+    #[serde(default)]
+    pub broken: Option<String>,
 }
 
 /// Which documents the Documents view shows (ticket 168): the project's

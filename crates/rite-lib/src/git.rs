@@ -65,6 +65,48 @@ pub fn repo_root() -> Option<PathBuf> {
     }
 }
 
+/// Whether `dir` is a git repository's work tree: its `.git` is a file (a
+/// worktree or submodule pointing at its real folder) or a folder holding a
+/// `HEAD`. An empty `.git` folder, which a copy that skipped its contents
+/// leaves, is not one (ticket 341). Asks the files, not git, so it's cheap.
+pub fn is_repo_dir(dir: &Path) -> bool {
+    let dot_git = dir.join(".git");
+    dot_git.is_file() || dot_git.join("HEAD").is_file()
+}
+
+/// Whether `dir` has a `.git` folder that doesn't make it a repository
+/// ([`is_repo_dir`]), so it can be told what's wrong.
+pub fn has_empty_dot_git(dir: &Path) -> bool {
+    dir.join(".git").is_dir() && !is_repo_dir(dir)
+}
+
+/// Why `dir` isn't a repository, and what to do: an empty `.git` folder is
+/// said so (ticket 341), since the folder looks like a clone.
+pub fn not_a_repo(dir: &Path) -> String {
+    if has_empty_dot_git(dir) {
+        format!(
+            "{} has a .git folder with nothing in it, so it isn't a git repository: clone it              again, or restore its .git from a copy",
+            dir.display()
+        )
+    } else {
+        format!("{} is not a git repository", dir.display())
+    }
+}
+
+/// A folder that [`is_repo_dir`] takes for a repository, for tests that need
+/// one without running git.
+#[cfg(test)]
+pub(crate) fn fake_repo(dir: &Path) {
+    let dot_git = dir.join(".git");
+    std::fs::create_dir_all(&dot_git).unwrap();
+    std::fs::write(
+        dot_git.join("HEAD"),
+        "ref: refs/heads/main
+",
+    )
+    .unwrap();
+}
+
 /// Is `file` tracked by the repository at `repo`?
 pub fn is_tracked(repo: &Path, file: &Path) -> bool {
     Command::new("git")
@@ -967,6 +1009,35 @@ pub fn checked(repo: &Path, args: &[&str]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_dot_git_folder_is_not_a_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let clone = dir.path().join("clone");
+        // Nothing there, and a `.git` with nothing in it (ticket 341).
+        assert!(!is_repo_dir(&clone));
+        assert!(!has_empty_dot_git(&clone));
+        std::fs::create_dir_all(clone.join(".git")).unwrap();
+        assert!(!is_repo_dir(&clone));
+        assert!(has_empty_dot_git(&clone));
+        assert!(not_a_repo(&clone).contains("nothing in it"));
+        assert!(!not_a_repo(dir.path()).contains("nothing in it"));
+        // One with a HEAD is.
+        fake_repo(&clone);
+        assert!(is_repo_dir(&clone));
+        assert!(!has_empty_dot_git(&clone));
+        // A worktree's or submodule's `.git` is a file.
+        let linked = dir.path().join("linked");
+        std::fs::create_dir_all(&linked).unwrap();
+        std::fs::write(
+            linked.join(".git"),
+            "gitdir: ../clone/.git
+",
+        )
+        .unwrap();
+        assert!(is_repo_dir(&linked));
+        assert!(!has_empty_dot_git(&linked));
+    }
 
     #[test]
     fn a_failure_carries_gits_own_reason_when_there_is_one() {

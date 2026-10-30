@@ -2849,6 +2849,7 @@ async fn home() -> Result<rite_ui_model::Home> {
                         shared_cloned: shared.is_some_and(|d| d.root.is_some()),
                         archived: p.archived,
                         graphs_folded: folded.contains(&p.root),
+                        broken: p.broken,
                     }
                 })
                 .collect(),
@@ -3033,6 +3034,11 @@ async fn use_project(
 /// remembers it for a launch from outside any project. Changes nothing if
 /// no project opens.
 fn show_from(path: &Path) -> Result<rite_ui_model::Board> {
+    // Say which folder is the trouble, not that the current directory isn't
+    // in a repository (ticket 341).
+    if path.is_dir() && !agile_md::git::is_repo_dir(path) {
+        return Err(agile_md::git::not_a_repo(path));
+    }
     let previous = std::env::current_dir().ok();
     std::env::set_current_dir(path).map_err(|e| format!("{}: {e}", path.display()))?;
     match Project::open().and_then(|p| p.summary()) {

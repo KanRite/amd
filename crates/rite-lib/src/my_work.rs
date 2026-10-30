@@ -56,6 +56,9 @@ pub struct Project {
     pub hidden: bool,
     /// Archived for everyone (ticket 157): never in My work or work to pick.
     pub archived: bool,
+    /// Why its repository isn't one (ticket 341: an empty `.git` folder, say),
+    /// so it can't be opened. Never in My work or work to pick.
+    pub broken: Option<String>,
 }
 
 /// A ticket in My work.
@@ -119,6 +122,7 @@ fn projects_in(registry: &Registry, hidden: &[PathBuf]) -> Vec<Project> {
             dir: registry::project_dir_of(&e.root),
             hidden: hidden.iter().any(|h| h == &e.root),
             archived: crate::archive::is_archived(&Board::in_repo(&e.root)),
+            broken: (!crate::git::is_repo_dir(&e.root)).then(|| crate::git::not_a_repo(&e.root)),
             root: e.root.clone(),
         })
         .collect();
@@ -433,7 +437,7 @@ fn each_board(
     let mut seen: Vec<PathBuf> = Vec::new();
     for project in projects
         .iter()
-        .filter(|p| !p.archived && (include_hidden || !p.hidden))
+        .filter(|p| !p.archived && p.broken.is_none() && (include_hidden || !p.hidden))
     {
         for (repo, board) in boards_of(project, &registry) {
             if seen.contains(&board.root) {
