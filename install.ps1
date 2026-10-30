@@ -120,18 +120,25 @@ if ($removed.Count -gt 0) {
     Write-Host "agile-md's programs were not in $Bin."
 }
 
-# Your own settings and data: kept unless you say. These are where rite keeps
-# them on Windows today ($HOME, else your user folder; XDG_* when set).
+# Your own settings and data: kept unless you say. On Windows rite keeps them
+# in %APPDATA% and %LOCALAPPDATA% (ticket 278); 5.0.0 used $HOME or your user
+# folder, as Unix does, and an XDG_* folder wins when set. All are looked for.
 $homeDir = if ($env:HOME) { $env:HOME } else { $env:USERPROFILE }
 # Called kanrite since 5.0, agile-md before (ticket 310).
-function Place([string]$xdg, [string]$fallback, [string]$name) {
-    if ($xdg -and [IO.Path]::IsPathRooted($xdg)) { Join-Path $xdg $name } else { Join-Path $homeDir "$fallback\$name" }
+function Place([string]$xdg, [string]$windows, [string]$fallback, [string]$name) {
+    if ($xdg -and [IO.Path]::IsPathRooted($xdg)) { Join-Path $xdg $name }
+    elseif ($windows -and [IO.Path]::IsPathRooted($windows)) { Join-Path $windows $name }
+    else { Join-Path $homeDir "$fallback\$name" }
 }
 $present = @(foreach ($name in 'kanrite', 'agile-md') {
-    (Place $env:XDG_CONFIG_HOME '.config' $name)
-    (Place $env:XDG_STATE_HOME '.local\state' $name)
-    (Place $env:XDG_DATA_HOME '.local\share' $name)
-}) | Where-Object { Test-Path -LiteralPath $_ }
+    (Place $env:XDG_CONFIG_HOME $env:APPDATA '.config' $name)
+    (Place $env:XDG_STATE_HOME $env:LOCALAPPDATA '.local\state' $name)
+    (Place $env:XDG_DATA_HOME $env:LOCALAPPDATA '.local\share' $name)
+    # 5.0.0's folders, until rite has moved them.
+    (Join-Path $homeDir ".config\$name")
+    (Join-Path $homeDir ".local\state\$name")
+    (Join-Path $homeDir ".local\share\$name")
+}) | Select-Object -Unique | Where-Object { Test-Path -LiteralPath $_ }
 if ($present.Count -gt 0) {
     $removeData = [bool]$All
     if (-not $All -and -not $Yes) {

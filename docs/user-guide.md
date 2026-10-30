@@ -507,8 +507,8 @@ disagree.
   even with automatic checks off, and undoes a Later.
   Turn it off with `update-check = off` in `~/.config/kanrite/config`, or
   `RITE_UPDATE_CHECK=0`, which wins over the setting. What it remembers (the releases it last saw, and a Later) is in
-  `~/.local/state/kanrite/update.json`, or under `$XDG_STATE_HOME`: on
-  this machine only, never in a project's repositories.
+  `~/.local/state/kanrite/update.json` (`%LOCALAPPDATA%\kanrite` on Windows),
+  or under `$XDG_STATE_HOME`: on this machine only, never in a project's repositories.
 
   **How an update is applied** (also `rite update` on the command line,
   `rite update --check` to only look): if you're several releases behind,
@@ -1037,7 +1037,11 @@ still reads a board 5.x has written.
   `XDG_*` folders). The first time `rite` or `riteui` runs it moves each
   `agile-md` folder there, says so, and leaves a link at the old name, so
   a 4.x build on the same machine still finds everything. A Piper voice
-  set up in Preferences is moved with it.
+  set up in Preferences is moved with it. **On Windows** they are
+  `%APPDATA%\kanrite` (settings, your projects list) and
+  `%LOCALAPPDATA%\kanrite` (state and data), where Windows programs keep
+  theirs; 5.0.0 used `%USERPROFILE%\.config\kanrite` and so on, and the
+  first run of a later version moves those across (no link left behind).
 - **The AI tools' MCP server is `kanrite`.** If you connected a tool
   before 5.0, its entry is called `agile-md`: remove it, or the tools
   appear twice. For Claude Code:
