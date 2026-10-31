@@ -184,17 +184,20 @@ jobs:
       # so GNU's tools go first on the PATH rather than the script being
       # made portable.
       - name: GNU tools for tests/test.sh
+        if: ${{ !cancelled() }}
         run: |
           brew install gnu-sed coreutils
           echo "$(brew --prefix)/opt/gnu-sed/libexec/gnubin" >> "$GITHUB_PATH"
           echo "$(brew --prefix)/opt/coreutils/libexec/gnubin" >> "$GITHUB_PATH"
       - name: Versions
+        if: ${{ !cancelled() }}
         run: |
           bash --version | head -1
           git --version
           sed --version | head -1
           diskutil info / | grep -iE "file system personality|type \(bundle\)"
       - name: CLI tests
+        if: ${{ !cancelled() }}
         run: bash tests/test.sh
 
   shell:

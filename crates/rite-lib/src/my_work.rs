@@ -650,8 +650,18 @@ mod tests {
 
     #[test]
     fn scratch_boards_are_skipped() {
-        let temp = Path::new("/tmp");
-        assert!(is_scratch(Path::new("/tmp/tmp.abc/s"), temp));
-        assert!(!is_scratch(Path::new("/home/u/work/p-tickets"), temp));
+        // A real folder under a real temp folder: `/tmp` is a link to
+        // `/private/tmp` on macOS, and a path that isn't there can't be
+        // resolved to compare (ticket 345).
+        let temp = tempfile::tempdir().unwrap();
+        let scratch = temp.path().join("tmp.abc").join("s");
+        std::fs::create_dir_all(&scratch).unwrap();
+        assert!(is_scratch(&scratch, temp.path()));
+        let elsewhere = tempfile::tempdir().unwrap();
+        assert!(!is_scratch(elsewhere.path(), &temp.path().join("tmp.abc")));
+        assert!(!is_scratch(
+            Path::new("/home/u/work/p-tickets"),
+            temp.path()
+        ));
     }
 }
