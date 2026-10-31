@@ -39,6 +39,7 @@ pub mod import_log;
 pub mod links;
 pub mod model;
 pub mod my_work;
+pub mod names;
 pub mod new_repo;
 pub mod numbering;
 pub mod pairing;

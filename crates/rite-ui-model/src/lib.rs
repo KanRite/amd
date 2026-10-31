@@ -759,6 +759,13 @@ pub fn path_key(path: &str) -> String {
     }
 }
 
+/// Whether two project or repository names are the same name, whatever their
+/// case (ticket 338). The page can't use rite-lib's `names::same`, which
+/// rite-ui's tests check this agrees with.
+pub fn same_name(a: &str, b: &str) -> bool {
+    a == b || a.to_lowercase() == b.to_lowercase()
+}
+
 /// Whether two folder paths name the same place, whichever slashes they use.
 pub fn same_path(a: &str, b: &str) -> bool {
     path_key(a) == path_key(b)

@@ -4488,6 +4488,24 @@ mod tests {
     }
 
     #[test]
+    fn the_page_compares_project_names_as_rite_does() {
+        for (a, b) in [
+            ("KanRite", "kanrite"),
+            ("kanrite", "kanrite"),
+            ("KanRite-tickets", "kanrite-Tickets"),
+            ("kanrite", "kanrite2"),
+            ("kan-rite", "kanrite"),
+            ("\u{c4}rger", "\u{e4}rger"),
+        ] {
+            assert_eq!(
+                rite_ui_model::same_name(a, b),
+                agile_md::names::same(a, b),
+                "{a} / {b}"
+            );
+        }
+    }
+
+    #[test]
     fn the_editor_derives_branch_names_as_amd_does() {
         for title in [
             "Crash on save",
