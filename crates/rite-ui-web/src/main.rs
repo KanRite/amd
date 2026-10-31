@@ -6,6 +6,7 @@ mod admin;
 mod api;
 mod app;
 mod board;
+mod counts;
 mod dialog;
 mod documents;
 mod editor;

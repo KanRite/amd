@@ -1565,6 +1565,16 @@ pub async fn project_stats(root: &str, days: u32) -> Result<rite_ui_model::Proje
 }
 
 #[derive(Serialize)]
+struct RootArgs<'a> {
+    root: &'a str,
+}
+
+/// A project's open tickets, and how many are top and TRIAGE (ticket 349).
+pub async fn project_counts(root: &str) -> Result<rite_ui_model::TicketCounts, String> {
+    call("project_counts", &RootArgs { root }).await
+}
+
+#[derive(Serialize)]
 struct DaysArgs {
     days: u32,
 }

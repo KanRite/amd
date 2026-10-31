@@ -1342,6 +1342,56 @@ fn default_stats_days() -> u32 {
     30
 }
 
+/// How many tickets are open, and how many need looking at first (ticket
+/// 349): shown by the board's name and by each project on the landing page.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TicketCounts {
+    /// Tickets not in a done-kind column: the backlog (loose, and in epics and
+    /// sprints, drafts included), todo, doing, and a project's own columns
+    /// that aren't done.
+    pub open: usize,
+    /// Of those, priority top.
+    pub top: usize,
+    /// Of those, tagged TRIAGE. Always top as well, so each is in both.
+    pub triage: usize,
+}
+
+impl TicketCounts {
+    fn add(&mut self, ticket: &TicketSummary) {
+        self.open += 1;
+        if ticket.priority.eq_ignore_ascii_case("top") {
+            self.top += 1;
+        }
+        if ticket
+            .tags
+            .iter()
+            .any(|t| t.trim().eq_ignore_ascii_case("TRIAGE"))
+        {
+            self.triage += 1;
+        }
+    }
+}
+
+impl Board {
+    /// The open tickets this board draws, and how many are top and TRIAGE
+    /// (ticket 349): every column that isn't done-kind, and the tickets in
+    /// epics and sprints, which the page keeps apart from the columns. Of the
+    /// whole project, not of what a search or filter shows. rite-lib's
+    /// `my_work::counts` is the same count; rite-ui's tests check they agree.
+    pub fn counts(&self) -> TicketCounts {
+        let mut counts = TicketCounts::default();
+        for column in &self.columns {
+            if column.column.kind() != Kind::Done {
+                column.tickets.iter().for_each(|t| counts.add(t));
+            }
+        }
+        for epic in &self.epics {
+            epic.tickets.iter().for_each(|t| counts.add(t));
+        }
+        counts
+    }
+}
+
 /// A project's statistics (ticket 233), read from git history.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectStats {

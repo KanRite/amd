@@ -61,6 +61,44 @@ pub struct Project {
     pub broken: Option<String>,
 }
 
+/// How many tickets are open, and how many of them need looking at first
+/// (ticket 349): the landing page shows it by each project.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Counts {
+    /// Every ticket not in a done-kind column: the backlog (loose, and in
+    /// epics and sprints, drafts included), todo, doing and any column of the
+    /// project's own that isn't done.
+    pub open: usize,
+    /// Of those, priority top.
+    pub top: usize,
+    /// Of those, tagged TRIAGE. Always top as well (ticket 248), so each is
+    /// counted in both.
+    pub triage: usize,
+}
+
+/// [`Counts`] across `boards`: a project's own board and the declared
+/// repositories' ([`boards_of`]).
+pub fn counts(boards: &[&Board]) -> anyhow::Result<Counts> {
+    let mut counts = Counts::default();
+    for board in boards {
+        for column in board.workflow().columns() {
+            if column.is(Kind::Done) {
+                continue;
+            }
+            for task in board.tasks_in(column)? {
+                counts.open += 1;
+                if task.priority() == crate::task::TOP {
+                    counts.top += 1;
+                }
+                if task.has_tag(crate::task::TRIAGE_TAG) {
+                    counts.triage += 1;
+                }
+            }
+        }
+    }
+    Ok(counts)
+}
+
 /// A ticket in My work.
 #[derive(Clone, Debug, Serialize)]
 pub struct WorkItem {

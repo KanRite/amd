@@ -487,6 +487,14 @@ disagree.
   and Reset.
 - **New ticket**, **+ Sprint**, **+ Epic**; open one from its box to start
   a sprint, rename it, or delete it once everything in it is done.
+- **How many are open** (ticket 349): under Preferences and Admin, the
+  project's open tickets (everything not in a done column: the backlog,
+  including epics, sprints and drafts, to do, doing, and any column of your
+  own that isn't done), then in red how many of them are **top** priority and
+  how many are **triage**. A TRIAGE ticket is always top, so each is counted
+  in both. A kind with none isn't shown. It counts the whole project, so a
+  search or a filter doesn't change it. The landing page shows the same three
+  numbers on each project's row.
 - **Preferences**, your own settings on this machine, in
   `~/.config/kanrite/config`: the colour scheme (light, dark or the
   system's, with an accent colour: indigo, teal or slate), the zoom, the board to open when riteui
