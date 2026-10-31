@@ -702,7 +702,13 @@ redundant. Their history is in git if it is ever wanted again.
 - `tests/test.sh` — assert-based end-to-end suite; builds with cargo and spins
   up temp git repos. Unit tests live next to the code in `#[cfg(test)] mod tests`.
 - `.github/workflows/ci.yml` — fmt + clippy + cargo test + tests/test.sh, and
-  shellcheck for the shell files.
+  shellcheck for the shell files. A `windows` job (ticket 276) is the third; none is a check the
+  Dependabot gate reads beyond `rust` and `shell`. **macOS** (ticket 345) is its own
+  workflow, `macos.yml`, run by hand (`workflow_dispatch`) and every Monday, not on
+  pull requests (about nine minutes): every crate's tests, then tests/test.sh with
+  GNU sed and coreutils first on the PATH since the script uses `sed -i` and
+  `date -d`. A default macOS volume ignores case, Linux's honours it, so mixed-case
+  tests (ticket 338) cover all three kinds of disk.
 - `.github/dependabot.yml` and the **Dependabot gate** (tickets 246,
   247; `.github/workflows/dependabot-gate.yml`, `scripts/dependabot-gate.sh`):
   weekly GitHub Actions and Cargo updates (Cargo's minor and patch grouped),

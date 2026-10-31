@@ -4106,7 +4106,9 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let tmp = tempfile::tempdir().unwrap();
         let script = tmp.path().join("fake editor.sh");
-        std::fs::write(&script, "#!/bin/sh\ncp /proc/self/stat \"$1/ran\"\n").unwrap();
+        // Not `/proc`, which macOS has none of (ticket 345): the test is
+        // only that it ran, in the folder it was given.
+        std::fs::write(&script, "#!/bin/sh\necho \"$$\" > \"$1/ran\"\n").unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         let dir = tmp.path().join("project dir");
         std::fs::create_dir(&dir).unwrap();

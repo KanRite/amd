@@ -17,6 +17,11 @@ export RITE_NO_INPUT=1
 # to the config directory, and a test must never touch the user's. State and
 # data too: every run moves an agile-md folder it finds to kanrite (ticket
 # 310), which must only ever happen to the suite's own.
+# Temporary folders by their real path: on macOS $TMPDIR is under /var, a link
+# to /private/var, and rite prints the real path, so a test that looks for the
+# one it made would never find it (ticket 345). Harmless where there's no link.
+TMPDIR="$(cd "${TMPDIR:-/tmp}" && pwd -P)"
+export TMPDIR
 xdg="$(mktemp -d)"
 XDG_CONFIG_HOME="${xdg}/config"
 XDG_STATE_HOME="${xdg}/state"
@@ -2868,7 +2873,8 @@ assert "install.sh puts in rite, riteui, the amd and amdui links and rite-uninst
   bash -c "$(declare -f in_ins); ins='${ins}'; in_ins bash '${ROOT}/install.sh' --dir '${ins}/bin' --zip '${ins}/release.zip' >/dev/null 2>&1 \
     && '${ins}/bin/rite' --version | grep -q '^rite ' && test -L '${ins}/bin/amd' && [ \"\$(readlink '${ins}/bin/amd')\" = rite ] \
     && grep -qx '# agile-md install: release' '${ins}/bin/rite-uninstall' && ! test -e '${ins}/bin/amd-uninstall'"
-if [ -x "${AMDUI_BIN:-${ROOT}/target/debug/riteui}" ]; then
+# install.sh installs the launcher on Linux only: no .desktop files elsewhere.
+if [ "$(uname -s)" = "Linux" ] && [ -x "${AMDUI_BIN:-${ROOT}/target/debug/riteui}" ]; then
   assert "...and one launcher, riteui's: 4.x's amdui.desktop and its icon are gone" \
     bash -c "test -L '${ins}/bin/amdui' && test -f '${ins}/home/.local/share/applications/riteui.desktop' \
       && ! test -e '${ins}/home/.local/share/applications/amdui.desktop' \
