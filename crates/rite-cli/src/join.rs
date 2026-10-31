@@ -44,6 +44,18 @@ pub fn run(project: String, org: Option<String>) -> Result<()> {
     let tickets = base.join(format!("{project}-tickets"));
     let documents = base.join(format!("{project}-documents"));
     for target in [&tickets, &documents] {
+        // A folder of that name in another case is in the way too, whatever
+        // the disk says about case (ticket 338).
+        let folder = target
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if let Some(other) = agile_md::names::folder_named(&base, &folder)? {
+            bail!(
+                "{} already exists — rite join only clones into a directory that doesn't                  have the project yet",
+                other.display()
+            );
+        }
         // symlink_metadata, not exists(): a dangling symlink is still in the way.
         if target.symlink_metadata().is_ok() {
             bail!(

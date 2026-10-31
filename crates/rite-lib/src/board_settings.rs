@@ -307,7 +307,8 @@ impl BoardSettings {
     pub fn set_project(&mut self, name: &str) -> Result<()> {
         validate_project_name(name)?;
         if let Some(existing) = self.project() {
-            if existing == name {
+            // Same project whatever the case (ticket 338): the stored one stays.
+            if crate::names::same(existing, name) {
                 return Ok(());
             }
             bail!("this board's project is already '{existing}' and cannot become '{name}'");
@@ -1242,6 +1243,17 @@ mod tests {
         settings.set_project("agile-md").unwrap();
         settings.set_project("agile-md").unwrap();
         assert_eq!(settings.project(), Some("agile-md"));
+    }
+
+    #[test]
+    fn setting_the_same_project_in_another_case_changes_nothing() {
+        // Ticket 338: `rite init KanRite` on a board of `kanrite`.
+        let dir = tempfile::tempdir().unwrap();
+        let board = board(dir.path());
+        let mut settings = load(&board);
+        settings.set_project("kanrite").unwrap();
+        settings.set_project("KanRite").unwrap();
+        assert_eq!(settings.project(), Some("kanrite"));
     }
 
     #[test]

@@ -24,7 +24,10 @@ pub fn list() -> Result<()> {
     let width = projects.iter().map(|p| p.name.len()).max().unwrap_or(0);
     println!("projects in {}:", dir.display());
     for project in &projects {
-        let marker = if current.as_deref() == Some(project.name.as_str()) {
+        let marker = if current
+            .as_deref()
+            .is_some_and(|name| agile_md::names::same(name, &project.name))
+        {
             '*'
         } else {
             ' '
@@ -45,6 +48,14 @@ pub fn list() -> Result<()> {
             "{marker} {:<width$}  {}{shown}{archived}",
             project.name,
             repositories(&dir, project)
+        );
+    }
+    // Two projects whose names differ only in case (ticket 338).
+    for (a, b) in current_project::twins(&dir) {
+        eprintln!(
+            "warning: {} and {} differ only in case, so a project name can't tell them apart:              keep one",
+            a.display(),
+            b.display()
         );
     }
     if current.is_none() {
@@ -73,13 +84,31 @@ pub fn use_project(name: Option<String>) -> Result<()> {
             names.join(", ")
         ),
     };
-    if !names.contains(&name) {
-        bail!(
+    // Found by name without case, and recorded as the project is called
+    // (ticket 338): `rite project use KanRite` finds `kanrite`.
+    let matching: Vec<&String> = names
+        .iter()
+        .filter(|candidate| agile_md::names::same(candidate, &name))
+        .collect();
+    let name = match matching.as_slice() {
+        [] => bail!(
             "no project '{name}' in {} (one of: {})",
             dir.display(),
             names.join(", ")
-        );
-    }
+        ),
+        [one] => (*one).clone(),
+        // Exactly as typed picks between two that differ only in case.
+        many => match many.iter().find(|candidate| **candidate == &name) {
+            Some(exact) => (*exact).clone(),
+            None => bail!(
+                "{} differ only in case: say which, exactly as written",
+                many.iter()
+                    .map(|n| n.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            ),
+        },
+    };
     current_project::write(&dir, &name)?;
     println!("current project: {name}");
     Ok(())
@@ -93,7 +122,11 @@ pub fn archive(name: Option<String>, on: bool) -> Result<()> {
         Some(name) => {
             let dir = current_project::project_dir()?;
             let projects = current_project::projects(&dir);
-            match projects.iter().find(|p| p.name == name) {
+            match projects.iter().find(|p| p.name == name).or_else(|| {
+                projects
+                    .iter()
+                    .find(|p| agile_md::names::same(&p.name, &name))
+            }) {
                 Some(project) => Board::in_repo(&project.tickets),
                 None => bail!(
                     "no project '{name}' in {} (one of: {})",
@@ -137,7 +170,8 @@ pub fn archive(name: Option<String>, on: bool) -> Result<()> {
         crate::init::register(&root)?;
         let project = agile_md::current_project::project_name(&root);
         if let Some(dir) = root.parent() {
-            let documents = dir.join(format!("{project}-documents"));
+            let documents = agile_md::names::find_folder(dir, &format!("{project}-documents"))
+                .unwrap_or_else(|| dir.join(format!("{project}-documents")));
             if agile_md::git::is_repo_dir(&documents) {
                 crate::init::register(&documents)?;
             }

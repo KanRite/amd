@@ -283,6 +283,7 @@ redundant. Their history is in git if it is ever wanted again.
   leaves it, and `read` ignores a note whose pid isn't running (`kill
   -0`). Preferences → AI command shows the Claude Code command and points
   at `rite mcp setup`.
+- `crates/rite-lib/src/names.rs` — **names are compared without case** (ticket 338): `names::same` is the one comparison for project and repository names (the registry's `find`/`find_near`/`remove`, `.current-project`, `rite project use`, the trust record, `set_project`), `folder_named`/`find_folder` find a folder by it, so `KanRite-tickets` beside `kanrite-documents` works on a case-sensitive disk, and two folders or registry entries that differ only in case are refused (`Registry::add`, `init`, `join`, `pick`) or warned about (`rite project`), never picked between. Names stay as typed; nothing is lowercased on disk, and `rite project use` records the project's own spelling. Whether a disk is case-sensitive varies per folder or volume, so no OS check is made. rite-ui-model's `same_name` is the page's copy (rite-ui's tests check they agree). `project_trust`'s key is the board's path with one kind of slash and no case on Windows (an entry under the raw path is still read).
 - `crates/rite-lib/src/project_trust.rs` — a per-machine, trust-on-first-use
   check that a board's declared `project` hasn't changed unexpectedly since
   `rite` last saw it.

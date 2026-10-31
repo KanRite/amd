@@ -20,7 +20,7 @@ use agile_md::board::Board;
 use agile_md::board_settings::User;
 use agile_md::sync::{self, Purpose};
 use agile_md::transition::Event;
-use agile_md::{board_settings, git, registry::Registry};
+use agile_md::{board_settings, git, names, registry::Registry};
 
 use agile_md::github;
 
@@ -71,7 +71,10 @@ pub fn run(project: String, local_only: bool, org: Option<String>) -> Result<()>
 /// before this repository had a documents sibling; only pulled out of
 /// `run()` so both repositories share the same creation path.
 fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf> {
-    let target = base.join(format!("{project}-tickets"));
+    // An existing folder of that name in any case is the one (ticket 338);
+    // two that differ only in case are refused.
+    let folder = format!("{project}-tickets");
+    let target = names::folder_named(base, &folder)?.unwrap_or_else(|| base.join(&folder));
     let full_name = format!("{}/{project}-tickets", owner_for(project, org));
 
     let created_new = if target.exists() {
@@ -117,7 +120,8 @@ fn init_tickets(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf
 /// `docs/`, `ideas/`, `README.md` and `CHANGELOG.md` (ticket 168). No settings: they all live in the tickets
 /// repository (ticket 111). Registered, same as tickets.
 fn init_documents(base: &Path, project: &str, org: Option<&str>) -> Result<PathBuf> {
-    let target = base.join(format!("{project}-documents"));
+    let folder = format!("{project}-documents");
+    let target = names::folder_named(base, &folder)?.unwrap_or_else(|| base.join(&folder));
     let full_name = format!("{}/{project}-documents", owner_for(project, org));
 
     let created_new = if target.exists() {

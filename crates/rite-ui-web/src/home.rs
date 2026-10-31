@@ -426,7 +426,13 @@ fn Projects(
     };
     // The same name in two folders: say which folder, so they can be told
     // apart (ticket 095).
-    let twice = |name: &str| projects.iter().filter(|p| p.name == name).count() > 1;
+    let twice = |name: &str| {
+        projects
+            .iter()
+            .filter(|p| rite_ui_model::same_name(&p.name, name))
+            .count()
+            > 1
+    };
     let rows: Vec<(HomeProject, bool)> = projects
         .iter()
         .map(|p| (p.clone(), twice(&p.name)))

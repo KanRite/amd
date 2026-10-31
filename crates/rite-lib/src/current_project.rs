@@ -92,15 +92,17 @@ pub fn projects(dir: &Path) -> Vec<ProjectEntry> {
         .into_iter()
         .map(|tickets| {
             let name = project_name(&tickets);
-            let documents = dir.join(format!("{name}-documents"));
+            // Found by name without case (ticket 338): on a case-sensitive
+            // disk `KanRite-tickets` may sit beside `kanrite-documents`.
+            let documents = crate::names::find_folder(dir, &format!("{name}-documents"));
             ProjectEntry {
-                documents: documents.is_dir().then_some(documents),
+                documents: documents.filter(|documents| documents.is_dir()),
                 name,
                 tickets,
             }
         })
         .collect();
-    found.sort_by(|a, b| a.name.cmp(&b.name));
+    found.sort_by_key(|entry| (crate::names::key(&entry.name), entry.name.clone()));
     found
 }
 
@@ -129,7 +131,7 @@ pub fn keep_existing(dir: &Path, added: &str) -> Result<Option<String>> {
     }
     let others: Vec<ProjectEntry> = projects(dir)
         .into_iter()
-        .filter(|project| project.name != added)
+        .filter(|project| !crate::names::same(&project.name, added))
         .collect();
     match others.as_slice() {
         [existing] => {
@@ -155,17 +157,21 @@ pub fn keep_existing(dir: &Path, added: &str) -> Result<Option<String>> {
 pub(crate) fn pick(dir: &Path, strict: bool) -> Result<Option<PathBuf>> {
     let candidates = project_siblings(dir);
     if let Some(name) = read(dir) {
-        return candidates
+        // The name is the same however it's cased (ticket 338). Two clones
+        // that differ only in case can't both be it: refused, not picked.
+        let named: Vec<PathBuf> = candidates
             .into_iter()
-            .find(|tickets| project_name(tickets) == name)
-            .map(Some)
-            .ok_or_else(|| {
-                anyhow!(
-                    "current project '{name}' (from {}) isn't here — run `rite project use <name>` \
-                     to pick another (`rite project` lists them)",
-                    dir.join(FILE).display()
-                )
-            });
+            .filter(|tickets| crate::names::same(&project_name(tickets), &name))
+            .collect();
+        return match named.as_slice() {
+            [only] => Ok(Some(only.clone())),
+            [] => Err(anyhow!(
+                "current project '{name}' (from {}) isn't here — run `rite project use <name>` \
+                 to pick another (`rite project` lists them)",
+                dir.join(FILE).display()
+            )),
+            many => Err(anyhow!(case_twins(many))),
+        };
     }
     match candidates.as_slice() {
         [] => Ok(None),
@@ -184,6 +190,34 @@ pub(crate) fn pick(dir: &Path, strict: bool) -> Result<Option<PathBuf>> {
             Ok(None)
         }
     }
+}
+
+/// Two or more project boards in one folder whose names differ only in
+/// case, so no name chooses between them (ticket 338).
+fn case_twins(paths: &[PathBuf]) -> String {
+    let names: Vec<String> = paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect();
+    format!(
+        "{} differ only in case: keep one of them, so a project name can't mean either",
+        names.join(" and ")
+    )
+}
+
+/// Pairs of projects in `dir` whose names differ only in case, for a listing
+/// to warn about (ticket 338). Only possible on a case-sensitive disk.
+pub fn twins(dir: &Path) -> Vec<(PathBuf, PathBuf)> {
+    let found = projects(dir);
+    let mut out = Vec::new();
+    for (i, a) in found.iter().enumerate() {
+        for b in &found[i + 1..] {
+            if a.name != b.name && crate::names::same(&a.name, &b.name) {
+                out.push((a.tickets.clone(), b.tickets.clone()));
+            }
+        }
+    }
+    out
 }
 
 fn ambiguous(paths: &[PathBuf]) -> String {
@@ -249,6 +283,63 @@ mod tests {
         );
         assert_eq!(found[0].documents, Some(dir.path().join("acme-documents")));
         assert_eq!(found[1].documents, None);
+    }
+
+    #[test]
+    fn a_project_is_found_whatever_case_its_name_is_written_in() {
+        // Ticket 338: the name typed, the folder on disk and the file say
+        // `KanRite`, `kanrite` and `KANRITE`, and are one project.
+        let dir = tempfile::tempdir().unwrap();
+        let tickets = repo_with_board(dir.path(), "KanRite-tickets");
+        // Its documents, in another case (a case-sensitive disk has both).
+        fs::create_dir_all(dir.path().join("kanrite-documents")).unwrap();
+        write(dir.path(), "KANRITE").unwrap();
+        assert_eq!(pick(dir.path(), true).unwrap(), Some(tickets.clone()));
+        write(dir.path(), "kanrite").unwrap();
+        assert_eq!(pick(dir.path(), true).unwrap(), Some(tickets.clone()));
+        let found = projects(dir.path());
+        assert_eq!(found[0].name, "KanRite");
+        assert_eq!(
+            found[0]
+                .documents
+                .as_deref()
+                .and_then(Path::file_name)
+                .map(|n| n.to_string_lossy().to_lowercase()),
+            Some("kanrite-documents".to_string())
+        );
+        // A name that isn't there is still refused.
+        write(dir.path(), "other").unwrap();
+        assert!(pick(dir.path(), true).is_err());
+    }
+
+    #[test]
+    fn keeping_the_existing_project_ignores_case() {
+        let dir = tempfile::tempdir().unwrap();
+        repo_with_board(dir.path(), "KanRite-tickets");
+        repo_with_board(dir.path(), "acme-tickets");
+        // `kanrite` was just added, as typed in lower case: not "another".
+        assert_eq!(
+            keep_existing(dir.path(), "kanrite").unwrap(),
+            Some("acme".to_string())
+        );
+    }
+
+    #[test]
+    fn two_projects_that_differ_only_in_case_are_refused_not_picked() {
+        let dir = tempfile::tempdir().unwrap();
+        repo_with_board(dir.path(), "acme-tickets");
+        fs::create_dir_all(dir.path().join("Acme-tickets")).unwrap();
+        if !dir.path().join("Acme-tickets").join(".git").exists()
+            && fs::read_dir(dir.path()).unwrap().count() == 2
+        {
+            repo_with_board(dir.path(), "Acme-tickets");
+        } else {
+            return; // a disk that ignores case: only one folder can exist
+        }
+        write(dir.path(), "acme").unwrap();
+        let err = pick(dir.path(), true).unwrap_err().to_string();
+        assert!(err.contains("differ only in case"), "{err}");
+        assert_eq!(twins(dir.path()).len(), 1);
     }
 
     #[test]

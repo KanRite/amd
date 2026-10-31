@@ -117,8 +117,22 @@ impl Registry {
         if self.entries.iter().any(|entry| entry.root == root) {
             return Ok(false);
         }
-        self.entries.push(Entry::new(root));
-        self.entries.sort_by(|a, b| a.name.cmp(&b.name));
+        // Another clone in the same folder whose name differs only in case
+        // (possible on a case-sensitive disk) would be taken for this one:
+        // refused, not quietly mixed up (ticket 338).
+        let new = Entry::new(root);
+        if let Some(twin) = self.entries.iter().find(|entry| {
+            entry.root.parent() == new.root.parent() && crate::names::same(&entry.name, &new.name)
+        }) {
+            bail!(
+                "{} and {} differ only in case: keep one, so a name can't mean either",
+                twin.root.display(),
+                new.root.display()
+            );
+        }
+        self.entries.push(new);
+        self.entries
+            .sort_by_key(|entry| (crate::names::key(&entry.name), entry.name.clone()));
         Ok(true)
     }
 
@@ -128,7 +142,7 @@ impl Registry {
         let before = self.entries.len();
         self.entries.retain(|entry| {
             let by_path = canonical.as_ref().is_some_and(|path| entry.root == *path);
-            let by_name = entry.name == reference;
+            let by_name = crate::names::same(&entry.name, reference);
             !(by_path || by_name)
         });
         self.entries.len() != before
@@ -143,7 +157,9 @@ impl Registry {
     /// whose board no longer exists — `has_board()`) is what `riteui` shows
     /// greyed out, not an error and not silently omitted.
     pub fn find(&self, name: &str) -> Option<&Entry> {
-        self.entries.iter().find(|entry| entry.name == name)
+        self.entries
+            .iter()
+            .find(|entry| crate::names::same(&entry.name, name))
     }
 
     /// The clone of `name` that belongs with the project in `project_dir`
@@ -152,7 +168,11 @@ impl Registry {
     /// none here is ambiguous — the same project name can live in two
     /// project directories — so it's `None` rather than a guess.
     pub fn find_near(&self, name: &str, project_dir: &Path) -> Option<&Entry> {
-        let named: Vec<&Entry> = self.entries.iter().filter(|e| e.name == name).collect();
+        let named: Vec<&Entry> = self
+            .entries
+            .iter()
+            .filter(|e| crate::names::same(&e.name, name))
+            .collect();
         let project_dir =
             dunce::canonicalize(project_dir).unwrap_or_else(|_| project_dir.to_path_buf());
         let here = named
@@ -212,7 +232,7 @@ pub fn registered_clone_of(from: &Path, name: &str) -> Option<PathBuf> {
 /// cloned again, or copied, has them there before anyone runs `rite
 /// register`, and they're cloned all the same.
 pub fn beside(from: &Path, name: &str) -> Option<PathBuf> {
-    let clone = project_dir_of(from).join(name);
+    let clone = crate::names::find_folder(&project_dir_of(from), name)?;
     git::is_repo_dir(&clone).then_some(clone)
 }
 
@@ -301,6 +321,48 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("doesn't exist"), "{err}");
+    }
+
+    #[test]
+    fn a_repository_is_found_whatever_case_its_name_is_typed_in() {
+        // Ticket 338.
+        let dir = tempfile::tempdir().unwrap();
+        let kanrite = repo(dir.path(), "KanRite-tickets");
+        let mut registry = Registry::default();
+        registry.add(&kanrite).unwrap();
+        for typed in ["KanRite-tickets", "kanrite-tickets", "KANRITE-TICKETS"] {
+            assert_eq!(
+                registry.find(typed).map(|e| e.root.clone()).as_ref(),
+                Some(&registry.entries[0].root),
+                "{typed}"
+            );
+            assert!(registry.find_near(typed, dir.path()).is_some(), "{typed}");
+        }
+        assert!(registry.find("other").is_none());
+        assert!(registry.remove("kanrite-TICKETS"));
+        assert!(registry.entries.is_empty());
+    }
+
+    #[test]
+    fn two_clones_that_differ_only_in_case_are_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let lower = repo(dir.path(), "acme-tickets");
+        let upper = dir.path().join("Acme-Tickets");
+        // A disk that ignores case has only the one folder.
+        if fs::create_dir(&upper).is_err() {
+            return;
+        }
+        Command::new("git")
+            .arg("-C")
+            .arg(&upper)
+            .args(["init", "-q"])
+            .status()
+            .unwrap();
+        let mut registry = Registry::default();
+        registry.add(&lower).unwrap();
+        let err = registry.add(&upper).unwrap_err().to_string();
+        assert!(err.contains("differ only in case"), "{err}");
+        assert_eq!(registry.entries.len(), 1);
     }
 
     #[test]
