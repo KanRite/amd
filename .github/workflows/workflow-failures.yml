@@ -1,0 +1,65 @@
+name: Workflow failures
+
+# Ticket 348: a workflow that fails and that nobody opens is no check. When a
+# listed workflow finishes on main, on a schedule or for a release, a failure
+# opens a GitHub issue (or comments on the open one) and a later pass closes
+# it. rite's issue import turns an open issue into a TRIAGE ticket, so a red
+# workflow reaches the board and My work. scripts/workflow-report.sh does it.
+#
+# Not for pull requests: a red PR check is normal while a change is made, and
+# its author sees it. Not for Dependabot's branches, whose failures the
+# Dependabot gate already raises its own issues for.
+#
+# `workflow_run` needs the workflows named, so every workflow in this folder
+# is listed (scripts/check-failure-reporter.sh, in CI, fails when one isn't).
+# Nothing here can notice a workflow that never runs.
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - "CodeQL Advanced"
+      - Dependabot gate
+      - Dependabot gate (closed)
+      - macOS
+      - Pages
+      - Release
+    types: [completed]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Main, or a release tag (a `v` tag pushed); never a pull request or one
+    # of Dependabot's branches. Cancelled, skipped and neutral runs say
+    # nothing either way.
+    if: >-
+      github.event.workflow_run.event != 'pull_request'
+      && github.event.workflow_run.event != 'pull_request_target'
+      && !startsWith(github.event.workflow_run.head_branch, 'dependabot/')
+      && (github.event.workflow_run.head_branch == github.event.repository.default_branch
+          || (github.event.workflow_run.event == 'push'
+              && startsWith(github.event.workflow_run.head_branch, 'v')))
+      && contains(fromJSON('["failure", "timed_out", "success"]'), github.event.workflow_run.conclusion)
+    steps:
+      - uses: actions/checkout@v7
+      # The run's details come in the environment, not in the script's text:
+      # a branch name is data, not a command.
+      - name: Open or close the issue for ${{ github.event.workflow_run.name }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          EVENT: ${{ github.event.workflow_run.event }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          if [ "${CONCLUSION}" = "success" ]; then
+            scripts/workflow-report.sh passed
+          else
+            scripts/workflow-report.sh failed
+          fi
