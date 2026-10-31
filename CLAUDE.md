@@ -709,6 +709,13 @@ redundant. Their history is in git if it is ever wanted again.
   GNU sed and coreutils first on the PATH since the script uses `sed -i` and
   `date -d`. A default macOS volume ignores case, Linux's honours it, so mixed-case
   tests (ticket 338) cover all three kinds of disk.
+  **A failing workflow reaches the board** (ticket 348, `workflow-failures.yml`):
+  when a listed workflow finishes on main, on a schedule or for a `v` tag, a failure
+  opens a GitHub issue (one per workflow and branch, `scripts/workflow-report.sh`),
+  which rite's issue import turns into a TRIAGE ticket, and a later pass closes it.
+  Not pull requests or Dependabot's branches. `workflow_run` needs every workflow
+  named, so `scripts/check-failure-reporter.sh` (the `shell` job) fails when a new
+  workflow isn't in the list. A workflow that never runs can't report itself.
 - `.github/dependabot.yml` and the **Dependabot gate** (tickets 246,
   247; `.github/workflows/dependabot-gate.yml`, `scripts/dependabot-gate.sh`):
   weekly GitHub Actions and Cargo updates (Cargo's minor and patch grouped),
