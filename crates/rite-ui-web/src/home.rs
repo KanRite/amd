@@ -455,6 +455,7 @@ fn Projects(
         let flip = p.root.clone();
         let hide = !p.hidden;
         let stats_root = p.root.clone();
+        let counts_root = p.root.clone();
         let folded = p.graphs_folded;
         let broken = p.broken.clone();
         view! {
@@ -480,6 +481,7 @@ fn Projects(
                     {rite_ui_model::shown_name(&p.name, &p.shown).to_string()}
                     {show_dir.then(|| view! { <span class="ml-2 text-xs font-normal text-slate-500">{p.dir.clone()}</span> })}
                 </button>
+                <crate::counts::ProjectCounts root=counts_root.clone() />
                     }.into_any(),
                 }}
                 <button

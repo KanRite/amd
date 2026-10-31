@@ -2866,6 +2866,29 @@ async fn home() -> Result<rite_ui_model::Home> {
     .await
 }
 
+/// A project's open tickets, and how many are top and TRIAGE (ticket 349),
+/// across its boards: what the landing page shows by each project. Reads each
+/// ticket's own file, no git history.
+#[tauri::command]
+async fn project_counts(root: String) -> Result<rite_ui_model::TicketCounts> {
+    blocking(move || {
+        use agile_md::my_work;
+        let project = my_work::projects()
+            .into_iter()
+            .find(|p| p.root == Path::new(&root))
+            .ok_or_else(|| format!("no project at {root}"))?;
+        let boards = my_work::boards_of(&project, &agile_md::registry::Registry::load());
+        let refs: Vec<&Board> = boards.iter().map(|(_, b)| b).collect();
+        let counts = my_work::counts(&refs).map_err(err)?;
+        Ok(rite_ui_model::TicketCounts {
+            open: counts.open,
+            top: counts.top,
+            triage: counts.triage,
+        })
+    })
+    .await
+}
+
 /// A project's statistics (ticket 233) over `days`, across its boards:
 /// raised, done and closed, by week, and each running sprint's burn.
 #[tauri::command]
@@ -3117,6 +3140,7 @@ pub fn run() {
             set_project_graphs_folded,
             set_project_archived,
             project_stats,
+            project_counts,
             set_stats_days,
             pin_start_page,
             my_pins,
@@ -4286,6 +4310,75 @@ mod tests {
 
     fn column(c: UiColumn) -> Place {
         Place::column(c)
+    }
+
+    /// A ticket with the fields the counts look at (ticket 349).
+    fn new_ticket_with(
+        project: &Project,
+        title: &str,
+        priority: &str,
+        tags: &[&str],
+        epic: Option<&str>,
+    ) -> String {
+        let fields = TicketFields {
+            title: title.into(),
+            assignees: Vec::new(),
+            repository: None,
+            points: String::new(),
+            epic: epic.map(str::to_string),
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            branch_type: String::new(),
+            parent: String::new(),
+            related: Vec::new(),
+            clone_of: String::new(),
+            body: String::new(),
+            priority: priority.into(),
+            requires: Vec::new(),
+            required_by: Vec::new(),
+        };
+        let dest = transition::create_ticket(project.board("").unwrap(), &fields)
+            .unwrap()
+            .dest
+            .unwrap();
+        dest.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn the_open_count_is_the_same_on_the_page_and_in_the_library() {
+        // Ticket 349: open tickets are every one not in a done column,
+        // including those in an epic, which the page keeps apart from its
+        // columns; top and TRIAGE are counted among them.
+        let (_dir, project) = project();
+        let board = project.board("").unwrap();
+        board
+            .create_group(&Group {
+                dir: board.dir(Column::Backlog).join("e1"),
+                name: "e1".into(),
+                kind: Kind::Epic,
+                description: String::new(),
+                days: 0,
+                state: State::Pending,
+            })
+            .unwrap();
+        new_ticket_with(&project, "plain", "low", &[], None);
+        new_ticket_with(&project, "urgent", "top", &[], None);
+        new_ticket_with(&project, "needs triage", "", &["TRIAGE"], None);
+        new_ticket_with(&project, "in an epic", "top", &[], Some("e1"));
+        let finished = new_ticket_with(&project, "finished", "top", &[], None);
+        std::fs::rename(
+            board.dir(Column::Backlog).join(&finished),
+            board.dir(Column::Done).join(&finished),
+        )
+        .unwrap();
+
+        let page = project.summary().unwrap().counts();
+        let library = agile_md::my_work::counts(&[board]).unwrap();
+        // Done is left out; the epic's ticket is in; a TRIAGE ticket is top.
+        assert_eq!((page.open, page.top, page.triage), (4, 3, 1));
+        assert_eq!(
+            (library.open, library.top, library.triage),
+            (page.open, page.top, page.triage)
+        );
     }
 
     #[test]

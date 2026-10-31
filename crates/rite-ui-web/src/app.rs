@@ -437,37 +437,45 @@ pub fn App() -> impl IntoView {
                 <Show when=on_home>
                     <crate::home::HomeBar />
                 </Show>
-                // Tickets are made on the board; documents have their own
-                // New document (ticket 178).
-                <Show when=move || ctx.view.get() == View::Board>
-                    <button
-                        class="whitespace-nowrap rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
-                        disabled=move || ctx.board.with(|b| b.as_ref().is_none_or(|b| b.archived))
-                        on:click=move |_| ctx.overlay.set(Some(Overlay::NewTicket(None)))
-                    >
-                        "New ticket"
-                    </button>
-                </Show>
-                <button
-                    class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
-                    title="Your own settings on this machine: colours, zoom, the board to open"
-                    on:click=move |_| ctx.overlay.set(Some(Overlay::Preferences))
-                >
-                    "Preferences"
-                </button>
-                // Only for the project's admins (ticket 149): its admins list,
-                // or admin access on GitHub, or open when rite can't tell.
-                <Show when=move || {
-                    !on_home() && ctx.board.with(|b| b.as_ref().is_none_or(|b| b.admin.allowed))
-                }>
+                // New ticket, Preferences and Admin, with the open-ticket count
+                // underneath (ticket 349): the count is of the whole project, so
+                // it sits with the project's own buttons.
+                <div class="flex shrink-0 flex-col items-end gap-1">
+                    <div class="flex items-center gap-4">
+                    // Tickets are made on the board; documents have their own
+                    // New document (ticket 178).
+                    <Show when=move || ctx.view.get() == View::Board>
+                        <button
+                            class="whitespace-nowrap rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-50"
+                            disabled=move || ctx.board.with(|b| b.as_ref().is_none_or(|b| b.archived))
+                            on:click=move |_| ctx.overlay.set(Some(Overlay::NewTicket(None)))
+                        >
+                            "New ticket"
+                        </button>
+                    </Show>
                     <button
                         class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
-                        title="The project's settings, shared with the team"
-                        on:click=move |_| ctx.overlay.set(Some(Overlay::Admin))
+                        title="Your own settings on this machine: colours, zoom, the board to open"
+                        on:click=move |_| ctx.overlay.set(Some(Overlay::Preferences))
                     >
-                        "Admin"
+                        "Preferences"
                     </button>
-                </Show>
+                    // Only for the project's admins (ticket 149): its admins list,
+                    // or admin access on GitHub, or open when rite can't tell.
+                    <Show when=move || {
+                        !on_home() && ctx.board.with(|b| b.as_ref().is_none_or(|b| b.admin.allowed))
+                    }>
+                        <button
+                            class="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-700"
+                            title="The project's settings, shared with the team"
+                            on:click=move |_| ctx.overlay.set(Some(Overlay::Admin))
+                        >
+                            "Admin"
+                        </button>
+                    </Show>
+                    </div>
+                    <crate::counts::BoardCounts />
+                </div>
             </header>
 
             <Show when=move || ctx.view.get() == View::Board>
